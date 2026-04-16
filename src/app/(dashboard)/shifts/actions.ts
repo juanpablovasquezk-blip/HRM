@@ -39,7 +39,9 @@ export async function updateShift(formData: FormData) {
 export async function listShifts(companyId?: string) {
   const supabase = await createClient();
   let query = supabase.from('shifts').select('*').order('start_time');
-  if (companyId) query = query.eq('company_id', companyId);
+  if (companyId) {
+    query = query.or(`company_id.eq.${companyId},company_id.is.null`);
+  }
   const { data, error } = await query;
   return { data: data || [], error: error?.message || null };
 }
