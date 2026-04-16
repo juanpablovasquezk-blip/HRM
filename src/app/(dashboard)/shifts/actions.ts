@@ -225,8 +225,7 @@ export async function materializeTemplates(startDate: string, endDate: string) {
   // Fetch all active templates
   const { data: templates, error: fetchErr } = await supabase
     .from('requirement_templates')
-    .select('*')
-    .eq('is_active', true);
+    .select('*');
 
   if (fetchErr) return { success: false, error: fetchErr.message, count: 0 };
   if (!templates || templates.length === 0) return { success: true, error: null, count: 0 };

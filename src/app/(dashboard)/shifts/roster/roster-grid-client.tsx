@@ -369,7 +369,10 @@ export function RosterGridClient({
                   const { materializeTemplates } = await import('@/app/(dashboard)/shifts/actions');
                   const res = await materializeTemplates(start, end);
                   if (res.error) toast.error(res.error);
-                  else toast.success(`${res.count} requerimientos generados`);
+                  else {
+                    toast.success(`${res.count} requerimientos generados`);
+                    router.refresh();
+                  }
                 });
               }
             }}
