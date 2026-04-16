@@ -402,6 +402,19 @@ export function checkRotationPattern(
     }
   }
 
+  // Regla Especial Emilio Barros: Solo turno 07:00
+  if (personnel.first_name.toUpperCase().includes('EMILIO')) {
+    if (!shiftSlot.shift_start.includes('07')) {
+      return {
+        type: 'rotation_violation',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: 'Emilio Barros solo puede trabajar en turno 07:00',
+        severity: 'error',
+      };
+    }
+  }
+
   // EXEMPTION: Mathias Rozas covering Canes
   const isMathias = personnel.first_name.toUpperCase().includes('MATHIAS');
   const isCanesSlot = (shiftSlot.position_name || '').toUpperCase().includes('CANES');
