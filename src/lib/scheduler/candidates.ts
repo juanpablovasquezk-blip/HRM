@@ -130,7 +130,7 @@ function scorePositionMatch(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot
 ): number {
-  if (personnel.main_position === shiftSlot.position_id) return 100;
+  if (personnel.main_position === shiftSlot.position_id) return 500;
   if (personnel.secondary_positions.includes(shiftSlot.position_id)) return 70;
 
   // SPECIAL BOOST: Mathias Rozas for Canes

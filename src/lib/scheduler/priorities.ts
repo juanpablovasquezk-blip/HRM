@@ -15,10 +15,10 @@ export function getSlotPriority(
   // 1. CANES (Highest priority)
   if (pos.includes('CANES')) return 100;
 
-  // 2. SUPERVISORS (especially 04:00 shift)
+  // 2. SUPERVISORS (All supervisor shifts are high priority)
   if (pos.includes('SUPERVISOR')) {
-    if (shft.includes('04')) return 95; // Critical
-    return 80;
+    if (shft.includes('04')) return 98; // Extreme priority
+    return 96; // High priority (higher than operators)
   }
 
   // 3. AIRPORT OPERATORS (especially 04:00, 13:30, 22:00)
