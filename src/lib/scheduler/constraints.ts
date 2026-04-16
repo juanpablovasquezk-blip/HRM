@@ -379,8 +379,10 @@ export function checkRotationPattern(
   }
 
   // 7x7 (Canes)
+  // Offset +2 significa que para Abril 2026:
+  // 13-19: TRABAJO (cyclePos 0-6)
+  // 20-26: DESCANSO (cyclePos 7-13)
   if (pattern.includes('7X7')) {
-    // Offset +2 matches Andres Cal working until April 19
     const cyclePos = (daysSinceAnchor + 2) % 14; 
     if (cyclePos >= 7) {
       return {
@@ -403,6 +405,23 @@ export function checkRotationPattern(
         personnel_id: personnel.personnel_id,
         date: shiftSlot.date,
         message: 'Periodo de descanso 4x4',
+        severity: 'error',
+      };
+    }
+  }
+
+  // Regla Especial Mathias Rozas: Si cubrió Canes (7x7), necesita descanso equivalente
+  if (personnel.first_name.toUpperCase().includes('MATHIAS') && !pattern.includes('7X7')) {
+    const date = parseISO(shiftSlot.date);
+    const restStart = new Date(2026, 3, 27); // 27 de Abril (Mes 3 en JS es Abril)
+    const restEnd = new Date(2026, 4, 3);    // 03 de Mayo (Mes 4 en JS es Mayo)
+    
+    if (date >= restStart && date <= restEnd) {
+       return {
+        type: 'rotation_violation',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: 'Descanso compensatorio tras cubrir Canes (7x7)',
         severity: 'error',
       };
     }

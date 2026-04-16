@@ -201,8 +201,8 @@ export function RosterGridClient({
         }, 1000);
 
         setAiStep('scheduling');
-        const today = format(new Date(), 'yyyy-MM-dd');
-        const end = format(endOfMonth(new Date()), 'yyyy-MM-dd');
+        const today = '2026-04-20'; // Inicia desde el 20 de abril como solicitaste
+        const end = format(endOfMonth(new Date(monthDate)), 'yyyy-MM-dd');
         
         const res = await runScheduler(today, end);
         
@@ -341,6 +341,27 @@ export function RosterGridClient({
         {/* AI Test Controls */}
         <div className="flex items-center gap-2 border-l pl-3 ml-auto border-slate-200">
           <Badge variant="outline" className="text-[10px] uppercase font-bold text-orange-600 border-orange-200 bg-orange-50/50">Prueba IA</Badge>
+          <Button 
+            variant="default" 
+            size="sm" 
+            className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs"
+            onClick={() => {
+              if (confirm('¿Generar requerimientos para todo el mes basados en las reglas permanentes?')) {
+                const start = format(startOfMonth(monthDate), 'yyyy-MM-dd');
+                const end = format(endOfOfMonth(monthDate), 'yyyy-MM-dd');
+                startTransition(async () => {
+                  const { materializeTemplates } = await import('@/app/(dashboard)/shifts/actions');
+                  const res = await materializeTemplates(start, end);
+                  if (res.error) toast.error(res.error);
+                  else toast.success(`${res.count} requerimientos generados`);
+                });
+              }
+            }}
+            disabled={isPending}
+          >
+            <Calendar className="h-3.5 w-3.5 mr-1" />
+            Generar Necesidades
+          </Button>
           <Button 
             variant="default" 
             size="sm" 
@@ -571,12 +592,15 @@ export function RosterGridClient({
                              {getLeaveLabel(leave.type)}
                           </div>
                         ) : shift ? (
-                          <div className={cn(
-                            "h-full flex flex-col items-center justify-center rounded border shadow-sm",
-                            assignment?.is_manual 
-                              ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700/50" 
-                              : "bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800/40"
-                          )}>
+                          <div 
+                            title={`${shift.name} | Area: ${area?.name || '---'} | Cargo: ${positions.find(p => p.id === assignment?.position_id)?.name || '---'}`}
+                            className={cn(
+                              "h-full flex flex-col items-center justify-center rounded border shadow-sm",
+                              assignment?.is_manual 
+                                ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700/50" 
+                                : "bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800/40"
+                            )}
+                          >
                              <span className="text-[9px] font-bold text-slate-700 dark:text-slate-300">
                                {shift.start_time.slice(0, 5)}
                              </span>

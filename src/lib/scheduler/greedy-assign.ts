@@ -69,84 +69,90 @@ export function greedyAssign(
     return aCandidates - bCandidates;
   });
 
-  // MULTI-PASS STRATEGY
-  const passes = [0, 1, 2, 3]; // 0: Fixed & Cycles, 1: Loyalty, 2: Coverage, 3: Emergencies
+  // TIERED MULTI-PASS STRATEGY
+  const tiers = [
+    { name: 'Critical (Canes/Sup)', minPriority: 95, passes: [0, 1, 2] },
+    { name: 'Standard (Airport/Bodega)', minPriority: 0, passes: [0, 1, 2, 3] }
+  ];
   
-  for (const pass of passes) {
-    for (const slot of sortedSlots) {
-      const alreadyAssigned = assignments.filter(
-        (a) => a.date === slot.date && a.shift_id === slot.shift_id && a.area_id === slot.area_id && a.position_id === slot.position_id
-      ).length;
-      
-      const needed = slot.required_count - (slot.filled_count + alreadyAssigned);
-      if (needed <= 0) continue;
-
-      for (let i = 0; i < needed; i++) {
-        const available = personnelPool.filter((p) => {
-          if (p.assigned_dates.has(slot.date) || p.leave_dates.has(slot.date)) return false;
-
-          // Pass 0: Mandatory Cycle Work or Fixed (L-V)
-          if (pass === 0) {
-            const isFixed = p.rotation_pattern?.includes('Fijo');
-            const isRotational = p.rotation_pattern && p.rotation_pattern !== 'Rotativo' && !isFixed;
-            
-            // Check if cycle says work (no violation)
-            const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_pattern');
-            
-            if (!(isFixed || isWorkDayInCycle) || p.main_position !== slot.position_id) return false;
-          }
-
-          // Pass 1: Strict Loyalty (Main Position Only, non-fixed)
-          if (pass === 1) {
-            if (p.main_position !== slot.position_id) return false;
-          }
-          
-          // Pass 2 & 3: Qualified (Main or Secondary)
-          if (pass >= 2) {
-            const isQualified = p.main_position === slot.position_id || p.secondary_positions.includes(slot.position_id);
-            if (!isQualified) return false;
-          }
-          return true;
-        });
-
-        if (available.length === 0) continue;
-
-        const ranked = rankCandidates(available, slot);
+  for (const tier of tiers) {
+    const tierSlots = sortedSlots.filter(s => getSlotPriority(s, s.position_name || '', s.area_name || '', s.shift_name || '') >= tier.minPriority);
+    
+    for (const pass of tier.passes) {
+      for (const slot of tierSlots) {
+        const alreadyAssigned = assignments.filter(
+          (a) => a.date === slot.date && a.shift_id === slot.shift_id && a.area_id === slot.area_id && a.position_id === slot.position_id
+        ).length;
         
-        for (const candidate of ranked) {
-          if (candidate.availability_score === 0) continue;
-          const person = personnelPool.find((p) => p.personnel_id === candidate.personnel_id)!;
-          const state = personnelState.get(candidate.personnel_id)!;
-
-          const violations = validateAllConstraints(person, slot, state.assignments);
-          
-          // Standard Pass blocking logic
-          if (hasHardViolation(violations)) continue;
-          if (pass < 3 && violations.some(v => v.severity === 'warning')) continue;
-
-          allViolations.push(...violations);
-          const assignment: AssignmentCandidate = {
-            personnel_id: candidate.personnel_id,
-            shift_id: slot.shift_id,
-            date: slot.date,
-            area_id: slot.area_id,
-            position_id: slot.position_id,
-            status: 'scheduled',
-            is_locked: false,
-            is_manual: false,
-            frozen_by_rule: false,
-          };
-
-          assignments.push(assignment);
-          state.assignments.push({
-            date: slot.date,
-            duration_hours: slot.shift_duration_hours,
-            shift_start: slot.shift_start,
-            shift_end: slot.shift_end,
+        const needed = slot.required_count - (slot.filled_count + alreadyAssigned);
+        if (needed <= 0) continue;
+  
+        for (let i = 0; i < needed; i++) {
+          const available = personnelPool.filter((p) => {
+            if (p.assigned_dates.has(slot.date) || p.leave_dates.has(slot.date)) return false;
+  
+            // Pass 0: Mandatory Cycle Work or Fixed
+            if (pass === 0) {
+              const isFixed = p.rotation_pattern?.includes('Fijo');
+              const isRotational = p.rotation_pattern && p.rotation_pattern !== 'Rotativo' && !isFixed;
+              const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_pattern');
+              
+              if (!(isFixed || isWorkDayInCycle) || p.main_position !== slot.position_id) return false;
+            }
+  
+            // Pass 1: Primary Qualification (Main Position)
+            if (pass === 1) {
+              if (p.main_position !== slot.position_id) return false;
+            }
+            
+            // Pass 2 & 3: Secondary Qualification & Support
+            if (pass >= 2) {
+              const isQualified = p.main_position === slot.position_id || p.secondary_positions.includes(slot.position_id);
+              // Special logic for Mathias/Canes
+              const isMathiasCanes = p.first_name.toUpperCase().includes('MATHIAS') && (slot.position_name || '').toUpperCase().includes('CANES');
+              if (!isQualified && !isMathiasCanes) return false;
+            }
+            return true;
           });
-          person.assigned_dates.add(slot.date);
-          person.weekly_hours += slot.shift_duration_hours;
-          break;
+  
+          if (available.length === 0) continue;
+  
+          const ranked = rankCandidates(available, slot);
+          
+          for (const candidate of ranked) {
+            if (candidate.availability_score === 0) continue;
+            const person = personnelPool.find((p) => p.personnel_id === candidate.personnel_id)!;
+            const state = personnelState.get(candidate.personnel_id)!;
+  
+            const violations = validateAllConstraints(person, slot, state.assignments);
+            
+            if (hasHardViolation(violations)) continue;
+            if (pass < 3 && violations.some(v => v.severity === 'warning')) continue;
+  
+            allViolations.push(...violations);
+            const assignment: AssignmentCandidate = {
+              personnel_id: candidate.personnel_id,
+              shift_id: slot.shift_id,
+              date: slot.date,
+              area_id: slot.area_id,
+              position_id: slot.position_id,
+              status: 'scheduled',
+              is_locked: false,
+              is_manual: false,
+              frozen_by_rule: false,
+            };
+  
+            assignments.push(assignment);
+            state.assignments.push({
+              date: slot.date,
+              duration_hours: slot.shift_duration_hours,
+              shift_start: slot.shift_start,
+              shift_end: slot.shift_end,
+            });
+            person.assigned_dates.add(slot.date);
+            person.weekly_hours += slot.shift_duration_hours;
+            break;
+          }
         }
       }
     }

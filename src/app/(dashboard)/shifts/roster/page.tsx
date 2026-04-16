@@ -29,7 +29,12 @@ export default async function RosterPage({
     supabase.from('shift_assignments').select('*').gte('date', startDate).lte('date', endDate),
     supabase.from('leaves').select('*').eq('status', 'approved').lte('start_date', endDate).gte('end_date', startDate),
     supabase.from('positions').select('*').order('name'),
-    supabase.from('shift_requirements').select('*').order('day_of_week')
+    supabase
+      .from('shift_requirements')
+      .select('*, shift:shifts(name, start_time, end_time), area:areas(name), position:positions(name)')
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .order('date', { ascending: true })
   ]);
 
   return (
