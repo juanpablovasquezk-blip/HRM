@@ -24,6 +24,14 @@ export function checkMaxHoursPerWeek(
   shiftSlot: ShiftSlot,
   currentAssignments: Array<{ date: string; duration_hours: number }>
 ): ConstraintViolation | null {
+  // EXEMPTION: Canes, 7x7 or Special Contracts
+  if (personnel.has_special_contract || 
+      (personnel.rotation_pattern || '').includes('7X7') || 
+      norm(personnel.main_position_name).includes('CANES') ||
+      norm(shiftSlot.position_name).includes('CANES')) {
+    return null;
+  }
+
   const slotDate = parseISO(shiftSlot.date);
   const weekStart = startOfWeek(slotDate, { weekStartsOn: 1 }); // Monday
   const weekEnd = endOfWeek(slotDate, { weekStartsOn: 1 });
@@ -58,6 +66,14 @@ export function checkMinDaysOff(
   shiftSlot: ShiftSlot,
   currentAssignments: Array<{ date: string }>
 ): ConstraintViolation | null {
+  // EXEMPTION: Canes, 7x7 or Special Contracts
+  if (personnel.has_special_contract || 
+      (personnel.rotation_pattern || '').includes('7X7') || 
+      norm(personnel.main_position_name).includes('CANES') ||
+      norm(shiftSlot.position_name).includes('CANES')) {
+    return null;
+  }
+
   const slotDate = parseISO(shiftSlot.date);
   const weekStart = startOfWeek(slotDate, { weekStartsOn: 1 });
   const weekEnd = endOfWeek(slotDate, { weekStartsOn: 1 });
