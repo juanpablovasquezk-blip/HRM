@@ -26,6 +26,9 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
   const [isPending, startTransition] = useTransition();
   const [selectedAreaId, setSelectedAreaId] = useState('');
   const [showGenerate, setShowGenerate] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterAreaId, setFilterAreaId] = useState('all');
+  const [filterPositionId, setFilterPositionId] = useState('all');
   const router = useRouter();
 
   const selectedArea = areas.find((a) => a.id === selectedAreaId);
@@ -165,21 +168,67 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
           </CardContent>
         </Card>
 
+        {/* Search and Filters for Templates */}
+        <div className="flex flex-wrap items-center gap-2 bg-slate-50 dark:bg-slate-900/40 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+           <div className="flex-1 min-w-[200px] relative">
+              <Plus className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 rotate-45" />
+              <Input 
+                placeholder="Filtrar por nombre de cargo o área..." 
+                className="pl-9 h-9" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+           </div>
+           <select 
+              className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm outline-none focus:ring-2 focus:ring-orange-500"
+              value={filterAreaId}
+              onChange={(e) => setFilterAreaId(e.target.value)}
+           >
+              <option value="all">Todas las áreas</option>
+              {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+           </select>
+           <select 
+              className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm outline-none focus:ring-2 focus:ring-orange-500"
+              value={filterPositionId}
+              onChange={(e) => setFilterPositionId(e.target.value)}
+           >
+              <option value="all">Todos los cargos</option>
+              {Array.from(new Set(templates.map(t => (t.position as any)?.name))).sort().map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+           </select>
+        </div>
+
         {/* Templates List */}
-        {templates.length === 0 ? (
-          <Card className="border-dashed">
-            <CardContent className="py-8 text-center text-sm text-muted-foreground">
-              <Shield className="h-8 w-8 mx-auto mb-3 opacity-40" />
-              No hay reglas definidas. Crea tu primera regla de dotación arriba.
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {templates.map((tmpl: any) => {
-              const days: number[] = tmpl.days_of_week || [];
-              return (
-                <Card key={tmpl.id} className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
-                  <CardContent className="p-4">
+        {(() => {
+          const filtered = templates.filter(tmpl => {
+            const areaName = (tmpl.area?.name || '').toLowerCase();
+            const posName = (tmpl.position?.name || '').toLowerCase();
+            const matchesSearch = areaName.includes(searchQuery.toLowerCase()) || posName.includes(searchQuery.toLowerCase());
+            const matchesArea = filterAreaId === 'all' || tmpl.area_id === filterAreaId;
+            const matchesPos = filterPositionId === 'all' || (tmpl.position as any)?.name === filterPositionId;
+            return matchesSearch && matchesArea && matchesPos;
+          });
+
+          if (filtered.length === 0) {
+            return (
+              <Card className="border-dashed">
+                <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                  <Shield className="h-8 w-8 mx-auto mb-3 opacity-40" />
+                  No se encontraron reglas con los filtros aplicados.
+                </CardContent>
+              </Card>
+            );
+          }
+
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {filtered.map((tmpl: any) => {
+                const days: number[] = tmpl.days_of_week || [];
+                return (
+                  <Card key={tmpl.id} className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
+                    <CardContent className="p-4">
+                      {/* ... rest of existing card content ... */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 shrink-0">
