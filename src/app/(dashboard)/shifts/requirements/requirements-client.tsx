@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,17 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
   const [filterAreaId, setFilterAreaId] = useState('all');
   const [filterPositionId, setFilterPositionId] = useState('all');
   const router = useRouter();
+
+  const filteredTemplates = useMemo(() => {
+    return templates.filter(tmpl => {
+      const areaName = (tmpl.area?.name || '').toLowerCase();
+      const posName = (tmpl.position?.name || '').toLowerCase();
+      const matchesSearch = areaName.includes(searchQuery.toLowerCase()) || posName.includes(searchQuery.toLowerCase());
+      const matchesArea = filterAreaId === 'all' || tmpl.area_id === filterAreaId;
+      const matchesPos = filterPositionId === 'all' || (tmpl.position as any)?.name === filterPositionId;
+      return matchesSearch && matchesArea && matchesPos;
+    });
+  }, [templates, searchQuery, filterAreaId, filterPositionId]);
 
   const selectedArea = areas.find((a) => a.id === selectedAreaId);
   const availablePositions = selectedArea?.positions || [];
@@ -200,34 +211,20 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
         </div>
 
         {/* Templates List */}
-        {(() => {
-          const filtered = templates.filter(tmpl => {
-            const areaName = (tmpl.area?.name || '').toLowerCase();
-            const posName = (tmpl.position?.name || '').toLowerCase();
-            const matchesSearch = areaName.includes(searchQuery.toLowerCase()) || posName.includes(searchQuery.toLowerCase());
-            const matchesArea = filterAreaId === 'all' || tmpl.area_id === filterAreaId;
-            const matchesPos = filterPositionId === 'all' || (tmpl.position as any)?.name === filterPositionId;
-            return matchesSearch && matchesArea && matchesPos;
-          });
-
-          if (filtered.length === 0) {
-            return (
-              <Card className="border-dashed">
-                <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                  <Shield className="h-8 w-8 mx-auto mb-3 opacity-40" />
-                  No se encontraron reglas con los filtros aplicados.
-                </CardContent>
-              </Card>
-            );
-          }
-
-          return (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {filtered.map((tmpl: any) => {
-                const days: number[] = tmpl.days_of_week || [];
-                return (
-                  <Card key={tmpl.id} className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
-                    <CardContent className="p-4">
+        {filteredTemplates.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="py-8 text-center text-sm text-muted-foreground">
+              <Shield className="h-8 w-8 mx-auto mb-3 opacity-40" />
+              No se encontraron reglas con los filtros aplicados.
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {filteredTemplates.map((tmpl: any) => {
+              const days: number[] = tmpl.days_of_week || [];
+              return (
+                <Card key={tmpl.id} className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
+                  <CardContent className="p-4">
                       {/* ... rest of existing card content ... */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
