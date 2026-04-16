@@ -70,7 +70,7 @@ export function greedyAssign(
   });
 
   // MULTI-PASS STRATEGY
-  const passes = [0, 1, 2, 3]; // 0: Fixed, 1: Loyalty, 2: Coverage, 3: Emergencies
+  const passes = [0, 1, 2, 3]; // 0: Fixed & Cycles, 1: Loyalty, 2: Coverage, 3: Emergencies
   
   for (const pass of passes) {
     for (const slot of sortedSlots) {
@@ -85,10 +85,15 @@ export function greedyAssign(
         const available = personnelPool.filter((p) => {
           if (p.assigned_dates.has(slot.date) || p.leave_dates.has(slot.date)) return false;
 
-          // Pass 0: Strictly for Fixed (L-V Fixed) personnel in their main position
+          // Pass 0: Mandatory Cycle Work or Fixed (L-V)
           if (pass === 0) {
             const isFixed = p.rotation_pattern?.includes('Fijo');
-            if (!isFixed || p.main_position !== slot.position_id) return false;
+            const isRotational = p.rotation_pattern && p.rotation_pattern !== 'Rotativo' && !isFixed;
+            
+            // Check if cycle says work (no violation)
+            const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_pattern');
+            
+            if (!(isFixed || isWorkDayInCycle) || p.main_position !== slot.position_id) return false;
           }
 
           // Pass 1: Strict Loyalty (Main Position Only, non-fixed)
@@ -107,8 +112,7 @@ export function greedyAssign(
         if (available.length === 0) continue;
 
         const ranked = rankCandidates(available, slot);
-        let assigned = false;
-
+        
         for (const candidate of ranked) {
           if (candidate.availability_score === 0) continue;
           const person = personnelPool.find((p) => p.personnel_id === candidate.personnel_id)!;
@@ -116,12 +120,10 @@ export function greedyAssign(
 
           const violations = validateAllConstraints(person, slot, state.assignments);
           
-          // Pass 0, 1, 2: We block on Hard violations AND warnings
+          // Standard Pass blocking logic
           if (hasHardViolation(violations)) continue;
           if (pass < 3 && violations.some(v => v.severity === 'warning')) continue;
 
-          // Pass 3: We allow warnings but still block Hard violations
-          
           allViolations.push(...violations);
           const assignment: AssignmentCandidate = {
             personnel_id: candidate.personnel_id,
@@ -144,7 +146,6 @@ export function greedyAssign(
           });
           person.assigned_dates.add(slot.date);
           person.weekly_hours += slot.shift_duration_hours;
-          assigned = true;
           break;
         }
       }
