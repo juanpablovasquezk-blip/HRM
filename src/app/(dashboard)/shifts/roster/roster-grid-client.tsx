@@ -464,9 +464,8 @@ export function RosterGridClient({
                     }
                     
                     if (positionFilter && positionFilter !== "none") {
-                      const filterName = positions.find(p => p.id === positionFilter)?.name?.toUpperCase();
-                      const reqName = (r.position as any)?.name?.toUpperCase();
-                      if (filterName !== reqName) return false;
+                      const reqName = (r.position as any)?.name?.toUpperCase() || "";
+                      if (positionFilter.toUpperCase() !== reqName) return false;
                     }
                     return true;
                   });
@@ -478,11 +477,9 @@ export function RosterGridClient({
                     const dateMatch = a.date === dateStr;
                     if (!dateMatch) return false;
                     
-                    // If position filter active, match by name
-                    if (positionFilter) {
-                      const filterName = positions.find(p => p.id === positionFilter)?.name;
-                      const assignPosName = (positions || []).find(p => p.id === a.position_id)?.name;
-                      return filterName === assignPosName;
+                    if (positionFilter && positionFilter !== "none") {
+                      const assignPosName = (positions || []).find(p => p.id === a.position_id)?.name?.toUpperCase() || "";
+                      return positionFilter.toUpperCase() === assignPosName;
                     }
                     
                     return true;
