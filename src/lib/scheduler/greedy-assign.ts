@@ -107,17 +107,35 @@ export function greedyAssign(
             
             // Pass 2 & 3: Secondary Qualification & Support
             if (pass >= 2) {
-              const isQualified = p.main_position === slot.position_id || p.secondary_positions.includes(slot.position_id);
-              // Special logic for Mathias/Canes
-              const isMathiasCanes = p.first_name.toUpperCase().includes('MATHIAS') && (slot.position_name || '').toUpperCase().includes('CANES');
-              if (!isQualified && !isMathiasCanes) return false;
+              const isMathias = p.first_name.toUpperCase().includes('MATHIAS');
+              const isCanesSlot = (slot.position_name || '').toUpperCase().includes('CANES');
+              
+              if (isMathias && isCanesSlot) {
+                // Mathias is ALWAYS qualified for Canes
+              } else {
+                const isQualified = p.main_position === slot.position_id || p.secondary_positions.includes(slot.position_id);
+                if (!isQualified) return false;
+              }
             }
             return true;
           });
   
           if (available.length === 0) continue;
   
-          const ranked = rankCandidates(available, slot);
+          // TIERED RANKING REFINEMENT: If this is a Canes slot, prioritize Mathias Rozas above everyone else in Pass 2
+          let ranked = rankCandidates(available, slot);
+          const isCanesSlot = (slot.position_name || '').toUpperCase().includes('CANES');
+          if (isCanesSlot && pass >= 2) {
+             ranked = [...ranked].sort((a,b) => {
+               const pA = personnelPool.find(p => p.personnel_id === a.personnel_id);
+               const pB = personnelPool.find(p => p.personnel_id === b.personnel_id);
+               const isMathiasA = pA?.first_name.toUpperCase().includes('MATHIAS');
+               const isMathiasB = pB?.first_name.toUpperCase().includes('MATHIAS');
+               if (isMathiasA && !isMathiasB) return -1;
+               if (!isMathiasA && isMathiasB) return 1;
+               return b.total_score - a.total_score;
+             });
+          }
           
           for (const candidate of ranked) {
             if (candidate.availability_score === 0) continue;

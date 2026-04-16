@@ -402,6 +402,11 @@ export function checkRotationPattern(
     }
   }
 
+  // EXEMPTION: Mathias Rozas covering Canes
+  const isMathias = personnel.first_name.toUpperCase().includes('MATHIAS');
+  const isCanesSlot = (shiftSlot.position_name || '').toUpperCase().includes('CANES');
+  if (isMathias && isCanesSlot) return null;
+
   // 7x7 (Canes)
   // Offset +2 significa que para Abril 2026:
   // 13-19: TRABAJO (cyclePos 0-6)
