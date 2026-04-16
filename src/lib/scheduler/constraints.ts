@@ -200,6 +200,14 @@ export function checkMaxConsecutiveDays(
   shiftSlot: ShiftSlot,
   allAssignments: Array<{ date: string }>
 ): ConstraintViolation | null {
+  // EXEMPTION: Canes, 7x7 or Special Contracts
+  if (personnel.has_special_contract || 
+      (personnel.rotation_pattern || '').includes('7X7') || 
+      norm(personnel.main_position_name).includes('CANES') ||
+      norm(shiftSlot.position_name).includes('CANES')) {
+    return null;
+  }
+
   const MAX_CONSECUTIVE = 7;
   const slotDate = parseISO(shiftSlot.date);
   
