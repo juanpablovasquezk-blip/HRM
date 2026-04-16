@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { 
   format, 
   eachDayOfInterval, 
@@ -113,6 +114,7 @@ export function RosterGridClient({
   requirements,
   currentMonth
 }: RosterGridProps) {
+  const router = useRouter();
   const [search, setSearch] = useState('');
   const [positionFilter, setPositionFilter] = useState('');
   const [areaFilter, setAreaFilter] = useState('');
@@ -139,15 +141,14 @@ export function RosterGridClient({
 
   const filteredPersonnel = useMemo(() => {
     const filtered = personnel.filter(p => {
-      const fullName = `${p.first_name} ${p.last_name_father} ${p.last_name_mother} ${p.nickname || ''}`.toLowerCase();
-      const nameMatch = fullName.includes(search.toLowerCase());
+      const nameMatch = `${p.first_name} ${p.last_name_father}`.toLowerCase().includes(search.toLowerCase());
       
-      // Filter by position Name
-      const personPositionName = positions.find(pos => pos.id === p.main_position)?.name || '';
+      const pos = positions.find(pos => pos.id === p.main_position);
+      const personPositionName = pos?.name || '';
       const posMatch = !positionFilter || personPositionName === positionFilter;
 
-      // Filter by Area
-      const areaMatch = !areaFilter || p.area_id === areaFilter;
+      // Filter by Area (Area of the main position)
+      const areaMatch = !areaFilter || pos?.area_id === areaFilter;
       
       const personMatch = personnelFilter.length === 0 || personnelFilter.includes(p.id);
       
