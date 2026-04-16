@@ -18,7 +18,7 @@ export default async function RequirementsPage() {
   const [{ data: reqs }, { data: areas }, { data: shifts }, { data: templates }] = await Promise.all([
     listRequirements(),
     listAreas(),
-    listShifts(companyId || undefined),
+    listShifts(),
     listTemplates(),
   ]);
 
