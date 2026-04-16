@@ -53,6 +53,13 @@ export async function partialRecalculate(
     if (a.is_manual) return true;
     if (a.frozen_by_rule && !input.override_freeze) return true;
     if (isShiftFrozen(a.date) && !input.override_freeze) return true;
+    
+    // REGLA DE TURNO FIJO (Desde la ficha personal)
+    const p = (personnel || []).find(p => p.id === a.personnel_id);
+    if (p?.fixed_shift_id && p.fixed_shift_id !== a.shift_id) {
+      return true;
+    }
+
     return false;
   });
 

@@ -115,6 +115,7 @@ export function RosterGridClient({
 }: RosterGridProps) {
   const [search, setSearch] = useState('');
   const [positionFilter, setPositionFilter] = useState('');
+  const [areaFilter, setAreaFilter] = useState('');
   const [personnelFilter, setPersonnelFilter] = useState<string[]>([]);
   const [selectedCell, setSelectedCell] = useState<{ person: Personnel, date: Date } | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -138,15 +139,19 @@ export function RosterGridClient({
 
   const filteredPersonnel = useMemo(() => {
     const filtered = personnel.filter(p => {
-      const nameMatch = `${p.first_name} ${p.last_name_father}`.toLowerCase().includes(search.toLowerCase());
+      const fullName = `${p.first_name} ${p.last_name_father} ${p.last_name_mother} ${p.nickname || ''}`.toLowerCase();
+      const nameMatch = fullName.includes(search.toLowerCase());
       
       // Filter by position Name
       const personPositionName = positions.find(pos => pos.id === p.main_position)?.name || '';
       const posMatch = !positionFilter || personPositionName === positionFilter;
+
+      // Filter by Area
+      const areaMatch = !areaFilter || p.area_id === areaFilter;
       
       const personMatch = personnelFilter.length === 0 || personnelFilter.includes(p.id);
       
-      return nameMatch && posMatch && personMatch;
+      return nameMatch && posMatch && areaMatch && personMatch;
     });
 
     // Sort by position name first, then by last name
@@ -159,7 +164,7 @@ export function RosterGridClient({
       }
       return a.last_name_father.localeCompare(b.last_name_father);
     });
-  }, [personnel, search, positionFilter, positions, personnelFilter]);
+  }, [personnel, search, positionFilter, areaFilter, positions, personnelFilter]);
 
   const uniquePositionNames = useMemo(() => {
     const names = positions.map(p => p.name);
@@ -280,6 +285,17 @@ export function RosterGridClient({
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <div className="w-[200px]">
+          <select 
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={areaFilter}
+            onChange={(e) => setAreaFilter(e.target.value)}
+          >
+            <option value="">Todas las áreas</option>
+            {areas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
+          </select>
+        </div>
+
         <div className="w-[200px]">
           <select 
             className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -439,10 +455,14 @@ export function RosterGridClient({
                     const dateMatch = r.date === dateStr;
                     if (!dateMatch) return false;
                     
-                    if (positionFilter) {
-                      const filterName = positions.find(p => p.id === positionFilter)?.name;
-                      const reqName = (r.position as any)?.name;
-                      return filterName === reqName;
+                    if (areaFilter && areaFilter !== "none") {
+                      if (r.area_id !== areaFilter) return false;
+                    }
+                    
+                    if (positionFilter && positionFilter !== "none") {
+                      const filterName = positions.find(p => p.id === positionFilter)?.name?.toUpperCase();
+                      const reqName = (r.position as any)?.name?.toUpperCase();
+                      if (filterName !== reqName) return false;
                     }
                     return true;
                   });
