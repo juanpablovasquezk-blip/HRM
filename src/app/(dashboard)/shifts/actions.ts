@@ -337,3 +337,27 @@ export async function runPartialRecalc(input: RecalculationInput) {
     };
   }
 }
+
+export async function clearAutoAssignments(startDate: string, endDate: string, areaId?: string) {
+  const supabase = await createClient();
+  
+  let query = supabase
+    .from('shift_assignments')
+    .delete()
+    .eq('is_manual', false)
+    .eq('is_locked', false)
+    .gte('date', startDate)
+    .lte('date', endDate);
+
+  if (areaId) query = query.eq('area_id', areaId);
+
+  const { error } = await query;
+  
+  if (error) return { success: false, error: error.message };
+  
+  revalidatePath('/shifts/assignments');
+  revalidatePath('/shifts/roster');
+  revalidatePath('/dashboard');
+  
+  return { success: true, error: null };
+}

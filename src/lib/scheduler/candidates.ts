@@ -76,8 +76,8 @@ function scoreAvailability(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot
 ): number {
-  // Not available if on leave
-  if (personnel.is_on_leave) return 0;
+  // Not available if on leave on this specific date
+  if (personnel.leave_dates.has(shiftSlot.date)) return 0;
 
   // Not available if already assigned this date
   if (personnel.assigned_dates.has(shiftSlot.date)) return 0;
@@ -92,7 +92,7 @@ function scorePreference(
 ): number {
   // FIXED SHIFT PRIORITY: If this is their designated fixed shift, enormous score boost
   if (personnel.fixed_shift_id && personnel.fixed_shift_id === shiftSlot.shift_id) {
-    return 500; 
+    return 1000; // Even higher boost
   }
 
   const startHour = parseInt(shiftSlot.shift_start.split(':')[0], 10);
@@ -121,14 +121,19 @@ function scorePositionMatch(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot
 ): number {
-  // We match against position_id — but we use position names stored on personnel
-  // In real implementation, this would match against the position record
-  // For now, we prioritize primary position match
-
   if (personnel.main_position === shiftSlot.position_id) return 100;
   if (personnel.secondary_positions.includes(shiftSlot.position_id)) return 70;
 
-  return 30; // Can still be assigned if no match, but low priority
+  // SPECIAL BOOST: Mathias Rozas for Canes
+  const norm = (s: string = '') => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  const firstName = norm(personnel.first_name);
+  const posName = norm(shiftSlot.position_name);
+  
+  if (firstName.includes('MATHIAS') && posName.includes('CANES')) {
+    return 150; // Super priority boost even above main position
+  }
+
+  return 0; // CRITICAL: If no match, candidate is NOT eligible (blocked by availability scoring usually)
 }
 
 function scoreFairness(

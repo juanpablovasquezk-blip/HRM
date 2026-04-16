@@ -54,8 +54,10 @@ export interface AssignmentCandidate {
 
 export interface PersonnelAvailability {
   personnel_id: string;
-  birth_date: string;
+  birth_date: string | null;
+  first_name: string;
   main_position: string;
+  main_position_name?: string;
   secondary_positions: string[];
   prefers_night: boolean;
   avoids_night: boolean;
@@ -66,7 +68,7 @@ export interface PersonnelAvailability {
   days_off_count: number;
   last_shift_end: Date | null;
   assigned_dates: Set<string>;
-  is_on_leave: boolean;
+  leave_dates: Set<string>;
 }
 
 export interface ShiftSlot {
@@ -80,4 +82,7 @@ export interface ShiftSlot {
   shift_duration_hours: number;
   required_count: number;
   filled_count: number;
+  position_name?: string;
+  area_name?: string;
+  shift_name?: string;
 }

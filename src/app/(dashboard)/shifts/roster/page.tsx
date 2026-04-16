@@ -20,14 +20,16 @@ export default async function RosterPage({
     { data: areas },
     { data: assignments },
     { data: leaves },
-    { data: positions }
+    { data: positions },
+    { data: requirements }
   ] = await Promise.all([
     supabase.from('personnel').select('*, company:companies(name)').eq('is_active', true).order('last_name_father'),
     supabase.from('shifts').select('*').order('start_time'),
     supabase.from('areas').select('*, positions(*)').order('name'),
     supabase.from('shift_assignments').select('*').gte('date', startDate).lte('date', endDate),
     supabase.from('leaves').select('*').eq('status', 'approved').lte('start_date', endDate).gte('end_date', startDate),
-    supabase.from('positions').select('*').order('name')
+    supabase.from('positions').select('*').order('name'),
+    supabase.from('shift_requirements').select('*').order('day_of_week')
   ]);
 
   return (
@@ -46,6 +48,7 @@ export default async function RosterPage({
         assignments={assignments || []}
         leaves={leaves || []}
         positions={positions || []}
+        requirements={requirements || []}
         currentMonth={startDate}
       />
     </div>

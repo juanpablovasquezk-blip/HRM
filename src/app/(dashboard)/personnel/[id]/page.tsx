@@ -175,6 +175,7 @@ export default async function PersonnelDetailPage({
                 <span className="text-sm">
                   Rotación: <strong>
                     {person.rotation_pattern === '5x2' ? '5x2 Rotativo (Semanal)' : 
+                     person.rotation_pattern === 'l-v' ? 'Lunes a Viernes (Fijo)' :
                      person.rotation_pattern === '7x7' ? '7x7 Canes' : 
                      person.rotation_pattern === '4x4_noche' ? '4x4 Noche' : 
                      person.rotation_pattern || 'Estándar'}

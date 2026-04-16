@@ -13,7 +13,7 @@ import type {
   ConstraintViolation,
 } from './types';
 
-const MAX_SWAP_ITERATIONS = 100;
+const MAX_SWAP_ITERATIONS = 50;
 
 export interface OptimizationResult {
   assignments: AssignmentCandidate[];
@@ -23,7 +23,8 @@ export interface OptimizationResult {
 }
 
 /**
- * Attempt to optimize assignments by swapping to reduce violations
+ * Attempt to optimize assignments by swapping to reduce violations.
+ * Optimized version: Only recalculates affected personnel.
  */
 export function optimizeAssignments(
   assignments: AssignmentCandidate[],
@@ -32,7 +33,14 @@ export function optimizeAssignments(
 ): OptimizationResult {
   let currentAssignments = [...assignments];
   let swapsMade = 0;
-  const initialViolations = countViolations(currentAssignments, personnelPool, slots);
+  
+  // Pre-map slots for fast lookup
+  const slotMap = new Map<string, ShiftSlot>();
+  for (const s of slots) {
+    slotMap.set(`${s.date}-${s.shift_id}-${s.area_id}`, s);
+  }
+
+  const initialViolations = countAllViolations(currentAssignments, personnelPool, slotMap);
 
   for (let iter = 0; iter < MAX_SWAP_ITERATIONS; iter++) {
     let improved = false;
@@ -42,84 +50,92 @@ export function optimizeAssignments(
         const a = currentAssignments[i];
         const b = currentAssignments[j];
 
-        // Only swap if different personnel, same date or same position
+        // Only swap if different personnel and same date (to keep requirements met)
         if (a.personnel_id === b.personnel_id) continue;
-        if (a.date !== b.date && a.position_id !== b.position_id) continue;
+        if (a.date !== b.date) continue; 
+
+        // Calculate current violations for ONLY these two people
+        const vBefore = 
+          countPersonViolations(a.personnel_id, currentAssignments, personnelPool, slotMap) +
+          countPersonViolations(b.personnel_id, currentAssignments, personnelPool, slotMap);
 
         // Try the swap
-        const swapped = [...currentAssignments];
-        swapped[i] = {
-          ...a,
-          personnel_id: b.personnel_id,
-        };
-        swapped[j] = {
-          ...b,
-          personnel_id: a.personnel_id,
-        };
+        const p1 = a.personnel_id;
+        const p2 = b.personnel_id;
+        
+        a.personnel_id = p2;
+        b.personnel_id = p1;
 
-        const newViolations = countViolations(swapped, personnelPool, slots);
-        const currentViolations = countViolations(currentAssignments, personnelPool, slots);
+        const vAfter = 
+          countPersonViolations(p1, currentAssignments, personnelPool, slotMap) +
+          countPersonViolations(p2, currentAssignments, personnelPool, slotMap);
 
-        if (newViolations < currentViolations) {
-          currentAssignments = swapped;
+        if (vAfter < vBefore) {
           swapsMade++;
           improved = true;
+          // Swap kept
           break;
+        } else {
+          // Revert swap
+          a.personnel_id = p1;
+          b.personnel_id = p2;
         }
       }
-
       if (improved) break;
     }
-
-    if (!improved) break; // No more improvements possible
+    if (!improved) break; 
   }
 
   return {
     assignments: currentAssignments,
     swaps_made: swapsMade,
     violations_before: initialViolations,
-    violations_after: countViolations(currentAssignments, personnelPool, slots),
+    violations_after: countAllViolations(currentAssignments, personnelPool, slotMap),
   };
 }
 
-function countViolations(
+function countPersonViolations(
+  personnelId: string,
   assignments: AssignmentCandidate[],
   personnelPool: PersonnelAvailability[],
-  slots: ShiftSlot[]
+  slotMap: Map<string, ShiftSlot>
 ): number {
-  let count = 0;
+  const person = personnelPool.find(p => p.personnel_id === personnelId);
+  if (!person) return 0;
 
-  for (const assignment of assignments) {
-    const person = personnelPool.find(
-      (p) => p.personnel_id === assignment.personnel_id
-    );
-    if (!person) continue;
+  const personAssignments = assignments.filter(a => a.personnel_id === personnelId);
+  let errors = 0;
 
-    const slot = slots.find(
-      (s) =>
-        s.shift_id === assignment.shift_id &&
-        s.date === assignment.date &&
-        s.area_id === assignment.area_id
-    );
+  for (const pa of personAssignments) {
+    const slot = slotMap.get(`${pa.date}-${pa.shift_id}-${pa.area_id}`);
     if (!slot) continue;
 
-    const personAssignments = assignments
-      .filter((a) => a.personnel_id === assignment.personnel_id)
-      .map((a) => {
-        const s = slots.find(
-          (sl) => sl.shift_id === a.shift_id && sl.date === a.date
-        );
-        return {
-          date: a.date,
-          duration_hours: s?.shift_duration_hours || 0,
-          shift_start: s?.shift_start || '00:00',
-          shift_end: s?.shift_end || '00:00',
-        };
-      });
+    const constraintInput = personAssignments.map(a => {
+      const s = slotMap.get(`${a.date}-${a.shift_id}-${a.area_id}`);
+      return {
+        date: a.date,
+        duration_hours: s?.shift_duration_hours || 8,
+        shift_start: s?.shift_start || '00:00',
+        shift_end: s?.shift_end || '00:00',
+      };
+    });
 
-    const violations = validateAllConstraints(person, slot, personAssignments);
-    count += violations.filter((v) => v.severity === 'error').length;
+    const violations = validateAllConstraints(person, slot, constraintInput);
+    errors += violations.filter(v => v.severity === 'error').length;
   }
 
-  return count;
+  return errors;
+}
+
+function countAllViolations(
+  assignments: AssignmentCandidate[],
+  personnelPool: PersonnelAvailability[],
+  slotMap: Map<string, ShiftSlot>
+): number {
+  let total = 0;
+  const uniquePersonnel = Array.from(new Set(assignments.map(a => a.personnel_id)));
+  for (const id of uniquePersonnel) {
+    total += countPersonViolations(id, assignments, personnelPool, slotMap);
+  }
+  return total;
 }

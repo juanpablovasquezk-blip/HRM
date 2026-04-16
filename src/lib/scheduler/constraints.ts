@@ -9,7 +9,7 @@
  * - Respect shift preferences (night/no night)
  */
 
-import { differenceInHours, parseISO, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
+import { differenceInHours, parseISO, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval, isSunday, startOfMonth, endOfMonth, format } from 'date-fns';
 import type { ConstraintViolation, PersonnelAvailability, ShiftSlot } from './types';
 
 const MAX_HOURS_PER_WEEK = 40;
@@ -43,7 +43,7 @@ export function checkMaxHoursPerWeek(
       personnel_id: personnel.personnel_id,
       date: shiftSlot.date,
       message: `Would exceed ${MAX_HOURS_PER_WEEK}h/week (projected: ${projectedHours.toFixed(1)}h)`,
-      severity: 'error',
+      severity: 'warning',
     };
   }
 
@@ -84,7 +84,7 @@ export function checkMinDaysOff(
       personnel_id: personnel.personnel_id,
       date: shiftSlot.date,
       message: `Only ${daysOff} day(s) off this week (minimum: ${MIN_DAYS_OFF_PER_WEEK})`,
-      severity: 'error',
+      severity: 'warning',
     };
   }
 
@@ -233,6 +233,8 @@ export function checkMaxConsecutiveDays(
   return null;
 }
 
+const norm = (s: string = '') => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+
 /**
  * Check shift preferences (warning-level, not blocking)
  */
@@ -267,8 +269,215 @@ export function checkPreferences(
 }
 
 /**
- * Run all constraints and return violations
+ * Check qualification - Personnel MUST have the position
  */
+export function checkQualification(
+  personnel: PersonnelAvailability,
+  shiftSlot: ShiftSlot
+): ConstraintViolation | null {
+  const posName = norm(shiftSlot.position_name);
+  const perPosName = norm(personnel.main_position_name);
+  const firstName = norm(personnel.first_name);
+
+  // 1. Direct match by ID
+  if (personnel.main_position === shiftSlot.position_id) return null;
+  if (personnel.secondary_positions.includes(shiftSlot.position_id)) return null;
+
+  // CRITICAL RULE: CANES stay in CANES. They don't cover other areas.
+  const isCan = perPosName.includes('CAN');
+  const isCanSlot = posName.includes('CAN');
+
+  if (isCan && !isCanSlot) {
+    return {
+      type: 'preference',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: `Personal de Canes solo puede cubrir puestos de Canes`,
+      severity: 'error',
+    };
+  }
+
+  // Also prevent non-qualified people from covering specific high-security roles like CANES
+  if (isCanSlot && !isCan && !firstName.includes('MATHIAS')) {
+     return {
+      type: 'preference',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: `Solo personal autorizado puede cubrir Canes`,
+      severity: 'error',
+    };
+  }
+
+  // 2. Mathias Rozas Special Rule (Substitution for Canes)
+  if (firstName.includes('MATHIAS') && posName.includes('CANES')) {
+    return null;
+  }
+
+  // 3. Crane Operators Flexibility (Atrex/Base Interchangeable)
+  if (perPosName.includes('GRUA') && posName.includes('GRUA')) {
+    return null;
+  }
+
+  // 4. Case match by name
+  if (perPosName === posName && posName !== '') return null;
+
+  return {
+    type: 'preference',
+    personnel_id: personnel.personnel_id,
+    date: shiftSlot.date,
+    message: `No calificado para ${shiftSlot.position_name}`,
+    severity: 'error',
+  };
+}
+
+/**
+ * Check rotation pattern (e.g., Mon-Fri only)
+ */
+export function checkRotationPattern(
+  personnel: PersonnelAvailability,
+  shiftSlot: ShiftSlot
+): ConstraintViolation | null {
+  if (!personnel.rotation_pattern) return null;
+
+  const pattern = personnel.rotation_pattern.toUpperCase();
+  const date = parseISO(shiftSlot.date);
+  
+  // Reference anchor for cycles in April 2026
+  const anchorDate = new Date(2026, 3, 1); // April 1st
+  const daysSinceAnchor = Math.floor((date.getTime() - anchorDate.getTime()) / (1000 * 60 * 60 * 24));
+
+  // L-V (Estricto Lunes a Viernes)
+  if (pattern.includes('L-V') || pattern.includes('LUNES A VIERNES')) {
+    const day = date.getDay();
+    // EXCEPTION: If they are covering CANES (Mathias rule), allow weekends
+    const isCoveringCanes = norm(personnel.first_name).includes('MATHIAS') && norm(shiftSlot.position_name).includes('CANES');
+    
+    if ((day === 0 || day === 6) && !isCoveringCanes) {
+      return {
+        type: 'rotation_violation',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: 'Personal L-V no trabaja fines de semana',
+        severity: 'error',
+      };
+    }
+  }
+
+  // Rule: NOCHE patterns should ONLY work night shifts
+  if (pattern.includes('NOCHE')) {
+    const startHour = parseInt(shiftSlot.shift_start.split(':')[0], 10);
+    const isNightShift = startHour >= 20 || startHour < 6;
+    if (!isNightShift) {
+       return {
+        type: 'rotation_violation',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: 'Personal de noche no puede cubrir turnos de día',
+        severity: 'error',
+      };
+    }
+  }
+
+  // 7x7 (Canes)
+  if (pattern.includes('7X7')) {
+    // Offset +2 matches Andres Cal working until April 19
+    const cyclePos = (daysSinceAnchor + 2) % 14; 
+    if (cyclePos >= 7) {
+      return {
+        type: 'rotation_violation',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: 'Periodo de descanso 7x7 (Art. 38)',
+        severity: 'error',
+      };
+    }
+  }
+
+  // 4x4 (Aeropuerto)
+  if (pattern.includes('4X4')) {
+    // Offset +7 matches Marcelo Jara working 18-21
+    const cyclePos = (daysSinceAnchor + 7) % 8; 
+    if (cyclePos >= 4) {
+      return {
+        type: 'rotation_violation',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: 'Periodo de descanso 4x4',
+        severity: 'error',
+      };
+    }
+  }
+
+  return null;
+}
+
+// Memoization for Sundays count to speed up calculations
+const memoSundays: Record<string, number> = {};
+
+/**
+ * Check for at least 2 Sundays off per month (Chilean Law Art. 38)
+ * Highly optimized for bulk processing.
+ */
+export function checkSundaysOff(
+  personnel: PersonnelAvailability,
+  shiftSlot: ShiftSlot,
+  allAssignments: Array<{ date: string }>
+): ConstraintViolation | null {
+  // EXEMPTION: Personnel with special contracts, 7x7 or Canes
+  if (personnel.has_special_contract || 
+      (personnel.rotation_pattern || '').includes('7X7') || 
+      norm(personnel.main_position_name).includes('CANES')) {
+    return null;
+  }
+
+  const slotDate = parseISO(shiftSlot.date);
+  if (!isSunday(slotDate)) return null;
+
+  const mStart = startOfMonth(slotDate);
+  const mEnd = endOfMonth(slotDate);
+  const monthKey = format(mStart, 'yyyy-MM');
+
+  // Use memoized Sunday count
+  if (!memoSundays[monthKey]) {
+    let count = 0;
+    let curr = new Date(mStart);
+    while (curr <= mEnd) {
+      if (isSunday(curr)) count++;
+      curr.setDate(curr.getDate() + 1);
+    }
+    memoSundays[monthKey] = count;
+  }
+  
+  const sundaysInMonth = memoSundays[monthKey];
+  
+  // Quick count of assigned Sundays
+  let assignedSundays = 0;
+  for (let i = 0; i < allAssignments.length; i++) {
+    const a = allAssignments[i];
+    // Fast check for Sunday if the date string is YYYY-MM-DD
+    // Sunday in parseISO().getDay() is 0
+    const d = parseISO(a.date);
+    if (d.getDay() === 0 && d >= mStart && d <= mEnd) {
+      assignedSundays++;
+    }
+  }
+
+  const totalSundaysWorking = assignedSundays + 1;
+  const sundaysOff = sundaysInMonth - totalSundaysWorking;
+
+  if (sundaysOff < 2) {
+    return {
+      type: 'min_days_off',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: `Debe tener al menos 2 domingos libres al mes (quedarían: ${sundaysOff})`,
+      severity: 'error',
+    };
+  }
+
+  return null;
+}
+
 export function validateAllConstraints(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot,
@@ -293,6 +502,15 @@ export function validateAllConstraints(
 
   const consecutive = checkMaxConsecutiveDays(personnel, shiftSlot, currentAssignments);
   if (consecutive) violations.push(consecutive);
+
+  const qualification = checkQualification(personnel, shiftSlot);
+  if (qualification) violations.push(qualification);
+
+  const rotation = checkRotationPattern(personnel, shiftSlot);
+  if (rotation) violations.push(rotation);
+
+  const sundayRule = checkSundaysOff(personnel, shiftSlot, currentAssignments);
+  if (sundayRule) violations.push(sundayRule);
 
   return violations;
 }

@@ -256,6 +256,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
                 defaultValue={personnel?.rotation_pattern || '5x2'}
               >
                 <option value="5x2">5x2 (Semanal / Rotativo)</option>
+                <option value="l-v">Lunes a Viernes (Fijo)</option>
                 <option value="7x7">7x7 (Rotativo Canes)</option>
                 <option value="4x4_noche">4x4 Noche (Intercambiable)</option>
                 <option value="part_time">Part-Time / Ocasional</option>
