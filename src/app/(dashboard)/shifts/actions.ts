@@ -239,7 +239,7 @@ export async function materializeTemplates(startDate: string, endDate: string) {
     const allowedDays: number[] = tmpl.days_of_week || [];
     const current = new Date(start);
 
-    while (current <= end) {
+    while (current.getTime() <= end.getTime()) {
       if (allowedDays.includes(current.getDay())) {
         inserts.push({
           date: current.toISOString().split('T')[0],

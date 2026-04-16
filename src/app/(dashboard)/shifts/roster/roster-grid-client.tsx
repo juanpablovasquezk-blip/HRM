@@ -364,7 +364,7 @@ export function RosterGridClient({
             onClick={() => {
               if (confirm('¿Generar requerimientos para todo el mes basados en las reglas permanentes?')) {
                 const start = format(startOfMonth(monthDate), 'yyyy-MM-dd');
-                const end = format(endOfOfMonth(monthDate), 'yyyy-MM-dd');
+                const end = format(endOfMonth(monthDate), 'yyyy-MM-dd');
                 startTransition(async () => {
                   const { materializeTemplates } = await import('@/app/(dashboard)/shifts/actions');
                   const res = await materializeTemplates(start, end);
