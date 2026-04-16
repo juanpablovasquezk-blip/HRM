@@ -96,6 +96,8 @@ export async function partialRecalculate(
     .lte('start_date', endDate)
     .gte('end_date', startDate);
 
+  const { data: positions } = await supabase.from('positions').select('*');
+
   // Build available slots (requirements minus protected fulfillment)
   const slots: ShiftSlot[] = (requirements || []).map((req) => {
     const shift = req.shift as { start_time: string; end_time: string; duration_hours: number } | null;
@@ -129,11 +131,14 @@ export async function partialRecalculate(
 
   const personnelAvailability: PersonnelAvailability[] = (personnel || []).map((p) => {
     const personLeaves = (leaves || []).filter((l) => l.personnel_id === p.id);
-    const isOnLeave = personLeaves.some((l) => {
-      return dates.some((d) => {
-        const dateStr = format(d, 'yyyy-MM-dd');
-        return dateStr >= l.start_date && dateStr <= l.end_date;
-      });
+    const leaveDates = new Set<string>();
+    personLeaves.forEach(l => {
+      try {
+        const interval = eachDayOfInterval({ start: parseISO(l.start_date), end: parseISO(l.end_date) });
+        interval.forEach(d => leaveDates.add(format(d, 'yyyy-MM-dd')));
+      } catch (e) {
+        console.error(`[AI] Error en fechas de licencia para ${p.id}:`, l.start_date, l.end_date);
+      }
     });
 
     const protectedForPerson = protectedAssignments.filter(
@@ -142,11 +147,16 @@ export async function partialRecalculate(
 
     return {
       personnel_id: p.id,
+      first_name: p.first_name,
       birth_date: p.birth_date,
       main_position: p.main_position,
+      main_position_name: ((positions || []).find(pos => pos.id === p.main_position) as any)?.name || '',
       secondary_positions: p.secondary_positions || [],
       prefers_night: p.prefers_night,
       avoids_night: p.avoids_night,
+      fixed_shift_id: p.fixed_shift_id,
+      rotation_pattern: p.rotation_pattern,
+      has_special_contract: p.has_special_contract || false,
       weekly_hours: protectedForPerson.reduce((sum, a) => {
         const shift = a.shift as { duration_hours: number } | null;
         return sum + (shift?.duration_hours || 0);
@@ -154,7 +164,7 @@ export async function partialRecalculate(
       days_off_count: 0,
       last_shift_end: null,
       assigned_dates: new Set(protectedForPerson.map((a) => a.date)),
-      is_on_leave: isOnLeave,
+      leave_dates: leaveDates,
     };
   });
 

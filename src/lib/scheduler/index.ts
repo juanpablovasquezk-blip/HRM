@@ -111,6 +111,7 @@ export async function generateSchedule(
       avoids_night: p.avoids_night,
       fixed_shift_id: p.fixed_shift_id,
       rotation_pattern: p.rotation_pattern,
+      has_special_contract: p.has_special_contract || false,
       weekly_hours: protectedForPerson.reduce((sum, a) => sum + ((a.shift as any)?.duration_hours || 0), 0),
       days_off_count: 0,
       last_shift_end: null,

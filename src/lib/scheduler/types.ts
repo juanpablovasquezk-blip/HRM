@@ -22,7 +22,7 @@ export interface CandidateScore {
 }
 
 export interface ConstraintViolation {
-  type: 'max_hours' | 'min_days_off' | 'min_rest' | 'birthday' | 'preference';
+  type: 'max_hours' | 'min_days_off' | 'min_rest' | 'birthday' | 'preference' | 'rotation_violation';
   personnel_id: string;
   date: string;
   message: string;
@@ -63,6 +63,7 @@ export interface PersonnelAvailability {
   avoids_night: boolean;
   fixed_shift_id: string | null;
   rotation_pattern: string | null;
+  has_special_contract: boolean;
   // Computed during scheduling
   weekly_hours: number;
   days_off_count: number;
