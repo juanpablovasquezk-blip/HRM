@@ -95,7 +95,7 @@ export function greedyAssign(
             if (pass === 0) {
               const isFixed = p.rotation_pattern?.includes('Fijo');
               const isRotational = p.rotation_pattern && p.rotation_pattern !== 'Rotativo' && !isFixed;
-              const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_pattern');
+              const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_violation');
               
               if (!(isFixed || isWorkDayInCycle) || p.main_position !== slot.position_id) return false;
             }
