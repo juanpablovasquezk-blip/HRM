@@ -357,6 +357,18 @@ export function RosterGridClient({
 
         {/* AI Test Controls */}
         <div className="flex items-center gap-2 border-l pl-3 ml-auto border-slate-200">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-8 border-orange-500 text-orange-600 hover:bg-orange-50 text-[10px] font-bold uppercase"
+            onClick={async () => {
+              const { runDiagnostic } = await import('@/app/(dashboard)/shifts/actions');
+              const res = await runDiagnostic();
+              alert(`DIAGNÓSTICO 20-21 ABRIL:\n\nREQ. SUPERVISOR (${res.supervisorReqs.length}):\n${res.supervisorReqs.join('\n')}\n\nPERSONALES SUP (${res.supervisors.length}):\n${res.supervisors.join(', ')}\n\nTOTAL REQS EN PERIODO: ${res.totalReqs}`);
+            }}
+          >
+            Diagnóstico 20-21
+          </Button>
           <Badge variant="outline" className="text-[10px] uppercase font-bold text-orange-600 border-orange-200 bg-orange-50/50">Prueba IA</Badge>
           <Button 
             variant="default" 
