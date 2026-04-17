@@ -405,13 +405,22 @@ export function checkRotationPattern(
   // REGLA DE TURNO FIJO Y ÁREA (Desde la ficha personal)
   // Si tiene turno fijo, solo puede trabajar en ese turno.
   if (personnel.fixed_shift_id && personnel.fixed_shift_id !== shiftSlot.shift_id) {
-    return {
-      type: 'rotation_violation',
-      personnel_id: personnel.personnel_id,
-      date: shiftSlot.date,
-      message: `El trabajador tiene turno fijo asignado`,
-      severity: 'error',
-    };
+    // FALLBACK: Si los IDs no coinciden, verificar si el NOMBRE del turno es el mismo
+    // Esto previene bloqueos por IDs obsoletos en la ficha personal
+    const personnelShiftName = (personnel.fixed_shift_name || '').toUpperCase().trim();
+    const slotShiftName = (shiftSlot.shift_name || '').toUpperCase().trim();
+    
+    const namesMatch = personnelShiftName !== '' && personnelShiftName === slotShiftName;
+    
+    if (!namesMatch) {
+      return {
+        type: 'rotation_violation',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: `El trabajador tiene turno fijo asignado (${personnel.fixed_shift_name || personnel.fixed_shift_id})`,
+        severity: 'error',
+      };
+    }
   }
 
   // PROTECCIÓN PERSONAL FIJO EN BASE (Emilio, Lizardo, etc.)

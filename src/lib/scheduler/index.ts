@@ -53,10 +53,12 @@ export async function generateSchedule(
 
   const { data: personnelRaw } = await supabase.from('personnel').select('*');
   const { data: positions } = await supabase.from('positions').select('*');
+  const { data: allShifts } = await supabase.from('shifts').select('*');
 
   const personnel = (personnelRaw || []).map(p => ({
     ...p,
-    main_position_obj: (positions || []).find(pos => pos.id === p.main_position)
+    main_position_obj: (positions || []).find(pos => pos.id === p.main_position),
+    fixed_shift_obj: (allShifts || []).find(s => s.id === p.fixed_shift_id)
   }));
 
   console.log(`[AI-DEBUG] Personal total cargado: ${personnel.length}`);
@@ -121,6 +123,7 @@ export async function generateSchedule(
       prefers_night: p.prefers_night,
       avoids_night: p.avoids_night,
       fixed_shift_id: p.fixed_shift_id,
+      fixed_shift_name: (p.fixed_shift_obj as any)?.name,
       rotation_pattern: p.rotation_pattern,
       has_special_contract: p.has_special_contract || false,
       weekly_hours: protectedForPerson.reduce((sum, a) => sum + ((a.shift as any)?.duration_hours || 0), 0),
