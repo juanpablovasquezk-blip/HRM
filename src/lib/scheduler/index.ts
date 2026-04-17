@@ -171,6 +171,8 @@ export async function generateSchedule(
     }
   }
 
+  const totalSlots = (requirements || []).reduce((sum, r) => sum + r.required_count, 0);
+  const filledSlots = protectedAssignments.length + optimized.assignments.length;
   const coverage = totalSlots > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0;
 
   return {
@@ -180,7 +182,8 @@ export async function generateSchedule(
     stats: {
       total_slots: totalSlots,
       filled_slots: filledSlots,
-      coverage_percent: coverage
+      coverage_percent: coverage,
+      recalculated_count: 0 // Default for main generation
     }
   };
 }
