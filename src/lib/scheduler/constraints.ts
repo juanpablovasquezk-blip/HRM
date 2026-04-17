@@ -418,11 +418,8 @@ export function checkRotationPattern(
   const isCanesSlot = (shiftSlot.position_name || '').toUpperCase().includes('CANES');
   if (isMathias && isCanesSlot) return null;
 
-  // 7x7 (Canes)
-  // Offset +2 significa que para Abril 2026:
-  // 13-19: TRABAJO (cyclePos 0-6)
-  // 20-26: DESCANSO (cyclePos 7-13)
-  if (pattern.includes('7X7')) {
+  // 7x7 (Strict comparison)
+  if (pattern === '7X7') {
     const cyclePos = (daysSinceAnchor + 2) % 14; 
     if (cyclePos >= 7) {
       return {
