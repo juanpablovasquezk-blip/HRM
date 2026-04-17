@@ -130,20 +130,24 @@ function scorePositionMatch(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot
 ): number {
-  if (personnel.main_position === shiftSlot.position_id) return 5000;
-  if (personnel.secondary_positions.includes(shiftSlot.position_id)) return 1; // Almost zero chance
-
-  // PROTECTION: Supervisors NEVER work as Canes or Generic Operators (Strict lockdown)
-  const norm = (s: string = '') => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  const isMatch = personnel.main_position === shiftSlot.position_id || personnel.secondary_positions.includes(shiftSlot.position_id);
+  
+  // PRIMARY MATCH: Huge boost
+  if (personnel.main_position === shiftSlot.position_id) return 10000;
+  
+  // CROSS-ASSIGNMENT PROTECTION: 
+  // If the person is a Supervisor, they CANNOT work in anything else. Period.
+  const norm = (s: string = '') => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
   const pName = norm(personnel.main_position_name);
-  const slotPosName = norm(shiftSlot.position_name);
   const isSupervisorMan = pName.includes('SUPERVISOR') || pName.includes('SUP');
   
-  if (isSupervisorMan && (slotPosName.includes('CANES') || slotPosName.includes('OPERADOR') || slotPosName.includes('AYUDANTE'))) {
-    return 0; // TOTAL BLOCK
+  if (isSupervisorMan && !isMatch) {
+    return -1000000; // Impossible score
   }
 
-  return 0; // No match found
+  if (isMatch) return 70;
+
+  return -1000000; // Total block if not in main or secondary positions
 }
 
 function scoreFairness(
