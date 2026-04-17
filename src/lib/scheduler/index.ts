@@ -35,7 +35,15 @@ export async function generateSchedule(
     .lte('date', endDate);
 
   if (areaId) reqQuery = reqQuery.eq('area_id', areaId);
-  const { data: requirements } = await reqQuery;
+  const { data: rawRequirements } = await reqQuery;
+
+  // PRUEBA DE AISLAMIENTO: Solo Supervisores
+  const requirements = (rawRequirements || []).filter(r => (r.position?.name || '').toUpperCase().includes('SUPERVISOR'));
+  
+  console.log(`[AI-TEST] Requerimientos de Supervisión encontrados: ${requirements?.length || 0}`);
+  if (requirements.length > 0) {
+    console.log(`[AI-TEST] Ejemplo: ${requirements[0].date} - ${requirements[0].shift?.name}`);
+  }
 
   let assignQuery = supabase
     .from('shift_assignments')
