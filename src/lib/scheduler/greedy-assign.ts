@@ -97,7 +97,8 @@ export function greedyAssign(
               const isRotational = p.rotation_pattern && p.rotation_pattern !== 'Rotativo' && !isFixed;
               const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_violation');
               
-              if (!(isFixed || isWorkDayInCycle) || p.main_position !== slot.position_id) return false;
+              const isMatch = p.main_position === slot.position_id || p.secondary_positions.includes(slot.position_id);
+              if (!(isFixed || isWorkDayInCycle) || !isMatch) return false;
             }
   
             // Pass 1: Primary Qualification (Main Position)
@@ -120,7 +121,10 @@ export function greedyAssign(
             return true;
           });
   
-          if (available.length === 0) continue;
+          if (available.length === 0) {
+            console.log(`[AI-DEBUG] Paso ${pass}: Sin candidatos base para ${slot.date} ${slot.position_name}`);
+            continue;
+          }
   
           // TIERED RANKING REFINEMENT: If this is a Canes slot, prioritize Mathias Rozas above everyone else in Pass 2
           let ranked = rankCandidates(available, slot);
