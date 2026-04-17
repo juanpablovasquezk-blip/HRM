@@ -130,25 +130,20 @@ function scorePositionMatch(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot
 ): number {
-  if (personnel.main_position === shiftSlot.position_id) return 500;
-  if (personnel.secondary_positions.includes(shiftSlot.position_id)) return 70;
+  if (personnel.main_position === shiftSlot.position_id) return 5000;
+  if (personnel.secondary_positions.includes(shiftSlot.position_id)) return 1; // Almost zero chance
 
-  // SPECIAL BOOST: Mathias Rozas for Canes
+  // PROTECTION: Supervisors NEVER work as Canes or Generic Operators (Strict lockdown)
   const norm = (s: string = '') => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
-  const firstName = norm(personnel.first_name);
-  const posName = norm(shiftSlot.position_name);
-  
-  if (firstName.includes('MATHIAS') && posName.includes('CANES')) {
-    return 150; // Super priority boost even above main position
-  }
-
-  // PROTECTION: Supervisors NEVER work as Canes or Generic Operators
-  const pName = (personnel.main_position_name || '').toUpperCase();
+  const pName = norm(personnel.main_position_name);
+  const slotPosName = norm(shiftSlot.position_name);
   const isSupervisorMan = pName.includes('SUPERVISOR') || pName.includes('SUP');
   
-  if (isSupervisorMan && (posName.includes('CANES') || posName.includes('OPERADOR'))) return 0;
+  if (isSupervisorMan && (slotPosName.includes('CANES') || slotPosName.includes('OPERADOR') || slotPosName.includes('AYUDANTE'))) {
+    return 0; // TOTAL BLOCK
+  }
 
-  return 0; // CRITICAL: If no match, candidate is NOT eligible
+  return 0; // No match found
 }
 
 function scoreFairness(
