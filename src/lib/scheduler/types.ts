@@ -62,6 +62,7 @@ export interface PersonnelAvailability {
   prefers_night: boolean;
   avoids_night: boolean;
   fixed_shift_id: string | null;
+  fixed_shift_name?: string;
   rotation_pattern: string | null;
   has_special_contract: boolean;
   // Computed during scheduling
