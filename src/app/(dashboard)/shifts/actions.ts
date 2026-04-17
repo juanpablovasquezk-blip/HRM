@@ -376,8 +376,12 @@ export async function runDiagnostic() {
     .lte('date', end);
 
   const supReqs = (reqs || []).filter((r: any) => (r.position as any)?.name?.toUpperCase().includes('SUPERVISOR'));
+  const craneReqs = (reqs || []).filter((r: any) => {
+     const n = (r.position as any)?.name?.toUpperCase() || '';
+     return n.includes('GRÚA') || n.includes('HORQUILLA');
+  });
 
-  // 2. Ver personal y cargos (Unión manual a prueba de fallos)
+  // 2. Ver personal
   const { data: rawPers } = await supabase.from('personnel').select('*');
   const { data: positions } = await supabase.from('positions').select('*');
   
@@ -386,12 +390,14 @@ export async function runDiagnostic() {
     main_position_name: positions?.find(pos => pos.id === p.main_position)?.name
   }));
 
-  const supervisors = mappedPersonnel.filter((p: any) => (p.main_position_name || '').toUpperCase().includes('SUPERVISOR'));
+  const targets = mappedPersonnel.filter((p: any) => {
+    const n = (p.main_position_name || '').toUpperCase();
+    return n.includes('SUPERVISOR') || n.includes('GRÚA') || n.includes('HORQUILLA');
+  });
 
   return {
-    totalReqs: reqs?.length || 0,
-    supervisorReqs: supReqs.map((r: any) => `${r.date} ${r.shift_id} (${(r.position as any)?.name})`),
-    totalPersonnel: rawPers?.length || 0,
-    supervisors: supervisors.map((p: any) => `${p.first_name} [${p.main_position_name}]`)
+    supervisorReqsLines: supReqs.map((r: any) => `${r.date} ${r.shift_id} (${(r.position as any)?.name})`),
+    craneReqsLines: craneReqs.map((r: any) => `${r.date} ${r.shift_id} (${(r.position as any)?.name})`),
+    personnelList: targets.map((p: any) => `${p.first_name} [${p.main_position_name}]`)
   };
 }

@@ -361,11 +361,14 @@ export function RosterGridClient({
             variant="outline" 
             size="sm" 
             className="h-8 border-orange-500 text-orange-600 hover:bg-orange-50 text-[10px] font-bold uppercase"
-            onClick={async () => {
-              const { runDiagnostic } = await import('@/app/(dashboard)/shifts/actions');
-              const res = await runDiagnostic();
-              alert(`DIAGNÓSTICO 20-21 ABRIL:\n\nREQ. SUPERVISOR (${res.supervisorReqs.length}):\n${res.supervisorReqs.join('\n')}\n\nPERSONALES SUP (${res.supervisors.length}):\n${res.supervisors.join(', ')}\n\nTOTAL REQS EN PERIODO: ${res.totalReqs}`);
-            }}
+              onClick={async () => {
+                const { runDiagnostic } = await import('@/app/(dashboard)/shifts/actions');
+                const res = await runDiagnostic();
+                alert(`RESUMEN DIAGNÓSTICO 20-21 ABRIL:\n\n` +
+                      `REQS SUPERVISOR (${res.supervisorReqsLines.length}):\n${res.supervisorReqsLines.join('\n')}\n\n` +
+                      `REQS GRÚA/H (${res.craneReqsLines.length}):\n${res.craneReqsLines.join('\n')}\n\n` +
+                      `PERSONAL DETECTADO (${res.personnelList.length}):\n${res.personnelList.join(', ')}`);
+              }}
           >
             Diagnóstico 20-21
           </Button>
