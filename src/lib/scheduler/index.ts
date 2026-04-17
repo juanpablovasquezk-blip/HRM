@@ -20,29 +20,36 @@ export async function generateSchedule(
   endDateStr: string,
   areaId?: string
 ): Promise<ScheduleResult> {
-  console.log(`[AI] Iniciando generación: ${startDateStr} al ${endDateStr}`);
+  console.log(`[AI-DEBUG] Iniciando generación: ${startDateStr} al ${endDateStr}`);
   const supabase = createAdminClient();
 
   const startDate = parseISO(startDateStr);
   const endDate = parseISO(endDateStr);
 
   // 1. Fetch data
-  const { data: personnelRaw } = await supabase
+  const { data: personnelRaw, error: pErr } = await supabase
     .from('personnel')
     .select('*, main_position_obj:positions!personnel_main_position_fkey(*)')
     .is('termination_date', null);
+  
+  if (pErr) console.error('[AI-DEBUG] Error personal:', pErr);
 
-  const { data: requirements } = await supabase
+  const { data: requirements, error: rErr } = await supabase
     .from('shift_requirements')
     .select('*, shift:shifts(*), area:areas(*), position:positions(*)')
     .gte('date', format(startDate, 'yyyy-MM-dd'))
     .lte('date', format(endDate, 'yyyy-MM-dd'));
+
+  if (rErr) console.error('[AI-DEBUG] Error reqs:', rErr);
+  console.log(`[AI-DEBUG] Requerimientos brutos: ${requirements?.length || 0}`);
 
   const { data: existingAssignments } = await supabase
     .from('shift_assignments')
     .select('*, shift:shifts(*)')
     .gte('date', format(startDate, 'yyyy-MM-dd'))
     .lte('date', format(endDate, 'yyyy-MM-dd'));
+
+  console.log(`[AI-DEBUG] Asignaciones existentes: ${existingAssignments?.length || 0}`);
 
   const { data: leaves } = await supabase
     .from('leaves')
@@ -58,13 +65,15 @@ export async function generateSchedule(
     fixed_shift_obj: (allShifts || []).find(s => s.id === p.fixed_shift_id)
   }));
 
-  console.log(`[AI] Iniciando con ${(requirements || []).length} slots y ${personnel.length} personas.`);
+  console.log(`[AI-DEBUG] Empleados cargados: ${personnel.length}`);
 
   const protectedAssignments = (existingAssignments || []).filter(
     (a) => a.is_locked || a.is_manual || a.frozen_by_rule || isShiftFrozen(a.date)
   );
 
-  const slots: ShiftSlot[] = (requirements || []).map((req) => {
+  console.log(`[AI-DEBUG] Asignaciones protegidas: ${protectedAssignments.length}`);
+
+  const slots = (requirements || []).map((req) => {
     const shift = req.shift as any;
     const filled = protectedAssignments.filter(
       (a) => a.date === req.date && a.shift_id === req.shift_id && a.area_id === req.area_id && a.position_id === req.position_id
@@ -87,6 +96,16 @@ export async function generateSchedule(
     };
   }).filter((s) => s.filled_count < s.required_count);
 
+  console.log(`[AI-DEBUG] Slots finales por llenar: ${slots.length}`);
+
+  if (slots.length === 0) {
+    console.warn('[AI-DEBUG] !ATENCIÓN! No hay slots para llenar. Verificando requerimientos...');
+    if (requirements && requirements.length > 0) {
+       const first = requirements[0];
+       console.log(`[AI-DEBUG] Ejemplo req: ID=${first.id}, PosID=${first.position_id}, Count=${first.required_count}`);
+    }
+  }
+
   const personnelAvailability: PersonnelAvailability[] = (personnel || []).map((p) => {
     const personLeaves = (leaves || []).filter((l) => l.personnel_id === p.id);
     const leaveDates = new Set<string>();
@@ -95,7 +114,7 @@ export async function generateSchedule(
         const interval = eachDayOfInterval({ start: parseISO(l.start_date), end: parseISO(l.end_date) });
         interval.forEach(d => leaveDates.add(format(d, 'yyyy-MM-dd')));
       } catch (e) {
-        console.error(`[AI] Error en fechas de licencia para ${p.id}:`, l.start_date, l.end_date);
+        console.error(`[AI-DEBUG] Error en fechas de licencia para ${p.id}:`, l.start_date, l.end_date);
       }
     });
 
@@ -134,11 +153,12 @@ export async function generateSchedule(
     };
   });
 
-  console.log(`[AI] Entrando a Greedy Assign...`);
+  console.log(`[AI-DEBUG] Entrando a Greedy Assign con ${slots.length} slots...`);
   const greedy = greedyAssign(slots, personnelAvailability, existingForConstraints);
+  console.log(`[AI-DEBUG] Asignaciones greedy: ${greedy.assignments.length}`);
   
-  console.log(`[AI] Entrando a Optimizador (Swaps)...`);
   const optimized = optimizeAssignments(greedy.assignments, personnelAvailability, slots);
+  console.log(`[AI-DEBUG] Asignaciones optimizadas: ${optimized.assignments.length}`);
 
   const supabaseAdmin = createAdminClient();
   if (optimized.assignments.length > 0) {
@@ -162,13 +182,7 @@ export async function generateSchedule(
       frozen_by_rule: false,
     }));
 
-    console.log(`[AI-SAVE] Preparando para insertar ${toInsert.length} turnos.`);
-    const { error: insertError } = await supabaseAdmin.from('shift_assignments').insert(toInsert);
-    if (insertError) {
-      console.error(`[AI-ERROR] Error crítico al insertar:`, insertError);
-    } else {
-      console.log(`[AI-SAVE] ¡Inserción completada con éxito!`);
-    }
+    await supabaseAdmin.from('shift_assignments').insert(toInsert);
   }
 
   const totalSlots = (requirements || []).reduce((sum, r) => sum + r.required_count, 0);
@@ -183,7 +197,7 @@ export async function generateSchedule(
       total_slots: totalSlots,
       filled_slots: filledSlots,
       coverage_percent: coverage,
-      recalculated_count: 0 // Default for main generation
+      recalculated_count: 0
     }
   };
 }
