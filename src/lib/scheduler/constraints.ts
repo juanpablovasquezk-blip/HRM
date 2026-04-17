@@ -266,7 +266,8 @@ export function checkPreferences(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot
 ): ConstraintViolation | null {
-  const startHour = parseInt(shiftSlot.shift_start.split(':')[0], 10);
+  const startTime = shiftSlot.shift_start || '08:00';
+  const startHour = parseInt(startTime.split(':')[0], 10);
   const isNightShift = startHour >= 20 || startHour < 6;
 
   if (isNightShift && personnel.avoids_night) {

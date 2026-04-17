@@ -422,6 +422,8 @@ export async function runDiagnostic() {
           area_id: req.area_id,
           position_name: posName,
           shift_name: shiftName,
+          shift_start: (req.shift as any)?.start_time || '08:00',
+          shift_end: (req.shift as any)?.end_time || '18:00',
           area_name: (req.area as any)?.name
         };
 
