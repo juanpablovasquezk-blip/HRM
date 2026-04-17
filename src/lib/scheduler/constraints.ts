@@ -466,13 +466,22 @@ export function checkRotationPattern(
 
   // 7x7 (Strict comparison)
   if (pattern === '7X7') {
-    const cyclePos = (daysSinceAnchor + 2) % 14; 
+    // Determine offset: Mathias is Turn B (offset 7), others are Turn A
+    const isMathias = firstName.includes('MATHIAS');
+    const offset = isMathias ? 9 : 2; // Mathias starts his work cycle exactly when others start their rest
+    
+    // Improved daysSinceAnchor using middle of the day to avoid TZ shifts
+    const d1 = new Date(date).setHours(12,0,0,0);
+    const d2 = new Date(anchorDate).setHours(12,0,0,0);
+    const diffDays = Math.round((d1 - d2) / (1000 * 60 * 60 * 24));
+    
+    const cyclePos = (diffDays + offset) % 14; 
     if (cyclePos >= 7) {
       return {
         type: 'rotation_violation',
         personnel_id: personnel.personnel_id,
         date: shiftSlot.date,
-        message: 'DESCANSO OBLIGATORIO 7x7 (Art. 38)',
+        message: `DESCANSO OBLIGATORIO 7x7 (Turno ${isMathias ? 'B' : 'A'})`,
         severity: 'error',
       };
     }
@@ -518,7 +527,7 @@ const memoSundays: Record<string, number> = {};
 
 /**
  * Check for at least 2 Sundays off per month (Chilean Law Art. 38)
- * Highly optimized for bulk processing.
+ * Optimized version: expects pre-processed sunday assignments
  */
 export function checkSundaysOff(
   personnel: PersonnelAvailability,
@@ -533,18 +542,18 @@ export function checkSundaysOff(
   }
 
   const slotDate = parseISO(shiftSlot.date);
-  if (!isSunday(slotDate)) return null;
+  if (slotDate.getDay() !== 0) return null; // Not a Sunday
 
   const mStart = startOfMonth(slotDate);
   const mEnd = endOfMonth(slotDate);
   const monthKey = format(mStart, 'yyyy-MM');
 
-  // Use memoized Sunday count
+  // Use memoized Sunday count for the month
   if (!memoSundays[monthKey]) {
     let count = 0;
     let curr = new Date(mStart);
     while (curr <= mEnd) {
-      if (isSunday(curr)) count++;
+      if (curr.getDay() === 0) count++;
       curr.setDate(curr.getDate() + 1);
     }
     memoSundays[monthKey] = count;
@@ -552,16 +561,19 @@ export function checkSundaysOff(
   
   const sundaysInMonth = memoSundays[monthKey];
   
-  // Quick count of assigned Sundays
+  // COUNT SUNDAYS: This is the hot path. 
+  // Optimization: use the pre-calculated assigned_dates if available
   let assignedSundays = 0;
-  for (let i = 0; i < allAssignments.length; i++) {
-    const a = allAssignments[i];
-    // Fast check for Sunday if the date string is YYYY-MM-DD
-    // Sunday in parseISO().getDay() is 0
-    const d = parseISO(a.date);
-    if (d.getDay() === 0 && d >= mStart && d <= mEnd) {
+  
+  // Use assigned_dates Set for O(1) lookups instead of O(N) loop
+  // We need to check all Sundays in the month
+  let curr = new Date(mStart);
+  while (curr <= mEnd) {
+    const dStr = format(curr, 'yyyy-MM-dd');
+    if (curr.getDay() === 0 && personnel.assigned_dates.has(dStr)) {
       assignedSundays++;
     }
+    curr.setDate(curr.getDate() + 1);
   }
 
   const totalSundaysWorking = assignedSundays + 1;
