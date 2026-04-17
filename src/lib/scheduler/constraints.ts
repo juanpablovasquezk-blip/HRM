@@ -367,17 +367,52 @@ export function checkRotationPattern(
   const pattern = personnel.rotation_pattern.toUpperCase();
   const date = parseISO(shiftSlot.date);
   
-  // Reference anchor for cycles in April 2026
-  const anchorDate = new Date(2026, 3, 1); // April 1st
-  const daysSinceAnchor = Math.floor((date.getTime() - anchorDate.getTime()) / (1000 * 60 * 60 * 24));
+  // 1. HARD ROTATION 7x7 (ABSOLUTE PRIORITY)
+  if (pattern.includes('7X7')) {
+    const anchor = parseISO('2026-04-01T00:00:00Z'); 
+    const dStr = format(date, 'yyyy-MM-dd') + 'T00:00:00Z';
+    const dayUTC = parseISO(dStr);
+    const diffDays = differenceInCalendarDays(dayUTC, anchor);
+    
+    // BALANCEADOR UNIVERSAL (Ciego a nombres, Robusto a colisiones)
+    // - Si el patrón contiene '-A', fuerza Turno A.
+    // - Si el patrón contiene '-B', fuerza Turno B.
+    // - Por defecto, usa el ADN pre-calculado (is_turn_b).
+    let isTurnBResult = personnel.is_turn_b;
+    if (pattern.includes('7X7-B') || pattern.includes('7X7 B')) {
+      isTurnBResult = true;
+    } else if (pattern.includes('7X7-A') || pattern.includes('7X7 A')) {
+      isTurnBResult = false;
+    }
 
-  // L-V (Estricto Lunes a Viernes)
+    const offset = isTurnBResult ? 9 : 2; 
+    const cyclePos = (diffDays + offset) % 14; 
+    
+    if (cyclePos >= 7) {
+      return {
+        type: 'rotation_violation',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: `DESCANSO OBLIGATORIO 7x7 (Turno ${isTurnBResult ? 'B' : 'A'})`,
+        severity: 'error',
+      };
+    }
+  }
+
+  // Reference anchor for other cycles
+
+  const anchorDate = new Date(2026, 3, 1);
+  const daysSinceAnchor = Math.floor((date.getTime() - anchorDate.getTime()) / (1000 * 60 * 60 * 24));
+  // ... (rest of function unchanged until Sundays)
+
+
+  // 2. L-V (Estricto Lunes a Viernes)
   if (pattern.includes('L-V') || pattern.includes('LUNES A VIERNES')) {
     const day = date.getDay();
-    // EXCEPTION: If they are covering CANES (Mathias rule), allow weekends
-    const isMathiasCoveringCanes = norm(personnel.first_name).includes('MATHIAS') && norm(shiftSlot.position_name).includes('CANES');
+    // Exención genérica para Canes en fines de semana (Si el patrón lo permite)
+    const isCanesSlot = (shiftSlot.position_name || '').toUpperCase().includes('CANES');
     
-    if ((day === 0 || day === 6) && !isMathiasCoveringCanes) {
+    if ((day === 0 || day === 6) && !isCanesSlot) {
       return {
         type: 'rotation_violation',
         personnel_id: personnel.personnel_id,
@@ -388,7 +423,7 @@ export function checkRotationPattern(
     }
   }
 
-  // Rule: NOCHE patterns should ONLY work night shifts
+  // 3. NOCHE
   if (pattern.includes('NOCHE')) {
     const startHour = parseInt(shiftSlot.shift_start.split(':')[0], 10);
     const isNightShift = startHour >= 20 || startHour < 6;
@@ -403,16 +438,11 @@ export function checkRotationPattern(
     }
   }
 
-  // REGLA DE TURNO FIJO Y ÁREA (Desde la ficha personal)
-  // Si tiene turno fijo, solo puede trabajar en ese turno.
+  // 4. TURNO FIJO
   if (personnel.fixed_shift_id && personnel.fixed_shift_id !== shiftSlot.shift_id) {
-    // FALLBACK: Si los IDs no coinciden, verificar si el NOMBRE del turno es el mismo
-    // Esto previene bloqueos por IDs obsoletos en la ficha personal
     const personnelShiftName = (personnel.fixed_shift_name || '').toUpperCase().trim();
     const slotShiftName = (shiftSlot.shift_name || '').toUpperCase().trim();
-    
     const namesMatch = personnelShiftName !== '' && personnelShiftName === slotShiftName;
-    
     if (!namesMatch) {
       return {
         type: 'rotation_violation',
@@ -424,26 +454,10 @@ export function checkRotationPattern(
     }
   }
 
-  // PROTECCIÓN PERSONAL FIJO EN BASE (Emilio, Lizardo, etc.)
-  const firstName = personnel.first_name.toUpperCase();
-  const isFixedBasePerson = firstName.includes('EMILIO') || firstName.includes('LIZARDO');
-  const isBaseMinerquim = (shiftSlot.area_name || '').toUpperCase().includes('BASE');
-  
-  if (isFixedBasePerson && !isBaseMinerquim) {
-    return {
-      type: 'rotation_violation',
-      personnel_id: personnel.personnel_id,
-      date: shiftSlot.date,
-      message: 'Este trabajador solo puede ser asignado a la BASE MINERQUIM',
-      severity: 'error',
-    };
-  }
-
-  // REGLA DE ORO DE IDENTIDAD DE CARGO
+  // 5. REG REGLA DE CARGO E IDENTIDAD (Ahora debajo de la rotación)
   const pPos = (personnel.main_position_name || '').toUpperCase();
   const sPos = (shiftSlot.position_name || '').toUpperCase();
   
-  // Si los IDs coinciden EXACTAMENTE, es el puesto correcto. No hay violación.
   if (personnel.main_position === shiftSlot.position_id) return null;
 
   const isSupervisor = pPos.includes('SUPERVISOR') || pPos.includes('SUP');
@@ -459,41 +473,8 @@ export function checkRotationPattern(
     };
   }
 
-  // NO MORE CUSTOM EXEMPTIONS. Everyone follows rotation rules.
-
-
-  // 7x7 (Strict comparison)
-  const normPattern = (personnel.rotation_pattern || '').toUpperCase();
-  if (normPattern.includes('7X7')) {
-    // Reference anchor for cycles: April 1st, 2026 (UTC midnight to stay safe)
-    const anchor = parseISO('2026-04-01T00:00:00Z'); 
-    const isMathias = firstName.includes('MATHIAS');
-    
-    // Normalize current date to UTC midnight for comparison
-    const dStr = format(date, 'yyyy-MM-dd') + 'T00:00:00Z';
-    const dayUTC = parseISO(dStr);
-
-    // Use calendar days difference to be time-zone agnostic
-    const diffDays = differenceInCalendarDays(dayUTC, anchor);
-    
-    // Determine offset: Mathias is Turn B (offset 7), others are Turn A
-    // Andres (Turn A): Cycle starts at anchor+2 to match April 13th
-    const offset = isMathias ? 9 : 2; 
-    
-    const cyclePos = (diffDays + offset) % 14; 
-    if (cyclePos >= 7) {
-      return {
-        type: 'rotation_violation',
-        personnel_id: personnel.personnel_id,
-        date: shiftSlot.date,
-        message: `DESCANSO OBLIGATORIO 7x7 (Turno ${isMathias ? 'B' : 'A'})`,
-        severity: 'error',
-      };
-    }
-  }
-
-
   // 4x4 (Aeropuerto)
+
   if (pattern.includes('4X4')) {
     // Offset +7 matches Marcelo Jara working 18-21
     const cyclePos = (daysSinceAnchor + 7) % 8; 
@@ -528,12 +509,25 @@ export function checkRotationPattern(
   return null;
 }
 
-// Memoization for Sundays count to speed up calculations
-const memoSundays: Record<string, number> = {};
+// Memoization for Sunday dates to speed up calculations
+const memoSundayDates: Record<string, string[]> = {};
+
+function getSundaysInMonth(monthKey: string, mStart: Date, mEnd: Date): string[] {
+  if (memoSundayDates[monthKey]) return memoSundayDates[monthKey];
+  const sundays: string[] = [];
+  let curr = new Date(mStart);
+  while (curr <= mEnd) {
+    if (curr.getDay() === 0) {
+      sundays.push(format(curr, 'yyyy-MM-dd'));
+    }
+    curr.setDate(curr.getDate() + 1);
+  }
+  memoSundayDates[monthKey] = sundays;
+  return sundays;
+}
 
 /**
  * Check for at least 2 Sundays off per month (Chilean Law Art. 38)
- * Optimized version: expects pre-processed sunday assignments
  */
 export function checkSundaysOff(
   personnel: PersonnelAvailability,
@@ -554,49 +548,34 @@ export function checkSundaysOff(
   const mEnd = endOfMonth(slotDate);
   const monthKey = format(mStart, 'yyyy-MM');
 
-  // Use memoized Sunday count for the month
-  if (!memoSundays[monthKey]) {
-    let count = 0;
-    let curr = new Date(mStart);
-    while (curr <= mEnd) {
-      if (curr.getDay() === 0) count++;
-      curr.setDate(curr.getDate() + 1);
-    }
-    memoSundays[monthKey] = count;
-  }
+  // GET LIST OF SUNDAYS (Memoized)
+  const sundaysInMonth = getSundaysInMonth(monthKey, mStart, mEnd);
   
-  const sundaysInMonth = memoSundays[monthKey];
-  
-  // COUNT SUNDAYS: This is the hot path. 
-  // Optimization: use the pre-calculated assigned_dates if available
+  // COUNT SUNDAYS: 
+  // Optimization: only check the specific Sunday dates, not the whole month
   let assignedSundays = 0;
-  
-  // Use assigned_dates Set for O(1) lookups instead of O(N) loop
-  // We need to check all Sundays in the month
-  let curr = new Date(mStart);
-  while (curr <= mEnd) {
-    const dStr = format(curr, 'yyyy-MM-dd');
-    if (curr.getDay() === 0 && personnel.assigned_dates.has(dStr)) {
+  for (const sunDate of sundaysInMonth) {
+    if (personnel.assigned_dates.has(sunDate)) {
       assignedSundays++;
     }
-    curr.setDate(curr.getDate() + 1);
   }
 
-  const totalSundaysWorking = assignedSundays + 1;
-  const sundaysOff = sundaysInMonth - totalSundaysWorking;
+  const totalSundaysWorking = assignedSundays + 1; // Including the current one
+  const sundaysOffCount = sundaysInMonth.length - totalSundaysWorking;
 
-  if (sundaysOff < 2) {
+  if (sundaysOffCount < 2) {
     return {
       type: 'min_days_off',
       personnel_id: personnel.personnel_id,
       date: shiftSlot.date,
-      message: `Debe tener al menos 2 domingos libres al mes (quedarían: ${sundaysOff})`,
+      message: `Debe tener al menos 2 domingos libres al mes (quedarían: ${sundaysOffCount})`,
       severity: 'error',
     };
   }
 
   return null;
 }
+
 
 export function validateAllConstraints(
   personnel: PersonnelAvailability,

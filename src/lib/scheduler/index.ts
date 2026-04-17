@@ -59,30 +59,14 @@ export async function generateSchedule(
     (a) => a.is_locked || a.is_manual || a.frozen_by_rule || isShiftFrozen(a.date)
   );
 
-  const slots: ShiftSlot[] = (rawRequirements || []).map((req) => {
-    const shift = req.shift as any;
-    const filled = protectedAssignments.filter(
-      (a) => a.date === req.date && a.shift_id === req.shift_id && a.area_id === req.area_id && a.position_id === req.position_id
-    ).length;
+  const tStart = performance.now();
 
-    return {
-      requirement_id: req.id,
-      date: req.date,
-      shift_id: req.shift_id,
-      area_id: req.area_id,
-      position_id: req.position_id,
-      shift_start: shift?.start_time || '00:00',
-      shift_end: shift?.end_time || '00:00',
-      shift_duration_hours: shift?.duration_hours || 8,
-      required_count: req.required_count,
-      filled_count: filled,
-      position_name: (req.positions as any)?.name,
-      area_name: (req.area as any)?.name,
-      shift_name: (req.shift as any)?.name,
-    };
-  }).filter((s) => s.filled_count < s.required_count);
+  const personnelAvailability: PersonnelAvailability[] = personnel.map((p) => {
+    // 1. Calcular ADN de Rotación (Paridad estable)
+    const hash = (p.id || '').split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
+    const isTurnB = (hash % 2 !== 0);
 
-  const personnelAvailability: PersonnelAvailability[] = (personnel || []).map((p) => {
+    // 2. Calcular Fechas de Licencia
     const personLeaves = (leaves || []).filter((l) => l.personnel_id === p.id);
     const leaveDates = new Set<string>();
     
@@ -90,11 +74,8 @@ export async function generateSchedule(
       try {
         const lStart = parseISO(l.start_date);
         const lEnd = parseISO(l.end_date);
-        
-        // Clip to current range to prevent infinite or extreme loops
         const clipStart = lStart < startDate ? startDate : lStart;
         const clipEnd = lEnd > endDate ? endDate : lEnd;
-        
         if (clipStart <= clipEnd) {
           const interval = eachDayOfInterval({ start: clipStart, end: clipEnd });
           interval.forEach(d => leaveDates.add(format(d, 'yyyy-MM-dd')));
@@ -104,28 +85,29 @@ export async function generateSchedule(
       }
     });
 
-
-    const protectedForPerson = protectedAssignments.filter(a => a.personnel_id === p.id);
-
     return {
       personnel_id: p.id,
       first_name: p.first_name,
       birth_date: p.birth_date,
       main_position: p.main_position,
-      main_position_obj: p.main_position_obj,
       main_position_name: (p.main_position_obj as any)?.name,
       secondary_positions: p.secondary_positions || [],
-      prefers_night: p.prefers_night,
-      avoids_night: p.avoids_night,
+      prefers_night: p.prefers_night || false,
+      avoids_night: p.avoids_night || false,
       fixed_shift_id: p.fixed_shift_id,
       fixed_shift_name: (p.fixed_shift_obj as any)?.name,
       rotation_pattern: p.rotation_pattern,
       has_special_contract: p.has_special_contract || false,
-      weekly_hours: protectedForPerson.reduce((sum, a) => sum + ((a.shift as any)?.duration_hours || 0), 0),
+      weekly_hours: 0,
       days_off_count: 0,
       last_shift_end: null,
-      assigned_dates: new Set(protectedForPerson.map((a) => a.date)),
+      assigned_dates: new Set(
+        protectedAssignments
+          .filter((a) => a.personnel_id === p.id)
+          .map((a) => a.date)
+      ),
       leave_dates: leaveDates,
+      is_turn_b: isTurnB,
     };
   });
 
@@ -140,17 +122,51 @@ export async function generateSchedule(
     };
   });
 
-  const greedy = greedyAssign(slots, personnelAvailability, existingForConstraints);
-  const optimized = optimizeAssignments(greedy.assignments, personnelAvailability, slots);
+  try {
+    const slots: ShiftSlot[] = (rawRequirements || []).map((req) => {
+      const shift = req.shift as any;
+      const filled = protectedAssignments.filter(
+        (a) => a.date === req.date && a.shift_id === req.shift_id && a.area_id === req.area_id && a.position_id === req.position_id
+      ).length;
 
-  const supabaseAdmin = createAdminClient();
-  if (optimized.assignments.length > 0) {
+      return {
+        requirement_id: req.id,
+        date: req.date,
+        shift_id: req.shift_id,
+        area_id: req.area_id,
+        position_id: req.position_id,
+        shift_start: shift?.start_time || '00:00',
+        shift_end: shift?.end_time || '00:00',
+        shift_duration_hours: shift?.duration_hours || 8,
+        required_count: req.required_count,
+        filled_count: filled,
+        position_name: (req.positions as any)?.name,
+        area_name: (req.area as any)?.name,
+        shift_name: (req.shift as any)?.name,
+      };
+    }).filter((s) => s.filled_count < s.required_count);
+
+    const tData = performance.now();
+    console.log(`[PERF] Datos preparados en ${(tData - tStart).toFixed(0)}ms. Slots a cubrir: ${slots.length}`);
+
+    // 4. RUN AI ENGINE
+    const result = greedyAssign(slots, personnelAvailability, existingForConstraints);
+    const tGreedy = performance.now();
+    const coverageInt = slots.length > 0 ? Math.round((result.assignments.length / slots.length) * 100) : 100;
+    console.log(`[PERF] Motor Greedy completado en ${(tGreedy - tData).toFixed(0)}ms (Cobertura en este pase: ${coverageInt}%)`);
+
+    const optimized = optimizeAssignments(result.assignments, personnelAvailability, slots);
+    const tOptim = performance.now();
+
+    // 6. SAVE RESULTS
+    const supabaseAdmin = createAdminClient();
     const nonProtectedIds = (existingAssignments || [])
       .filter((a) => !a.is_locked && !a.is_manual && !a.frozen_by_rule && !isShiftFrozen(a.date))
       .map((a) => a.id);
 
     if (nonProtectedIds.length > 0) {
-      await supabaseAdmin.from('shift_assignments').delete().in('id', nonProtectedIds);
+      const { error: delErr } = await supabaseAdmin.from('shift_assignments').delete().in('id', nonProtectedIds);
+      if (delErr) throw new Error(`Failed to clear old assignments: ${delErr.message}`);
     }
 
     const toInsert = optimized.assignments.map((a) => ({
@@ -165,22 +181,36 @@ export async function generateSchedule(
       frozen_by_rule: false,
     }));
 
-    await supabaseAdmin.from('shift_assignments').insert(toInsert);
-  }
-
-  const totalSlots = (rawRequirements || []).reduce((sum, r) => sum + r.required_count, 0);
-  const filledSlots = protectedAssignments.length + optimized.assignments.length;
-  const coverage = totalSlots > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0;
-
-  return {
-    assignments: optimized.assignments,
-    coverage,
-    count: filledSlots,
-    stats: {
-      total_slots: totalSlots,
-      filled_slots: filledSlots,
-      coverage_percent: coverage,
-      recalculated_count: 0
+    if (toInsert.length > 0) {
+      const { error: insErr } = await supabaseAdmin.from('shift_assignments').insert(toInsert);
+      if (insErr) throw new Error(`DB Error: No se pudieron guardar los ${toInsert.length} turnos: ${insErr.message}`);
     }
-  };
+
+    const tFinal = performance.now();
+    const executionTimeMs = tFinal - tStart;
+    console.log(`[PERF] Guardado completado en ${(tFinal - tOptim).toFixed(0)}ms. Total Turnos: ${toInsert.length}`);
+
+    const totalSlots = (rawRequirements || []).reduce((sum, r) => sum + r.required_count, 0);
+    const totalFilled = protectedAssignments.length + optimized.assignments.length;
+    const finalCoverage = totalSlots > 0 ? Math.round((totalFilled / totalSlots) * 100) : 0;
+
+    return {
+      assignments: optimized.assignments,
+      coverage: finalCoverage,
+      count: optimized.assignments.length, // Turnos nuevos creados
+      stats: {
+        total_slots: totalSlots,
+        filled_slots: totalFilled,
+        coverage_percent: finalCoverage,
+        recalculated_count: optimized.assignments.length,
+        execution_time_ms: executionTimeMs
+      }
+    };
+  } catch (error) {
+    console.error('[SCHEDULER-ERROR]', error);
+    throw error;
+  }
 }
+
+
+

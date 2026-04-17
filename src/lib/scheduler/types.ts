@@ -39,6 +39,7 @@ export interface ScheduleResult {
     filled_slots: number;
     coverage_percent: number;
     recalculated_count: number;
+    execution_time_ms?: number;
   };
 }
 
@@ -74,6 +75,7 @@ export interface PersonnelAvailability {
   last_shift_end: Date | null;
   assigned_dates: Set<string>;
   leave_dates: Set<string>;
+  is_turn_b: boolean;
 }
 
 export interface ShiftSlot {

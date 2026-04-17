@@ -126,9 +126,10 @@ export function RosterGridClient({
   const [aiStep, setAiStep] = useState<AIProcessStep>('preparing');
   const [aiProgress, setAiProgress] = useState(0);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [aiStats, setAiStats] = useState<{ coverage: number, count: number } | null>(null);
+  const [aiStats, setAiStats] = useState<{ coverage: number, count: number, executionTime?: number } | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [diagnosticLogs, setDiagnosticLogs] = useState<string[] | null>(null);
+
 
   // Local state for the dialog selects
   const [dialogPositionId, setDialogPositionId] = useState<string>('');
@@ -193,8 +194,8 @@ export function RosterGridClient({
     setIsAiModalOpen(true);
     setAiStep('preparing');
     setAiProgress(0);
-    setAiError(null);
     setAiStats(null);
+    setAiError(null);
 
     startTransition(async () => {
       try {
@@ -224,9 +225,11 @@ export function RosterGridClient({
           setAiStep('completed');
           setAiStats({
             coverage: res.data?.stats.coverage_percent || 0,
-            count: res.data?.stats.recalculated_count || 0
+            count: res.data?.count || 0,
+            executionTime: res.data?.stats.execution_time_ms
           });
           toast.success('Autogeneración completada');
+          router.refresh(); // Forzar actualización de la tabla
         }
       } catch (err) {
         setAiError(err instanceof Error ? err.message : 'Error desconocido');
@@ -824,17 +827,23 @@ export function RosterGridClient({
                       <CheckCircle2 className="h-5 w-5 text-emerald-600" />
                       <span className="font-bold text-emerald-700">¡Optimización Exitosa!</span>
                    </div>
-                   <div className="grid grid-cols-2 gap-4 mt-1">
-                      <div>
-                        <p className="text-[10px] text-emerald-600/70 uppercase font-black uppercase tracking-wider">Cobertura</p>
-                        <p className="text-2xl font-black text-emerald-700">{aiStats.coverage}%</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-emerald-600/70 uppercase font-black uppercase tracking-wider">Turnos</p>
-                        <p className="text-2xl font-black text-emerald-700">{aiStats.count}</p>
-                      </div>
-                   </div>
-                </div>
+                    <div className="grid grid-cols-3 gap-4 mt-1">
+                       <div>
+                         <p className="text-[10px] text-emerald-600/70 uppercase font-black uppercase tracking-wider">Cobertura</p>
+                         <p className="text-2xl font-black text-emerald-700">{aiStats.coverage}%</p>
+                       </div>
+                       <div>
+                         <p className="text-[10px] text-emerald-600/70 uppercase font-black uppercase tracking-wider">Turnos</p>
+                         <p className="text-2xl font-black text-emerald-700">{aiStats.count}</p>
+                       </div>
+                       <div>
+                         <p className="text-[10px] text-emerald-600/70 uppercase font-black uppercase tracking-wider">Tiempo</p>
+                         <p className="text-2xl font-black text-emerald-700">
+                           {aiStats.executionTime ? (aiStats.executionTime / 1000).toFixed(1) : '0'}s
+                         </p>
+                       </div>
+                    </div>
+                 </div>
              )}
 
              {aiStep === 'error' && (
