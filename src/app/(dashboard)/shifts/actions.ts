@@ -364,7 +364,7 @@ export async function clearAutoAssignments(startDate: string, endDate: string, a
 }
 
 export async function runDiagnostic() {
-  const supabase = createClient();
+  const supabase = await createClient(); // FIXED: Added await
   const start = '2026-04-20';
   const end = '2026-04-21';
 
@@ -375,19 +375,19 @@ export async function runDiagnostic() {
     .gte('date', start)
     .lte('date', end);
 
-  const supReqs = (reqs || []).filter(r => (r.position as any)?.name?.toUpperCase().includes('SUPERVISOR'));
+  const supReqs = (reqs || []).filter((r: any) => (r.position as any)?.name?.toUpperCase().includes('SUPERVISOR'));
 
   // 2. Ver personal
   const { data: rawPers } = await supabase
     .from('personnel')
     .select('*, main_position_obj:positions(name)');
   
-  const supervisors = (rawPers || []).filter(p => (p.main_position_obj as any)?.name?.toUpperCase().includes('SUPERVISOR'));
+  const supervisors = (rawPers || []).filter((p: any) => (p.main_position_obj as any)?.name?.toUpperCase().includes('SUPERVISOR'));
 
   return {
     totalReqs: reqs?.length || 0,
-    supervisorReqs: supReqs.map(r => `${r.date} ${r.shift_id} (${(r.position as any)?.name})`),
+    supervisorReqs: supReqs.map((r: any) => `${r.date} ${r.shift_id} (${(r.position as any)?.name})`),
     totalPersonnel: rawPers?.length || 0,
-    supervisors: supervisors.map(p => p.first_name)
+    supervisors: supervisors.map((p: any) => p.first_name)
   };
 }
