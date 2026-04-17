@@ -91,14 +91,20 @@ export function greedyAssign(
           const available = personnelPool.filter((p) => {
             if (p.assigned_dates.has(slot.date) || p.leave_dates.has(slot.date)) return false;
   
-            // Pass 0: Mandatory Cycle Work or Fixed
+            // Pass 0: Mandatory Cycle Work, Fixed Shifts or Strategic Strategic Roles
             if (pass === 0) {
               const isFixed = p.rotation_pattern?.includes('Fijo');
               const isRotational = p.rotation_pattern && p.rotation_pattern !== 'Rotativo' && !isFixed;
               const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_violation');
               
-              const isMatch = p.main_position === slot.position_id || p.secondary_positions.includes(slot.position_id);
-              if (!(isFixed || isWorkDayInCycle) || !isMatch) return false;
+              const isMatch = p.main_position === slot.position_id;
+              const pPosName = (p.main_position_name || '').toUpperCase();
+              const isStrategic = pPosName.includes('SUPERVISOR') || pPosName.includes('GRÚA') || pPosName.includes('HORQUILLA');
+
+              // If it's a strategic person matching their main role, don't over-validate rotation in pass 0
+              if (isStrategic && isMatch) return true;
+
+              if (!isMatch || (!isWorkDayInCycle && !isFixed)) return false;
             }
   
             // Pass 1: Primary Qualification (Main Position)
