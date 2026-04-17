@@ -28,49 +28,59 @@ export async function generateSchedule(
 
   console.log(`[AI] Cargando contexto extendido (Mes): ${extendedStart} - ${extendedEnd}`);
 
+  // LABORATORIO AISLADO: 20 y 21 de Abril
+  const labStart = '2026-04-20';
+  const labEnd = '2026-04-21';
+
   let reqQuery = supabase
     .from('shift_requirements')
     .select('*, shift:shifts(name, start_time, end_time, duration_hours), area:areas(name), position:positions(name)')
-    .gte('date', startDate)
-    .lte('date', endDate);
+    .gte('date', labStart)
+    .lte('date', labEnd);
 
-  if (areaId) reqQuery = reqQuery.eq('area_id', areaId);
-  const { data: requirements } = await reqQuery;
+  const { data: rawRequirements } = await reqQuery;
 
-  // DEBUG CRÍTICO: ¿Qué cargos ve la IA en los requerimientos?
-  const uniquePositions = [...new Set((requirements || []).map(r => (r.position as any)?.name))];
-  console.log(`[AI-RADAR] Cargos detectados en requerimientos:`, uniquePositions);
-  console.log(`[AI-RADAR] Total slots encontrados: ${requirements?.length || 0}`);
+  // Solo Supervisión y Grúas
+  const requirements = (rawRequirements || []).filter(r => {
+    const name = (r.position as any)?.name?.toUpperCase() || '';
+    return name.includes('SUPERVISOR') || name.includes('GRÚA') || name.includes('HORQUILLA');
+  });
   
-  let assignQuery = supabase
-    .from('shift_assignments')
-    .select('*, shift:shifts(name, start_time, end_time, duration_hours)')
-    .gte('date', extendedStart)
-    .lte('date', extendedEnd);
-
-  if (areaId) assignQuery = assignQuery.eq('area_id', areaId);
-  const { data: existingAssignments } = await assignQuery;
-
+  console.log(`[AI-LAB] Requerimientos cargados: ${requirements.length}`);
+  
   const { data: personnelRaw } = await supabase.from('personnel').select('*');
   const { data: positions } = await supabase.from('positions').select('*');
   const { data: allShifts } = await supabase.from('shifts').select('*');
 
-  const personnel = (personnelRaw || []).map(p => ({
-    ...p,
-    main_position_obj: (positions || []).find(pos => pos.id === p.main_position),
-    fixed_shift_obj: (allShifts || []).find(s => s.id === p.fixed_shift_id)
-  }));
+  const personnel = (personnelRaw || [])
+    .map(p => ({
+      ...p,
+      main_position_obj: (positions || []).find(pos => pos.id === p.main_position),
+      fixed_shift_obj: (allShifts || []).find(s => s.id === p.fixed_shift_id)
+    }))
+    .filter(p => {
+       const pName = (p.main_position_obj as any)?.name?.toUpperCase() || '';
+       return pName.includes('SUPERVISOR') || pName.includes('GRÚA') || pName.includes('HORQUILLA');
+    });
 
-  console.log(`[AI-DEBUG] Personal total cargado: ${personnel.length}`);
+  console.log(`[AI-LAB] Personal cargado: ${personnel.length}`);
+
+  let assignQuery = supabase
+    .from('shift_assignments')
+    .select('*, shift:shifts(name, start_time, end_time, duration_hours)')
+    .gte('date', labStart)
+    .lte('date', labEnd);
+
+  const { data: existingAssignments } = await assignQuery;
 
   const { data: leaves } = await supabase
     .from('leaves')
     .select('*')
     .eq('status', 'approved')
-    .lte('start_date', extendedEnd)
-    .gte('end_date', extendedStart);
+    .lte('start_date', labEnd)
+    .gte('end_date', labStart);
 
-  console.log(`[AI] Datos cargados. Slots a llenar: ${requirements?.length || 0}`);
+  console.log(`[AI-LAB] Iniciando con ${requirements.length} slots y ${personnel.length} personas.`);
 
   const protectedAssignments = (existingAssignments || []).filter(
     (a) => a.is_locked || a.is_manual || a.frozen_by_rule || isShiftFrozen(a.date)
