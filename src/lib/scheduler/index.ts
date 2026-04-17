@@ -49,10 +49,15 @@ export async function generateSchedule(
   const { data: existingAssignments } = await assignQuery;
 
   // Cargamos TODO el personal (sin filtros restrictivos)
-  // Cargamos TODO el personal con su cargo principal unido
-  const { data: personnel } = await supabase
-    .from('personnel')
-    .select('*, main_position_obj:positions!personnel_main_position_fkey(name)');
+  const { data: personnelRaw } = await supabase.from('personnel').select('*');
+  const { data: positions } = await supabase.from('positions').select('*');
+
+  const personnel = (personnelRaw || []).map(p => ({
+    ...p,
+    main_position_obj: (positions || []).find(pos => pos.id === p.main_position)
+  }));
+
+  console.log(`[AI-DEBUG] Personal cargado: ${personnel.length}`);
 
   const { data: leaves } = await supabase
     .from('leaves')
@@ -60,8 +65,6 @@ export async function generateSchedule(
     .eq('status', 'approved')
     .lte('start_date', extendedEnd)
     .gte('end_date', extendedStart);
-
-  const { data: positions } = await supabase.from('positions').select('*');
 
   console.log(`[AI] Datos cargados. Slots a llenar: ${requirements?.length || 0}`);
 
