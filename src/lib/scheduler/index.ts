@@ -185,7 +185,25 @@ export async function generateSchedule(
       frozen_by_rule: false,
     }));
 
-    await supabase.from('shift_assignments').insert(toInsert);
+    console.log(`[AI-SAVE] Preparando para insertar ${toInsert.length} turnos.`);
+    if (toInsert.length > 0) {
+       // Debug de nombres
+       const names = toInsert.map(i => {
+         const p = personnelAvailability.find(pa => pa.personnel_id === i.personnel_id);
+         return `${p?.first_name} (${i.date})`;
+       });
+       console.log(`[AI-SAVE] Lista de asignación:`, names.join(', '));
+    }
+
+    const { error: insertError } = await supabase.from('shift_assignments').insert(toInsert);
+    
+    if (insertError) {
+      console.error(`[AI-ERROR] Error crítico al insertar:`, insertError);
+    } else {
+      console.log(`[AI-SAVE] ¡Inserción completada con éxito!`);
+    }
+  } else {
+    console.log(`[AI-SAVE] No hay nuevas asignaciones para insertar.`);
   }
 
   const totalSlots = (requirements || []).reduce((sum, r) => sum + r.required_count, 0);
