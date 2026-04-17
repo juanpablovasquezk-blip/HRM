@@ -37,13 +37,20 @@ export async function generateSchedule(
   if (areaId) reqQuery = reqQuery.eq('area_id', areaId);
   const { data: rawRequirements } = await reqQuery;
 
-  // PRUEBA DE AISLAMIENTO: Solo Supervisores
-  const requirements = (rawRequirements || []).filter(r => (r.position?.name || '').toUpperCase().includes('SUPERVISOR'));
+  console.log(`[AI-DEBUG] Requerimientos brutos encontrados en DB: ${rawRequirements?.length || 0}`);
   
-  console.log(`[AI-TEST] Requerimientos de Supervisión encontrados: ${requirements?.length || 0}`);
-  if (requirements.length > 0) {
-    console.log(`[AI-TEST] Ejemplo: ${requirements[0].date} - ${requirements[0].shift?.name}`);
+  // LOG DETALLADO: Ver el primer requerimiento para diagnosticar
+  if (rawRequirements && rawRequirements.length > 0) {
+    console.log(`[AI-DEBUG] Primer Req: Area=${rawRequirements[0].area_id}, Pos=${rawRequirements[0].position_id}, PosName=${rawRequirements[0].position?.name}`);
   }
+
+  // PRUEBA DE AISLAMIENTO: Solo Supervisores (Búsqueda más flexible)
+  const requirements = (rawRequirements || []).filter(r => {
+    const posName = (r.position?.name || '').toUpperCase();
+    return posName.includes('SUPERVISOR');
+  });
+  
+  console.log(`[AI-TEST] Requerimientos de Supervisión (POST-FILTRO): ${requirements?.length || 0}`);
 
   let assignQuery = supabase
     .from('shift_assignments')
