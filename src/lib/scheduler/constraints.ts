@@ -402,13 +402,27 @@ export function checkRotationPattern(
     }
   }
 
-  // REGLA DE TURNO FIJO (Desde la ficha personal)
+  // REGLA DE TURNO FIJO Y ÁREA (Desde la ficha personal)
+  // Si tiene turno fijo, solo puede trabajar en ese turno.
   if (personnel.fixed_shift_id && personnel.fixed_shift_id !== shiftSlot.shift_id) {
     return {
       type: 'rotation_violation',
       personnel_id: personnel.personnel_id,
       date: shiftSlot.date,
-      message: `El trabajador tiene asignado el turno fijo ${personnel.fixed_shift_id}`,
+      message: `El trabajador tiene turno fijo asignado`,
+      severity: 'error',
+    };
+  }
+
+  // PROTECCIÓN EMILIO / SUPERVISORES: No moverse de su área si son fijos
+  const isEmilio = personnel.first_name.toUpperCase().includes('EMILIO');
+  const isBaseMinerquim = (shiftSlot.area_name || '').toUpperCase().includes('BASE');
+  if (isEmilio && !isBaseMinerquim) {
+    return {
+      type: 'rotation_violation',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: 'Emilio solo puede trabajar en la BASE',
       severity: 'error',
     };
   }

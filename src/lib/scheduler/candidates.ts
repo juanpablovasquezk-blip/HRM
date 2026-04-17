@@ -142,10 +142,11 @@ function scorePositionMatch(
     return 150; // Super priority boost even above main position
   }
 
-  // PROTECTION: Supervisors NEVER work as Canes
-  const isSupervisor = (personnel.main_position_name || '').toUpperCase().includes('SUPERVISOR');
+  // PROTECTION: Supervisors NEVER work as Canes or Generic Operators
+  const pName = (personnel.main_position_name || '').toUpperCase();
+  const isSupervisorMan = pName.includes('SUPERVISOR') || pName.includes('SUP');
   
-  if (isSupervisor && posName.includes('CANES')) return 0;
+  if (isSupervisorMan && (posName.includes('CANES') || posName.includes('OPERADOR'))) return 0;
 
   return 0; // CRITICAL: If no match, candidate is NOT eligible
 }
