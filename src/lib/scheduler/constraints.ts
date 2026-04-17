@@ -432,6 +432,10 @@ export function checkRotationPattern(
   // REGLA DE ORO DE IDENTIDAD DE CARGO
   const pPos = (personnel.main_position_name || '').toUpperCase();
   const sPos = (shiftSlot.position_name || '').toUpperCase();
+  
+  // Si los IDs coinciden EXACTAMENTE, es el puesto correcto. No hay violación.
+  if (personnel.main_position === shiftSlot.position_id) return null;
+
   const isSupervisor = pPos.includes('SUPERVISOR') || pPos.includes('SUP');
   const isOperational = sPos.includes('OPERADOR') || sPos.includes('CANES') || sPos.includes('AYUDANTE');
 
