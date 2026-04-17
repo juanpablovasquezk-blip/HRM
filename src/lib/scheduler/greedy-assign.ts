@@ -91,11 +91,18 @@ export function greedyAssign(
           const available = personnelPool.filter((p) => {
             if (p.assigned_dates.has(slot.date) || p.leave_dates.has(slot.date)) return false;
   
+            const isFixed = p.rotation_pattern?.includes('Fijo');
+            const isRotational = p.rotation_pattern && p.rotation_pattern !== 'Rotativo' && !isFixed;
+            const rotationViolation = checkRotationPattern(p, slot);
+            
+            // 7x7 (Strict comparison)
+            if (p.rotation_pattern?.toUpperCase().includes('7X7')) {
+              if (rotationViolation) return false;
+            }
+
             // Pass 0: Mandatory Cycle Work, Fixed Shifts or Strategic Strategic Roles
             if (pass === 0) {
-              const isFixed = p.rotation_pattern?.includes('Fijo');
-              const isRotational = p.rotation_pattern && p.rotation_pattern !== 'Rotativo' && !isFixed;
-              const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_violation');
+              const isWorkDayInCycle = isRotational && !rotationViolation;
               
               const isMatch = p.main_position === slot.position_id;
               const pPosName = (p.main_position_name || '').toUpperCase();
@@ -111,14 +118,19 @@ export function greedyAssign(
 
               if (!isMatch || (!isWorkDayInCycle && !isFixed)) return false;
             }
+
   
             // Pass 1: Primary Qualification (Main Position)
             if (pass === 1) {
-              if (p.main_position !== slot.position_id) return false;
+              const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_violation');
+              if (p.main_position !== slot.position_id || (!isWorkDayInCycle && !isFixed)) return false;
             }
             
-            // Pass 2 & 3: Secondary Qualification & Support
+            // Pass 2 & 3: Secondary Qualification & Support (Still respect rotation)
             if (pass >= 2) {
+              const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_violation');
+              if (!isWorkDayInCycle && !isFixed) return false;
+
               const isMathias = p.first_name.toUpperCase().includes('MATHIAS');
               const isCanesSlot = (slot.position_name || '').toUpperCase().includes('CANES');
               
