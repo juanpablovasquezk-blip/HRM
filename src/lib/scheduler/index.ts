@@ -35,14 +35,9 @@ export async function generateSchedule(
     .lte('date', endDate);
 
   if (areaId) reqQuery = reqQuery.eq('area_id', areaId);
-  const { data: rawRequirements } = await reqQuery;
+  const { data: requirements } = await reqQuery;
 
-  // AISLAMIENTO: Solo Operadores de Grúa/Horquilla
-  const requirements = (rawRequirements || []).filter(r => {
-    const name = (r.position as any)?.name?.toUpperCase() || '';
-    return name.includes('GRÚA') || name.includes('HORQUILLA');
-  });
-  console.log(`[AI-ISO-GRUA] Requerimientos Grúa: ${requirements.length}`);
+  console.log(`[AI-DEBUG] Requerimientos totales: ${requirements?.length || 0}`);
   
   let assignQuery = supabase
     .from('shift_assignments')
@@ -56,17 +51,12 @@ export async function generateSchedule(
   const { data: personnelRaw } = await supabase.from('personnel').select('*');
   const { data: positions } = await supabase.from('positions').select('*');
 
-  const personnel = (personnelRaw || [])
-    .map(p => ({
-      ...p,
-      main_position_obj: (positions || []).find(pos => pos.id === p.main_position)
-    }))
-    .filter(p => {
-       const pName = (p.main_position_obj as any)?.name?.toUpperCase() || '';
-       return pName.includes('GRÚA') || pName.includes('HORQUILLA');
-    });
+  const personnel = (personnelRaw || []).map(p => ({
+    ...p,
+    main_position_obj: (positions || []).find(pos => pos.id === p.main_position)
+  }));
 
-  console.log(`[AI-ISO-GRUA] Operadores cargados: ${personnel.length}`);
+  console.log(`[AI-DEBUG] Personal total cargado: ${personnel.length}`);
 
   const { data: leaves } = await supabase
     .from('leaves')

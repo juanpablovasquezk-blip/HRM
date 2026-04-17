@@ -414,15 +414,17 @@ export function checkRotationPattern(
     };
   }
 
-  // PROTECCIÓN EMILIO / SUPERVISORES: No moverse de su área si son fijos
-  const isEmilio = personnel.first_name.toUpperCase().includes('EMILIO');
+  // PROTECCIÓN PERSONAL FIJO EN BASE (Emilio, Lizardo, etc.)
+  const firstName = personnel.first_name.toUpperCase();
+  const isFixedBasePerson = firstName.includes('EMILIO') || firstName.includes('LIZARDO');
   const isBaseMinerquim = (shiftSlot.area_name || '').toUpperCase().includes('BASE');
-  if (isEmilio && !isBaseMinerquim) {
+  
+  if (isFixedBasePerson && !isBaseMinerquim) {
     return {
       type: 'rotation_violation',
       personnel_id: personnel.personnel_id,
       date: shiftSlot.date,
-      message: 'Emilio solo puede trabajar en la BASE',
+      message: 'Este trabajador solo puede ser asignado a la BASE MINERQUIM',
       severity: 'error',
     };
   }
