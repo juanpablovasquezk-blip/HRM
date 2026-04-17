@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Plus, Users as UsersIcon, FileSpreadsheet } from 'lucide-react';
+import { Plus, Users as UsersIcon, FileSpreadsheet, Edit } from 'lucide-react';
 import { PersonnelFilters } from './personnel-filters';
 
 export default async function PersonnelPage({
@@ -119,6 +119,7 @@ export default async function PersonnelPage({
                     <TableHead>Empresa</TableHead>
                     <TableHead>Planificación</TableHead>
                     <TableHead>Preferencias</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -186,6 +187,13 @@ export default async function PersonnelPage({
                             </Badge>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Link href={`/personnel/${person.id}/edit`}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
+                             <Edit className="h-4 w-4" />
+                          </Button>
+                        </Link>
                       </TableCell>
                     </TableRow>
                   );

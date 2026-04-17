@@ -182,8 +182,25 @@ export async function generateSchedule(
     }));
 
     if (toInsert.length > 0) {
-      const { error: insErr } = await supabaseAdmin.from('shift_assignments').insert(toInsert);
-      if (insErr) throw new Error(`DB Error: No se pudieron guardar los ${toInsert.length} turnos: ${insErr.message}`);
+      const CHUNK_SIZE = 50;
+      for (let i = 0; i < toInsert.length; i += CHUNK_SIZE) {
+        const chunk = toInsert.slice(i, i + CHUNK_SIZE);
+        let retries = 3;
+        let success = false;
+
+        while (retries > 0 && !success) {
+          try {
+            const { error: insErr } = await supabaseAdmin.from('shift_assignments').insert(chunk);
+            if (insErr) throw insErr;
+            success = true;
+          } catch (err: any) {
+            retries--;
+            console.warn(`[RETRY] Error guardando bloque ${i/CHUNK_SIZE + 1}. Reintentos restantes: ${retries}. Error: ${err.message || err}`);
+            if (retries === 0) throw new Error(`DB Error: No se pudo guardar el bloque ${i/CHUNK_SIZE + 1}: ${err.message || err}`);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Esperar 1s antes de reintentar
+          }
+        }
+      }
     }
 
     const tFinal = performance.now();

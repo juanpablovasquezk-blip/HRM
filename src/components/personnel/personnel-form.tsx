@@ -257,12 +257,14 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
               >
                 <option value="5x2">5x2 (Semanal / Rotativo)</option>
                 <option value="l-v">Lunes a Viernes (Fijo)</option>
-                <option value="7x7">7x7 (Rotativo Canes)</option>
+                <option value="7x7">7x7 (Ciclo Estándar)</option>
+                <option value="7X7-A">7x7 - Turno A (Inicio Ciclo)</option>
+                <option value="7X7-B">7x7 - Turno B (Relevo Ciclo)</option>
                 <option value="4x4_noche">4x4 Noche (Intercambiable)</option>
                 <option value="part_time">Part-Time / Ocasional</option>
                 <option value="manual">Manual / Bajo Demanda</option>
               </select>
-              <p className="text-[10px] text-muted-foreground italic">Determina cómo el motor propone los turnos.</p>
+              <p className="text-[10px] text-muted-foreground italic">Determina cómo el motor propone los turnos. Usa Turno A/B para balancear compañeros (ej: para que no descansen los dos al mismo tiempo).</p>
             </div>
 
             <div className="space-y-2">
