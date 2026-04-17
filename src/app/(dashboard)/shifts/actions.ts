@@ -429,10 +429,13 @@ export async function runDiagnostic() {
         };
 
         const violations = validateAllConstraints(personAvail, slot, []);
+        const pID = p.main_position?.substring(0, 8);
+        const rID = req.position_id?.substring(0, 8);
+        
         if (violations.length > 0) {
-          logs.push(`   × ${p.first_name}: BLOQUEADO (${violations[0].message})`);
+          logs.push(`   × ${p.first_name}: BLOQUEADO (${violations[0].message}) [P:${pID} vs R:${rID}]`);
         } else {
-          logs.push(`   √ ${p.first_name}: DISPONIBLE`);
+          logs.push(`   √ ${p.first_name}: DISPONIBLE [P:${pID} vs R:${rID}]`);
         }
       }
     }
