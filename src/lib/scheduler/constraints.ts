@@ -306,7 +306,7 @@ export function checkQualification(
 
   // 1. Direct match by ID
   if (personnel.main_position === shiftSlot.position_id) return null;
-  if (personnel.secondary_positions.includes(shiftSlot.position_id)) return null;
+  if ((personnel.secondary_positions || []).includes(shiftSlot.position_id)) return null;
 
   // CRITICAL RULE: CANES stay in CANES. They don't cover other areas.
   const isCan = perPosName.includes('CAN');

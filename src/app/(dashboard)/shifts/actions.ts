@@ -407,6 +407,7 @@ export async function runDiagnostic() {
           first_name: p.first_name,
           main_position: p.main_position,
           main_position_name: p.main_position_name,
+          secondary_positions: p.secondary_positions || [],
           fixed_shift_id: p.fixed_shift_id,
           fixed_shift_name: (p.fixed_shift_obj as any)?.name,
           rotation_pattern: p.rotation_pattern,
