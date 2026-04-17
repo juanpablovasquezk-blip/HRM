@@ -12,11 +12,12 @@
 import type { CandidateScore, PersonnelAvailability, ShiftSlot } from './types';
 
 const WEIGHTS = {
-  availability: 0.30,
-  preference: 0.15,
-  hours_balance: 0.25,
-  position_match: 0.20,
-  fairness: 0.10,
+  availability: 0.25,
+  preference: 0.10,
+  hours_balance: 0.20,
+  position_match: 0.25,
+  area_match: 0.15, // New weight
+  fairness: 0.05,
 };
 
 /**
@@ -32,6 +33,7 @@ export function scoreCandidate(
   const preference = scorePreference(personnel, shiftSlot);
   const hoursBalance = scoreHoursBalance(personnel, maxWeeklyHours);
   const positionMatch = scorePositionMatch(personnel, shiftSlot);
+  const areaMatch = scoreAreaMatch(personnel, shiftSlot);
   const fairness = scoreFairness(personnel, avgAssignmentCount);
 
   const total =
@@ -39,6 +41,7 @@ export function scoreCandidate(
     preference * WEIGHTS.preference +
     hoursBalance * WEIGHTS.hours_balance +
     positionMatch * WEIGHTS.position_match +
+    areaMatch * WEIGHTS.area_match +
     fairness * WEIGHTS.fairness;
 
   return {
@@ -164,4 +167,16 @@ function scoreFairness(
   if (ratio <= 1.0) return 75;
   if (ratio <= 1.5) return 50;
   return 25;
+}
+
+function scoreAreaMatch(personnel: PersonnelAvailability, shiftSlot: ShiftSlot): number {
+  const personAreaId = personnel.main_position_obj?.area_id;
+  
+  // GLOBAL POSITION (No area assigned): Can work anywhere!
+  if (!personAreaId) return 100;
+  
+  // Specific area match
+  if (personAreaId === shiftSlot.area_id) return 100;
+  
+  return 0;
 }

@@ -58,6 +58,7 @@ export interface PersonnelAvailability {
   first_name: string;
   main_position: string;
   main_position_name?: string;
+  main_position_obj?: any;
   secondary_positions: string[];
   prefers_night: boolean;
   avoids_night: boolean;

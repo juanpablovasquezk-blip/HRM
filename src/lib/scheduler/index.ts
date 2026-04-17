@@ -128,6 +128,7 @@ export async function generateSchedule(
       first_name: p.first_name,
       birth_date: p.birth_date,
       main_position: p.main_position,
+      main_position_obj: p.main_position_obj,
       main_position_name: (p.main_position_obj as any)?.name,
       secondary_positions: p.secondary_positions || [],
       prefers_night: p.prefers_night,
