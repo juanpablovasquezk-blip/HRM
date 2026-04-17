@@ -370,8 +370,8 @@ export function checkRotationPattern(
   const anchorDate = new Date(2026, 3, 1); // April 1st
   const daysSinceAnchor = Math.floor((date.getTime() - anchorDate.getTime()) / (1000 * 60 * 60 * 24));
 
-  // L-V / 5x2 (Estricto Lunes a Viernes)
-  if (pattern.includes('L-V') || pattern.includes('LUNES A VIERNES') || pattern.includes('5X2')) {
+  // L-V (Estricto Lunes a Viernes)
+  if (pattern.includes('L-V') || pattern.includes('LUNES A VIERNES')) {
     const day = date.getDay();
     // EXCEPTION: If they are covering CANES (Mathias rule), allow weekends
     const isCoveringCanes = norm(personnel.first_name).includes('MATHIAS') && norm(shiftSlot.position_name).includes('CANES');
