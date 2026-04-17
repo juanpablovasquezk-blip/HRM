@@ -35,23 +35,10 @@ export async function generateSchedule(
     .lte('date', endDate);
 
   if (areaId) reqQuery = reqQuery.eq('area_id', areaId);
-  const { data: rawRequirements } = await reqQuery;
+  const { data: requirements } = await reqQuery;
 
-  console.log(`[AI-DEBUG] Requerimientos brutos encontrados en DB: ${rawRequirements?.length || 0}`);
+  console.log(`[AI-DEBUG] Requerimientos totales encontrados: ${requirements?.length || 0}`);
   
-  // LOG DETALLADO: Ver el primer requerimiento para diagnosticar
-  if (rawRequirements && rawRequirements.length > 0) {
-    console.log(`[AI-DEBUG] Primer Req: Area=${rawRequirements[0].area_id}, Pos=${rawRequirements[0].position_id}, PosName=${rawRequirements[0].position?.name}`);
-  }
-
-  // PRUEBA DE AISLAMIENTO: Solo Supervisores (Búsqueda más flexible)
-  const requirements = (rawRequirements || []).filter(r => {
-    const posName = (r.position?.name || '').toUpperCase();
-    return posName.includes('SUPERVISOR');
-  });
-  
-  console.log(`[AI-TEST] Requerimientos de Supervisión (POST-FILTRO): ${requirements?.length || 0}`);
-
   let assignQuery = supabase
     .from('shift_assignments')
     .select('*, shift:shifts(name, start_time, end_time, duration_hours)')
@@ -61,7 +48,8 @@ export async function generateSchedule(
   if (areaId) assignQuery = assignQuery.eq('area_id', areaId);
   const { data: existingAssignments } = await assignQuery;
 
-  const { data: personnel } = await supabase.from('personnel').select('*').eq('is_active', true);
+  // Cargamos TODO el personal (sin filtros restrictivos)
+  const { data: personnel } = await supabase.from('personnel').select('*');
 
   const { data: leaves } = await supabase
     .from('leaves')
