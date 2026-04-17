@@ -93,44 +93,30 @@ export function greedyAssign(
   
             const isFixed = p.rotation_pattern?.includes('Fijo');
             const isRotational = p.rotation_pattern && p.rotation_pattern !== 'Rotativo' && !isFixed;
-            const rotationViolation = checkRotationPattern(p, slot);
             
-            // 7x7 (Strict comparison)
-            if (p.rotation_pattern?.toUpperCase().includes('7X7')) {
-              if (rotationViolation) return false;
+            // 1. HARD ROTATION CHECK (Top Priority)
+            if (isRotational) {
+              const rotationViolation = checkRotationPattern(p, slot);
+              if (rotationViolation) return false; // If resting, ignore completely
             }
 
-            // Pass 0: Mandatory Cycle Work, Fixed Shifts or Strategic Strategic Roles
+            // Pass 0: Strategic Roles & Main Matches
             if (pass === 0) {
-              const isWorkDayInCycle = isRotational && !rotationViolation;
-              
               const isMatch = p.main_position === slot.position_id;
               const pPosName = (p.main_position_name || '').toUpperCase();
               const isStrategic = pPosName.includes('SUPERVISOR') || pPosName.includes('GRÚA') || pPosName.includes('HORQUILLA');
 
-              // If it's a strategic person matching their main role, don't over-validate general constraints
-              // BUT we MUST respect critical rotation patterns (7x7, 4x4)
-              if (isStrategic && isMatch) {
-                const rotationViolation = checkRotationPattern(p, slot);
-                if (rotationViolation) return false;
-                return true;
-              }
-
-              if (!isMatch || (!isWorkDayInCycle && !isFixed)) return false;
+              if (isStrategic && isMatch) return true;
+              if (!isMatch || (!isRotational && !isFixed)) return false;
             }
-
   
             // Pass 1: Primary Qualification (Main Position)
             if (pass === 1) {
-              const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_violation');
-              if (p.main_position !== slot.position_id || (!isWorkDayInCycle && !isFixed)) return false;
+              if (p.main_position !== slot.position_id) return false;
             }
             
-            // Pass 2 & 3: Secondary Qualification & Support (Still respect rotation)
+            // Pass 2 & 3: Secondary Qualification & Support
             if (pass >= 2) {
-              const isWorkDayInCycle = isRotational && !validateAllConstraints(p, slot, []).some(v => v.type === 'rotation_violation');
-              if (!isWorkDayInCycle && !isFixed) return false;
-
               const isMathias = p.first_name.toUpperCase().includes('MATHIAS');
               const isCanesSlot = (slot.position_name || '').toUpperCase().includes('CANES');
               
@@ -143,6 +129,7 @@ export function greedyAssign(
             }
             return true;
           });
+
   
           if (available.length === 0) {
             console.log(`[AI-DEBUG] Paso ${pass}: Sin candidatos base para ${slot.date} ${slot.position_name}`);

@@ -465,15 +465,18 @@ export function checkRotationPattern(
   if (isMathias && isCanesSlot) return null;
 
   // 7x7 (Strict comparison)
-  if (pattern === '7X7') {
-    // Determine offset: Mathias is Turn B (offset 7), others are Turn A
+  const normPattern = (personnel.rotation_pattern || '').toUpperCase();
+  if (normPattern.includes('7X7')) {
+    // Reference anchor for cycles: April 1st, 2026
+    const anchor = new Date(2026, 3, 1); 
     const isMathias = firstName.includes('MATHIAS');
-    const offset = isMathias ? 9 : 2; // Mathias starts his work cycle exactly when others start their rest
     
-    // Improved daysSinceAnchor using middle of the day to avoid TZ shifts
-    const d1 = new Date(date).setHours(12,0,0,0);
-    const d2 = new Date(anchorDate).setHours(12,0,0,0);
-    const diffDays = Math.round((d1 - d2) / (1000 * 60 * 60 * 24));
+    // Use calendar days difference to be time-zone agnostic
+    const diffDays = differenceInCalendarDays(date, anchor);
+    
+    // Determine offset: Mathias is Turn B (offset 7), others are Turn A
+    // Andres (Turn A): Cycle starts at anchor+2 to match April 13th
+    const offset = isMathias ? 9 : 2; 
     
     const cyclePos = (diffDays + offset) % 14; 
     if (cyclePos >= 7) {
@@ -486,6 +489,7 @@ export function checkRotationPattern(
       };
     }
   }
+
 
   // 4x4 (Aeropuerto)
   if (pattern.includes('4X4')) {
