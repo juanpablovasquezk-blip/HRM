@@ -37,7 +37,10 @@ export async function generateSchedule(
   if (areaId) reqQuery = reqQuery.eq('area_id', areaId);
   const { data: requirements } = await reqQuery;
 
-  console.log(`[AI-DEBUG] Requerimientos totales: ${requirements?.length || 0}`);
+  // DEBUG CRÍTICO: ¿Qué cargos ve la IA en los requerimientos?
+  const uniquePositions = [...new Set((requirements || []).map(r => (r.position as any)?.name))];
+  console.log(`[AI-RADAR] Cargos detectados en requerimientos:`, uniquePositions);
+  console.log(`[AI-RADAR] Total slots encontrados: ${requirements?.length || 0}`);
   
   let assignQuery = supabase
     .from('shift_assignments')
