@@ -35,9 +35,9 @@ export async function generateSchedule(
     .lte('date', endDate);
 
   if (areaId) reqQuery = reqQuery.eq('area_id', areaId);
-  const { data: requirements } = await reqQuery;
-
-  console.log(`[AI-DEBUG] Requerimientos totales encontrados: ${requirements?.length || 0}`);
+  const { data: rawRequirements } = await reqQuery;
+  const requirements = (rawRequirements || []).filter(r => (r.position as any)?.name?.toUpperCase().includes('SUPERVISOR'));
+  console.log(`[AI-ISO] Requerimientos Supervisor: ${requirements.length}`);
   
   let assignQuery = supabase
     .from('shift_assignments')
@@ -48,16 +48,17 @@ export async function generateSchedule(
   if (areaId) assignQuery = assignQuery.eq('area_id', areaId);
   const { data: existingAssignments } = await assignQuery;
 
-  // Cargamos TODO el personal (sin filtros restrictivos)
   const { data: personnelRaw } = await supabase.from('personnel').select('*');
   const { data: positions } = await supabase.from('positions').select('*');
 
-  const personnel = (personnelRaw || []).map(p => ({
-    ...p,
-    main_position_obj: (positions || []).find(pos => pos.id === p.main_position)
-  }));
+  const personnel = (personnelRaw || [])
+    .map(p => ({
+      ...p,
+      main_position_obj: (positions || []).find(pos => pos.id === p.main_position)
+    }))
+    .filter(p => (p.main_position_obj as any)?.name?.toUpperCase().includes('SUPERVISOR'));
 
-  console.log(`[AI-DEBUG] Personal cargado: ${personnel.length}`);
+  console.log(`[AI-ISO] Personal Supervisor cargado: ${personnel.length}`);
 
   const { data: leaves } = await supabase
     .from('leaves')
