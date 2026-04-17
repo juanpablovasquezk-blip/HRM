@@ -143,7 +143,6 @@ function scorePositionMatch(
   }
 
   // PROTECTION: Supervisors NEVER work as Canes
-  const posName = (shiftSlot.position_name || '').toUpperCase();
   const isSupervisor = (personnel.main_position_name || '').toUpperCase().includes('SUPERVISOR');
   
   if (isSupervisor && posName.includes('CANES')) return 0;
