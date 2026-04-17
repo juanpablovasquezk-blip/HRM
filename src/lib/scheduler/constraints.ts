@@ -375,9 +375,9 @@ export function checkRotationPattern(
   if (pattern.includes('L-V') || pattern.includes('LUNES A VIERNES')) {
     const day = date.getDay();
     // EXCEPTION: If they are covering CANES (Mathias rule), allow weekends
-    const isCoveringCanes = norm(personnel.first_name).includes('MATHIAS') && norm(shiftSlot.position_name).includes('CANES');
+    const isMathiasCoveringCanes = norm(personnel.first_name).includes('MATHIAS') && norm(shiftSlot.position_name).includes('CANES');
     
-    if ((day === 0 || day === 6) && !isCoveringCanes) {
+    if ((day === 0 || day === 6) && !isMathiasCoveringCanes) {
       return {
         type: 'rotation_violation',
         personnel_id: personnel.personnel_id,
@@ -472,7 +472,7 @@ export function checkRotationPattern(
         type: 'rotation_violation',
         personnel_id: personnel.personnel_id,
         date: shiftSlot.date,
-        message: 'Periodo de descanso 7x7 (Art. 38)',
+        message: 'DESCANSO OBLIGATORIO 7x7 (Art. 38)',
         severity: 'error',
       };
     }

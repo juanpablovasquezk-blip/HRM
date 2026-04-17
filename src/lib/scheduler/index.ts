@@ -85,14 +85,25 @@ export async function generateSchedule(
   const personnelAvailability: PersonnelAvailability[] = (personnel || []).map((p) => {
     const personLeaves = (leaves || []).filter((l) => l.personnel_id === p.id);
     const leaveDates = new Set<string>();
+    
     personLeaves.forEach(l => {
       try {
-        const interval = eachDayOfInterval({ start: parseISO(l.start_date), end: parseISO(l.end_date) });
-        interval.forEach(d => leaveDates.add(format(d, 'yyyy-MM-dd')));
+        const lStart = parseISO(l.start_date);
+        const lEnd = parseISO(l.end_date);
+        
+        // Clip to current range to prevent infinite or extreme loops
+        const clipStart = lStart < startDate ? startDate : lStart;
+        const clipEnd = lEnd > endDate ? endDate : lEnd;
+        
+        if (clipStart <= clipEnd) {
+          const interval = eachDayOfInterval({ start: clipStart, end: clipEnd });
+          interval.forEach(d => leaveDates.add(format(d, 'yyyy-MM-dd')));
+        }
       } catch (e) {
         console.error(`[AI] Error en fechas de licencia para ${p.id}:`, l.start_date, l.end_date);
       }
     });
+
 
     const protectedForPerson = protectedAssignments.filter(a => a.personnel_id === p.id);
 

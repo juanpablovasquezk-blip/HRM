@@ -7,7 +7,7 @@
  */
 
 import { rankCandidates } from './candidates';
-import { validateAllConstraints, hasHardViolation } from './constraints';
+import { validateAllConstraints, hasHardViolation, checkRotationPattern } from './constraints';
 import { getSlotPriority } from './priorities';
 import type {
   PersonnelAvailability,
@@ -101,8 +101,13 @@ export function greedyAssign(
               const pPosName = (p.main_position_name || '').toUpperCase();
               const isStrategic = pPosName.includes('SUPERVISOR') || pPosName.includes('GRÚA') || pPosName.includes('HORQUILLA');
 
-              // If it's a strategic person matching their main role, don't over-validate rotation in pass 0
-              if (isStrategic && isMatch) return true;
+              // If it's a strategic person matching their main role, don't over-validate general constraints
+              // BUT we MUST respect critical rotation patterns (7x7, 4x4)
+              if (isStrategic && isMatch) {
+                const rotationViolation = checkRotationPattern(p, slot);
+                if (rotationViolation) return false;
+                return true;
+              }
 
               if (!isMatch || (!isWorkDayInCycle && !isFixed)) return false;
             }
