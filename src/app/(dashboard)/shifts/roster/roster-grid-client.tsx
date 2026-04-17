@@ -128,6 +128,7 @@ export function RosterGridClient({
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiStats, setAiStats] = useState<{ coverage: number, count: number } | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [diagnosticLogs, setDiagnosticLogs] = useState<string[] | null>(null);
 
   // Local state for the dialog selects
   const [dialogPositionId, setDialogPositionId] = useState<string>('');
@@ -364,7 +365,7 @@ export function RosterGridClient({
               onClick={async () => {
                 const { runDiagnostic } = await import('@/app/(dashboard)/shifts/actions');
                 const res = await runDiagnostic();
-                alert(`AUDITORÍA DE REGLAS (20-21 ABRIL):\n\n${res.logs.join('\n')}`);
+                setDiagnosticLogs(res.logs);
               }}
           >
             Diagnóstico 20-21
@@ -858,6 +859,52 @@ export function RosterGridClient({
                  No cierres esta ventana hasta finalizar
               </p>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diagnostic Logs Modal */}
+      <Dialog open={!!diagnosticLogs} onOpenChange={() => setDiagnosticLogs(null)}>
+        <DialogContent className="sm:max-w-[800px] max-h-[85vh] flex flex-col p-0 overflow-hidden shadow-2xl border-orange-100 dark:border-orange-950">
+          <div className="bg-slate-900 dark:bg-black p-6 text-white flex justify-between items-center shrink-0">
+             <div className="flex items-center gap-3">
+                <Search className="h-5 w-5 text-orange-400" />
+                <h2 className="text-lg font-bold tracking-tight">Auditoría de Reglas e IA (20-21 Abril)</h2>
+             </div>
+             <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => {
+                  if (diagnosticLogs) {
+                    navigator.clipboard.writeText(diagnosticLogs.join('\n'));
+                    toast.success('Auditoría copiada al portapapeles');
+                  }
+                }} 
+                className="text-[10px] uppercase font-bold text-slate-400 hover:text-white hover:bg-white/10"
+             >
+                Copiar Todo
+             </Button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-8 bg-slate-50 dark:bg-slate-950 font-mono text-[11px] leading-relaxed select-text">
+             {diagnosticLogs?.map((log, i) => (
+               <div key={i} className={cn(
+                 "py-1 border-b border-slate-100 dark:border-slate-900 last:border-0",
+                 log.includes('---') ? "text-slate-900 dark:text-white font-black mt-6 bg-slate-200/50 dark:bg-slate-800/50 p-2 rounded flex items-center gap-2 first:mt-0" :
+                 log.includes('Turno:') ? "text-blue-600 dark:text-blue-400 font-bold mt-4 border-l-4 border-blue-500 pl-3" :
+                 log.includes('√') ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-900/5 px-2 py-0.5 rounded" :
+                 log.includes('×') ? "text-red-600 dark:text-red-400 bg-red-50/50 dark:bg-red-900/5 px-2 py-0.5 rounded" : 
+                 "text-slate-500 pl-6"
+               )}>
+                 {log}
+               </div>
+             ))}
+          </div>
+
+          <DialogFooter className="p-4 bg-white dark:bg-slate-900 border-t flex justify-end shrink-0">
+             <Button onClick={() => setDiagnosticLogs(null)} className="bg-orange-600 hover:bg-orange-700 text-white font-bold h-10 px-10 shadow-lg shadow-orange-200 dark:shadow-none">
+                Cerrar Auditoría
+             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
