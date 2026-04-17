@@ -36,8 +36,13 @@ export async function generateSchedule(
 
   if (areaId) reqQuery = reqQuery.eq('area_id', areaId);
   const { data: rawRequirements } = await reqQuery;
-  const requirements = (rawRequirements || []).filter(r => (r.position as any)?.name?.toUpperCase().includes('SUPERVISOR'));
-  console.log(`[AI-ISO] Requerimientos Supervisor: ${requirements.length}`);
+
+  // AISLAMIENTO: Solo Operadores de Grúa/Horquilla
+  const requirements = (rawRequirements || []).filter(r => {
+    const name = (r.position as any)?.name?.toUpperCase() || '';
+    return name.includes('GRÚA') || name.includes('HORQUILLA');
+  });
+  console.log(`[AI-ISO-GRUA] Requerimientos Grúa: ${requirements.length}`);
   
   let assignQuery = supabase
     .from('shift_assignments')
@@ -56,9 +61,12 @@ export async function generateSchedule(
       ...p,
       main_position_obj: (positions || []).find(pos => pos.id === p.main_position)
     }))
-    .filter(p => (p.main_position_obj as any)?.name?.toUpperCase().includes('SUPERVISOR'));
+    .filter(p => {
+       const pName = (p.main_position_obj as any)?.name?.toUpperCase() || '';
+       return pName.includes('GRÚA') || pName.includes('HORQUILLA');
+    });
 
-  console.log(`[AI-ISO] Personal Supervisor cargado: ${personnel.length}`);
+  console.log(`[AI-ISO-GRUA] Operadores cargados: ${personnel.length}`);
 
   const { data: leaves } = await supabase
     .from('leaves')
