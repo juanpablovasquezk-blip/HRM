@@ -465,12 +465,16 @@ export function checkRotationPattern(
   // 7x7 (Strict comparison)
   const normPattern = (personnel.rotation_pattern || '').toUpperCase();
   if (normPattern.includes('7X7')) {
-    // Reference anchor for cycles: April 1st, 2026
-    const anchor = new Date(2026, 3, 1); 
+    // Reference anchor for cycles: April 1st, 2026 (UTC midnight to stay safe)
+    const anchor = parseISO('2026-04-01T00:00:00Z'); 
     const isMathias = firstName.includes('MATHIAS');
     
+    // Normalize current date to UTC midnight for comparison
+    const dStr = format(date, 'yyyy-MM-dd') + 'T00:00:00Z';
+    const dayUTC = parseISO(dStr);
+
     // Use calendar days difference to be time-zone agnostic
-    const diffDays = differenceInCalendarDays(date, anchor);
+    const diffDays = differenceInCalendarDays(dayUTC, anchor);
     
     // Determine offset: Mathias is Turn B (offset 7), others are Turn A
     // Andres (Turn A): Cycle starts at anchor+2 to match April 13th
