@@ -364,10 +364,7 @@ export function RosterGridClient({
               onClick={async () => {
                 const { runDiagnostic } = await import('@/app/(dashboard)/shifts/actions');
                 const res = await runDiagnostic();
-                alert(`RESUMEN DIAGNÓSTICO 20-21 ABRIL:\n\n` +
-                      `REQS SUPERVISOR (${res.supervisorReqsLines.length}):\n${res.supervisorReqsLines.join('\n')}\n\n` +
-                      `REQS GRÚA/H (${res.craneReqsLines.length}):\n${res.craneReqsLines.join('\n')}\n\n` +
-                      `PERSONAL DETECTADO (${res.personnelList.length}):\n${res.personnelList.join(', ')}`);
+                alert(`AUDITORÍA DE REGLAS (20-21 ABRIL):\n\n${res.logs.join('\n')}`);
               }}
           >
             Diagnóstico 20-21

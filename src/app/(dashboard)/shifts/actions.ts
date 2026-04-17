@@ -368,36 +368,72 @@ export async function runDiagnostic() {
   const start = '2026-04-20';
   const end = '2026-04-21';
 
-  // 1. Ver requerimientos
   const { data: reqs } = await supabase
     .from('shift_requirements')
-    .select('*, position:positions(name)')
+    .select('*, shift:shifts(*), area:areas(name), position:positions(name)')
     .gte('date', start)
     .lte('date', end);
 
-  const supReqs = (reqs || []).filter((r: any) => (r.position as any)?.name?.toUpperCase().includes('SUPERVISOR'));
-  const craneReqs = (reqs || []).filter((r: any) => {
-     const n = (r.position as any)?.name?.toUpperCase() || '';
-     return n.includes('GRÚA') || n.includes('HORQUILLA');
-  });
-
-  // 2. Ver personal
   const { data: rawPers } = await supabase.from('personnel').select('*');
   const { data: positions } = await supabase.from('positions').select('*');
+  const { data: allShifts } = await supabase.from('shifts').select('*');
   
+  const { validateAllConstraints } = await import('@/lib/scheduler/constraints');
+
   const mappedPersonnel = (rawPers || []).map((p: any) => ({
     ...p,
-    main_position_name: positions?.find(pos => pos.id === p.main_position)?.name
-  }));
-
-  const targets = mappedPersonnel.filter((p: any) => {
+    main_position_name: positions?.find(pos => pos.id === p.main_position)?.name,
+    fixed_shift_obj: allShifts?.find(s => s.id === p.fixed_shift_id)
+  })).filter((p: any) => {
     const n = (p.main_position_name || '').toUpperCase();
     return n.includes('SUPERVISOR') || n.includes('GRÚA') || n.includes('HORQUILLA');
   });
 
-  return {
-    supervisorReqsLines: supReqs.map((r: any) => `${r.date} ${r.shift_id} (${(r.position as any)?.name})`),
-    craneReqsLines: craneReqs.map((r: any) => `${r.date} ${r.shift_id} (${(r.position as any)?.name})`),
-    personnelList: targets.map((p: any) => `${p.first_name} [${p.main_position_name}]`)
-  };
+  const logs: string[] = [];
+
+  for (const day of [start, end]) {
+    const dailyReqs = (reqs || []).filter(r => r.date === day);
+    logs.push(`--- DÍA ${day} ---`);
+    
+    for (const req of dailyReqs) {
+      const posName = (req.position as any)?.name;
+      const shiftName = (req.shift as any)?.name;
+      logs.push(`Turno: ${shiftName} (${posName})`);
+
+      for (const p of mappedPersonnel) {
+        // Mock objects for validation
+        const personAvail: any = {
+          personnel_id: p.id,
+          first_name: p.first_name,
+          main_position: p.main_position,
+          main_position_name: p.main_position_name,
+          fixed_shift_id: p.fixed_shift_id,
+          fixed_shift_name: (p.fixed_shift_obj as any)?.name,
+          rotation_pattern: p.rotation_pattern,
+          weekly_hours: 0,
+          assigned_dates: new Set(),
+          leave_dates: new Set()
+        };
+
+        const slot: any = {
+          date: req.date,
+          shift_id: req.shift_id,
+          position_id: req.position_id,
+          area_id: req.area_id,
+          position_name: posName,
+          shift_name: shiftName,
+          area_name: (req.area as any)?.name
+        };
+
+        const violations = validateAllConstraints(personAvail, slot, []);
+        if (violations.length > 0) {
+          logs.push(`   × ${p.first_name}: BLOQUEADO (${violations[0].message})`);
+        } else {
+          logs.push(`   √ ${p.first_name}: DISPONIBLE`);
+        }
+      }
+    }
+  }
+
+  return { logs };
 }
