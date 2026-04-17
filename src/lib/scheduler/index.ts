@@ -49,7 +49,10 @@ export async function generateSchedule(
   const { data: existingAssignments } = await assignQuery;
 
   // Cargamos TODO el personal (sin filtros restrictivos)
-  const { data: personnel } = await supabase.from('personnel').select('*');
+  // Cargamos TODO el personal con su cargo principal unido
+  const { data: personnel } = await supabase
+    .from('personnel')
+    .select('*, main_position_obj:positions!personnel_main_position_fkey(name)');
 
   const { data: leaves } = await supabase
     .from('leaves')
@@ -108,7 +111,7 @@ export async function generateSchedule(
       first_name: p.first_name,
       birth_date: p.birth_date,
       main_position: p.main_position,
-      main_position_name: ((positions || []).find(pos => pos.id === p.main_position) as any)?.name,
+      main_position_name: (p.main_position_obj as any)?.name,
       secondary_positions: p.secondary_positions || [],
       prefers_night: p.prefers_night,
       avoids_night: p.avoids_night,
