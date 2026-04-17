@@ -364,7 +364,7 @@ export async function clearAutoAssignments(startDate: string, endDate: string, a
 }
 
 export async function runDiagnostic() {
-  const supabase = await createClient(); // FIXED: Added await
+  const supabase = await createClient();
   const start = '2026-04-20';
   const end = '2026-04-21';
 
@@ -377,17 +377,21 @@ export async function runDiagnostic() {
 
   const supReqs = (reqs || []).filter((r: any) => (r.position as any)?.name?.toUpperCase().includes('SUPERVISOR'));
 
-  // 2. Ver personal
-  const { data: rawPers } = await supabase
-    .from('personnel')
-    .select('*, main_position_obj:positions(name)');
+  // 2. Ver personal y cargos (Unión manual a prueba de fallos)
+  const { data: rawPers } = await supabase.from('personnel').select('*');
+  const { data: positions } = await supabase.from('positions').select('*');
   
-  const supervisors = (rawPers || []).filter((p: any) => (p.main_position_obj as any)?.name?.toUpperCase().includes('SUPERVISOR'));
+  const mappedPersonnel = (rawPers || []).map((p: any) => ({
+    ...p,
+    main_position_name: positions?.find(pos => pos.id === p.main_position)?.name
+  }));
+
+  const supervisors = mappedPersonnel.filter((p: any) => (p.main_position_name || '').toUpperCase().includes('SUPERVISOR'));
 
   return {
     totalReqs: reqs?.length || 0,
     supervisorReqs: supReqs.map((r: any) => `${r.date} ${r.shift_id} (${(r.position as any)?.name})`),
     totalPersonnel: rawPers?.length || 0,
-    supervisors: supervisors.map((p: any) => p.first_name)
+    supervisors: supervisors.map((p: any) => `${p.first_name} [${p.main_position_name}]`)
   };
 }
