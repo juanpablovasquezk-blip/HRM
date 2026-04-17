@@ -30,10 +30,10 @@ export function getSlotPriority(
     return 70;
   }
 
-  // 4. CRANE OPERATORS (Atrex priority)
+  // 4. CRANE OPERATORS (Atrex/Base Balance)
   if (pos.includes('GRÚA') || pos.includes('HORQUILLA')) {
-    if (area.toUpperCase().includes('ATREX')) return 88;
-    return 50; // Base is lower priority
+    if (area.toUpperCase().includes('ATREX')) return 92;
+    return 95; // Base is HIGHER priority now to ensure it's covered
   }
 
   // 5. TRUCK DRIVERS (Blue)

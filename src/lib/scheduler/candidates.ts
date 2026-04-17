@@ -142,7 +142,13 @@ function scorePositionMatch(
     return 150; // Super priority boost even above main position
   }
 
-  return 0; // CRITICAL: If no match, candidate is NOT eligible (blocked by availability scoring usually)
+  // PROTECTION: Supervisors NEVER work as Canes
+  const posName = (shiftSlot.position_name || '').toUpperCase();
+  const isSupervisor = (personnel.main_position_name || '').toUpperCase().includes('SUPERVISOR');
+  
+  if (isSupervisor && posName.includes('CANES')) return 0;
+
+  return 0; // CRITICAL: If no match, candidate is NOT eligible
 }
 
 function scoreFairness(
