@@ -31,8 +31,10 @@ export interface ConstraintViolation {
 
 export interface ScheduleResult {
   assignments: AssignmentCandidate[];
-  violations: ConstraintViolation[];
-  stats: {
+  violations?: ConstraintViolation[];
+  coverage: number;
+  count: number;
+  stats?: {
     total_slots: number;
     filled_slots: number;
     coverage_percent: number;
