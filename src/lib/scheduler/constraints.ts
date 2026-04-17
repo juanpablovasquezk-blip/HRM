@@ -429,6 +429,22 @@ export function checkRotationPattern(
     };
   }
 
+  // REGLA DE ORO DE IDENTIDAD DE CARGO
+  const pPos = (personnel.main_position_name || '').toUpperCase();
+  const sPos = (shiftSlot.position_name || '').toUpperCase();
+  const isSupervisor = pPos.includes('SUPERVISOR') || pPos.includes('SUP');
+  const isOperational = sPos.includes('OPERADOR') || sPos.includes('CANES') || sPos.includes('AYUDANTE');
+
+  if (isSupervisor && isOperational) {
+    return {
+      type: 'rotation_violation',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: `BLOQUEO JERÁRQUICO: Un Supervisor no puede cubrir puestos operativos (${sPos})`,
+      severity: 'error',
+    };
+  }
+
   // EXEMPTION: Mathias Rozas covering Canes
   const isMathias = personnel.first_name.toUpperCase().includes('MATHIAS');
   const isCanesSlot = (shiftSlot.position_name || '').toUpperCase().includes('CANES');
