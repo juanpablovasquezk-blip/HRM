@@ -171,12 +171,16 @@ export async function generateSchedule(
     }
   }
 
-  const totalSlots = (requirements || []).reduce((sum, r) => sum + r.required_count, 0);
-  const filledSlots = protectedAssignments.length + optimized.assignments.length;
+  const coverage = totalSlots > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0;
 
   return {
     assignments: optimized.assignments,
-    coverage: totalSlots > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0,
-    count: filledSlots
+    coverage,
+    count: filledSlots,
+    stats: {
+      total_slots: totalSlots,
+      filled_slots: filledSlots,
+      coverage_percent: coverage
+    }
   };
 }
