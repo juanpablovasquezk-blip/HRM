@@ -9,7 +9,7 @@
  * - Respect shift preferences (night/no night)
  */
 
-import { differenceInHours, parseISO, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval, isSunday, startOfMonth, endOfMonth, format } from 'date-fns';
+import { differenceInHours, parseISO, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval, isSunday, startOfMonth, endOfMonth, format, differenceInCalendarDays } from 'date-fns';
 import type { ConstraintViolation, PersonnelAvailability, ShiftSlot } from './types';
 
 const MAX_HOURS_PER_WEEK = 40;
