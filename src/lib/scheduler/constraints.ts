@@ -459,10 +459,8 @@ export function checkRotationPattern(
     };
   }
 
-  // EXEMPTION: Mathias Rozas covering Canes
-  const isMathias = personnel.first_name.toUpperCase().includes('MATHIAS');
-  const isCanesSlot = (shiftSlot.position_name || '').toUpperCase().includes('CANES');
-  if (isMathias && isCanesSlot) return null;
+  // NO MORE CUSTOM EXEMPTIONS. Everyone follows rotation rules.
+
 
   // 7x7 (Strict comparison)
   const normPattern = (personnel.rotation_pattern || '').toUpperCase();
