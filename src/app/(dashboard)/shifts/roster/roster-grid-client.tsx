@@ -189,6 +189,17 @@ export function RosterGridClient({
     return Array.from(new Set(names)).sort();
   }, [positions]);
 
+  const filteredPersonnelForSelect = useMemo(() => {
+    return personnel.filter(p => {
+      if (!positionFilter && !areaFilter) return true;
+      const pos = positions.find(pos => pos.id === p.main_position);
+      const posName = pos?.name || "";
+      const posMatch = !positionFilter || posName === positionFilter;
+      const areaMatch = !areaFilter || pos?.area_id === areaFilter;
+      return posMatch && areaMatch;
+    }).sort((a, b) => a.first_name.localeCompare(b.first_name));
+  }, [personnel, positionFilter, areaFilter, positions]);
+
   const handleCellClick = (person: Personnel, date: Date) => {
     setSelectedCell({ person, date });
     
@@ -359,9 +370,7 @@ export function RosterGridClient({
               Todos
             </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator />
-            {personnel
-              .sort((a, b) => a.first_name.localeCompare(b.first_name))
-              .map(p => (
+            {filteredPersonnelForSelect.map(p => (
                 <DropdownMenuCheckboxItem
                   key={p.id}
                   checked={personnelFilter.includes(p.id)}
@@ -980,3 +989,5 @@ export function RosterGridClient({
     </div>
   );
 }
+
+

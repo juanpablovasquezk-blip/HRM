@@ -369,8 +369,8 @@ export function checkRotationPattern(
   
   // 1. HARD ROTATION 7x7 (ABSOLUTE PRIORITY)
   if (pattern.includes('7X7')) {
-    const anchor = parseISO('2026-04-01T00:00:00Z'); 
-    const dStr = format(date, 'yyyy-MM-dd') + 'T00:00:00Z';
+    const anchor = parseISO('2026-04-01T12:00:00Z'); 
+    const dStr = format(date, 'yyyy-MM-dd') + 'T12:00:00Z';
     const dayUTC = parseISO(dStr);
     const diffDays = differenceInCalendarDays(dayUTC, anchor);
     
@@ -401,8 +401,8 @@ export function checkRotationPattern(
 
   // 1b. ROTATING 5X2 RELEVO (Surgical Isolation for Supervisors)
   if (pattern.includes('5X2-RELEVO')) {
-    const anchor = parseISO('2026-03-30T00:00:00Z'); // Monday of first week
-    const dStr = format(date, 'yyyy-MM-dd') + 'T00:00:00Z';
+    const anchor = parseISO('2026-03-30T12:00:00Z'); // Monday of first week
+    const dStr = format(date, 'yyyy-MM-dd') + 'T12:00:00Z';
     const dayUTC = parseISO(dStr);
     const diffDays = differenceInCalendarDays(dayUTC, anchor);
     
@@ -439,8 +439,8 @@ export function checkRotationPattern(
     }
   }
 
-  const anchorDate = parseISO('2026-04-01T00:00:00Z');
-  const dateStr = format(date, 'yyyy-MM-dd') + 'T00:00:00Z';
+  const anchorDate = parseISO('2026-04-01T12:00:00Z');
+  const dateStr = format(date, 'yyyy-MM-dd') + 'T12:00:00Z';
   const dateUTC = parseISO(dateStr);
   const daysSinceAnchor = differenceInCalendarDays(dateUTC, anchorDate);
   // ... (rest of function unchanged until Sundays)
@@ -522,12 +522,13 @@ export function checkRotationPattern(
     if (pattern.includes('-B')) offset = 3;
 
     const cyclePos = (daysSinceAnchor + offset) % 8; 
+    
     if (cyclePos >= 4) {
       return {
         type: 'rotation_violation',
         personnel_id: personnel.personnel_id,
         date: shiftSlot.date,
-        message: 'Periodo de descanso 4x4',
+        message: `DESCANSO 4x4 (Día ${cyclePos + 1 - 4}/4 de libre)`,
         severity: 'error',
       };
     }

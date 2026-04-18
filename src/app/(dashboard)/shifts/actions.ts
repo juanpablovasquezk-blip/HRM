@@ -395,7 +395,7 @@ export async function runDiagnostic() {
     fixed_shift_obj: allShifts?.find(s => s.id === p.fixed_shift_id)
   })).filter((p: any) => {
     const n = (p.main_position_name || '').toUpperCase();
-    return n.includes('SUPERVISOR') || n.includes('GRÚA') || n.includes('HORQUILLA');
+    return n.includes('SUPERVISOR') || n.includes('GRÚA') || n.includes('HORQUILLA') || n.includes('AEROPUERTO');
   });
 
   const logs: string[] = [];
