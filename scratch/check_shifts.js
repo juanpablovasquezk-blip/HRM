@@ -1,38 +1,19 @@
-
 const { createClient } = require('@supabase/supabase-js');
+require('dotenv').config({ path: '.env.local' });
 
-const supabaseUrl = 'http://hrm-supabase-e8b016-187-127-24-58.traefik.me';
-const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzYxMjE0MDMsImV4cCI6MTg5MzQ1NjAwMCwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlzcyI6InN1cGFiYXNlIn0.jqUPui-C58gACQVYTrZSr_30Rt2_7X79TJXfh_BJJT0';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function checkShifts() {
-  const { data: shifts, error } = await supabase
-    .from('shifts')
-    .select('*')
-    .order('start_time');
-
+  const { data: shifts, error } = await supabase.from('shifts').select('*');
   if (error) {
-    console.error('Error fetching shifts:', error);
+    console.error(error);
     return;
   }
-
-  console.log('--- Current Shifts Status ---');
-  for (const s of shifts) {
-    const { count: assCount } = await supabase
-      .from('shift_assignments')
-      .select('*', { count: 'exact', head: true })
-      .eq('shift_id', s.id);
-
-    const { count: reqCount } = await supabase
-      .from('shift_requirements')
-      .select('*', { count: 'exact', head: true })
-      .eq('shift_id', s.id);
-
-    console.log(`ID: ${s.id.slice(0,8)} | Name: ${s.name.padEnd(20)} | Assignments: ${assCount || 0} | Requirements: ${reqCount || 0}`);
-  }
-  console.log('-----------------------------');
+  console.log('Available Shifts:');
+  shifts?.forEach(s => console.log(`- ${s.name}: ${s.start_time} (ID: ${s.id})`));
 }
 
 checkShifts();
-

@@ -51,7 +51,7 @@ export function checkMaxHoursPerWeek(
       personnel_id: personnel.personnel_id,
       date: shiftSlot.date,
       message: `Would exceed ${MAX_HOURS_PER_WEEK}h/week (projected: ${projectedHours.toFixed(1)}h)`,
-      severity: 'warning',
+      severity: 'error',
     };
   }
 
@@ -100,7 +100,7 @@ export function checkMinDaysOff(
       personnel_id: personnel.personnel_id,
       date: shiftSlot.date,
       message: `Only ${daysOff} day(s) off this week (minimum: ${MIN_DAYS_OFF_PER_WEEK})`,
-      severity: 'warning',
+      severity: 'error',
     };
   }
 

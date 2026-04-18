@@ -207,6 +207,10 @@ export function greedyAssign(
         if (assignmentsInWeek >= 5) break;
         if (person.assigned_dates.has(date) || person.leave_dates.has(date)) continue;
 
+        // Only reinforce if there is a real requirement for this position on this date
+        const hasOperation = slots.some(s => s.date === date && s.position_id === person.main_position);
+        if (!hasOperation) continue;
+
         // Find a "Proto-Slot" for this position and shift_start as a template
         const protoSlot = slots.find(s => 
           s.position_id === person.main_position && 

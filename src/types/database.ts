@@ -228,10 +228,13 @@ export interface ConstraintViolation {
 export interface ScheduleResult {
   assignments: ShiftAssignment[];
   violations: ConstraintViolation[];
+  coverage?: number;
+  count?: number;
   stats: {
     total_slots: number;
     filled_slots: number;
     coverage_percent: number;
     recalculated_count: number;
+    execution_time_ms?: number;
   };
 }

@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { generateSchedule, partialRecalculate } from '@/lib/scheduler';
 import type { RecalculationInput } from '@/lib/scheduler/types';
+import { parseISO, format, endOfWeek } from 'date-fns';
 
 // ─── Shift CRUD ───────────────────────────────────────────────────────────────
 
@@ -311,7 +312,11 @@ export async function deleteAssignment(id: string) {
 
 export async function runScheduler(startDate: string, endDate: string, areaId?: string) {
   try {
-    const result = await generateSchedule(startDate, endDate, areaId);
+    // Extend end date to the end of the current week (Sunday) to ensure full week analysis
+    const end = parseISO(endDate);
+    const extendedEnd = format(endOfWeek(end, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    
+    const result = await generateSchedule(startDate, extendedEnd, areaId);
     revalidatePath('/shifts/assignments');
     revalidatePath('/dashboard');
     return { success: true, data: result, error: null };

@@ -85,6 +85,7 @@ interface Personnel {
   id: string;
   first_name: string;
   last_name_father: string;
+  last_name_mother?: string;
   rotation_pattern: string | null;
   main_position: string;
   secondary_positions: string[];
@@ -224,9 +225,9 @@ export function RosterGridClient({
           setAiProgress(100);
           setAiStep('completed');
           setAiStats({
-            coverage: res.data?.stats.coverage_percent || 0,
+            coverage: res.data?.stats?.coverage_percent || 0,
             count: res.data?.count || 0,
-            executionTime: res.data?.stats.execution_time_ms
+            executionTime: res.data?.stats?.execution_time_ms
           });
           toast.success('Autogeneración completada');
           router.refresh(); // Forzar actualización de la tabla
@@ -555,7 +556,10 @@ export function RosterGridClient({
                          <UserIcon className="h-4 w-4" />
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-sm font-semibold truncate max-w-[160px]">
+                        <span 
+                          className="text-sm font-semibold truncate max-w-[160px]"
+                          title={`${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`}
+                        >
                           {person.first_name} {person.last_name_father}
                         </span>
                         <div className="flex flex-col">

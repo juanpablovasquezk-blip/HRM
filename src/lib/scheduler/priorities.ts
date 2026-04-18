@@ -60,4 +60,6 @@ export function getSlotPriority(
 export const REINFORCEMENT_CONFIG: Record<string, { shift_start: string }> = {
   'SUPERVISOR': { shift_start: '07:00' },
   'SUP': { shift_start: '07:00' },
+  'OPERADOR FEDEX': { shift_start: '05:00' },
+  'OPERADOR DHL': { shift_start: '05:00' },
 };
