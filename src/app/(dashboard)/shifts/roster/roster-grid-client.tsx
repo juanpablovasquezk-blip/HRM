@@ -225,12 +225,11 @@ export function RosterGridClient({
 
         setAiStep('scheduling');
         // If it's the current month, start from today (or a reference date), otherwise from the 1st
-        const now = new Date();
-        const isCurrentMonth = format(now, 'yyyy-MM') === format(monthDate, 'yyyy-MM');
+        const isCurrentMonth = format(new Date(), 'yyyy-MM') === format(monthDate, 'yyyy-MM');
         
-        // Start from first day if not current month, otherwise from "now" (simulated as 20th for this test)
-        const start = isCurrentMonth ? '2026-04-20' : format(startOfMonth(monthDate), 'yyyy-MM-dd');
-        const end = format(endOfMonth(monthDate), 'yyyy-MM-dd');
+        // Start from first visible day if not current month, otherwise from "now"
+        const start = isCurrentMonth ? format(new Date(), 'yyyy-MM-dd') : format(days[0], 'yyyy-MM-dd');
+        const end = format(days[days.length - 1], 'yyyy-MM-dd');
         
         const res = await runScheduler(start, end);
         
@@ -263,8 +262,8 @@ export function RosterGridClient({
     if (!confirm(`¿Eliminar todos los turnos autogenerados en ${monthName}? (Los manuales se mantendrán)`)) return;
     
     startTransition(async () => {
-      const start = format(startOfMonth(monthDate), 'yyyy-MM-dd');
-      const end = format(endOfMonth(monthDate), 'yyyy-MM-dd');
+      const start = format(days[0], 'yyyy-MM-dd');
+      const end = format(days[days.length - 1], 'yyyy-MM-dd');
       const res = await clearAutoAssignments(start, end);
       if (res.error) toast.error(res.error);
       else toast.success('Turnos automáticos eliminados');
@@ -422,9 +421,9 @@ export function RosterGridClient({
             className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs"
             onClick={() => {
               const monthName = format(monthDate, 'MMMM', { locale: es });
-              if (confirm(`¿Generar requerimientos para todo el mes de ${monthName} basados en las reglas permanentes?`)) {
-                const start = format(startOfMonth(monthDate), 'yyyy-MM-dd');
-                const end = format(endOfMonth(monthDate), 'yyyy-MM-dd');
+              if (confirm(`¿Generar requerimientos para todo el periodo visible de ${monthName} basados en las reglas permanentes?`)) {
+                const start = format(days[0], 'yyyy-MM-dd');
+                const end = format(days[days.length - 1], 'yyyy-MM-dd');
                 startTransition(async () => {
                   const { materializeTemplates } = await import('@/app/(dashboard)/shifts/actions');
                   const res = await materializeTemplates(start, end);
