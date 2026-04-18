@@ -7,7 +7,7 @@ import { greedyAssign } from './greedy-assign';
 import { optimizeAssignments } from './optimizer';
 import { isShiftFrozen } from './freeze';
 import type { ScheduleResult, PersonnelAvailability, ShiftSlot } from './types';
-import { eachDayOfInterval, parseISO, format, startOfMonth, endOfMonth } from 'date-fns';
+import { eachDayOfInterval, parseISO, format, startOfMonth, endOfMonth, subDays, addDays } from 'date-fns';
 
 export { partialRecalculate } from './partial-recalc';
 export { isShiftFrozen, canOverrideFreeze, canModifyAssignment, getFreezeStatus } from './freeze';
@@ -25,6 +25,10 @@ export async function generateSchedule(
   const startDate = parseISO(startDateStr);
   const endDate = parseISO(endDateStr);
 
+  // Expand the search window by 7 days to cover boundary weeks for constraints
+  const extendedStart = format(subDays(startDate, 7), 'yyyy-MM-dd');
+  const extendedEnd = format(addDays(endDate, 7), 'yyyy-MM-dd');
+
   // 1. CARGA DE DATOS (ESTILO ESTABLE)
   const { data: rawRequirements } = await supabase
     .from('shift_requirements')
@@ -39,15 +43,15 @@ export async function generateSchedule(
   const { data: existingAssignments } = await supabase
     .from('shift_assignments')
     .select('*, shift:shifts(name, start_time, end_time, duration_hours)')
-    .gte('date', format(startDate, 'yyyy-MM-dd'))
-    .lte('date', format(endDate, 'yyyy-MM-dd'));
+    .gte('date', extendedStart)
+    .lte('date', extendedEnd);
 
   const { data: leaves } = await supabase
     .from('leaves')
     .select('*')
     .eq('status', 'approved')
-    .lte('start_date', format(endDate, 'yyyy-MM-dd'))
-    .gte('end_date', format(startDate, 'yyyy-MM-dd'));
+    .lte('start_date', extendedEnd)
+    .gte('end_date', extendedStart);
 
   const personnel = (personnelRaw || []).map(p => ({
     ...p,

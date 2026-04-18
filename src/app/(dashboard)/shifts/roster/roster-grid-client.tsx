@@ -7,9 +7,13 @@ import {
   eachDayOfInterval, 
   startOfMonth, 
   endOfMonth, 
+  startOfWeek,
+  endOfWeek,
   isSunday, 
   isSameDay,
-  isToday
+  isToday,
+  addMonths,
+  subMonths
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { 
@@ -31,7 +35,8 @@ import {
   X, 
   AlertCircle, 
   Info,
-  Users
+  Users,
+  Zap
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -138,9 +143,17 @@ export function RosterGridClient({
 
   const monthDate = new Date(currentMonth + 'T00:00:00');
   const days = eachDayOfInterval({
-    start: startOfMonth(monthDate),
-    end: endOfMonth(monthDate),
+    start: startOfWeek(startOfMonth(monthDate), { weekStartsOn: 1 }),
+    end: endOfWeek(endOfMonth(monthDate), { weekStartsOn: 1 }),
   });
+
+  const goToMonth = (date: Date) => {
+    const formatted = format(date, 'yyyy-MM');
+    router.push(`/shifts/roster?month=${formatted}`);
+  };
+
+  const nextMonth = () => goToMonth(addMonths(monthDate, 1));
+  const prevMonth = () => goToMonth(subMonths(monthDate, 1));
 
   const filteredPersonnel = useMemo(() => {
     const filtered = personnel.filter(p => {
@@ -190,7 +203,8 @@ export function RosterGridClient({
   };
 
   const handleRunAI = () => {
-    if (!confirm('¿Ejecutar autogeneración para lo que queda de Abril? (Se respetarán turnos manuales)')) return;
+    const monthName = format(monthDate, 'MMMM', { locale: es });
+    if (!confirm(`¿Ejecutar autogeneración para lo que queda de ${monthName}? (Se respetarán turnos manuales)`)) return;
     
     setIsAiModalOpen(true);
     setAiStep('preparing');
@@ -210,10 +224,15 @@ export function RosterGridClient({
         }, 1000);
 
         setAiStep('scheduling');
-        const today = '2026-04-20'; // Inicia desde el 20 de abril como solicitaste
-        const end = format(endOfMonth(new Date(monthDate)), 'yyyy-MM-dd');
+        // If it's the current month, start from today (or a reference date), otherwise from the 1st
+        const now = new Date();
+        const isCurrentMonth = format(now, 'yyyy-MM') === format(monthDate, 'yyyy-MM');
         
-        const res = await runScheduler(today, end);
+        // Start from first day if not current month, otherwise from "now" (simulated as 20th for this test)
+        const start = isCurrentMonth ? '2026-04-20' : format(startOfMonth(monthDate), 'yyyy-MM-dd');
+        const end = format(endOfMonth(monthDate), 'yyyy-MM-dd');
+        
+        const res = await runScheduler(start, end);
         
         clearInterval(interval);
         
@@ -240,11 +259,12 @@ export function RosterGridClient({
   };
 
   const handleClearAI = () => {
-    if (!confirm('¿Eliminar todos los turnos autogenerados en Abril? (Los manuales se mantendrán)')) return;
+    const monthName = format(monthDate, 'MMMM', { locale: es });
+    if (!confirm(`¿Eliminar todos los turnos autogenerados en ${monthName}? (Los manuales se mantendrán)`)) return;
     
     startTransition(async () => {
-      const start = format(startOfMonth(new Date()), 'yyyy-MM-dd');
-      const end = format(endOfMonth(new Date()), 'yyyy-MM-dd');
+      const start = format(startOfMonth(monthDate), 'yyyy-MM-dd');
+      const end = format(endOfMonth(monthDate), 'yyyy-MM-dd');
       const res = await clearAutoAssignments(start, end);
       if (res.error) toast.error(res.error);
       else toast.success('Turnos automáticos eliminados');
@@ -352,11 +372,32 @@ export function RosterGridClient({
           </DropdownMenuContent>
         </DropdownMenu>
         <div className="flex items-center gap-1 border-l pl-3 ml-2 border-slate-200">
-           <Button variant="ghost" size="sm" className="h-8">
-              <ChevronLeft className="h-4 w-4 mr-1" /> Mes anterior
+           <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-8 pr-1"
+            onClick={prevMonth}
+           >
+              <ChevronLeft className="h-4 w-4" />
            </Button>
-           <Button variant="ghost" size="sm" className="h-8">
-              Mes siguiente <ChevronRight className="h-4 w-4 ml-1" />
+           
+           <Input 
+            type="month"
+            className="h-8 w-[140px] text-xs border-none bg-secondary/30 focus-visible:ring-0"
+            value={format(monthDate, 'yyyy-MM')}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val) goToMonth(new Date(val + '-01T00:00:00'));
+            }}
+           />
+
+           <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-8 pl-1"
+            onClick={nextMonth}
+           >
+              <ChevronRight className="h-4 w-4" />
            </Button>
         </div>
 
@@ -380,7 +421,8 @@ export function RosterGridClient({
             size="sm" 
             className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs"
             onClick={() => {
-              if (confirm('¿Generar requerimientos para todo el mes basados en las reglas permanentes?')) {
+              const monthName = format(monthDate, 'MMMM', { locale: es });
+              if (confirm(`¿Generar requerimientos para todo el mes de ${monthName} basados en las reglas permanentes?`)) {
                 const start = format(startOfMonth(monthDate), 'yyyy-MM-dd');
                 const end = format(endOfMonth(monthDate), 'yyyy-MM-dd');
                 startTransition(async () => {
@@ -404,10 +446,10 @@ export function RosterGridClient({
             size="sm" 
             className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
             onClick={handleRunAI}
-            disabled={isPending}
+            disabled={isPending || aiStep === 'scheduling'}
           >
-            {isPending && aiStep !== 'completed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
-            Completar Abril
+            {isPending && aiStep !== 'completed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-3.5 w-3.5 mr-1" />}
+            Completar {format(monthDate, 'MMMM', { locale: es })}
           </Button>
           <Button 
             variant="outline" 
@@ -417,7 +459,7 @@ export function RosterGridClient({
             disabled={isPending}
           >
             <Trash2 className="h-3.5 w-3.5 mr-1" />
-            Limpiar IA
+            Limpiar {format(monthDate, 'MMM', { locale: es })}
           </Button>
         </div>
       </div>

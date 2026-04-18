@@ -139,13 +139,6 @@ export function greedyAssign(
   
             const violations = validateAllConstraints(person, slot, state.assignments);
             
-            // DIAGNÓSTICO DE CAUSA RAÍZ
-            if (person.first_name.toUpperCase().includes('LIZARDO') || person.first_name.toUpperCase().includes('EMILIO')) {
-              if (violations.length > 0) {
-                 console.log(`[ROOT-CAUSE-LOG] Rechazando a ${person.first_name} para ${slot.date} (${slot.position_name}): ${violations[0].message}`);
-              }
-            }
-
             if (hasHardViolation(violations)) continue;
             if (pass < 3 && violations.some(v => v.severity === 'warning')) continue;
   

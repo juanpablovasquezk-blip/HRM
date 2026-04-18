@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { RosterGridClient } from './roster-grid-client';
-import { startOfMonth, endOfMonth, format } from 'date-fns';
+import { startOfMonth, endOfMonth, format, startOfWeek, endOfWeek } from 'date-fns';
+import { es } from 'date-fns/locale';
 
 export default async function RosterPage({
   searchParams,
@@ -10,9 +11,12 @@ export default async function RosterPage({
   const params = await searchParams;
   const supabase = await createClient();
 
-  const currentMonth = params.month ? new Date(params.month + '-01T00:00:00') : new Date();
-  const startDate = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
-  const endDate = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
+  // Use the month from URL or the current month as base
+  const currentMonthDate = params.month ? new Date(params.month + '-01T00:00:00') : new Date();
+  
+  // Date range for the database queries: Full weeks covering the month
+  const startDate = format(startOfWeek(startOfMonth(currentMonthDate), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+  const endDate = format(endOfWeek(endOfMonth(currentMonthDate), { weekStartsOn: 1 }), 'yyyy-MM-dd');
 
   const [
     { data: personnel },
@@ -42,7 +46,7 @@ export default async function RosterPage({
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Planificador Maestro (Roster)</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Visualiza y gestiona la carga de turnos de todo el personal para {format(currentMonth, 'MMMM yyyy')}
+          Visualiza y gestiona la carga de turnos de todo el personal para {format(currentMonthDate, 'MMMM yyyy', { locale: es })}
         </p>
       </div>
 
@@ -54,7 +58,7 @@ export default async function RosterPage({
         leaves={leaves || []}
         positions={positions || []}
         requirements={requirements || []}
-        currentMonth={startDate}
+        currentMonth={format(startOfMonth(currentMonthDate), 'yyyy-MM-dd')}
       />
     </div>
   );
