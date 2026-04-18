@@ -8,7 +8,8 @@
 
 import { rankCandidates } from './candidates';
 import { validateAllConstraints, hasHardViolation, checkRotationPattern } from './constraints';
-import { getSlotPriority } from './priorities';
+import { getSlotPriority, REINFORCEMENT_CONFIG } from './priorities';
+import { parseISO, startOfWeek, format } from 'date-fns';
 import type {
   PersonnelAvailability,
   ShiftSlot,
@@ -173,6 +174,76 @@ export function greedyAssign(
             break;
           }
         }
+      }
+    }
+  }
+
+  // =========================================================================
+  // PASS 4: PRO-ACTIVE REINFORCEMENT (Fill to 40h/5-days)
+  // =========================================================================
+  const uniqueDates = Array.from(new Set(slots.map(s => s.date))).sort();
+  
+  for (const person of personnelPool) {
+    const pPosName = (person.main_position_name || '').toUpperCase();
+    const config = Object.entries(REINFORCEMENT_CONFIG).find(([key]) => pPosName.includes(key))?.[1];
+    
+    if (!config) continue; // Only reinforcement-enabled positions
+
+    const state = personnelState.get(person.personnel_id)!;
+    
+    // Group dates by week
+    const weeksMap = new Map<string, string[]>();
+    uniqueDates.forEach(d => {
+      const weekKey = format(startOfWeek(parseISO(d), { weekStartsOn: 1 }), 'yyyy-ww');
+      if (!weeksMap.has(weekKey)) weeksMap.set(weekKey, []);
+      weeksMap.get(weekKey)!.push(d);
+    });
+
+    for (const [weekKey, weekDates] of weeksMap.entries()) {
+      let assignmentsInWeek = state.assignments.filter(a => weekDates.includes(a.date)).length;
+      
+      // Try to reach 5 assignments per week
+      for (const date of weekDates) {
+        if (assignmentsInWeek >= 5) break;
+        if (person.assigned_dates.has(date) || person.leave_dates.has(date)) continue;
+
+        // Find a "Proto-Slot" for this position and shift_start as a template
+        const protoSlot = slots.find(s => 
+          s.position_id === person.main_position && 
+          s.shift_start.includes(config.shift_start)
+        );
+
+        if (!protoSlot) continue;
+
+        // Create a virtual slot for this specific date
+        const virtualSlot: ShiftSlot = { ...protoSlot, date };
+        
+        const violations = validateAllConstraints(person, virtualSlot, state.assignments);
+        if (hasHardViolation(violations)) continue;
+
+        // Assign as Reinforcement
+        const assignment: AssignmentCandidate = {
+          personnel_id: person.personnel_id,
+          shift_id: virtualSlot.shift_id,
+          date: virtualSlot.date,
+          area_id: virtualSlot.area_id,
+          position_id: virtualSlot.position_id,
+          status: 'scheduled',
+          is_locked: false,
+          is_manual: false,
+          frozen_by_rule: false,
+        };
+
+        assignments.push(assignment);
+        state.assignments.push({
+          date: virtualSlot.date,
+          duration_hours: virtualSlot.shift_duration_hours,
+          shift_start: virtualSlot.shift_start,
+          shift_end: virtualSlot.shift_end,
+        });
+        person.assigned_dates.add(virtualSlot.date);
+        person.weekly_hours += virtualSlot.shift_duration_hours;
+        assignmentsInWeek++;
       }
     }
   }

@@ -106,14 +106,14 @@ function scorePreference(
   if (!isNightShift && personnel.avoids_night) return 100;
   if (!isNightShift && personnel.prefers_night) return 50;
 
-  // SPECIAL BOOST: Pablo and Carlos for Supervisor 04:00
-  const isPabloOrCarlos = personnel.first_name.toUpperCase().includes('PABLO') || personnel.first_name.toUpperCase().includes('CARLOS');
+  // UNIVERSAL PRIORITY SYSTEM: Higher score for specifically tagged personnel
+  const hasPrio04 = (personnel.rotation_pattern || '').includes('PRIO-04');
   const isSupervisor04 = (shiftSlot.position_name || '').toUpperCase().includes('SUPERVISOR') && shiftSlot.shift_start.includes('04');
-  if (isPabloOrCarlos && isSupervisor04) return 500;
-
-  // SPECIAL DISCOURAGE: Emilio for Supervisor 04:00
-  const isEmilio = personnel.first_name.toUpperCase().includes('EMILIO');
-  if (isEmilio && isSupervisor04) return 0;
+  
+  if (hasPrio04 && isSupervisor04) return 800; // Strongest preference
+  
+  // STANDARD PRIORITY: If qualified but not specifically prioritized
+  if (!hasPrio04 && isSupervisor04) return 300;
 
   return 75;
 }

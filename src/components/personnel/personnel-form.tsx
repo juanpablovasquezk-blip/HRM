@@ -31,6 +31,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const [selectedSecondary, setSelectedSecondary] = useState<string[]>(
     (personnel?.secondary_positions as string[]) || []
   );
+  const [isPrio04, setIsPrio04] = useState(personnel?.rotation_pattern?.includes('PRIO-04') || false);
   const [dropdownValue, setDropdownValue] = useState<string>('');
 
   const address = (personnel?.address as { street?: string; city?: string; region?: string }) || {};
@@ -40,7 +41,15 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
     formData.set('avoids_night', String(avoidsNight));
     formData.set('has_special_contract', String(hasSpecialContract));
     formData.set('secondary_positions', selectedSecondary.join(','));
-    // rotation_pattern and fixed_shift_id come direct from their selects via name attribute
+
+    // Manage rotation pattern + priority tags
+    let pattern = formData.get('rotation_pattern') as string;
+    if (isPrio04 && !pattern.includes('PRIO-04')) {
+      pattern = `${pattern} PRIO-04`;
+    } else if (!isPrio04 && pattern.includes('PRIO-04')) {
+      pattern = pattern.replace('PRIO-04', '').trim();
+    }
+    formData.set('rotation_pattern', pattern);
 
     startTransition(async () => {
       const result = isEditing
@@ -51,7 +60,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
         toast.error('Error', { description: result.error });
       } else {
         toast.success(isEditing ? 'Trabajador actualizado' : 'Trabajador registrado');
-        router.push('/personnel');
+        router.back();
       }
     });
   };
@@ -256,6 +265,8 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
                 defaultValue={personnel?.rotation_pattern || '5x2'}
               >
                 <option value="5x2">5x2 (Semanal / Rotativo)</option>
+                <option value="5X2-RELEVO-A">5x2 Relevo A (Fin de semana libre Sem 1)</option>
+                <option value="5X2-RELEVO-B">5x2 Relevo B (Fin de semana libre Sem 2)</option>
                 <option value="l-v">Lunes a Viernes (Fijo)</option>
                 <option value="7x7">7x7 (Ciclo Estándar)</option>
                 <option value="7X7-A">7x7 - Turno A (Inicio Ciclo)</option>
@@ -264,7 +275,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
                 <option value="part_time">Part-Time / Ocasional</option>
                 <option value="manual">Manual / Bajo Demanda</option>
               </select>
-              <p className="text-[10px] text-muted-foreground italic">Determina cómo el motor propone los turnos. Usa Turno A/B para balancear compañeros (ej: para que no descansen los dos al mismo tiempo).</p>
+              <p className="text-[10px] text-muted-foreground italic">Determina cómo el motor propone los turnos. Usa Relevo A/B para alternar fines de semana en Supervisores.</p>
             </div>
 
             <div className="space-y-2">
@@ -303,6 +314,14 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
                 <p className="text-[11px] text-orange-700">Exime de la regla de 40h semanales y domingos libres (ej: Canes externo)</p>
               </div>
               <Switch id="has_special_contract" checked={hasSpecialContract} onCheckedChange={setHasSpecialContract} />
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-lg border border-blue-100 bg-blue-50/30 md:col-span-2">
+              <div>
+                <Label htmlFor="is_prio_04" className="text-blue-900">Prioridad Turno 04:00 (Supervisores)</Label>
+                <p className="text-[11px] text-blue-700">Asegura que este trabajador cubra primero los turnos de las 04:00 frente a otros candidatos.</p>
+              </div>
+              <Switch id="is_prio_04" checked={isPrio04} onCheckedChange={setIsPrio04} />
             </div>
           </div>
         </CardContent>

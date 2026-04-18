@@ -399,7 +399,45 @@ export function checkRotationPattern(
     }
   }
 
-  // Reference anchor for other cycles
+  // 1b. ROTATING 5X2 RELEVO (Surgical Isolation for Supervisors)
+  if (pattern.includes('5X2-RELEVO')) {
+    const anchor = parseISO('2026-03-30T00:00:00Z'); // Monday of first week
+    const dStr = format(date, 'yyyy-MM-dd') + 'T00:00:00Z';
+    const dayUTC = parseISO(dStr);
+    const diffDays = differenceInCalendarDays(dayUTC, anchor);
+    
+    // Week index from anchor
+    const weekIdx = Math.floor(diffDays / 7);
+    const dayInWeek = diffDays % 7; // 0=Mon, ..., 5=Sat, 6=Sun
+    
+    const isB = pattern.includes('-B');
+    // Alternancia: en semana par uno descansa el finde, en semana impar el otro.
+    const isOffWeekendWeek = isB ? (weekIdx % 2 !== 0) : (weekIdx % 2 === 0);
+
+    if (isOffWeekendWeek) {
+      // Semana de Fin de Semana Libre: Trabaja L-V, Descansa S-D
+      if (dayInWeek >= 5) {
+        return {
+          type: 'rotation_violation',
+          personnel_id: personnel.personnel_id,
+          date: shiftSlot.date,
+          message: '5X2-RELEVO: Descanso de Fin de Semana',
+          severity: 'error',
+        };
+      }
+    } else {
+      // Semana de Trabajo de Fin de Semana: Trabaja S-D, Descansa 2 días semana (Jue-Vie)
+      if (dayInWeek === 3 || dayInWeek === 4) {
+        return {
+          type: 'rotation_violation',
+          personnel_id: personnel.personnel_id,
+          date: shiftSlot.date,
+          message: '5X2-RELEVO: Descanso compensatorio semanal',
+          severity: 'error',
+        };
+      }
+    }
+  }
 
   const anchorDate = new Date(2026, 3, 1);
   const daysSinceAnchor = Math.floor((date.getTime() - anchorDate.getTime()) / (1000 * 60 * 60 * 24));

@@ -51,3 +51,13 @@ export function getSlotPriority(
 
   return 10; // Default
 }
+
+/**
+ * REINFORCEMENT WHITE-LIST
+ * Defines which positions should be pro-actively filled to 5 days/week (40h)
+ * and which shift they should use as reinforcement.
+ */
+export const REINFORCEMENT_CONFIG: Record<string, { shift_start: string }> = {
+  'SUPERVISOR': { shift_start: '07:00' },
+  'SUP': { shift_start: '07:00' },
+};
