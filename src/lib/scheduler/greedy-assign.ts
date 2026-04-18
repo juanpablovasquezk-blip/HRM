@@ -181,6 +181,7 @@ export function greedyAssign(
     const config = Object.entries(REINFORCEMENT_CONFIG).find(([key]) => pPosName.includes(key))?.[1];
     
     if (!config) continue; // Only reinforcement-enabled positions
+    if ((person.rotation_pattern || '').toUpperCase().includes('4X4')) continue;
 
     const state = personnelState.get(person.personnel_id)!;
     

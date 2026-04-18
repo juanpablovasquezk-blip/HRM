@@ -439,8 +439,10 @@ export function checkRotationPattern(
     }
   }
 
-  const anchorDate = new Date(2026, 3, 1);
-  const daysSinceAnchor = Math.floor((date.getTime() - anchorDate.getTime()) / (1000 * 60 * 60 * 24));
+  const anchorDate = parseISO('2026-04-01T00:00:00Z');
+  const dateStr = format(date, 'yyyy-MM-dd') + 'T00:00:00Z';
+  const dateUTC = parseISO(dateStr);
+  const daysSinceAnchor = differenceInCalendarDays(dateUTC, anchorDate);
   // ... (rest of function unchanged until Sundays)
 
 
@@ -514,8 +516,12 @@ export function checkRotationPattern(
   // 4x4 (Aeropuerto)
 
   if (pattern.includes('4X4')) {
-    // Offset +7 matches Marcelo Jara working 18-21
-    const cyclePos = (daysSinceAnchor + 7) % 8; 
+    // Current date logic synchronized with 2026-04-18 being Marcelo's Day 3
+    let offset = 7; // Default
+    if (pattern.includes('-A')) offset = 7;
+    if (pattern.includes('-B')) offset = 3;
+
+    const cyclePos = (daysSinceAnchor + offset) % 8; 
     if (cyclePos >= 4) {
       return {
         type: 'rotation_violation',
@@ -575,6 +581,7 @@ export function checkSundaysOff(
   // EXEMPTION: Personnel with special contracts, 7x7 or Canes
   if (personnel.has_special_contract || 
       (personnel.rotation_pattern || '').includes('7X7') || 
+      (personnel.rotation_pattern || '').includes('4X4') || 
       norm(personnel.main_position_name).includes('CANES')) {
     return null;
   }

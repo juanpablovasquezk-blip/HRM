@@ -254,16 +254,20 @@ export async function materializeTemplates(startDate: string, endDate: string) {
   }
 
   if (inserts.length > 0) {
-    // Upsert: avoid duplicates by date+shift+area+position
-    const { error } = await supabase.from('shift_requirements').upsert(inserts, {
-      onConflict: 'date,shift_id,area_id,position_id',
-      ignoreDuplicates: true,
-    });
-    if (error) {
-      // Fallback: just insert, ignore duplicates manually
-      const { error: insertErr } = await supabase.from('shift_requirements').insert(inserts);
-      if (insertErr) return { success: false, error: insertErr.message, count: 0 };
-    }
+    // Delete existing requirements for the range to avoid duplicates and allow updates
+    const { error: delErr } = await supabase
+      .from('shift_requirements')
+      .delete()
+      .gte('date', startDate)
+      .lte('date', endDate);
+    
+    if (delErr) console.error('Error cleaning requirements:', delErr.message);
+
+    const { error: insertErr } = await supabase
+      .from('shift_requirements')
+      .insert(inserts);
+      
+    if (insertErr) return { success: false, error: insertErr.message, count: 0 };
   }
 
   revalidatePath('/shifts/requirements');

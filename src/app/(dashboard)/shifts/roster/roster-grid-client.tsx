@@ -135,6 +135,7 @@ export function RosterGridClient({
   const [aiStats, setAiStats] = useState<{ coverage: number, count: number, executionTime?: number } | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [diagnosticLogs, setDiagnosticLogs] = useState<string[] | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
 
   // Local state for the dialog selects
@@ -213,6 +214,11 @@ export function RosterGridClient({
     setAiError(null);
 
     startTransition(async () => {
+      setElapsedSeconds(0);
+      const timer = setInterval(() => {
+        setElapsedSeconds((prev: number) => prev + 1);
+      }, 1000);
+
       try {
         // Since we can't easily stream from server actions yet, 
         // we simulate progress increments for the phases to give feedback
@@ -248,11 +254,13 @@ export function RosterGridClient({
             executionTime: res.data?.stats?.execution_time_ms
           });
           toast.success('Autogeneración completada');
+          clearInterval(timer);
           router.refresh(); // Forzar actualización de la tabla
         }
       } catch (err) {
         setAiError(err instanceof Error ? err.message : 'Error desconocido');
         setAiStep('error');
+        clearInterval(timer);
       }
     });
   };
@@ -823,7 +831,14 @@ export function RosterGridClient({
               {aiStep !== 'completed' && aiStep !== 'error' && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-                    <span>Progreso del cálculo</span>
+                    <div className="flex items-center gap-2">
+                      <span>Progreso del cálculo</span>
+                      <span className="bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded flex items-center gap-1 font-mono">
+                        <Clock className="h-3 w-3" />
+                        {Math.floor(elapsedSeconds / 60).toString().padStart(2, '0')}:
+                        {(elapsedSeconds % 60).toString().padStart(2, '0')}
+                      </span>
+                    </div>
                     <span>{Math.round(aiProgress)}%</span>
                   </div>
                   <Progress value={aiProgress} className="h-2 bg-slate-100" />
