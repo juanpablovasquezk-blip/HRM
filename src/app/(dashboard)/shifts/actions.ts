@@ -233,7 +233,7 @@ export async function materializeTemplates(startDate: string, endDate: string) {
 
   const start = new Date(startDate + 'T00:00:00');
   const end = new Date(endDate + 'T00:00:00');
-  const inserts: any[] = [];
+  const aggregated = new Map<string, any>();
 
   for (const tmpl of templates) {
     const allowedDays: number[] = tmpl.days_of_week || [];
@@ -241,17 +241,27 @@ export async function materializeTemplates(startDate: string, endDate: string) {
 
     while (current.getTime() <= end.getTime()) {
       if (allowedDays.includes(current.getDay())) {
-        inserts.push({
-          date: current.toISOString().split('T')[0],
-          shift_id: tmpl.shift_id,
-          area_id: tmpl.area_id,
-          position_id: tmpl.position_id,
-          required_count: tmpl.required_count,
-        });
+        const dateStr = current.toISOString().split('T')[0];
+        const key = `${dateStr}|${tmpl.shift_id}|${tmpl.area_id}|${tmpl.position_id}`;
+        
+        if (aggregated.has(key)) {
+          const existing = aggregated.get(key);
+          existing.required_count += tmpl.required_count;
+        } else {
+          aggregated.set(key, {
+            date: dateStr,
+            shift_id: tmpl.shift_id,
+            area_id: tmpl.area_id,
+            position_id: tmpl.position_id,
+            required_count: tmpl.required_count,
+          });
+        }
       }
       current.setDate(current.getDate() + 1);
     }
   }
+
+  const inserts = Array.from(aggregated.values());
 
   if (inserts.length > 0) {
     // Delete existing requirements for the range to avoid duplicates and allow updates
