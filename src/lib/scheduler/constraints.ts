@@ -365,19 +365,15 @@ export function checkRotationPattern(
   if (!personnel.rotation_pattern) return null;
 
   const pattern = personnel.rotation_pattern.toUpperCase();
-  const date = parseISO(shiftSlot.date);
+  const dateStrForLogic = format(parseISO(shiftSlot.date), 'yyyy-MM-dd') + 'T12:00:00Z';
+  const date = parseISO(dateStrForLogic);
   
+  // SHARED ANCHOR LOGIC
+  const anchorDate = parseISO('2026-04-01T12:00:00Z');
+  const daysSinceAnchor = differenceInCalendarDays(date, anchorDate);
+
   // 1. HARD ROTATION 7x7 (ABSOLUTE PRIORITY)
   if (pattern.includes('7X7')) {
-    const anchor = parseISO('2026-04-01T12:00:00Z'); 
-    const dStr = format(date, 'yyyy-MM-dd') + 'T12:00:00Z';
-    const dayUTC = parseISO(dStr);
-    const diffDays = differenceInCalendarDays(dayUTC, anchor);
-    
-    // BALANCEADOR UNIVERSAL (Ciego a nombres, Robusto a colisiones)
-    // - Si el patrón contiene '-A', fuerza Turno A.
-    // - Si el patrón contiene '-B', fuerza Turno B.
-    // - Por defecto, usa el ADN pre-calculado (is_turn_b).
     let isTurnBResult = personnel.is_turn_b;
     if (pattern.includes('7X7-B') || pattern.includes('7X7 B')) {
       isTurnBResult = true;
@@ -386,7 +382,7 @@ export function checkRotationPattern(
     }
 
     const offset = isTurnBResult ? 9 : 2; 
-    const cyclePos = (diffDays + offset) % 14; 
+    const cyclePos = (daysSinceAnchor + offset) % 14; 
     
     if (cyclePos >= 7) {
       return {
@@ -401,21 +397,17 @@ export function checkRotationPattern(
 
   // 1b. ROTATING 5X2 RELEVO (Surgical Isolation for Supervisors)
   if (pattern.includes('5X2-RELEVO')) {
-    const anchor = parseISO('2026-03-30T12:00:00Z'); // Monday of first week
-    const dStr = format(date, 'yyyy-MM-dd') + 'T12:00:00Z';
-    const dayUTC = parseISO(dStr);
-    const diffDays = differenceInCalendarDays(dayUTC, anchor);
+    const anchor = parseISO('2026-03-30T12:00:00Z'); // Monday
+    const diffDays = differenceInCalendarDays(date, anchor);
     
     // Week index from anchor
     const weekIdx = Math.floor(diffDays / 7);
     const dayInWeek = diffDays % 7; // 0=Mon, ..., 5=Sat, 6=Sun
     
     const isB = pattern.includes('-B');
-    // Alternancia: en semana par uno descansa el finde, en semana impar el otro.
     const isOffWeekendWeek = isB ? (weekIdx % 2 !== 0) : (weekIdx % 2 === 0);
 
     if (isOffWeekendWeek) {
-      // Semana de Fin de Semana Libre: Trabaja L-V, Descansa S-D
       if (dayInWeek >= 5) {
         return {
           type: 'rotation_violation',
@@ -426,7 +418,6 @@ export function checkRotationPattern(
         };
       }
     } else {
-      // Semana de Trabajo de Fin de Semana: Trabaja S-D, Descansa 2 días semana (Jue-Vie)
       if (dayInWeek === 3 || dayInWeek === 4) {
         return {
           type: 'rotation_violation',
@@ -439,17 +430,28 @@ export function checkRotationPattern(
     }
   }
 
-  const anchorDate = parseISO('2026-04-01T12:00:00Z');
-  const dateStr = format(date, 'yyyy-MM-dd') + 'T12:00:00Z';
-  const dateUTC = parseISO(dateStr);
-  const daysSinceAnchor = differenceInCalendarDays(dateUTC, anchorDate);
-  // ... (rest of function unchanged until Sundays)
+  // 1c. 4x4 (Aeropuerto) - MOVED UP TO ENSURE PRIORITY OVER MAIN_POSITION
+  if (pattern.includes('4X4')) {
+    let offset = 7; 
+    if (pattern.includes('-A')) offset = 7;
+    if (pattern.includes('-B')) offset = 3;
 
+    const cyclePos = (daysSinceAnchor + offset) % 8; 
+    
+    if (cyclePos >= 4) {
+      return {
+        type: 'rotation_violation',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: `DESCANSO 4x4 (Día ${cyclePos + 1 - 4}/4 de libre)`,
+        severity: 'error',
+      };
+    }
+  }
 
-  // 2. L-V (Estricto Lunes a Viernes)
+  // 1d. L-V (Estricto Lunes a Viernes)
   if (pattern.includes('L-V') || pattern.includes('LUNES A VIERNES')) {
-    const day = date.getDay();
-    // Exención genérica para Canes en fines de semana (Si el patrón lo permite)
+    const day = parseISO(shiftSlot.date).getDay();
     const isCanesSlot = (shiftSlot.position_name || '').toUpperCase().includes('CANES');
     
     if ((day === 0 || day === 6) && !isCanesSlot) {
@@ -461,6 +463,27 @@ export function checkRotationPattern(
         severity: 'error',
       };
     }
+  }
+
+  // --- POSITION & IDENTITY CHECKS ---
+  
+  // RE-ENABLE MAIN POSITION EARLY EXIT ONLY AFTER ROTATION PATTERNS ARE RESPECTED
+  if (personnel.main_position === shiftSlot.position_id) return null;
+
+  // 2. Hierarchical Blocking
+  const pPos = (personnel.main_position_name || '').toUpperCase();
+  const sPos = (shiftSlot.position_name || '').toUpperCase();
+  const isSupervisor = pPos.includes('SUPERVISOR') || pPos.includes('SUP');
+  const isOperational = sPos.includes('OPERADOR') || sPos.includes('CANES') || sPos.includes('AYUDANTE');
+
+  if (isSupervisor && isOperational) {
+    return {
+      type: 'rotation_violation',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: `BLOQUEO JERÁRQUICO: Un Supervisor no puede cubrir puestos operativos (${sPos})`,
+      severity: 'error',
+    };
   }
 
   // 3. NOCHE
@@ -494,53 +517,13 @@ export function checkRotationPattern(
     }
   }
 
-  // 5. REG REGLA DE CARGO E IDENTIDAD (Ahora debajo de la rotación)
-  const pPos = (personnel.main_position_name || '').toUpperCase();
-  const sPos = (shiftSlot.position_name || '').toUpperCase();
-  
-  if (personnel.main_position === shiftSlot.position_id) return null;
-
-  const isSupervisor = pPos.includes('SUPERVISOR') || pPos.includes('SUP');
-  const isOperational = sPos.includes('OPERADOR') || sPos.includes('CANES') || sPos.includes('AYUDANTE');
-
-  if (isSupervisor && isOperational) {
-    return {
-      type: 'rotation_violation',
-      personnel_id: personnel.personnel_id,
-      date: shiftSlot.date,
-      message: `BLOQUEO JERÁRQUICO: Un Supervisor no puede cubrir puestos operativos (${sPos})`,
-      severity: 'error',
-    };
-  }
-
-  // 4x4 (Aeropuerto)
-
-  if (pattern.includes('4X4')) {
-    // Current date logic synchronized with 2026-04-18 being Marcelo's Day 3
-    let offset = 7; // Default
-    if (pattern.includes('-A')) offset = 7;
-    if (pattern.includes('-B')) offset = 3;
-
-    const cyclePos = (daysSinceAnchor + offset) % 8; 
-    
-    if (cyclePos >= 4) {
-      return {
-        type: 'rotation_violation',
-        personnel_id: personnel.personnel_id,
-        date: shiftSlot.date,
-        message: `DESCANSO 4x4 (Día ${cyclePos + 1 - 4}/4 de libre)`,
-        severity: 'error',
-      };
-    }
-  }
-
-  // Regla Especial Mathias Rozas: Si cubrió Canes (7x7), necesita descanso equivalente
+  // 5. Mathias Rozas Special Rule
   if (personnel.first_name.toUpperCase().includes('MATHIAS') && !pattern.includes('7X7')) {
-    const date = parseISO(shiftSlot.date);
-    const restStart = new Date(2026, 3, 27); // 27 de Abril (Mes 3 en JS es Abril)
-    const restEnd = new Date(2026, 4, 3);    // 03 de Mayo (Mes 4 en JS es Mayo)
+    const dateRel = parseISO(shiftSlot.date);
+    const restStart = new Date(2026, 3, 27);
+    const restEnd = new Date(2026, 4, 3);
     
-    if (date >= restStart && date <= restEnd) {
+    if (dateRel >= restStart && dateRel <= restEnd) {
        return {
         type: 'rotation_violation',
         personnel_id: personnel.personnel_id,
@@ -597,8 +580,6 @@ export function checkSundaysOff(
   // GET LIST OF SUNDAYS (Memoized)
   const sundaysInMonth = getSundaysInMonth(monthKey, mStart, mEnd);
   
-  // COUNT SUNDAYS: 
-  // Optimization: only check the specific Sunday dates, not the whole month
   let assignedSundays = 0;
   for (const sunDate of sundaysInMonth) {
     if (personnel.assigned_dates.has(sunDate)) {
