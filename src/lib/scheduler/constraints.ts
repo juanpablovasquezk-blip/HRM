@@ -346,6 +346,25 @@ export function checkQualification(
   // 4. Case match by name
   if (perPosName === posName && posName !== '') return null;
 
+  // --- BRAKING RULES FOR TRUCKS (BLUE/CAMION) ---
+  const isTruckSlot = posName.includes('CONDUCTOR') || posName.includes('CAMION') || posName.includes('BLUE');
+  const canDrive = perPosName.includes('CONDUCTOR') || perPosName.includes('CAMION') || 
+                   (personnel.secondary_positions || []).some(id => {
+                     // We would ideally need the position name here, but we check IDs in step 1.
+                     // Since step 1 matches IDs, if we are here and it's a truck slot, we should be careful.
+                     return false; // If not matched by ID in step 1, assume no.
+                   });
+
+  if (isTruckSlot && !canDrive) {
+    return {
+      type: 'preference',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: `Personal no habilitado para operar Camión/Blue`,
+      severity: 'error',
+    };
+  }
+
   return {
     type: 'preference',
     personnel_id: personnel.personnel_id,
@@ -462,6 +481,65 @@ export function checkRotationPattern(
         message: 'Personal L-V no trabaja fines de semana',
         severity: 'error',
       };
+    }
+  }
+
+  // 1e. BLUE_DIA (Conductors 21-Day Cycle: A-B-C Rotation)
+  if (pattern.includes('BLUE_DIA')) {
+    const anchorBlue = parseISO('2026-04-13T12:00:00Z'); // Lunes
+    const daysSinceAnchorBlue = differenceInCalendarDays(date, anchorBlue);
+    const dayOfCycle = ((daysSinceAnchorBlue % 21) + 21) % 21; // Handle negatives
+    
+    const weekIdx = Math.floor(dayOfCycle / 7); // 0, 1, 2
+    const dayOfWeek = dayOfCycle % 7; // 0=Mon, ..., 6=Sun
+    
+    // Determine which block (A, B, C) applies to this week for this specific personnel
+    let activeBlock = '';
+    if (pattern.includes('-1')) {
+      // Juan: A -> C -> B
+      if (weekIdx === 0) activeBlock = 'A';
+      else if (weekIdx === 1) activeBlock = 'C';
+      else activeBlock = 'B';
+    } else if (pattern.includes('-2')) {
+      // Cristo: B -> A -> C
+      if (weekIdx === 0) activeBlock = 'B';
+      else if (weekIdx === 1) activeBlock = 'A';
+      else activeBlock = 'C';
+    } else if (pattern.includes('-3')) {
+      // Nica: C -> B -> A
+      if (weekIdx === 0) activeBlock = 'C';
+      else if (weekIdx === 1) activeBlock = 'B';
+      else activeBlock = 'A';
+    }
+
+    const sName = (shiftSlot.shift_name || '').toUpperCase();
+    
+    if (activeBlock === 'A') {
+      // Block A: Mon-Fri PM 12. Sat-Sun OFF.
+      if (dayOfWeek >= 5) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (A): Descanso Fines de Semana', severity: 'error' };
+      }
+      if (!sName.includes('PM 12')) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (A): Solo turno PM 12 permitido', severity: 'error' };
+      }
+    } else if (activeBlock === 'B') {
+      // Block B: Mon-Tue AM 08. Wed-Thu OFF. Fri AM 00. Sat-Sun AM 08.
+      if (dayOfWeek === 2 || dayOfWeek === 3) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (B): Descanso Miércoles-Jueves', severity: 'error' };
+      }
+      const expectedShift = dayOfWeek === 4 ? 'AM 00' : 'AM 08';
+      if (!sName.includes(expectedShift)) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: `BLUE_DIA (B): Debe cumplir turno ${expectedShift}`, severity: 'error' };
+      }
+    } else if (activeBlock === 'C') {
+      // Block C: Mon-Tue OFF. Wed-Thu AM 08. Fri AM 08. Sat-Sun AM 08.
+      if (dayOfWeek === 0 || dayOfWeek === 1) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (C): Descanso Lunes-Martes', severity: 'error' };
+      }
+      const expectedShift = 'AM 08'; // Block C is always AM 08 when working
+      if (!sName.includes(expectedShift)) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: `BLUE_DIA (C): Debe cumplir turno ${expectedShift}`, severity: 'error' };
+      }
     }
   }
 

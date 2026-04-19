@@ -140,7 +140,10 @@ export function greedyAssign(
             const violations = validateAllConstraints(person, slot, state.assignments);
             
             if (hasHardViolation(violations)) continue;
-            if (pass < 3 && violations.some(v => v.severity === 'warning')) continue;
+            
+            // For hard-fixed rotations (4x4, 7x7, BLUE_DIA), prioritize assignment even with warnings in early passes
+            const isHardRotation = (person.rotation_pattern || '').toUpperCase().match(/4X4|7X7|BLUE_DIA/);
+            if (pass < 3 && violations.some(v => v.severity === 'warning') && !isHardRotation) continue;
   
             allViolations.push(...violations);
             const assignment: AssignmentCandidate = {
