@@ -275,6 +275,9 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
                 <option value="BLUE_DIA-1">Blue Día - Secuencia 1 (Juan A-C-B)</option>
                 <option value="BLUE_DIA-2">Blue Día - Secuencia 2 (Cristopher B-A-C)</option>
                 <option value="BLUE_DIA-3">Blue Día - Secuencia 3 (Nicanor C-B-A)</option>
+                <option value="BLUE_NOCHE-1">Blue Noche - Secuencia 1 (Jorge A-C-B)</option>
+                <option value="BLUE_NOCHE-2">Blue Noche - Secuencia 2 (Branco B-A-C)</option>
+                <option value="BLUE_NOCHE-3">Blue Noche - Secuencia 3 (Esteban C-B-A)</option>
                 <option value="part_time">Part-Time / Ocasional</option>
                 <option value="manual">Manual / Bajo Demanda</option>
               </select>

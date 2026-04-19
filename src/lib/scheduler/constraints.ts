@@ -27,6 +27,8 @@ export function checkMaxHoursPerWeek(
   // EXEMPTION: Canes, 7x7 or Special Contracts
   if (personnel.has_special_contract || 
       (personnel.rotation_pattern || '').includes('7X7') || 
+      (personnel.rotation_pattern || '').includes('BLUE_DIA') || 
+      (personnel.rotation_pattern || '').includes('BLUE_NOCHE') || 
       norm(personnel.main_position_name).includes('CANES') ||
       norm(shiftSlot.position_name).includes('CANES')) {
     return null;
@@ -543,6 +545,63 @@ export function checkRotationPattern(
     }
   }
 
+  // 1f. BLUE_NOCHE (Night Conductors 21-Day Cycle: AM 00 Focus)
+  if (pattern.includes('BLUE_NOCHE')) {
+    const anchorBlue = parseISO('2026-04-13T12:00:00Z');
+    const daysSinceAnchorBlue = differenceInCalendarDays(date, anchorBlue);
+    const dayOfCycle = ((daysSinceAnchorBlue % 21) + 21) % 21;
+    
+    const weekIdx = Math.floor(dayOfCycle / 7);
+    const dayOfWeek = dayOfCycle % 7; 
+    
+    let activeBlock = '';
+    if (pattern.includes('-1')) {
+      // Jorge: A -> C -> B
+      if (weekIdx === 0) activeBlock = 'A';
+      else if (weekIdx === 1) activeBlock = 'C';
+      else activeBlock = 'B';
+    } else if (pattern.includes('-2')) {
+      // Branco: B -> A -> C
+      if (weekIdx === 0) activeBlock = 'B';
+      else if (weekIdx === 1) activeBlock = 'A';
+      else activeBlock = 'C';
+    } else if (pattern.includes('-3')) {
+      // Esteban: C -> B -> A
+      if (weekIdx === 0) activeBlock = 'C';
+      else if (weekIdx === 1) activeBlock = 'B';
+      else activeBlock = 'A';
+    }
+
+    const sName = (shiftSlot.shift_name || '').toUpperCase();
+    const expectedShift = 'AM 00'; // All night drivers do AM 00
+
+    if (activeBlock === 'A') {
+      // Block A: Mon-Fri working. Sat-Sun OFF.
+      if (dayOfWeek >= 5) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (A): Descanso Fines de Semana', severity: 'error' };
+      }
+      if (!sName.includes(expectedShift)) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (A): Debe cumplir turno AM 00', severity: 'error' };
+      }
+    } else if (activeBlock === 'B') {
+      // Block B: Mon-Tue working. Wed-Thu OFF. Fri-Sun working.
+      if (dayOfWeek === 2 || dayOfWeek === 3) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (B): Descanso Miércoles-Jueves', severity: 'error' };
+      }
+      if (!sName.includes(expectedShift)) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (B): Debe cumplir turno AM 00', severity: 'error' };
+      }
+    } else if (activeBlock === 'C') {
+      // Block C: Mon-Tue OFF. Wed-Sun working.
+      if (dayOfWeek === 0 || dayOfWeek === 1) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (C): Descanso Lunes-Martes', severity: 'error' };
+      }
+      if (!sName.includes(expectedShift)) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (C): Debe cumplir turno AM 00', severity: 'error' };
+      }
+    }
+  }
+
   // --- POSITION & IDENTITY CHECKS ---
   
   // RE-ENABLE MAIN POSITION EARLY EXIT ONLY AFTER ROTATION PATTERNS ARE RESPECTED
@@ -644,6 +703,7 @@ export function checkSundaysOff(
   if (personnel.has_special_contract || 
       (personnel.rotation_pattern || '').includes('7X7') || 
       (personnel.rotation_pattern || '').includes('4X4') || 
+      (personnel.rotation_pattern || '').includes('BLUE_') || 
       norm(personnel.main_position_name).includes('CANES')) {
     return null;
   }
