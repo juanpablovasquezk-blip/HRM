@@ -176,7 +176,7 @@ export interface TransportLog {
   created_at: string;
 }
 
-export type TransportType = 'PENDIENTE' | 'PROPIO' | 'REQUERIDO';
+export type TransportType = 'PENDIENTE' | 'PROPIO' | 'REQUERIDO' | 'EMPRESA';
 export type TransportStatus = 'ABIERTO' | 'CONFORME' | 'NO_CONFORME';
 
 export interface TransportRequest {
