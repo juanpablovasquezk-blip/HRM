@@ -104,6 +104,7 @@ export async function partialRecalculate(
     .gte('end_date', startDate);
 
   const { data: positions } = await supabase.from('positions').select('*');
+  const { data: allShifts } = await supabase.from('shifts').select('*');
 
   // Build available slots (requirements minus protected fulfillment)
   const slots: ShiftSlot[] = (requirements || []).map((req) => {
@@ -164,6 +165,10 @@ export async function partialRecalculate(
       fixed_shift_id: p.fixed_shift_id,
       rotation_pattern: p.rotation_pattern,
       has_special_contract: p.has_special_contract || false,
+      hire_date: p.hire_date,
+      termination_date: p.termination_date,
+      area_id: p.area_id || '',
+      is_turn_b: p.is_turn_b || false,
       weekly_hours: protectedForPerson.reduce((sum, a) => {
         const shift = a.shift as { duration_hours: number } | null;
         return sum + (shift?.duration_hours || 0);
@@ -188,7 +193,14 @@ export async function partialRecalculate(
   });
 
   // 7. Run greedy assignment
-  const greedy = greedyAssign(slots, personnelAvailability, existingForConstraints);
+  const greedy = greedyAssign(
+    slots, 
+    personnelAvailability, 
+    existingForConstraints, 
+    startDate, 
+    endDate, 
+    allShifts || []
+  );
 
   // 8. Optimize
   const optimized = optimizeAssignments(
@@ -218,6 +230,7 @@ export async function partialRecalculate(
       is_locked: false,
       is_manual: false,
       frozen_by_rule: false,
+      original_shift_id: a.shift_id,
     }));
 
     await supabase.from('shift_assignments').insert(toInsert);
@@ -234,6 +247,9 @@ export async function partialRecalculate(
   return {
     assignments: optimized.assignments,
     violations: greedy.violations,
+    diagnosticLogs: greedy.diagnosticLogs,
+    coverage: totalSlots > 0 ? (filledSlots / totalSlots) : 1,
+    count: optimized.assignments.length,
     stats: {
       total_slots: totalSlots,
       filled_slots: filledSlots,

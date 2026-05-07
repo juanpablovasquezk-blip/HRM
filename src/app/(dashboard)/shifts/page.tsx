@@ -68,15 +68,29 @@ export default async function ShiftsPage() {
           </Card>
         </Link>
 
-        <Link href="/shifts/requirements">
+        <Link href="/shifts/dotacion">
           <Card className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer group">
             <CardContent className="p-5 flex items-center gap-4">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 group-hover:scale-110 transition-transform">
                 <Layers className="h-5 w-5" />
               </div>
               <div>
-                <p className="font-semibold text-sm">Daily Demand</p>
-                <p className="text-xs text-muted-foreground">Set requirements</p>
+                <p className="font-semibold text-sm">Master Requirements</p>
+                <p className="text-xs text-muted-foreground">Reglas de dotación</p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/shifts/daily">
+          <Card className="border-indigo-100 dark:border-indigo-900 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer group bg-indigo-50/30">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 group-hover:scale-110 transition-transform">
+                <Zap className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">Daily Planning</p>
+                <p className="text-xs text-muted-foreground">Cambios día a día</p>
               </div>
             </CardContent>
           </Card>

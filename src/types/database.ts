@@ -68,14 +68,32 @@ export interface PersonnelAddress {
 export interface Document {
   id: string;
   personnel_id: string;
-  type: string;
+  definition_id: string | null;
+  type: string; // Deprecated but kept for compatibility
   number: string;
   file_url: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  rejection_reason: string | null;
   issue_date: string;
   expiration_date: string;
   tica_date: string | null;
   uploaded_by: string;
   uploaded_at: string;
+  created_at: string;
+}
+
+export interface DocumentDefinition {
+  id: string;
+  company_id: string;
+  name: string;
+  description: string | null;
+  is_mandatory: boolean;
+  requires_expiration: boolean;
+  applicable_positions: string[]; // Added this
+  depends_on_definition_id: string | null; // Added for TICA-like rules
+  cycle_months: number | null;            // e.g., 6
+  anchor_days_offset: number | null;      // e.g., 30
+  is_active: boolean;
   created_at: string;
 }
 
@@ -100,6 +118,7 @@ export interface Shift {
   end_time: string;   // HH:MM:SS
   duration_hours: number;
   requires_transport: boolean;
+  geov: number | null;
   company_id: string;
   created_at: string;
 }
@@ -111,6 +130,7 @@ export interface ShiftRequirement {
   area_id: string;
   position_id: string;
   required_count: number;
+  is_extra?: boolean;
   created_at: string;
 }
 
@@ -125,6 +145,8 @@ export interface ShiftAssignment {
   is_locked: boolean;
   is_manual: boolean;
   frozen_by_rule: boolean;
+  is_extra?: boolean;
+  is_confirmed?: boolean;
   override_by: string | null;
   override_reason: string | null;
   created_at: string;
@@ -152,6 +174,30 @@ export interface TransportLog {
   issues: string | null;
   logged_by: string;
   created_at: string;
+}
+
+export type TransportType = 'PENDIENTE' | 'PROPIO' | 'REQUERIDO';
+export type TransportStatus = 'ABIERTO' | 'CONFORME' | 'NO_CONFORME';
+
+export interface TransportRequest {
+  id: string;
+  assignment_id: string;
+  personnel_id: string;
+  date: string;
+  type: 'ENTRADA' | 'SALIDA';
+  transport_type: TransportType;
+  reservation_number: string | null;
+  pickup_time: string | null; // HH:MM:SS
+  pickup_address: string | null;
+  destination_address: string | null;
+  status: TransportStatus;
+  observations: string | null;
+  created_at: string;
+}
+
+export interface TransportRequestWithDetails extends TransportRequest {
+  personnel?: Personnel;
+  assignment?: ShiftAssignmentWithDetails;
 }
 
 export interface Notification {
@@ -218,7 +264,7 @@ export interface CandidateScore {
 }
 
 export interface ConstraintViolation {
-  type: 'max_hours' | 'min_days_off' | 'min_rest' | 'birthday' | 'preference';
+  type: 'max_hours' | 'min_days_off' | 'min_rest' | 'birthday' | 'preference' | 'fatigue' | 'consecutive_days';
   personnel_id: string;
   date: string;
   message: string;

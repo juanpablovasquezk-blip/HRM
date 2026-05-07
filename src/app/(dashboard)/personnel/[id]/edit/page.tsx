@@ -34,6 +34,7 @@ export default async function EditPersonnelPage({
         </p>
       </div>
       <PersonnelForm
+        key={person.id}
         personnel={JSON.parse(JSON.stringify(person))}
         companies={JSON.parse(JSON.stringify(companies || []))}
         positions={JSON.parse(JSON.stringify(positions || []))}

@@ -1,7 +1,7 @@
 'use client';
 
 import { Card, CardContent } from '@/components/ui/card';
-import { Settings as SettingsIcon, Building, Users, Shield, Bell } from 'lucide-react';
+import { Settings as SettingsIcon, Building, Users, Shield, Bell, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
@@ -11,6 +11,15 @@ export default function SettingsPage() {
       description: 'Este módulo de configuración se activará en la próxima expansión de la Fase 2.',
     });
   };
+
+  const settingsItems = [
+    { icon: Building, title: 'Ajustes de Compañía', desc: 'Gestionar información, razones sociales y configuración general', href: '/settings/companies' },
+    { icon: FileText, title: 'Documentos Requeridos', desc: 'Configurar qué documentos debe subir cada empleado y cuáles son obligatorios', href: '/settings/documents' },
+    { icon: Users, title: 'Gestión de Usuarios', desc: 'Gestionar usuarios del sistema, roles y permisos' },
+    { icon: Shield, title: 'Seguridad', desc: 'Políticas de contraseña, gestión de sesiones y registros de auditoría' },
+    { icon: Bell, title: 'Notificaciones', desc: 'Configurar integración con WhatsApp y preferencias de alertas', href: '/settings/whatsapp' },
+    { icon: SettingsIcon, title: 'Reglas de Programación', desc: 'Ventana de congelación, horas máximas, períodos de descanso y restricciones' },
+  ];
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -22,34 +31,8 @@ export default function SettingsPage() {
       </div>
 
       <div className="space-y-4">
-        {/* Ajustes de Compañía - LINKED */}
-        <Link href="/settings/companies">
-          <Card 
-            className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-orange-200 dark:hover:border-orange-900 transition-all duration-200 cursor-pointer"
-          >
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400">
-                <Building className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="font-medium text-sm">Ajustes de Compañía</p>
-                <p className="text-xs text-muted-foreground">Gestionar información, razones sociales y configuración general</p>
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-
-        {[
-          { icon: Users, title: 'Gestión de Usuarios', desc: 'Gestionar usuarios del sistema, roles y permisos' },
-          { icon: Shield, title: 'Seguridad', desc: 'Políticas de contraseña, gestión de sesiones y registros de auditoría' },
-          { icon: Bell, title: 'Notificaciones', desc: 'Configurar integración con WhatsApp y preferencias de alertas' },
-          { icon: SettingsIcon, title: 'Reglas de Programación', desc: 'Ventana de congelación, horas máximas, períodos de descanso y restricciones' },
-        ].map((item) => (
-          <Card 
-            key={item.title} 
-            onClick={() => handleSettingClick(item.title)}
-            className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-orange-200 dark:hover:border-orange-900 transition-all duration-200 cursor-pointer"
-          >
+        {settingsItems.map((item) => {
+          const content = (
             <CardContent className="p-5 flex items-center gap-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400">
                 <item.icon className="h-5 w-5" />
@@ -59,8 +42,30 @@ export default function SettingsPage() {
                 <p className="text-xs text-muted-foreground">{item.desc}</p>
               </div>
             </CardContent>
-          </Card>
-        ))}
+          );
+
+          if (item.href) {
+            return (
+              <Link key={item.title} href={item.href}>
+                <Card 
+                  className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-orange-200 dark:hover:border-orange-900 transition-all duration-200 cursor-pointer"
+                >
+                  {content}
+                </Card>
+              </Link>
+            );
+          }
+
+          return (
+            <Card 
+              key={item.title} 
+              onClick={() => handleSettingClick(item.title)}
+              className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-orange-200 dark:hover:border-orange-900 transition-all duration-200 cursor-pointer"
+            >
+              {content}
+            </Card>
+          );
+        })}
       </div>
     </div>
   );

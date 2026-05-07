@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useTransition } from 'react';
+import { useState, useMemo, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   format, 
@@ -13,7 +13,9 @@ import {
   isSameDay,
   isToday,
   addMonths,
-  subMonths
+  subMonths,
+  addDays,
+  parseISO
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { 
@@ -28,6 +30,7 @@ import {
   Clock,
   User as UserIcon,
   CheckCircle2,
+  Check,
   Loader2,
   RefreshCw,
   Sparkles,
@@ -36,10 +39,15 @@ import {
   AlertCircle, 
   Info,
   Users,
-  Zap
+  Play,
+  Terminal,
+  Zap,
+  Truck,
+  FileText
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { BlueConfigurator } from './blue-configurator';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -53,7 +61,16 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { createManualAssignment, deleteAssignment, runScheduler, clearAutoAssignments } from '@/app/(dashboard)/shifts/actions';
+import { 
+  createManualAssignment, 
+  deleteAssignment, 
+  runScheduler, 
+  clearAutoAssignments,
+  bulkDeleteManualAssignments,
+  validateAssignments,
+  publishAssignments,
+  moveAssignment
+} from '@/app/(dashboard)/shifts/actions';
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
@@ -75,6 +92,9 @@ interface Assignment {
   area_id: string; 
   position_id: string;
   is_manual: boolean;
+  is_validated?: boolean;
+  is_published?: boolean;
+  original_shift_id?: string | null;
 }
 
 type AIProcessStep = 'preparing' | 'scheduling' | 'optimizing' | 'saving' | 'completed' | 'error';
@@ -125,6 +145,28 @@ export function RosterGridClient({
   const [positionFilter, setPositionFilter] = useState('');
   const [areaFilter, setAreaFilter] = useState('');
   const [personnelFilter, setPersonnelFilter] = useState<string[]>([]);
+
+  // PERSISTENCE: Load filters from localStorage on mount
+  useEffect(() => {
+    const savedFilters = localStorage.getItem('roster_filters');
+    if (savedFilters) {
+      try {
+        const parsed = JSON.parse(savedFilters);
+        if (parsed.search) setSearch(parsed.search);
+        if (parsed.positionFilter) setPositionFilter(parsed.positionFilter);
+        if (parsed.areaFilter) setAreaFilter(parsed.areaFilter);
+        if (parsed.personnelFilter) setPersonnelFilter(parsed.personnelFilter);
+      } catch (e) {
+        console.error('Error loading filters:', e);
+      }
+    }
+  }, []);
+
+  // PERSISTENCE: Save filters to localStorage when they change
+  useEffect(() => {
+    const filters = { search, positionFilter, areaFilter, personnelFilter };
+    localStorage.setItem('roster_filters', JSON.stringify(filters));
+  }, [search, positionFilter, areaFilter, personnelFilter]);
   const [selectedCell, setSelectedCell] = useState<{ person: Personnel, date: Date } | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -134,13 +176,42 @@ export function RosterGridClient({
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiStats, setAiStats] = useState<{ coverage: number, count: number, executionTime?: number } | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [isBlueConfigOpen, setIsBlueConfigOpen] = useState(false);
   const [diagnosticLogs, setDiagnosticLogs] = useState<string[] | null>(null);
+  const [pendingLogs, setPendingLogs] = useState<string[]>([]);
+  const [isStepMode, setIsStepMode] = useState(false);
+  const [isStepSimOpen, setIsStepSimOpen] = useState(false);
+  const [auditing, setAuditing] = useState(false);
+  const [currentSimDate, setCurrentSimDate] = useState<Date | null>(null);
+  const [simLogs, setSimLogs] = useState<string[]>([]);
+  const [simResults, setSimResults] = useState<any[]>([]);
+  const [isAudit4x4Open, setIsAudit4x4Open] = useState(false);
+  const [audit4x4Data, setAudit4x4Data] = useState<any[]>([]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
+  const [draggingAssignment, setDraggingAssignment] = useState<Assignment | null>(null);
+  const [reasonDialogOpen, setReasonDialogOpen] = useState<{ open: boolean, assignment: Assignment | null, newDate: string }>({ 
+    open: false, assignment: null, newDate: '' 
+  });
+  const [pushedReason, setPushedReason] = useState('');
+  const [planningRange, setPlanningRange] = useState<{ from: string, to: string }>({ from: '', to: '' });
+  const [aiActionMode, setAiActionMode] = useState<'scheduling' | 'needs' | 'clear'>('scheduling');
+  const [isAssignmentDialogOpen, setIsAssignmentDialogOpen] = useState(false);
+  const [auditSummary, setAuditSummary] = useState<any[] | null>(null);
+  const [isAuditSummaryOpen, setIsAuditSummaryOpen] = useState(false);
+  const [clearOptions, setClearOptions] = useState({
+    includeManual: false,
+    includeValidated: false,
+    includePublished: false,
+  });
 
 
   // Local state for the dialog selects
   const [dialogPositionId, setDialogPositionId] = useState<string>('');
   const [dialogAreaId, setDialogAreaId] = useState<string>('');
+
+  // Multi-selection state
+  const [selectedCells, setSelectedCells] = useState<{ personId: string; dateStr: string }[]>([]);
 
   const monthDate = new Date(currentMonth + 'T00:00:00');
   const days = eachDayOfInterval({
@@ -157,16 +228,28 @@ export function RosterGridClient({
   const prevMonth = () => goToMonth(subMonths(monthDate, 1));
 
   const filteredPersonnel = useMemo(() => {
+    const monthStartStr = format(startOfMonth(monthDate), 'yyyy-MM-dd');
+    const monthEndStr = format(endOfMonth(monthDate), 'yyyy-MM-dd');
+
     const filtered = personnel.filter(p => {
+      // 1. Contract Date Check
+      if (p.termination_date && p.termination_date < monthStartStr) {
+        // Only show if they have assignments in this month (historical data)
+        const hasAssignments = assignments.some(a => a.personnel_id === p.id && a.date >= monthStartStr && a.date <= monthEndStr);
+        if (!hasAssignments) return false;
+      }
+      if (p.hire_date && p.hire_date > monthEndStr) {
+        return false;
+      }
+
+      // 2. Existing filters
       const nameMatch = `${p.first_name} ${p.last_name_father}`.toLowerCase().includes(search.toLowerCase());
       
       const pos = positions.find(pos => pos.id === p.main_position);
       const personPositionName = pos?.name || '';
       const posMatch = !positionFilter || personPositionName === positionFilter;
 
-      // Filter by Area (Area of the main position)
       const areaMatch = !areaFilter || pos?.area_id === areaFilter;
-      
       const personMatch = personnelFilter.length === 0 || personnelFilter.includes(p.id);
       
       return nameMatch && posMatch && areaMatch && personMatch;
@@ -201,56 +284,160 @@ export function RosterGridClient({
   }, [personnel, positionFilter, areaFilter, positions]);
 
   const handleCellClick = (person: Personnel, date: Date) => {
-    setSelectedCell({ person, date });
+    const dateStr = format(date, 'yyyy-MM-dd');
     
-    // Pre-select main position and area
-    if (person.main_position) {
-      setDialogPositionId(person.main_position);
-      const pos = positions.find(p => p.id === person.main_position);
-      if (pos) setDialogAreaId(pos.area_id);
+    setSelectedCells(prev => {
+      const exists = prev.find(c => c.personId === person.id && c.dateStr === dateStr);
+      if (exists) {
+        const next = prev.filter(c => !(c.personId === person.id && c.dateStr === dateStr));
+        return next;
+      } else {
+        const newCell = { personId: person.id, dateStr };
+        
+        // Pre-select main position and area for the dialog based on the last person clicked
+        if (person.main_position) {
+          setDialogPositionId(person.main_position);
+          const pos = positions.find(p => p.id === person.main_position);
+          if (pos) setDialogAreaId(pos.area_id);
+        } else {
+          setDialogPositionId('');
+          setDialogAreaId('');
+        }
+
+        return [...prev, newCell];
+      }
+    });
+  };
+
+  const handleToggleRow = (personId: string) => {
+    const personDates = days.map(d => format(d, 'yyyy-MM-dd'));
+    const isTerminated = (p: Personnel, d: string) => p.termination_date && d > p.termination_date;
+    const isPreHire = (p: Personnel, d: string) => p.hire_date && d < p.hire_date;
+    const person = personnel.find(p => p.id === personId);
+    if (!person) return;
+
+    const availableDates = personDates.filter(d => !isTerminated(person, d) && !isPreHire(person, d));
+    const allSelected = availableDates.every(d => selectedCells.some(c => c.personId === personId && c.dateStr === d));
+
+    if (allSelected) {
+      setSelectedCells(prev => prev.filter(c => c.personId !== personId));
     } else {
-      setDialogPositionId('');
-      setDialogAreaId('');
+      setSelectedCells(prev => {
+        const others = prev.filter(c => c.personId !== personId);
+        const newOnes = availableDates.map(d => ({ personId, dateStr: d }));
+        return [...others, ...newOnes];
+      });
     }
   };
 
-  const handleRunAI = () => {
-    const monthName = format(monthDate, 'MMMM', { locale: es });
-    if (!confirm(`¿Ejecutar autogeneración para lo que queda de ${monthName}? (Se respetarán turnos manuales)`)) return;
+  const handleToggleColumn = (dateStr: string) => {
+    const isTerminated = (p: Personnel, d: string) => p.termination_date && d > p.termination_date;
+    const isPreHire = (p: Personnel, d: string) => p.hire_date && d < p.hire_date;
     
+    const availablePersonnel = filteredPersonnel.filter(p => !isTerminated(p, dateStr) && !isPreHire(p, dateStr));
+    const allSelected = availablePersonnel.every(p => selectedCells.some(c => c.personId === p.id && c.dateStr === dateStr));
+
+    if (allSelected) {
+      setSelectedCells(prev => prev.filter(c => c.dateStr !== dateStr));
+    } else {
+      setSelectedCells(prev => {
+        const others = prev.filter(c => c.dateStr !== dateStr);
+        const newOnes = availablePersonnel.map(p => ({ personId: p.id, dateStr }));
+        return [...others, ...newOnes];
+      });
+    }
+  };
+
+  const handleToggleAll = () => {
+    const isTerminated = (p: Personnel, d: string) => p.termination_date && d > p.termination_date;
+    const isPreHire = (p: Personnel, d: string) => p.hire_date && d < p.hire_date;
+    
+    const allCells: { personId: string; dateStr: string }[] = [];
+    filteredPersonnel.forEach(p => {
+      days.forEach(day => {
+        const d = format(day, 'yyyy-MM-dd');
+        if (!isTerminated(p, d) && !isPreHire(p, d)) {
+          allCells.push({ personId: p.id, dateStr: d });
+        }
+      });
+    });
+
+    const allSelected = allCells.length > 0 && allCells.every(ac => selectedCells.some(sc => sc.personId === ac.personId && sc.dateStr === ac.dateStr));
+
+    if (allSelected) {
+      setSelectedCells([]);
+    } else {
+      setSelectedCells(allCells);
+    }
+  };
+
+  const handleRunAI = (from?: string, to?: string) => {
+    const start = from || planningRange.from;
+    const end = to || planningRange.to;
+    
+    if (!start || !end) {
+      toast.error('Seleccione un rango de fechas válido');
+      return;
+    }
+
+    setIsAiConfigOpen(false);
+    
+    if (aiActionMode === 'clear') {
+       if (!confirm(`¿Estás seguro de eliminar los turnos en el rango ${start} a ${end}? Esta acción no se puede deshacer.`)) return;
+       startTransition(async () => {
+         const res = await clearAutoAssignments(
+           start, 
+           end, 
+           areaFilter || undefined, 
+           personnelFilter, 
+           positionFilter || undefined,
+           clearOptions
+         );
+         if (res.error) toast.error(res.error);
+         else {
+           toast.success('Limpieza completada');
+           router.refresh();
+         }
+       });
+       return;
+    }
+
+    if (aiActionMode === 'needs') {
+       startTransition(async () => {
+         const { materializeTemplates } = await import('@/app/(dashboard)/shifts/actions');
+         const res = await materializeTemplates(start, end);
+         if (res.error) toast.error(res.error);
+         else {
+           toast.success(`${res.count} requerimientos generados`);
+           router.refresh();
+         }
+       });
+       return;
+    }
+
+    // Default scheduling mode
     setIsAiModalOpen(true);
     setAiStep('preparing');
     setAiProgress(0);
     setAiStats(null);
     setAiError(null);
+    setElapsedSeconds(0);
 
     startTransition(async () => {
-      setElapsedSeconds(0);
       const timer = setInterval(() => {
         setElapsedSeconds((prev: number) => prev + 1);
       }, 1000);
 
-      try {
-        // Since we can't easily stream from server actions yet, 
-        // we simulate progress increments for the phases to give feedback
-        const interval = setInterval(() => {
-          setAiProgress(prev => {
-            if (prev < 90) return prev + Math.random() * 5;
-            return prev;
-          });
-        }, 1000);
+      const progressInterval = setInterval(() => {
+        setAiProgress(prev => {
+          if (prev < 90) return prev + Math.random() * 5;
+          return prev;
+        });
+      }, 1000);
 
+      try {
         setAiStep('scheduling');
-        // If it's the current month, start from today (or a reference date), otherwise from the 1st
-        const isCurrentMonth = format(new Date(), 'yyyy-MM') === format(monthDate, 'yyyy-MM');
-        
-        // Start from first visible day if not current month, otherwise from "now"
-        const start = isCurrentMonth ? format(new Date(), 'yyyy-MM-dd') : format(days[0], 'yyyy-MM-dd');
-        const end = format(days[days.length - 1], 'yyyy-MM-dd');
-        
-        const res = await runScheduler(start, end);
-        
-        clearInterval(interval);
+        const res = await runScheduler(start, end, areaFilter || undefined, personnelFilter, positionFilter || undefined) as any;
         
         if (res.error) {
           setAiError(res.error);
@@ -264,43 +451,346 @@ export function RosterGridClient({
             count: res.data?.count || 0,
             executionTime: res.data?.stats?.execution_time_ms
           });
+
+          // DISPARAR EL INFORME DE AUDITORÍA
+          if (res.auditSummary) {
+            setAuditSummary(res.auditSummary);
+            setIsAuditSummaryOpen(true);
+          }
+
+          if (res.diagnosticLogs) {
+            setSimLogs(["--- LOGS DE LA IA REAL ---", ...res.diagnosticLogs, "✅ AUDITORÍA FINALIZADA"]);
+          } else {
+            setSimLogs(["--- LOGS DE LA IA REAL ---", "--- NO SE RECIBIERON LOGS ---", "✅ AUDITORÍA FINALIZADA"]);
+          }
+
           toast.success('Autogeneración completada');
-          clearInterval(timer);
-          router.refresh(); // Forzar actualización de la tabla
         }
       } catch (err) {
         setAiError(err instanceof Error ? err.message : 'Error desconocido');
         setAiStep('error');
+      } finally {
         clearInterval(timer);
+        clearInterval(progressInterval);
       }
     });
   };
 
   const handleClearAI = () => {
-    const monthName = format(monthDate, 'MMMM', { locale: es });
-    if (!confirm(`¿Eliminar todos los turnos autogenerados en ${monthName}? (Los manuales se mantendrán)`)) return;
-    
-    startTransition(async () => {
-      const start = format(days[0], 'yyyy-MM-dd');
-      const end = format(days[days.length - 1], 'yyyy-MM-dd');
-      const res = await clearAutoAssignments(start, end);
-      if (res.error) toast.error(res.error);
-      else toast.success('Turnos automáticos eliminados');
+    const isCurrentMonth = format(new Date(), 'yyyy-MM') === format(monthDate, 'yyyy-MM');
+    setPlanningRange({
+      from: isCurrentMonth ? format(new Date(), 'yyyy-MM-dd') : format(days[0], 'yyyy-MM-dd'),
+      to: format(days[days.length - 1], 'yyyy-MM-dd')
     });
+    setAiActionMode('clear');
+    setIsAiConfigOpen(true);
+  };
+
+  const startStepSimulation = () => {
+    const marcelo = personnel.find(p => p.first_name.toUpperCase().includes('MARCELO'));
+    if (!marcelo) {
+      toast.error("No se encontró a Marcelo");
+      return;
+    }
+    if (!planningRange.from || !planningRange.to) {
+      setPlanningRange({
+        from: format(startOfMonth(monthDate), 'yyyy-MM-dd'),
+        to: format(endOfMonth(monthDate), 'yyyy-MM-dd')
+      });
+    }
+    setSimLogs(["Simulación iniciada para " + marcelo.first_name]);
+    setSimResults([]);
+    setCurrentSimDate(null); // Empezamos sin fecha para que el usuario pueda auditar el rango elegido
+    setIsStepSimOpen(true);
+  };
+
+  const nextSimStep = async () => {
+    if (!currentSimDate) return;
+    
+    const marcelo = personnel.find(p => p.first_name.toUpperCase().includes('MARCELO'));
+    if (!marcelo) return;
+
+    const dateStr = format(currentSimDate, 'yyyy-MM-dd');
+    const mirrorDate = addDays(currentSimDate, -4);
+    const mirrorStr = format(mirrorDate, 'yyyy-MM-dd');
+
+    // Buscamos en los resultados que llevamos acumulados + los que ya había
+    const workedMirror = [...assignments, ...simResults].some(a => a.personnel_id === marcelo.id && a.date === mirrorStr);
+    
+    const newLog = `Día ${format(currentSimDate, 'dd/MM')}: Mirando ${format(mirrorDate, 'dd/MM')}... ${workedMirror ? 'TRABAJÓ' : 'VACÍO'}`;
+    const actionLog = workedMirror ? "-> Hoy DESCANSA" : "-> Hoy TRABAJA (NS22)";
+    
+    setSimLogs(prev => [...prev, newLog, actionLog]);
+
+    if (!workedMirror) {
+      // Si toca trabajar, lo añadimos a los resultados temporales de la simulación
+      const referenceAssignment = assignments.find(a => a.personnel_id === marcelo.id && a.shift_id);
+      setSimResults(prev => [...prev, {
+        personnel_id: marcelo.id,
+        date: dateStr,
+        shift_id: referenceAssignment?.shift_id || 'ns22-id', // fallback
+        area_id: referenceAssignment?.area_id || 'aero-id',
+        is_manual: true
+      }]);
+    }
+
+    const nextDay = addDays(currentSimDate, 1);
+    if (nextDay > parseISO('2026-05-31T12:00:00Z')) {
+      setCurrentSimDate(null);
+      setSimLogs(prev => [...prev, "--- FIN DE LA SIMULACIÓN ---"]);
+    } else {
+      setCurrentSimDate(nextDay);
+    }
+  };
+
+  const commitSimulation = async () => {
+    // Aquí es donde realmente guardamos en la DB
+    toast.loading("Guardando resultados de simulación...");
+    try {
+      // 1. Limpiar mayo para Marcelo
+      const marcelo = personnel.find(p => p.first_name.toUpperCase().includes('MARCELO'));
+      if (marcelo) {
+        const mayoAssignments = assignments.filter(a => 
+          a.personnel_id === marcelo.id && 
+          a.date >= '2026-05-11' && 
+          a.date <= '2026-05-31'
+        );
+        for (const a of mayoAssignments) {
+          await deleteAssignment(a.id);
+        }
+
+        // 2. Crear los nuevos
+        const airportArea = areas.find(a => a.name.toUpperCase().includes('AEROPUERTO'));
+        const ns22Shift = shifts.find(s => s.name.includes('22:00'));
+
+        for (const res of simResults) {
+          const formData = new FormData();
+          formData.append('personnel_id', res.personnel_id);
+          formData.append('date', res.date);
+          formData.append('shift_id', ns22Shift?.id || res.shift_id);
+          formData.append('area_id', airportArea?.id || res.area_id);
+          formData.append('position_id', marcelo.main_position);
+          formData.append('is_manual', 'true');
+          await createManualAssignment(formData);
+        }
+      }
+      toast.dismiss();
+      toast.success("Simulación aplicada con éxito");
+      window.location.reload();
+    } catch (e) {
+      toast.error("Error al aplicar la simulación");
+    }
+  };
+
+  const handleAudit = async () => {
+    setAuditing(true);
+    setSimLogs(["Generando reporte mensual...", "Esto puede tardar unos segundos..."]);
+    try {
+      const { getMonthlyAudit } = await import('@/app/(dashboard)/shifts/actions');
+      const start = format(startOfMonth(monthDate), 'yyyy-MM-dd');
+      
+      const currentPersonnelIds = filteredPersonnel.map(p => p.id);
+      
+      const res = await getMonthlyAudit(start, areaFilter !== 'all' ? areaFilter : undefined, currentPersonnelIds, positionFilter || undefined) as any;
+      
+      if (res.success && res.auditSummary) {
+        setAuditSummary(res.auditSummary);
+        setIsAuditSummaryOpen(true);
+        setAuditing(false);
+      } else {
+        toast.error("No se pudo generar el reporte.");
+        setAuditing(false);
+      }
+    } catch (e) {
+      toast.error("Error al generar reporte: " + (e as any).message);
+      setAuditing(false);
+    }
+  };
+
+  const playLogs = (logs: string[]) => {
+    if (isStepMode) {
+      setPendingLogs(logs);
+      setSimLogs([]);
+      // Mostrar el primer log inmediatamente
+      if (logs.length > 0) {
+        setSimLogs([logs[0]]);
+        setPendingLogs(logs.slice(1));
+      }
+      return;
+    }
+
+    let i = 0;
+    setSimLogs([]);
+    const interval = setInterval(() => {
+      if (i >= logs.length) {
+        clearInterval(interval);
+        setAuditing(false);
+        return;
+      }
+      setSimLogs(prev => [...prev, logs[i]]);
+      i++;
+    }, 50);
+  };
+
+  const nextStep = () => {
+    if (pendingLogs.length === 0) {
+      setAuditing(false);
+      setSimLogs(prev => [...prev, "✅ AUDITORÍA FINALIZADA"]);
+      return;
+    }
+    const next = pendingLogs[0];
+    setSimLogs(prev => [...prev, next]);
+    setPendingLogs(prev => prev.slice(1));
+  };
+
+  const runPureMath4x4 = async () => {
+    try {
+      const marcelo = personnel.find(p => p.first_name.toUpperCase().includes('MARCELO'));
+      if (!marcelo) {
+        toast.error("No se encontró a Marcelo");
+        return;
+      }
+
+      // 1. Limpiar todo lo actual de MAYO del 11 al 31
+      const toDelete = assignments.filter(a => {
+        const aDate = parseISO(a.date);
+        return a.personnel_id === marcelo.id && 
+               format(aDate, 'yyyy-MM') === '2026-05' && 
+               parseInt(format(aDate, 'dd')) >= 11;
+      });
+
+      for (const a of toDelete) {
+        await deleteAssignment(a.id);
+      }
+
+      // 2. Loop matemático puro
+      // En lugar de buscar por nombre, usamos el cargo y el turno que YA tiene Marcelo en sus días previos
+      const referenceAssignment = assignments.find(a => a.personnel_id === marcelo.id && a.shift_id);
+      const airportAreaId = referenceAssignment?.area_id || areas.find(a => a.name.toUpperCase().includes('AEROPUERTO'))?.id;
+      const ns22ShiftId = referenceAssignment?.shift_id || shifts.find(s => s.name.includes('22:00'))?.id;
+
+      if (!airportAreaId || !ns22ShiftId) {
+        toast.error("No se pudo detectar el Area o Turno de referencia");
+        return;
+      }
+
+      // Referencia de assignments para el espejo
+      const currentAssignments = [...assignments];
+
+      for (let d = 11; d <= 31; d++) {
+        const dateStr = `2026-05-${d.toString().padStart(2, '0')}`;
+        const currentDate = parseISO(dateStr);
+        const mirrorDate = addDays(currentDate, -4);
+        const mirrorStr = format(mirrorDate, 'yyyy-MM-dd');
+
+        // ¿Hubo turno hace 4 días?
+        const workedMirror = currentAssignments.some(a => a.personnel_id === marcelo.id && a.date === mirrorStr);
+
+        if (!workedMirror) {
+          // Si el espejo está VACÍO, ASIGNAMOS TURNO
+          const formData = new FormData();
+          formData.append('personnel_id', marcelo.id);
+          formData.append('date', dateStr);
+          formData.append('shift_id', ns22ShiftId);
+          formData.append('area_id', airportAreaId);
+          formData.append('position_id', marcelo.main_position);
+          formData.append('is_manual', 'false');
+          
+          await createManualAssignment(formData);
+          // Actualizamos localmente para el siguiente paso del loop
+          currentAssignments.push({
+            id: 'temp-' + d,
+            personnel_id: marcelo.id,
+            date: dateStr,
+            shift_id: ns22ShiftId,
+            area_id: airportAreaId,
+            position_id: marcelo.main_position,
+            is_manual: false
+          } as any);
+        }
+      }
+      
+      toast.success("Matemática 4x4 aplicada correctamente");
+      window.location.reload();
+    } catch (error) {
+      console.error(error);
+      toast.error("Error en el loop matemático");
+    }
+  };
+
+  const runAudit4x4 = () => {
+    const results: any[] = [];
+    const marcelo = personnel.find(p => p.first_name.toUpperCase().includes('MARCELO'));
+    if (!marcelo) return;
+
+    const pAssignments = assignments.filter(a => a.personnel_id === marcelo.id);
+    const assignedDates = new Set(pAssignments.map(a => a.date));
+    const startDate = parseISO('2026-05-11T12:00:00Z');
+    const endDate = parseISO('2026-05-31T12:00:00Z');
+    const auditDays = eachDayOfInterval({ start: startDate, end: endDate });
+
+    auditDays.forEach(day => {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      const mirrorDate = addDays(day, -4);
+      const mirrorStr = format(mirrorDate, 'yyyy-MM-dd');
+      
+      const workedMirror = assignedDates.has(mirrorStr);
+      const mirrorShift = workedMirror ? pAssignments.find(a => a.date === mirrorStr) : null;
+      const shiftName = mirrorShift ? (shifts.find(s => s.id === mirrorShift.shift_id)?.name || 'TURNO') : 'VACÍO';
+
+      results.push({
+        date: dateStr,
+        dayNum: format(day, 'dd'),
+        mirrorDayNum: format(mirrorDate, 'dd'),
+        mirrorStatus: shiftName,
+        canAssign: !workedMirror,
+        explanation: `${format(day, 'dd')} - 4 = ${format(mirrorDate, 'dd')}`
+      });
+    });
+
+    setAudit4x4Data(results);
+    setIsAudit4x4Open(true);
   };
 
   const handleSaveAssignment = (formData: FormData) => {
-    if (!selectedCell) return;
+    if (selectedCells.length === 0) return;
     
-    formData.set('personnel_id', selectedCell.person.id);
-    formData.set('date', format(selectedCell.date, 'yyyy-MM-dd'));
+    const shiftId = formData.get('shift_id') as string;
+    const positionId = formData.get('position_id') as string;
+    const areaId = formData.get('area_id') as string;
 
     startTransition(async () => {
-      const res = await createManualAssignment(formData);
-      if (res.error) toast.error(res.error);
-      else {
-        toast.success('Asignación guardada');
+      // Group by person to avoid too many calls, or we can update createManualAssignment to handle multiple people
+      // For now, let's group by person and call sequentially or better yet, I should have updated createManualAssignment.
+      // Actually, since I have the tools, let's keep it simple and just loop or use a promise.all
+      
+      const peopleMap = selectedCells.reduce((acc, cell) => {
+        if (!acc[cell.personId]) acc[cell.personId] = [];
+        acc[cell.personId].push(cell.dateStr);
+        return acc;
+      }, {} as Record<string, string[]>);
+
+      let hasError = false;
+      for (const [pId, dates] of Object.entries(peopleMap)) {
+        const batchData = new FormData();
+        batchData.set('personnel_id', pId);
+        batchData.set('date', dates.join(','));
+        batchData.set('shift_id', shiftId);
+        batchData.set('position_id', positionId);
+        batchData.set('area_id', areaId);
+        
+        const res = await createManualAssignment(batchData);
+        if (res.error) {
+          toast.error(`Error en ${pId}: ${res.error}`);
+          hasError = true;
+        }
+      }
+
+      if (!hasError) {
+        toast.success(`${selectedCells.length} asignaciones guardadas`);
         setSelectedCell(null);
+        setSelectedCells([]);
+        setIsAssignmentDialogOpen(false);
       }
     });
   };
@@ -312,6 +802,199 @@ export function RosterGridClient({
       else {
         toast.success('Asignación eliminada');
         setSelectedCell(null);
+      }
+    });
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedCells.length === 0) return;
+    
+    if (!confirm(`¿Eliminar las ${selectedCells.length} asignaciones seleccionadas?`)) return;
+
+    startTransition(async () => {
+      const idsToDelete = assignments
+        .filter(a => selectedCells.some(c => c.personId === a.personnel_id && c.dateStr === a.date))
+        .map(a => a.id);
+
+      if (idsToDelete.length === 0) {
+        // If no assignments exist for the selected empty cells, just clear selection
+        setSelectedCells([]);
+        return;
+      }
+
+      const { bulkDeleteAssignmentsByIds } = await import('@/app/(dashboard)/shifts/actions');
+      const res = await bulkDeleteAssignmentsByIds(idsToDelete);
+      
+      if (res.error) toast.error(res.error);
+      else {
+        toast.success(`${idsToDelete.length} asignaciones eliminadas`);
+        setSelectedCells([]);
+        setSelectedCell(null);
+      }
+    });
+  };
+
+  // ─── Administration & DND Handlers ──────────────────────────────────────────
+
+  const handleDragStart = (e: React.DragEvent, assignment: Assignment) => {
+    setDraggingAssignment(assignment);
+    e.dataTransfer.setData('assignmentId', assignment.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = async (e: React.DragEvent, personId: string, targetDate: string) => {
+    e.preventDefault();
+    if (!draggingAssignment || draggingAssignment.personnel_id !== personId) {
+      if (draggingAssignment && draggingAssignment.personnel_id !== personId) {
+        toast.error('Solo puedes mover turnos dentro de la misma persona');
+      }
+      setDraggingAssignment(null);
+      return;
+    }
+
+    if (draggingAssignment.date === targetDate) {
+      setDraggingAssignment(null);
+      return;
+    }
+
+    if (draggingAssignment.is_validated) {
+      setReasonDialogOpen({ 
+        open: true, 
+        assignment: draggingAssignment, 
+        newDate: targetDate 
+      });
+    } else {
+      startTransition(async () => {
+        const res = await moveAssignment(draggingAssignment.id, targetDate);
+        if (res.success) {
+          toast.success('Turno movido');
+          router.refresh();
+        } else {
+          toast.error(res.error || 'Error al mover turno');
+        }
+      });
+    }
+    setDraggingAssignment(null);
+  };
+
+  const handleConfirmMoveWithReason = () => {
+    if (!reasonDialogOpen.assignment) return;
+    
+    startTransition(async () => {
+      const res = await moveAssignment(
+        reasonDialogOpen.assignment!.id, 
+        reasonDialogOpen.newDate, 
+        pushedReason
+      );
+      if (res.success) {
+        toast.success('Turno movido y auditado');
+        setReasonDialogOpen({ open: false, assignment: null, newDate: '' });
+        setPushedReason('');
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Error al mover');
+      }
+    });
+  };
+
+  const handleValidateSelection = () => {
+    if (selectedCells.length === 0) {
+       toast.error('Selecciona turnos primero (clic en las celdas)');
+       return;
+    }
+
+    const idsToValidate = assignments
+      .filter(a => selectedCells.some(c => c.personId === a.personnel_id && c.dateStr === a.date) && !a.is_validated)
+      .map(a => a.id);
+
+    if (idsToValidate.length === 0) {
+      toast.info('No hay turnos pendientes de validación en la selección');
+      return;
+    }
+
+    startTransition(async () => {
+      const res = await validateAssignments(idsToValidate);
+      if (res.success) {
+        toast.success(`${idsToValidate.length} turnos validados`);
+        setSelectedCells([]);
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Error al validar');
+      }
+    });
+  };
+
+  const handlePublishRange = () => {
+    const start = format(days[0], 'yyyy-MM-dd');
+    const end = format(days[days.length - 1], 'yyyy-MM-dd');
+    
+    if (!confirm(`¿Publicar todos los turnos visibles (${start} al ${end})?`)) return;
+
+    const personnelIds = new Set(filteredPersonnel.map(p => p.id));
+    const dateStrings = new Set(days.map(d => format(d, 'yyyy-MM-dd')));
+
+    const idsToPublish = assignments
+      .filter(a => personnelIds.has(a.personnel_id) && dateStrings.has(a.date) && !a.is_published)
+      .map(a => a.id);
+
+    if (idsToPublish.length === 0) {
+      toast.info("No hay turnos pendientes por publicar en este rango.");
+      return;
+    }
+
+    startTransition(async () => {
+      const { publishAssignments } = await import('@/app/(dashboard)/shifts/actions');
+      const res = await publishAssignments(idsToPublish);
+      if (res.success) {
+        toast.success(`${idsToPublish.length} turnos publicados con éxito`);
+        window.location.reload();
+      } else {
+        toast.error(res.error || 'Error al publicar');
+      }
+    });
+  };
+
+  const handleValidateVisible = () => {
+    const personnelIds = new Set(filteredPersonnel.map(p => p.id));
+    const dateStrings = new Set(days.map(d => format(d, 'yyyy-MM-dd')));
+
+    const idsToValidate = assignments
+      .filter(a => personnelIds.has(a.personnel_id) && dateStrings.has(a.date) && !a.is_validated)
+      .map(a => a.id);
+
+    if (idsToValidate.length === 0) {
+      toast.info('No hay turnos pendientes de validación en esta vista');
+      return;
+    }
+
+    if (!confirm(`¿Validar los ${idsToValidate.length} turnos visibles?`)) return;
+
+    startTransition(async () => {
+      // Chunking to avoid "URI too long" / payload size issues
+      const CHUNK_SIZE = 200;
+      let successCount = 0;
+      let hasError = false;
+
+      for (let i = 0; i < idsToValidate.length; i += CHUNK_SIZE) {
+        const chunk = idsToValidate.slice(i, i + CHUNK_SIZE);
+        const res = await validateAssignments(chunk);
+        if (res.success) {
+          successCount += chunk.length;
+        } else {
+          toast.error(res.error || `Error en lote ${Math.floor(i/CHUNK_SIZE) + 1}`);
+          hasError = true;
+          break;
+        }
+      }
+
+      if (!hasError) {
+        toast.success(`${successCount} turnos validados correctamente`);
+        router.refresh();
       }
     });
   };
@@ -419,54 +1102,196 @@ export function RosterGridClient({
 
         {/* AI Test Controls */}
         <div className="flex items-center gap-2 border-l pl-3 ml-auto border-slate-200">
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="h-8 border-orange-500 text-orange-600 hover:bg-orange-50 text-[10px] font-bold uppercase"
-              onClick={async () => {
-                const { runDiagnostic } = await import('@/app/(dashboard)/shifts/actions');
-                const res = await runDiagnostic();
-                setDiagnosticLogs(res.logs);
-              }}
-          >
-            Diagnóstico 20-21
-          </Button>
-          <Badge variant="outline" className="text-[10px] uppercase font-bold text-orange-600 border-orange-200 bg-orange-50/50">Prueba IA</Badge>
+          {/* Modal del Simulador F8 (Ahora oculto el botón de trigger para limpiar UI) */}
+          <Dialog open={isStepSimOpen} onOpenChange={setIsStepSimOpen}>
+            <DialogContent className="max-w-md bg-white">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Terminal className="w-5 h-5 text-blue-600" />
+                  Simulador 4x4 (Depuración F8)
+                </DialogTitle>
+              </DialogHeader>
+
+              {/* Rango de Auditoría */}
+              <div className="grid grid-cols-2 gap-4 mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] uppercase text-slate-500 font-bold">Desde</Label>
+                  <Input 
+                    type="date" 
+                    className="h-8 text-xs" 
+                    value={planningRange.from} 
+                    onChange={(e) => setPlanningRange(prev => ({ ...prev, from: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] uppercase text-slate-500 font-bold">Hasta</Label>
+                  <Input 
+                    type="date" 
+                    className="h-8 text-xs" 
+                    value={planningRange.to} 
+                    onChange={(e) => setPlanningRange(prev => ({ ...prev, to: e.target.value }))}
+                  />
+                </div>
+              </div>
+              
+              <div 
+                className="bg-slate-900 text-green-400 p-4 rounded-md font-mono text-sm h-64 overflow-y-auto mb-4"
+                ref={(el) => {
+                  if (el) el.scrollTop = el.scrollHeight;
+                }}
+              >
+                {simLogs.map((log, i) => (
+                  <div key={i} className={(log?.startsWith?.('->') || log?.includes?.('TRABAJA')) ? 'text-yellow-300 ml-4 mb-2' : 'mb-1'}>
+                    {log}
+                  </div>
+                ))}
+                {currentSimDate && (
+                  <div className="animate-pulse text-white mt-2">
+                    _ Esperando F8...
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-between gap-3">
+                <Button variant="ghost" onClick={() => setIsStepSimOpen(false)}>
+                  Cancelar
+                </Button>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      navigator.clipboard.writeText(simLogs.join('\n'));
+                      toast.success("Logs copiados al portapapeles");
+                    }}
+                    className="border-slate-300 text-slate-600"
+                  >
+                    COPIAR LOGS
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsStepMode(!isStepMode)}
+                    className={isStepMode ? "bg-amber-500/20 border-amber-500 text-amber-500" : ""}
+                  >
+                    {isStepMode ? "MODO MANUAL (F8 ON)" : "MODO AUTOMÁTICO"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAudit}
+                    disabled={auditing}
+                  >
+                    {auditing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        AUDITANDO...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 mr-2" />
+                        AUDITAR IA REAL
+                      </>
+                    )}
+                  </Button>
+                  {isStepMode && pendingLogs.length > 0 && (
+                    <Button
+                      size="sm"
+                      onClick={nextStep}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold animate-pulse"
+                    >
+                      SIGUIENTE PASO (F8) →
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
           <Button 
             variant="default" 
             size="sm" 
-            className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs"
+            className="h-9 bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 shadow-sm"
             onClick={() => {
-              const monthName = format(monthDate, 'MMMM', { locale: es });
-              if (confirm(`¿Generar requerimientos para todo el periodo visible de ${monthName} basados en las reglas permanentes?`)) {
-                const start = format(days[0], 'yyyy-MM-dd');
-                const end = format(days[days.length - 1], 'yyyy-MM-dd');
-                startTransition(async () => {
-                  const { materializeTemplates } = await import('@/app/(dashboard)/shifts/actions');
-                  const res = await materializeTemplates(start, end);
-                  if (res.error) toast.error(res.error);
-                  else {
-                    toast.success(`${res.count} requerimientos generados`);
-                    router.refresh();
-                  }
-                });
-              }
+              const isCurrentMonth = format(new Date(), 'yyyy-MM') === format(monthDate, 'yyyy-MM');
+              setPlanningRange({
+                from: isCurrentMonth ? format(new Date(), 'yyyy-MM-dd') : format(days[0], 'yyyy-MM-dd'),
+                to: format(days[days.length - 1], 'yyyy-MM-dd')
+              });
+              setAiActionMode('needs');
+              setIsAiConfigOpen(true);
             }}
             disabled={isPending}
           >
-            <Calendar className="h-3.5 w-3.5 mr-1" />
-            Generar Necesidades
+            <Calendar className="h-4 w-4 mr-2" />
+            Necesidades
           </Button>
+          
           <Button 
             variant="default" 
             size="sm" 
-            className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
-            onClick={handleRunAI}
+            className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 shadow-sm"
+            onClick={() => {
+              const isCurrentMonth = format(new Date(), 'yyyy-MM') === format(monthDate, 'yyyy-MM');
+              setPlanningRange({
+                from: isCurrentMonth ? format(new Date(), 'yyyy-MM-dd') : format(days[0], 'yyyy-MM-dd'),
+                to: format(days[days.length - 1], 'yyyy-MM-dd')
+              });
+              setAiActionMode('scheduling');
+              setIsAiConfigOpen(true);
+            }}
             disabled={isPending || aiStep === 'scheduling'}
           >
-            {isPending && aiStep !== 'completed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-3.5 w-3.5 mr-1" />}
-            Completar {format(monthDate, 'MMMM', { locale: es })}
+            {isPending && aiStep !== 'completed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
+            Asistente IA
           </Button>
+
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-9 border-orange-500 bg-orange-50/30 text-orange-700 hover:bg-orange-50 text-xs font-bold uppercase shadow-sm px-4"
+            onClick={handleAudit}
+          >
+            <FileText className="h-4 w-4 mr-2 text-orange-500" />
+            Reporte Mensual
+          </Button>
+
+          {/* New Admin Controls */}
+          <div className="flex items-center gap-1 border-l pl-3 ml-1 border-slate-200">
+             <Button 
+                variant="outline" 
+                size="sm" 
+                className="h-8 border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-xs px-2"
+                onClick={handleValidateVisible}
+                disabled={isPending}
+                title="Validar todos los turnos visibles en la grilla"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-indigo-600" />
+                Validar Todo
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className={cn(
+                  "h-8 text-indigo-700 hover:bg-indigo-50 text-[10px] uppercase font-bold",
+                  selectedCells.length > 0 && "bg-indigo-50 border border-indigo-100"
+                )}
+                onClick={handleValidateSelection}
+                disabled={isPending || (selectedCells.length === 0)}
+              >
+                {selectedCells.length > 0 ? `Validar Selección (${selectedCells.length})` : 'Validar Selección'}
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="h-8 border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs ml-1"
+                onClick={handlePublishRange}
+                disabled={isPending}
+              >
+                <Sparkles className="h-3.5 w-3.5 mr-1 text-emerald-600" />
+                Publicar
+              </Button>
+          </div>
+
           <Button 
             variant="outline" 
             size="sm" 
@@ -475,10 +1300,9 @@ export function RosterGridClient({
             disabled={isPending}
           >
             <Trash2 className="h-3.5 w-3.5 mr-1" />
-            Limpiar {format(monthDate, 'MMM', { locale: es })}
+            Limpiar
           </Button>
         </div>
-      </div>
 
       {/* Roster Grid Wrapper */}
       <div className="flex-1 overflow-hidden border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-950 shadow-md">
@@ -487,30 +1311,54 @@ export function RosterGridClient({
             <thead className="sticky top-0 z-20 bg-slate-50 dark:bg-slate-900 shadow-sm">
               <tr>
                 <th className="sticky left-0 z-30 w-[240px] p-3 text-left font-semibold text-slate-600 dark:text-slate-300 border-b border-r border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
-                   Trabajador
+                   <div className="flex items-center gap-2">
+                     <input 
+                       type="checkbox" 
+                       className="h-3.5 w-3.5 rounded border-slate-300"
+                       onChange={handleToggleAll}
+                       checked={filteredPersonnel.length > 0 && filteredPersonnel.every(p => days.every(day => {
+                         const d = format(day, 'yyyy-MM-dd');
+                         if ((p.termination_date && d > p.termination_date) || (p.hire_date && d < p.hire_date)) return true;
+                         return selectedCells.some(c => c.personId === p.id && c.dateStr === d);
+                       }))}
+                     />
+                     Trabajador
+                   </div>
                 </th>
-                {days.map(day => (
-                  <th 
-                    key={day.toISOString()} 
-                    className={cn(
-                      "p-2 text-center border-b border-slate-100 dark:border-slate-800",
-                      isSunday(day) && "bg-slate-100/50 dark:bg-slate-800/30",
-                      isToday(day) && "bg-orange-50 dark:bg-orange-900/40 ring-2 ring-inset ring-orange-500/20"
-                    )}
-                  >
-                    <div className="flex flex-col items-center">
-                      <span className="text-[10px] uppercase font-bold text-slate-400">
-                        {format(day, 'eee', { locale: es })}
-                      </span>
-                      <span className={cn(
-                        "text-sm font-bold",
-                        isSunday(day) ? "text-red-500" : "text-slate-700 dark:text-slate-200"
-                      )}>
-                        {format(day, 'd')}
-                      </span>
-                    </div>
-                  </th>
-                ))}
+                {days.map(day => {
+                  const dateStr = format(day, 'yyyy-MM-dd');
+                  return (
+                    <th 
+                      key={day.toISOString()} 
+                      className={cn(
+                        "p-2 text-center border-b border-slate-100 dark:border-slate-800",
+                        isSunday(day) && "bg-slate-100/50 dark:bg-slate-800/30",
+                        isToday(day) && "bg-orange-50 dark:bg-orange-900/40 ring-2 ring-inset ring-orange-500/20"
+                      )}
+                    >
+                      <div className="flex flex-col items-center">
+                        <span className="text-[10px] uppercase font-bold text-slate-400">
+                          {format(day, 'eee', { locale: es })}
+                        </span>
+                        <span className={cn(
+                          "text-sm font-bold",
+                          isSunday(day) ? "text-red-500" : "text-slate-700 dark:text-slate-200"
+                        )}>
+                          {format(day, 'd')}
+                        </span>
+                        <input 
+                          type="checkbox" 
+                          className="h-3 w-3 mt-1 rounded border-slate-300"
+                          onChange={() => handleToggleColumn(dateStr)}
+                          checked={filteredPersonnel.length > 0 && filteredPersonnel.every(p => {
+                            if ((p.termination_date && dateStr > p.termination_date) || (p.hire_date && dateStr < p.hire_date)) return true;
+                            return selectedCells.some(c => c.personId === p.id && c.dateStr === dateStr);
+                          })}
+                        />
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -565,7 +1413,12 @@ export function RosterGridClient({
                   // Detail for tooltip/audit
                   const shiftBreakdown = dailyReqs.map(r => {
                     const shift = shifts.find(s => s.id === r.shift_id);
-                    const count = assignments.filter(a => a.date === dateStr && a.shift_id === r.shift_id && (!positionFilter || a.position_id === positionFilter)).length;
+                    const count = assignments.filter(a => {
+                      if (a.date !== dateStr || a.shift_id !== r.shift_id) return false;
+                      if (!positionFilter) return true;
+                      const pName = (positions || []).find(p => p.id === a.position_id)?.name?.toUpperCase() || "";
+                      return pName === positionFilter.toUpperCase();
+                    }).length;
                     return `${shift?.name || 'Turno'}: ${count}/${r.required_count}`;
                   }).join(' | ');
 
@@ -607,19 +1460,31 @@ export function RosterGridClient({
               </tr>
 
               {filteredPersonnel.map(person => (
-                <tr key={person.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors">
-                  <td className="sticky left-0 z-10 w-[240px] p-3 border-b border-r border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-950">
+                <tr key={person.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors border-b border-slate-100 dark:border-slate-800">
+                  <td className="sticky left-0 z-30 bg-white dark:bg-slate-900 border-r border-slate-100 dark:border-slate-800 p-3 w-[240px] shadow-[4px_0_10px_-2px_rgba(0,0,0,0.1)]">
                     <div className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        className="h-3.5 w-3.5 rounded border-slate-300"
+                        onChange={() => handleToggleRow(person.id)}
+                        checked={days.every(day => {
+                          const d = format(day, 'yyyy-MM-dd');
+                          if ((person.termination_date && d > person.termination_date) || (person.hire_date && d < person.hire_date)) return true;
+                          return selectedCells.some(c => c.personId === person.id && c.dateStr === d);
+                        })}
+                      />
                       <div className="h-7 w-7 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400">
                          <UserIcon className="h-4 w-4" />
                       </div>
                       <div className="flex flex-col">
-                        <span 
-                          className="text-sm font-semibold truncate max-w-[160px]"
-                          title={`${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`}
-                        >
-                          {person.first_name} {person.last_name_father}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span 
+                            className="text-sm font-semibold truncate max-w-[140px]"
+                            title={`${person.first_name} ${person.last_name_father}`}
+                          >
+                            {person.first_name} {person.last_name_father}
+                          </span>
+                        </div>
                         <div className="flex flex-col">
                           <span className="text-[10px] text-orange-600 font-bold uppercase truncate max-w-[160px]">
                              {positions.find(pos => pos.id === person.main_position)?.name || 'Sin Cargo'}
@@ -634,19 +1499,22 @@ export function RosterGridClient({
                   {days.map(day => {
                     const dateStr = format(day, 'yyyy-MM-dd');
                     const assignment = assignments.find(a => a.personnel_id === person.id && a.date === dateStr);
+                    const shift = assignment ? shifts.find(s => s.id === assignment.shift_id) : null;
+                    const area = assignment ? areas.find(a => a.id === assignment.area_id) : null;
                     const leave = leaves.find(l => 
                       person.id === l.personnel_id && 
                       dateStr >= l.start_date && 
                       dateStr <= l.end_date
                     );
-                    const shift = assignment ? shifts.find(s => s.id === assignment.shift_id) : null;
-                    const area = assignment ? areas.find(a => a.id === assignment.area_id) : null;
+                    const isAirport = (positions.find(pos => pos.id === person.main_position)?.name || '').toUpperCase().includes('AEROPUERTO');
                     
                     const getLeaveLabel = (type: string) => {
                       switch(type) {
                         case 'vacation': return 'VAC';
                         case 'sick': return 'LM';
                         case 'personal': return 'ADM';
+                        case 'maternity': return 'MAT';
+                        case 'free_request': return 'SL';
                         default: return 'ABS';
                       }
                     };
@@ -655,6 +1523,8 @@ export function RosterGridClient({
                         case 'vacation': return 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 text-emerald-600';
                         case 'sick': return 'bg-red-50 dark:bg-red-900/20 border-red-100 text-red-600';
                         case 'personal': return 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 text-amber-600';
+                        case 'maternity': return 'bg-purple-50 dark:bg-purple-900/20 border-purple-100 text-purple-600';
+                        case 'free_request': return 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 text-blue-600';
                         default: return 'bg-slate-50 dark:bg-slate-900/20 border-slate-100 text-slate-600';
                       }
                     };
@@ -665,16 +1535,34 @@ export function RosterGridClient({
 
                     return (
                       <td 
-                        key={dateStr}
+                        key={`${person.id}-${dateStr}`}
                         onClick={() => !isBlocked && handleCellClick(person, day)}
+                        onDragOver={handleDragOver}
+                        onDrop={(e) => handleDrop(e, person.id, dateStr)}
                         className={cn(
-                          "p-1 text-center border-b border-slate-50 dark:border-slate-900 cursor-pointer h-14",
+                          "p-1 text-center border-b border-slate-50 dark:border-slate-900 cursor-pointer h-14 relative group transition-all",
                           isSunday(day) && "bg-slate-50/30 dark:bg-slate-900/10",
                           isToday(day) && "bg-orange-50/40 dark:bg-orange-900/20 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.1)]",
                           isBlocked && "bg-slate-100 dark:bg-slate-900/80 cursor-not-allowed opacity-50 repeating-bg-stripe",
-                          "hover:ring-2 hover:ring-orange-500/20"
+                          draggingAssignment?.personnel_id === person.id && draggingAssignment?.date !== dateStr && "bg-indigo-50/50 dark:bg-indigo-900/20 ring-2 ring-indigo-300 ring-inset",
+                          selectedCells.some(c => c.personId === person.id && c.dateStr === dateStr)
+                            ? "bg-orange-100/50 dark:bg-orange-900/30 ring-2 ring-orange-500 ring-inset z-10" 
+                            : "hover:ring-2 hover:ring-orange-500/20"
                         )}
                       >
+                        {/* Multi-select checkbox indicator */}
+                        {!isBlocked && (
+                          <div className={cn(
+                            "absolute top-1 right-1 h-3 w-3 rounded-full border border-orange-300 dark:border-orange-700 transition-all z-20",
+                            selectedCells.some(c => c.personId === person.id && c.dateStr === dateStr)
+                              ? "bg-orange-500 border-orange-500 shadow-sm scale-110"
+                              : "bg-white/50 dark:bg-slate-950/50 opacity-0 group-hover:opacity-100"
+                          )}>
+                            {selectedCells.some(c => c.personId === person.id && c.dateStr === dateStr) && (
+                              <CheckCircle2 className="h-full w-full text-white p-[1px]" />
+                            )}
+                          </div>
+                        )}
                         {isTerminated ? (
                           <div className="h-full flex items-center justify-center">
                              <span className="text-[10px] font-bold text-slate-400 rotate-45">BAJA</span>
@@ -690,16 +1578,32 @@ export function RosterGridClient({
                           )}>
                              {getLeaveLabel(leave.type)}
                           </div>
-                        ) : shift ? (
+                        ) : (shift && assignment) ? (
                           <div 
-                            title={`${shift.name} | Area: ${area?.name || '---'} | Cargo: ${positions.find(p => p.id === assignment?.position_id)?.name || '---'}`}
+                            draggable
+                            onDragStart={(e) => assignment && handleDragStart(e, assignment)}
+                            title={`${shift.name} | Area: ${area?.name || '---'} | Cargo: ${positions.find(p => p.id === assignment?.position_id)?.name || '---'}${assignment?.is_validated ? ' | VALIDADO' : ''}`}
                             className={cn(
-                              "h-full flex flex-col items-center justify-center rounded border shadow-sm",
+                              "h-full flex flex-col items-center justify-center rounded border shadow-sm transition-all relative",
                               assignment?.is_manual 
                                 ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700/50" 
-                                : "bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800/40"
+                                : "bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800/40",
+                              assignment?.is_validated && "ring-1 ring-indigo-500 border-indigo-200 shadow-indigo-100 dark:shadow-indigo-900/20",
+                              // Highlighting changes from AI original plan
+                              assignment?.original_shift_id && assignment?.original_shift_id !== assignment?.shift_id && 
+                              "border-orange-500 border-2 border-dashed shadow-[0_0_8px_rgba(249,115,22,0.3)]"
                             )}
                           >
+                             {assignment?.is_validated && (
+                               <div className="absolute -top-1 -left-1 bg-indigo-600 rounded-full p-0.5 shadow-sm z-10" title="Validado">
+                                 <CheckCircle2 className="h-4 w-4 text-white" />
+                               </div>
+                             )}
+                             {assignment?.is_published && (
+                               <div className="absolute -top-1 -right-1 bg-emerald-600 rounded-full p-0.5 shadow-sm z-10" title="Publicado">
+                                 <Check className="h-4 w-4 text-white" />
+                               </div>
+                             )}
                              <span className="text-[9px] font-bold text-slate-700 dark:text-slate-300">
                                {shift.start_time.slice(0, 5)}
                              </span>
@@ -723,12 +1627,16 @@ export function RosterGridClient({
       </div>
 
       {/* Assignment Dialog */}
-      <Dialog open={!!selectedCell} onOpenChange={(open) => !open && setSelectedCell(null)}>
+      <Dialog open={isAssignmentDialogOpen} onOpenChange={setIsAssignmentDialogOpen}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Calendar className="h-5 w-5 text-orange-600" />
-              {selectedCell && format(selectedCell.date, 'PPP', { locale: es })}
+              {selectedCells.length > 1 ? (
+                <span>Asignar {selectedCells.length} espacios seleccionados</span>
+              ) : (
+                selectedCell && format(selectedCell.date, 'PPP', { locale: es })
+              )}
             </DialogTitle>
           </DialogHeader>
           
@@ -789,7 +1697,7 @@ export function RosterGridClient({
                 </div>
              </form>
 
-             {selectedCell && assignments.find(a => a.personnel_id === selectedCell.person.id && a.date === format(selectedCell.date, 'yyyy-MM-dd')) && (
+             {selectedCells.length === 1 && selectedCell && assignments.find(a => a.personnel_id === selectedCell.person.id && a.date === format(selectedCell.date, 'yyyy-MM-dd')) && (
                <div className="pt-4 border-t">
                   <Button 
                     variant="destructive" 
@@ -806,14 +1714,182 @@ export function RosterGridClient({
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedCell(null)}>Cancelar</Button>
+            <Button variant="outline" onClick={() => {
+              setIsAssignmentDialogOpen(false);
+              setSelectedCell(null);
+              setSelectedCells([]);
+            }}>
+              Cancelar
+            </Button>
             <Button 
-              form="assign-form" 
               type="submit" 
+              form="assign-form" 
               disabled={isPending}
               className="bg-orange-600 hover:bg-orange-700"
             >
-              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar Turno'}
+              {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Guardar {selectedCells.length > 1 ? `(${selectedCells.length} celdas)` : ''}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Selection Floating Bar */}
+      {selectedCells.length > 0 && !selectedCell && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-6">
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Selección</span>
+              <span className="text-lg font-black">{selectedCells.length} espacios marcados</span>
+            </div>
+            <div className="h-10 w-[1px] bg-slate-700" />
+            <div className="flex items-center gap-3">
+              <Button 
+                variant="ghost" 
+                className="text-white hover:bg-white/10"
+                onClick={() => {
+                  setSelectedCells([]);
+                }}
+              >
+                Limpiar
+              </Button>
+              <Button 
+                variant="outline"
+                className="text-red-400 border-red-500/50 hover:bg-red-500/10 hover:text-red-300 gap-2"
+                onClick={handleBulkDelete}
+              >
+                <Trash2 className="h-4 w-4" />
+                Eliminar
+              </Button>
+              <Button 
+                className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-8 shadow-[0_0_15px_rgba(249,115,22,0.4)]"
+                onClick={() => {
+                  if (selectedCells.length > 0) {
+                    const last = selectedCells[selectedCells.length - 1];
+                    const person = personnel.find(p => p.id === last.personId);
+                    if (person) {
+                      setSelectedCell({ person, date: new Date(last.dateStr + 'T00:00:00') });
+                      setIsAssignmentDialogOpen(true);
+                    }
+                  }
+                }}
+              >
+                Asignar Turno
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Assistant Range Config Dialog */}
+      <Dialog open={isAiConfigOpen} onOpenChange={setIsAiConfigOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-800 dark:text-slate-100">
+              {aiActionMode === 'scheduling' && <Sparkles className="h-5 w-5 text-emerald-600" />}
+              {aiActionMode === 'needs' && <Calendar className="h-5 w-5 text-blue-600" />}
+              {aiActionMode === 'clear' && <Trash2 className="h-5 w-5 text-red-600" />}
+              {aiActionMode === 'scheduling' ? 'Asistente de Planificación IA' : 
+               aiActionMode === 'needs' ? 'Generar Necesidades' : 'Limpiar Periodo'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-6 space-y-6">
+            <div className={cn(
+              "p-4 rounded-xl border flex items-start gap-3",
+              aiActionMode === 'scheduling' ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100" :
+              aiActionMode === 'needs' ? "bg-blue-50 dark:bg-blue-950/20 border-blue-100" :
+              "bg-red-50 dark:bg-red-950/20 border-red-100"
+            )}>
+              <Info className={cn(
+                "h-5 w-5 shrink-0 mt-0.5",
+                aiActionMode === 'scheduling' ? "text-emerald-500" :
+                aiActionMode === 'needs' ? "text-blue-500" : "text-red-500"
+              )} />
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                {aiActionMode === 'scheduling' ? 'El motor de IA analizará la demanda y las restricciones legales para generar turnos óptimos.' : 
+                 aiActionMode === 'needs' ? 'Se crearán los requerimientos de personal basados en las plantillas y demanda histórica.' : 
+                 'Se eliminarán de forma permanente los turnos autogenerados en este rango. Los manuales serán conservados.'}
+              </p>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase font-black text-slate-400 tracking-widest">Desde</Label>
+                <Input 
+                  type="date" 
+                  value={planningRange.from}
+                  onChange={(e) => setPlanningRange(prev => ({ ...prev, from: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase font-black text-slate-400 tracking-widest">Hasta</Label>
+                <Input 
+                  type="date"
+                  value={planningRange.to}
+                  onChange={(e) => setPlanningRange(prev => ({ ...prev, to: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            {aiActionMode === 'clear' && (
+              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <Label className="text-[10px] uppercase font-black text-slate-400 tracking-widest">Opciones de Limpieza</Label>
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <input 
+                      type="checkbox" 
+                      id="inc-validated" 
+                      checked={clearOptions.includeValidated}
+                      onChange={(e) => setClearOptions(prev => ({ ...prev, includeValidated: e.target.checked }))}
+                      className="h-4 w-4 rounded border-slate-300 text-orange-600 focus:ring-orange-600"
+                    />
+                    <label htmlFor="inc-validated" className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Incluir turnos validados (aceptados)
+                    </label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input 
+                      type="checkbox" 
+                      id="inc-published" 
+                      checked={clearOptions.includePublished}
+                      onChange={(e) => setClearOptions(prev => ({ ...prev, includePublished: e.target.checked }))}
+                      className="h-4 w-4 rounded border-slate-300 text-orange-600 focus:ring-orange-600"
+                    />
+                    <label htmlFor="inc-published" className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Incluir turnos publicados (visibles al trabajador)
+                    </label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input 
+                      type="checkbox" 
+                      id="inc-manual" 
+                      checked={clearOptions.includeManual}
+                      onChange={(e) => setClearOptions(prev => ({ ...prev, includeManual: e.target.checked }))}
+                      className="h-4 w-4 rounded border-slate-300 text-orange-600 focus:ring-orange-600"
+                    />
+                    <label htmlFor="inc-manual" className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Incluir turnos creados manualmente
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAiConfigOpen(false)}>Cancelar</Button>
+            <Button 
+              className={cn(
+                "font-bold gap-2 shadow-lg dark:shadow-none",
+                aiActionMode === 'scheduling' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200" :
+                aiActionMode === 'needs' ? "bg-blue-600 hover:bg-blue-700 shadow-blue-200" :
+                "bg-red-600 hover:bg-red-700 shadow-red-200"
+              )}
+              onClick={() => handleRunAI()}
+            >
+              {aiActionMode === 'scheduling' ? <Zap className="h-4 w-4" /> : 
+               aiActionMode === 'needs' ? <Plus className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+              {aiActionMode === 'scheduling' ? 'Iniciar IA' : 
+               aiActionMode === 'needs' ? 'Generar' : 'Confirmar Borrado'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -831,7 +1907,11 @@ export function RosterGridClient({
                 <Sparkles className="h-6 w-6 animate-pulse" />
                 <h2 className="text-xl font-bold italic tracking-tight">Motor de Inteligencia Artificial</h2>
              </div>
-             <p className="text-orange-100/80 text-sm">Optimizando la distribución de turnos según demanda y normativas legales.</p>
+             <p className="text-orange-100/80 text-sm">
+                {planningRange.from && planningRange.to 
+                  ? `Generando Roster desde ${format(parseISO(planningRange.from), 'dd-MM-yyyy')} hasta ${format(parseISO(planningRange.to), 'dd-MM-yyyy')}`
+                  : 'Optimizando la distribución de turnos según demanda y normativas legales.'}
+             </p>
           </div>
 
           <div className="p-8 space-y-6">
@@ -983,6 +2063,232 @@ export function RosterGridClient({
              <Button onClick={() => setDiagnosticLogs(null)} className="bg-orange-600 hover:bg-orange-700 text-white font-bold h-10 px-10 shadow-lg shadow-orange-200 dark:shadow-none">
                 Cerrar Auditoría
              </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Blue Express Configurator */}
+      <BlueConfigurator
+        isOpen={isBlueConfigOpen}
+        onClose={() => setIsBlueConfigOpen(false)}
+        personnel={personnel}
+        assignments={assignments}
+        shifts={shifts}
+        positions={positions}
+        currentMonth={currentMonth}
+      />
+      {/* Reason for Change Dialog (Auditing) */}
+      <Dialog 
+        open={reasonDialogOpen.open} 
+        onOpenChange={(open) => !open && setReasonDialogOpen({ open: false, assignment: null, newDate: '' })}
+      >
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-500" />
+              Justificar Cambio en Turno Validado
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-4">
+             <p className="text-sm text-muted-foreground">
+               Estás moviendo un turno que ya ha sido validado. Este cambio se registrará en las estadísticas de auditoría.
+             </p>
+             <div className="space-y-2">
+               <Label>Motivo (Opcional)</Label>
+               <textarea 
+                 className="w-full min-h-[100px] p-3 rounded-md border text-sm"
+                 placeholder="Ej: Licencia médica, Error en planificación inicial..."
+                 value={pushedReason}
+                 onChange={(e) => setPushedReason(e.target.value)}
+               />
+             </div>
+          </div>
+          <DialogFooter>
+             <Button variant="ghost" onClick={() => setReasonDialogOpen({ open: false, assignment: null, newDate: '' })}>
+               Cancelar
+             </Button>
+             <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleConfirmMoveWithReason}>
+               Confirmar Movimiento
+             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Audit 4x4 Dialog */}
+      <Dialog open={isAudit4x4Open} onOpenChange={setIsAudit4x4Open}>
+        <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-indigo-700">
+              <Zap className="h-6 w-6" /> Auditoría de Regla 4x4 (Mayo 2026)
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="py-4 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Este reporte analiza el historial de cada trabajador y detecta si se está cumpliendo la ley de espejo: 
+              <span className="font-bold text-slate-800 ml-1">Día Actual - 4 = Debe ser Descanso.</span>
+            </p>
+
+            {audit4x4Data.length > 0 && (
+              <div className="border rounded-xl overflow-hidden shadow-sm">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-bold text-slate-600">Día</th>
+                      <th className="px-4 py-2 text-left font-bold text-slate-600">Cálculo Espejo</th>
+                      <th className="px-4 py-2 text-left font-bold text-slate-600">Estado -4 días</th>
+                      <th className="px-4 py-2 text-center font-bold text-slate-600">Disponibilidad</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {audit4x4Data.map((item, idx) => (
+                      <tr key={idx} className={cn(
+                        "hover:bg-slate-50/50 transition-colors",
+                        !item.canAssign && "bg-red-50/30"
+                      )}>
+                        <td className="px-4 py-3 font-black text-slate-900">{item.dayNum} Mayo</td>
+                        <td className="px-4 py-3 font-mono text-indigo-600 font-bold">{item.explanation}</td>
+                        <td className="px-4 py-3">
+                          <span className={cn(
+                            "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase",
+                            item.mirrorStatus !== 'VACÍO' ? "bg-amber-100 text-amber-700 border border-amber-200" : "bg-slate-100 text-slate-500 border border-slate-200"
+                          )}>
+                            {item.mirrorStatus}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {item.canAssign ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-600 font-bold">
+                              <CheckCircle2 className="h-4 w-4" /> TRABAJA
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-red-600 font-bold">
+                              <X className="h-4 w-4" /> DESCANSA
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          
+          <DialogFooter>
+            <Button onClick={() => setIsAudit4x4Open(false)} className="bg-indigo-600 hover:bg-indigo-700 w-full">
+              Entendido, cerrar reporte
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isAuditSummaryOpen} onOpenChange={(open) => setIsAuditSummaryOpen(open)}>
+        <DialogContent 
+          className="max-h-[90vh] flex flex-col p-0 overflow-hidden !max-w-[95vw] shadow-2xl border-none"
+          style={{ width: '95vw', maxWidth: '95vw' }}
+        >
+          <DialogHeader className="p-6 pb-0 bg-white border-b border-slate-50">
+            <DialogTitle className="flex items-center justify-between gap-2 text-2xl font-black">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-7 w-7 text-emerald-500 fill-emerald-500/20" />
+                Resumen Mensual de Auditoría - {format(monthDate, 'MMMM yyyy', { locale: es }).toUpperCase()}
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-xs font-mono px-2 py-1">V.2.5.PRO</Badge>
+                <Button variant="ghost" size="icon" onClick={() => setIsAuditSummaryOpen(false)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </DialogTitle>
+            <p className="text-slate-500 text-sm mt-1">
+              Mirada global de cumplimiento: Días trabajados por semana y Domingos Libres (Art. 38)
+            </p>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-auto p-6 pt-4">
+            <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <table className="w-full text-sm border-collapse table-fixed">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="sticky left-0 bg-slate-50 px-4 py-4 text-left font-bold text-slate-800 z-10 border-r border-slate-200 w-[250px]">Trabajador</th>
+                    <th className="px-2 py-4 text-center font-bold text-slate-600 w-[80px]">Patrón</th>
+                    {(() => {
+                      const allWeeks = new Set<string>();
+                      auditSummary?.forEach(row => {
+                        if (row.weekCounts) {
+                          Object.keys(row.weekCounts).forEach(w => allWeeks.add(w));
+                        }
+                      });
+                      const sortedWeeks = Array.from(allWeeks).sort((a, b) => {
+                        const [d1, m1] = a.split('/').map(Number);
+                        const [d2, m2] = b.split('/').map(Number);
+                        return (m1 * 100 + d1) - (m2 * 100 + d2);
+                      });
+                      
+                      return sortedWeeks.map(w => (
+                        <th key={w} className="px-2 py-4 text-center font-bold text-slate-700 bg-slate-50/50">Sem {w}</th>
+                      ));
+                    })()}
+                    <th className="sticky right-0 px-4 py-4 text-center font-bold text-emerald-700 bg-emerald-50 z-10 border-l border-slate-200 w-[120px]">Dom. Libres</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {auditSummary?.map((row, idx) => {
+                    const allWeeksSet = new Set<string>();
+                    auditSummary?.forEach(r => {
+                      if (r.weekCounts) Object.keys(r.weekCounts).forEach(w => allWeeksSet.add(w));
+                    });
+                    const sortedWeeks = Array.from(allWeeksSet).sort((a, b) => {
+                      const [d1, m1] = a.split('/').map(Number);
+                      const [d2, m2] = b.split('/').map(Number);
+                      return (m1 * 100 + d1) - (m2 * 100 + d2);
+                    });
+
+                    return (
+                      <tr key={idx} className="hover:bg-slate-50/80 transition-colors group">
+                        <td className="sticky left-0 bg-white group-hover:bg-slate-50 px-4 py-3 font-bold text-slate-900 border-r border-slate-100 z-10 truncate">{row.personName}</td>
+                        <td className="px-2 py-3 text-center text-[9px] text-slate-400 font-mono uppercase">{row.pattern}</td>
+                        {sortedWeeks.map(w => {
+                          const count = row.weekCounts?.[w] ?? 0;
+                          const isSevenBySeven = (row.pattern || '').toUpperCase().includes('7X7');
+                          const isRed = isSevenBySeven ? count > 7 : count > 5;
+                          const isGreen = isSevenBySeven ? (count > 0 && count <= 7) : (count === 5);
+                          const isAmber = !isRed && !isGreen && count > 0;
+                          const isGray = count === 0;
+
+                          return (
+                            <td key={w} className="px-2 py-3 text-center">
+                              <div className={cn(
+                                "inline-flex items-center justify-center w-8 h-8 rounded-full text-[11px] font-black shadow-sm border-2 transition-all",
+                                isRed ? "bg-red-600 border-red-300 text-white animate-pulse" :
+                                isGreen ? "bg-emerald-500 border-emerald-200 text-white" :
+                                isGray ? "bg-slate-50 border-slate-100 text-slate-300" :
+                                "bg-amber-400 border-amber-200 text-amber-900"
+                              )}>
+                                {count}
+                              </div>
+                            </td>
+                          );
+                        })}
+                        <td className="sticky right-0 px-4 py-3 text-center bg-emerald-50 group-hover:bg-emerald-100/50 z-10 border-l border-slate-100">
+                          <span className={cn(
+                            "text-base font-black",
+                            row.sundaysOff >= 2 ? "text-emerald-600" : "text-amber-600"
+                          )}>
+                            {row.sundaysOff}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <DialogFooter className="p-6 bg-slate-50 border-t border-slate-200">
+            <Button onClick={() => window.location.reload()} className="bg-slate-900 hover:bg-slate-800 text-white h-12 px-10 text-lg font-bold shadow-lg shadow-slate-200">
+              Actualizar Grilla y Cerrar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

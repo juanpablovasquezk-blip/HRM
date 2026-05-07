@@ -14,7 +14,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ArrowLeft, Edit, FileText, Cake, Moon, SunMedium, AlertTriangle, Mail, Repeat, CalendarCheck, Pin } from 'lucide-react';
-import { format, differenceInDays } from 'date-fns';
+import { format, differenceInDays, parseISO } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { DocumentActions } from './document-actions';
+import { calculateDynamicExpiration, calculateIntervalExpiration } from '@/lib/utils/document-calc';
 
 export default async function PersonnelDetailPage({
   params,
@@ -35,31 +38,24 @@ export default async function PersonnelDetailPage({
   const posMap = Object.fromEntries((allPositions || []).map((p: any) => [p.id, p.name]));
   const shiftMap = Object.fromEntries((allShifts || []).map((s: any) => [s.id, s.name]));
   const address = (person.address as { street?: string; city?: string; region?: string }) || {};
-  const documents = (person.documents as Array<{ id: string; type: string; expiration_date: string | null; file_url: string; uploaded_at: string }>) || [];
+  
+  // 1. Fetch all definitions to know which ones are mandatory
+  const { data: allDefs } = await supabase.from('document_definitions').select('*').eq('is_active', true);
+  const definitions = (allDefs || []).filter(def => {
+    if (!def.applicable_positions || def.applicable_positions.length === 0) return true;
+    return def.applicable_positions.includes(person.main_position);
+  });
 
-  // Logica de Cumplimiento de Documentos
-  const uploadedTypes = documents.map(doc => doc.type);
-  const missingDocs: string[] = [];
+  const documents = (person.documents as Array<{ id: string; definition_id: string; type: string; expiration_date: string | null; file_url: string; uploaded_at: string; status: string }>) || [];
 
-  if (!uploadedTypes.includes('Cédula de Identidad')) {
-    missingDocs.push('Cédula de Identidad');
-  }
-  if (!uploadedTypes.includes('Antecedentes para fines especiales')) {
-    missingDocs.push('Antecedentes para fines especiales');
-  }
-
-  const hasPCP = uploadedTypes.includes('PCP');
-  if (hasPCP) {
-    if (!uploadedTypes.includes('Licencia de Conducir')) {
-      missingDocs.push('Licencia de Conducir (Requerido por tener PCP)');
-    }
-    if (!uploadedTypes.includes('Hoja de vida del conductor')) {
-      missingDocs.push('Hoja de vida del conductor (Requerido por tener PCP)');
-    }
-  }
+  // Dynamic Missing Documents Logic
+  const uploadedDefinitionIds = documents.map(doc => doc.definition_id);
+  const missingDocs = definitions
+    .filter(def => def.is_mandatory && !uploadedDefinitionIds.includes(def.id))
+    .map(def => def.name);
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 max-w-5xl">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/personnel">
@@ -230,7 +226,7 @@ export default async function PersonnelDetailPage({
           <div className="flex items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
               <FileText className="h-4 w-4" />
-              Documentos
+              Gestión Documental
             </CardTitle>
             <Link href={`/documents/upload?personnel_id=${id}`}>
               <Button variant="outline" size="sm">
@@ -245,24 +241,73 @@ export default async function PersonnelDetailPage({
               <TableHeader>
                 <TableRow>
                   <TableHead>Tipo</TableHead>
-                  <TableHead>Vencimiento</TableHead>
                   <TableHead>Estado</TableHead>
+                  <TableHead>Vencimiento</TableHead>
+                  <TableHead>Vigencia</TableHead>
                   <TableHead>Subido</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {documents.map((doc) => {
-                  const daysLeft = doc.expiration_date
-                    ? differenceInDays(new Date(doc.expiration_date), new Date())
+                {documents.map((doc: any) => {
+                  const def = definitions.find(d => d.id === doc.definition_id);
+                  let displayExpiry = doc.expiration_date ? new Date(doc.expiration_date + 'T12:00:00') : null;
+                  let isCalculated = false;
+
+                  // If no manual expiry, check for dynamic calculation
+                  if (!displayExpiry && def?.requires_expiration) {
+                    if (def.depends_on_definition_id) {
+                      const anchorDoc = documents.find(d => d.definition_id === def.depends_on_definition_id);
+                      if (anchorDoc?.expiration_date) {
+                        displayExpiry = calculateDynamicExpiration(
+                          parseISO(anchorDoc.expiration_date),
+                          def.cycle_months || 6,
+                          def.anchor_days_offset || 30
+                        );
+                        isCalculated = true;
+                      }
+                    } else if (doc.uploaded_at) {
+                      displayExpiry = calculateIntervalExpiration(
+                        parseISO(doc.uploaded_at),
+                        def.cycle_months || 6
+                      );
+                      isCalculated = true;
+                    }
+                  }
+
+                  const daysLeft = displayExpiry
+                    ? differenceInDays(displayExpiry, new Date())
                     : null;
+                  
                   return (
                     <TableRow key={doc.id}>
-                      <TableCell className="font-medium">{doc.type}</TableCell>
+                      <TableCell className="font-bold text-slate-700">
+                        {doc.type}
+                        {def?.is_mandatory && (
+                          <span className="ml-1 text-[9px] bg-red-100 text-red-600 px-1 rounded font-black uppercase">Obligatorio</span>
+                        )}
+                      </TableCell>
                       <TableCell>
-                        {doc.expiration_date
-                          ? format(new Date(doc.expiration_date), 'PP')
-                          : '—'}
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "font-bold uppercase text-[10px]",
+                            doc.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                            doc.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-100' :
+                            'bg-amber-50 text-amber-700 border-amber-100'
+                          )}
+                        >
+                          {doc.status === 'APPROVED' ? 'Aprobado' : 
+                           doc.status === 'REJECTED' ? 'Rechazado' : 'Pendiente'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex flex-col">
+                          <span>{displayExpiry ? format(displayExpiry, 'dd/MM/yyyy') : '—'}</span>
+                          {isCalculated && (
+                            <span className="text-[9px] text-indigo-500 font-bold uppercase italic">Calculado</span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         {daysLeft !== null ? (
@@ -282,20 +327,26 @@ export default async function PersonnelDetailPage({
                               : 'Vigente'}
                           </Badge>
                         ) : (
-                          '—'
+                          <span className="text-muted-foreground text-xs italic">Sin fecha</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {format(new Date(doc.uploaded_at), 'PP')}
+                      <TableCell className="text-muted-foreground text-xs">
+                        {format(new Date(doc.uploaded_at), 'dd/MM/yyyy')}
                       </TableCell>
                       <TableCell className="text-right">
                         {doc.file_url ? (
-                          <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
-                            <Button variant="ghost" size="sm" className="h-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/50">
-                              <FileText className="mr-2 h-4 w-4" />
-                              Ver Doc
-                            </Button>
-                          </a>
+                          <div className="flex justify-end items-center gap-1">
+                             <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
+                              <Button variant="ghost" size="icon" title="Ver Documento" className="h-8 w-8 text-orange-600">
+                                <FileText className="h-4 w-4" />
+                              </Button>
+                            </a>
+                            <DocumentActions 
+                              documentId={doc.id} 
+                              currentStatus={doc.status} 
+                              personnelId={id} 
+                            />
+                          </div>
                         ) : (
                           <span className="text-xs text-muted-foreground mr-2">N/A</span>
                         )}
@@ -306,8 +357,8 @@ export default async function PersonnelDetailPage({
               </TableBody>
             </Table>
           ) : (
-            <div className="py-8 text-center text-sm text-muted-foreground">
-              No hay documentos subidos aún.
+            <div className="py-8 text-center text-sm text-muted-foreground font-medium">
+              No hay documentos subidos aún para este funcionario.
             </div>
           )}
         </CardContent>

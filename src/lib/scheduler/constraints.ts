@@ -9,12 +9,14 @@
  * - Respect shift preferences (night/no night)
  */
 
-import { differenceInHours, parseISO, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval, isSunday, startOfMonth, endOfMonth, format, differenceInCalendarDays } from 'date-fns';
+import { differenceInHours, differenceInMinutes, parseISO, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval, isSunday, startOfMonth, endOfMonth, format, differenceInCalendarDays, addDays } from 'date-fns';
 import type { ConstraintViolation, PersonnelAvailability, ShiftSlot } from './types';
 
 const MAX_HOURS_PER_WEEK = 40;
 const MIN_DAYS_OFF_PER_WEEK = 2;
 const MIN_REST_HOURS = 10;
+
+const norm = (s: string = '') => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
 
 /**
  * Check if assigning this shift would exceed 40 hours/week
@@ -24,11 +26,16 @@ export function checkMaxHoursPerWeek(
   shiftSlot: ShiftSlot,
   currentAssignments: Array<{ date: string; duration_hours: number }>
 ): ConstraintViolation | null {
-  // EXEMPTION: Canes, 7x7 or Special Contracts
+  // EXEMPTION: Canes, 4x4, 7x7 or Special Contracts
+  const pattern = (personnel.rotation_pattern || '').toUpperCase();
+  const startHourMax = parseInt(shiftSlot.shift_start.split(':')[0], 10);
+  const isAeroNight = norm(shiftSlot.position_name).includes('AEROPUERTO') && (startHourMax >= 20 || startHourMax <= 6);
+
   if (personnel.has_special_contract || 
-      (personnel.rotation_pattern || '').includes('7X7') || 
-      (personnel.rotation_pattern || '').includes('BLUE_DIA') || 
-      (personnel.rotation_pattern || '').includes('BLUE_NOCHE') || 
+      pattern.includes('7X7') || 
+      pattern.includes('4X4') ||
+      pattern.includes('BLUE_') || 
+      isAeroNight ||
       norm(personnel.main_position_name).includes('CANES') ||
       norm(shiftSlot.position_name).includes('CANES')) {
     return null;
@@ -46,13 +53,17 @@ export function checkMaxHoursPerWeek(
     .reduce((sum, a) => sum + a.duration_hours, 0);
 
   const projectedHours = weeklyHours + shiftSlot.shift_duration_hours;
+  
+  // Si es un requerimiento real (no refuerzo), permitimos hasta 45h para no dejar huecos
+  const isReinforcement = shiftSlot.requirement_id.includes('reinforce-') || shiftSlot.requirement_id.includes('final-rev-');
+  const limit = isReinforcement ? MAX_HOURS_PER_WEEK : 45;
 
-  if (projectedHours > MAX_HOURS_PER_WEEK) {
+  if (projectedHours > limit) {
     return {
       type: 'max_hours',
       personnel_id: personnel.personnel_id,
       date: shiftSlot.date,
-      message: `Would exceed ${MAX_HOURS_PER_WEEK}h/week (projected: ${projectedHours.toFixed(1)}h)`,
+      message: `Excedería el límite de ${limit}h semanales (proyectado: ${projectedHours.toFixed(1)}h)`,
       severity: 'error',
     };
   }
@@ -66,11 +77,17 @@ export function checkMaxHoursPerWeek(
 export function checkMinDaysOff(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot,
-  currentAssignments: Array<{ date: string }>
+  dateSet: Set<string>
 ): ConstraintViolation | null {
-  // EXEMPTION: Canes, 7x7 or Special Contracts
+  const startHourMin = parseInt(shiftSlot.shift_start.split(':')[0], 10);
+  const isAeroNight = norm(shiftSlot.position_name).includes('AEROPUERTO') && (startHourMin >= 20 || startHourMin <= 6);
+
+  // EXEMPTION: Canes, 7x7, Blue Express or Special Contracts
   if (personnel.has_special_contract || 
       (personnel.rotation_pattern || '').includes('7X7') || 
+      (personnel.rotation_pattern || '').includes('4X4') || 
+      (personnel.rotation_pattern || '').includes('BLUE_') || 
+      isAeroNight ||
       norm(personnel.main_position_name).includes('CANES') ||
       norm(shiftSlot.position_name).includes('CANES')) {
     return null;
@@ -79,21 +96,15 @@ export function checkMinDaysOff(
   const slotDate = parseISO(shiftSlot.date);
   const weekStart = startOfWeek(slotDate, { weekStartsOn: 1 });
   const weekEnd = endOfWeek(slotDate, { weekStartsOn: 1 });
-
   const daysInWeek = eachDayOfInterval({ start: weekStart, end: weekEnd });
-  const assignedDates = new Set(
-    currentAssignments
-      .filter((a) => {
-        const d = parseISO(a.date);
-        return d >= weekStart && d <= weekEnd;
-      })
-      .map((a) => a.date)
-  );
 
-  // Adding this day
-  assignedDates.add(shiftSlot.date);
+  let workingDays = 0;
+  for (const d of daysInWeek) {
+    if (dateSet.has(format(d, 'yyyy-MM-dd'))) {
+      workingDays++;
+    }
+  }
 
-  const workingDays = assignedDates.size;
   const daysOff = daysInWeek.length - workingDays;
 
   if (daysOff < MIN_DAYS_OFF_PER_WEEK) {
@@ -131,17 +142,19 @@ export function checkMinRestBetweenShifts(
       prevEnd.setDate(prevEnd.getDate() + 1);
     }
 
-    const restHours = differenceInHours(currentStart, prevEnd);
-
-    if (restHours >= 0 && restHours < MIN_REST_HOURS) {
+    const restMinutes = differenceInMinutes(currentStart, prevEnd);
+    
+    // REGLA ABSOLUTA: Mínimo 10.5 horas (630 minutos) entre turnos
+    if (restMinutes >= 0 && restMinutes < 630) {
       return {
         type: 'min_rest',
         personnel_id: personnel.personnel_id,
         date: shiftSlot.date,
-        message: `Only ${restHours}h rest after previous shift (minimum: ${MIN_REST_HOURS}h)`,
+        message: `DESCANSO ILEGAL: Solo ${Math.floor(restMinutes/60)}h ${restMinutes%60}min (Mínimo: 10h 30m).`,
         severity: 'error',
       };
     }
+
 
     // Also check if current shift ends too close to next shift start
     const currentEnd = new Date(`${shiftSlot.date}T${shiftSlot.shift_end}`);
@@ -200,34 +213,33 @@ export function checkBirthdayOff(
 export function checkMaxConsecutiveDays(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot,
-  allAssignments: Array<{ date: string }>
+  dateSet: Set<string>
 ): ConstraintViolation | null {
-  // EXEMPTION: Canes, 7x7 or Special Contracts
+  const startHourCons = parseInt(shiftSlot.shift_start.split(':')[0], 10);
+  const isAeroNight = norm(shiftSlot.position_name).includes('AEROPUERTO') && (startHourCons >= 20 || startHourCons <= 6);
+
+  // EXEMPTION: Canes, 7x7, Blue Express or Special Contracts
   if (personnel.has_special_contract || 
       (personnel.rotation_pattern || '').includes('7X7') || 
+      (personnel.rotation_pattern || '').includes('BLUE_') || 
+      isAeroNight ||
       norm(personnel.main_position_name).includes('CANES') ||
       norm(shiftSlot.position_name).includes('CANES')) {
     return null;
   }
 
   const MAX_CONSECUTIVE = 7;
-  const slotDate = parseISO(shiftSlot.date);
   
-  // Combine current assignments with the new one
-  const sortedDates = [...allAssignments.map(a => parseISO(a.date)), slotDate]
-    .sort((a, b) => a.getTime() - b.getTime())
-    .map(d => d.toISOString().split('T')[0]);
-
-  // Find the streak for the current slot
+  // Find the streak for the current slot using the provided Set
   let streak = 1;
-  const currentIdx = sortedDates.indexOf(shiftSlot.date);
+  const slotMillis = parseISO(shiftSlot.date).getTime();
 
   // Look back
-  let checkDate = new Date(slotDate);
+  let checkDt = slotMillis;
   while (true) {
-    checkDate.setDate(checkDate.getDate() - 1);
-    const dateStr = checkDate.toISOString().split('T')[0];
-    if (sortedDates.includes(dateStr)) {
+    checkDt -= 86400000; // 1 day in ms
+    const dateStr = new Date(checkDt).toISOString().split('T')[0];
+    if (dateSet.has(dateStr)) {
       streak++;
     } else {
       break;
@@ -235,11 +247,11 @@ export function checkMaxConsecutiveDays(
   }
 
   // Look forward
-  checkDate = new Date(slotDate);
+  checkDt = slotMillis;
   while (true) {
-    checkDate.setDate(checkDate.getDate() + 1);
-    const dateStr = checkDate.toISOString().split('T')[0];
-    if (sortedDates.includes(dateStr)) {
+    checkDt += 86400000;
+    const dateStr = new Date(checkDt).toISOString().split('T')[0];
+    if (dateSet.has(dateStr)) {
       streak++;
     } else {
       break;
@@ -259,7 +271,6 @@ export function checkMaxConsecutiveDays(
   return null;
 }
 
-const norm = (s: string = '') => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
 
 /**
  * Check shift preferences (warning-level, not blocking)
@@ -306,10 +317,6 @@ export function checkQualification(
   const perPosName = norm(personnel.main_position_name);
   const firstName = norm(personnel.first_name);
 
-  // 1. Direct match by ID
-  if (personnel.main_position === shiftSlot.position_id) return null;
-  if ((personnel.secondary_positions || []).includes(shiftSlot.position_id)) return null;
-
   // CRITICAL RULE: CANES stay in CANES. They don't cover other areas.
   const isCan = perPosName.includes('CAN');
   const isCanSlot = posName.includes('CAN');
@@ -324,7 +331,25 @@ export function checkQualification(
     };
   }
 
-  // Also prevent non-qualified people from covering specific high-security roles like CANES
+  // 1. Direct match by ID (Must be checked BEFORE the hard block at line 333)
+  if (personnel.main_position === shiftSlot.position_id) return null;
+  if ((personnel.secondary_positions || []).includes(shiftSlot.position_id)) return null;
+
+  // CRITICAL RULE: Blue Express Isolation
+  const isBluePerson = (personnel.rotation_pattern || '').toUpperCase().includes('BLUE_');
+  const isBlueSlot = norm(shiftSlot.area_name).includes('BLUE') || norm(shiftSlot.shift_name).includes('BLUE');
+  
+  if (isBluePerson && !isBlueSlot) {
+    return {
+      type: 'preference',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: `Personal asignado a bloque Blue Express no puede cubrir otras áreas`,
+      severity: 'error',
+    };
+  }
+
+  // also block non-Canes from Canes if not Mathias and no ID match was found
   if (isCanSlot && !isCan && !firstName.includes('MATHIAS')) {
      return {
       type: 'preference',
@@ -353,7 +378,6 @@ export function checkQualification(
   const canDrive = perPosName.includes('CONDUCTOR') || perPosName.includes('CAMION') || 
                    (personnel.secondary_positions || []).some(id => {
                      // We would ideally need the position name here, but we check IDs in step 1.
-                     // Since step 1 matches IDs, if we are here and it's a truck slot, we should be careful.
                      return false; // If not matched by ID in step 1, assume no.
                    });
 
@@ -452,10 +476,11 @@ export function checkRotationPattern(
   }
 
   // 1c. 4x4 (Aeropuerto) - MOVED UP TO ENSURE PRIORITY OVER MAIN_POSITION
-  if (pattern.includes('4X4')) {
+  const upPattern = pattern.toUpperCase();
+  if (upPattern.includes('4X4')) {
     let offset = 7; 
-    if (pattern.includes('-A')) offset = 7;
-    if (pattern.includes('-B')) offset = 3;
+    if (upPattern.includes('A') || upPattern.includes('-A')) offset = 7;
+    if (upPattern.includes('B') || upPattern.includes('-B')) offset = 3;
 
     const cyclePos = (daysSinceAnchor + offset) % 8; 
     
@@ -475,20 +500,16 @@ export function checkRotationPattern(
     const day = parseISO(shiftSlot.date).getDay();
     const isCanesSlot = (shiftSlot.position_name || '').toUpperCase().includes('CANES');
     
+    // NOTE: Relaxed to allow weekend work if needed, previously was a hard error.
     if ((day === 0 || day === 6) && !isCanesSlot) {
-      return {
-        type: 'rotation_violation',
-        personnel_id: personnel.personnel_id,
-        date: shiftSlot.date,
-        message: 'Personal L-V no trabaja fines de semana',
-        severity: 'error',
-      };
+      // Just a warning to prioritize Mon-Fri but allow coverage if no other option
+      return null; 
     }
   }
 
   // 1e. BLUE_DIA (Conductors 21-Day Cycle: A-B-C Rotation)
   if (pattern.includes('BLUE_DIA')) {
-    const anchorBlue = parseISO('2026-04-13T12:00:00Z'); // Lunes
+    const anchorBlue = parseISO('2026-04-27T12:00:00Z'); // Lunes 27 Abril (Roster Configurator Epoch)
     const daysSinceAnchorBlue = differenceInCalendarDays(date, anchorBlue);
     const dayOfCycle = ((daysSinceAnchorBlue % 21) + 21) % 21; // Handle negatives
     
@@ -498,56 +519,53 @@ export function checkRotationPattern(
     // Determine which block (A, B, C) applies to this week for this specific personnel
     let activeBlock = '';
     if (pattern.includes('-1')) {
-      // Juan: A -> C -> B
+      // Sec 1 starts with Block A, then C, then B
       if (weekIdx === 0) activeBlock = 'A';
       else if (weekIdx === 1) activeBlock = 'C';
       else activeBlock = 'B';
     } else if (pattern.includes('-2')) {
-      // Cristo: B -> A -> C
-      if (weekIdx === 0) activeBlock = 'B';
-      else if (weekIdx === 1) activeBlock = 'A';
-      else activeBlock = 'C';
-    } else if (pattern.includes('-3')) {
-      // Nica: C -> B -> A
+      // Sec 2 starts with Block C, then B, then A
       if (weekIdx === 0) activeBlock = 'C';
       else if (weekIdx === 1) activeBlock = 'B';
       else activeBlock = 'A';
+    } else if (pattern.includes('-3')) {
+      // Sec 3 starts with Block B, then A, then C
+      if (weekIdx === 0) activeBlock = 'B';
+      else if (weekIdx === 1) activeBlock = 'A';
+      else activeBlock = 'C';
     }
 
-    const sName = (shiftSlot.shift_name || '').toUpperCase();
-    
     if (activeBlock === 'A') {
-      // Block A: Mon-Fri PM 12. Sat-Sun OFF.
+      // Block A: Mon-Fri WORK (PM 12). Sat-Sun OFF.
       if (dayOfWeek >= 5) {
         return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (A): Descanso Fines de Semana', severity: 'error' };
       }
-      if (!sName.includes('PM 12')) {
-        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (A): Solo turno PM 12 permitido', severity: 'error' };
+      if (!shiftSlot.shift_start.includes('12:00') && !shiftSlot.shift_start.includes('13:30')) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (A): Requiere turno de Tarde (12:00)', severity: 'error' };
       }
     } else if (activeBlock === 'B') {
       // Block B: Mon-Tue AM 08. Wed-Thu OFF. Fri AM 00. Sat-Sun AM 08.
       if (dayOfWeek === 2 || dayOfWeek === 3) {
         return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (B): Descanso Miércoles-Jueves', severity: 'error' };
       }
-      const expectedShift = dayOfWeek === 4 ? 'AM 00' : 'AM 08';
-      if (!sName.includes(expectedShift)) {
-        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: `BLUE_DIA (B): Debe cumplir turno ${expectedShift}`, severity: 'error' };
+      const expectedStart = dayOfWeek === 4 ? '00:00' : '08:00';
+      if (!shiftSlot.shift_start.includes(expectedStart)) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: `BLUE_DIA (B): Requiere turno de ${expectedStart}`, severity: 'error' };
       }
     } else if (activeBlock === 'C') {
-      // Block C: Mon-Tue OFF. Wed-Thu AM 08. Fri AM 08. Sat-Sun AM 08.
+      // Block C: Mon-Tue OFF. Wed-Sun AM 08.
       if (dayOfWeek === 0 || dayOfWeek === 1) {
         return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (C): Descanso Lunes-Martes', severity: 'error' };
       }
-      const expectedShift = 'AM 08'; // Block C is always AM 08 when working
-      if (!sName.includes(expectedShift)) {
-        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: `BLUE_DIA (C): Debe cumplir turno ${expectedShift}`, severity: 'error' };
+      if (!shiftSlot.shift_start.includes('08:00')) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (C): Requiere turno de Mañana (08:00)', severity: 'error' };
       }
     }
   }
 
   // 1f. BLUE_NOCHE (Night Conductors 21-Day Cycle: AM 00 Focus)
   if (pattern.includes('BLUE_NOCHE')) {
-    const anchorBlue = parseISO('2026-04-13T12:00:00Z');
+    const anchorBlue = parseISO('2026-04-27T12:00:00Z'); // Lunes 27 Abril (Roster Configurator Epoch)
     const daysSinceAnchorBlue = differenceInCalendarDays(date, anchorBlue);
     const dayOfCycle = ((daysSinceAnchorBlue % 21) + 21) % 21;
     
@@ -556,20 +574,17 @@ export function checkRotationPattern(
     
     let activeBlock = '';
     if (pattern.includes('-1')) {
-      // Jorge: A -> C -> B
       if (weekIdx === 0) activeBlock = 'A';
       else if (weekIdx === 1) activeBlock = 'C';
       else activeBlock = 'B';
     } else if (pattern.includes('-2')) {
-      // Branco: B -> A -> C
-      if (weekIdx === 0) activeBlock = 'B';
-      else if (weekIdx === 1) activeBlock = 'A';
-      else activeBlock = 'C';
-    } else if (pattern.includes('-3')) {
-      // Esteban: C -> B -> A
       if (weekIdx === 0) activeBlock = 'C';
       else if (weekIdx === 1) activeBlock = 'B';
       else activeBlock = 'A';
+    } else if (pattern.includes('-3')) {
+      if (weekIdx === 0) activeBlock = 'B';
+      else if (weekIdx === 1) activeBlock = 'A';
+      else activeBlock = 'C';
     }
 
     const sName = (shiftSlot.shift_name || '').toUpperCase();
@@ -580,33 +595,30 @@ export function checkRotationPattern(
       if (dayOfWeek >= 5) {
         return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (A): Descanso Fines de Semana', severity: 'error' };
       }
-      if (!sName.includes(expectedShift)) {
-        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (A): Debe cumplir turno AM 00', severity: 'error' };
+      if (!shiftSlot.shift_start.includes('00:00')) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE: Solo turnos de Noche (00:00)', severity: 'error' };
       }
     } else if (activeBlock === 'B') {
-      // Block B: Mon-Tue working. Wed-Thu OFF. Fri-Sun working.
-      if (dayOfWeek === 2 || dayOfWeek === 3) {
-        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (B): Descanso Miércoles-Jueves', severity: 'error' };
+      // Block B (Noche): Mon-Tue working. Wed-Fri OFF. Sat-Sun working.
+      if (dayOfWeek >= 2 && dayOfWeek <= 4) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (B): Descanso Miércoles a Viernes', severity: 'error' };
       }
-      if (!sName.includes(expectedShift)) {
-        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (B): Debe cumplir turno AM 00', severity: 'error' };
+      if (!shiftSlot.shift_start.includes('00:00')) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE: Solo turnos de Noche (00:00)', severity: 'error' };
       }
     } else if (activeBlock === 'C') {
       // Block C: Mon-Tue OFF. Wed-Sun working.
       if (dayOfWeek === 0 || dayOfWeek === 1) {
         return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (C): Descanso Lunes-Martes', severity: 'error' };
       }
-      if (!sName.includes(expectedShift)) {
-        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE (C): Debe cumplir turno AM 00', severity: 'error' };
+      if (!shiftSlot.shift_start.includes('00:00')) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_NOCHE: Solo turnos de Noche (00:00)', severity: 'error' };
       }
     }
   }
 
   // --- POSITION & IDENTITY CHECKS ---
   
-  // RE-ENABLE MAIN POSITION EARLY EXIT ONLY AFTER ROTATION PATTERNS ARE RESPECTED
-  if (personnel.main_position === shiftSlot.position_id) return null;
-
   // 2. Hierarchical Blocking
   const pPos = (personnel.main_position_name || '').toUpperCase();
   const sPos = (shiftSlot.position_name || '').toUpperCase();
@@ -624,10 +636,14 @@ export function checkRotationPattern(
   }
 
   // 3. NOCHE
-  if (pattern.includes('NOCHE')) {
+  if (upPattern.includes('NOCHE')) {
     const startHour = parseInt(shiftSlot.shift_start.split(':')[0], 10);
-    const isNightShift = startHour >= 20 || startHour < 6;
+    // Expand night window: 20:00 to 06:59
+    const isNightShift = startHour >= 20 || startHour <= 6;
     if (!isNightShift) {
+      if (personnel.first_name.toUpperCase().includes('MARCELO') || personnel.first_name.toUpperCase().includes('JAVIER')) {
+         console.log(`[DEBUG] Rej: ${personnel.first_name} NOCHE vs ${shiftSlot.shift_start}`);
+      }
        return {
         type: 'rotation_violation',
         personnel_id: personnel.personnel_id,
@@ -637,6 +653,21 @@ export function checkRotationPattern(
       };
     }
   }
+
+  // 3b. BLOQUEO ESTRICTO DE NS 22 PARA PERSONAL ESTÁNDAR (Solo Operador Aeropuerto)
+  if (sPos.includes('OPERADOR AEROPUERTO') && !upPattern.includes('4X4') && !upPattern.includes('7X7') && !personnel.prefers_night) {
+    const isNS22 = (shiftSlot.shift_name || '').toUpperCase().includes('NS 22') || shiftSlot.shift_start.includes('22:00');
+    if (isNS22) {
+      return {
+        type: 'rotation_violation',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: 'Turno NS 22 reservado exclusivamente para personal 4x4 o con preferencia de noche',
+        severity: 'error',
+      };
+    }
+  }
+
 
   // 4. TURNO FIJO
   if (personnel.fixed_shift_id && personnel.fixed_shift_id !== shiftSlot.shift_id) {
@@ -697,13 +728,17 @@ function getSundaysInMonth(monthKey: string, mStart: Date, mEnd: Date): string[]
 export function checkSundaysOff(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot,
-  allAssignments: Array<{ date: string }>
+  dateSet: Set<string>
 ): ConstraintViolation | null {
+  const startHourSun = parseInt(shiftSlot.shift_start.split(':')[0], 10);
+  const isAeroNight = norm(shiftSlot.position_name).includes('AEROPUERTO') && (startHourSun >= 20 || startHourSun <= 6);
+
   // EXEMPTION: Personnel with special contracts, 7x7 or Canes
   if (personnel.has_special_contract || 
       (personnel.rotation_pattern || '').includes('7X7') || 
       (personnel.rotation_pattern || '').includes('4X4') || 
       (personnel.rotation_pattern || '').includes('BLUE_') || 
+      isAeroNight ||
       norm(personnel.main_position_name).includes('CANES')) {
     return null;
   }
@@ -720,7 +755,7 @@ export function checkSundaysOff(
   
   let assignedSundays = 0;
   for (const sunDate of sundaysInMonth) {
-    if (personnel.assigned_dates.has(sunDate)) {
+    if (dateSet.has(sunDate)) {
       assignedSundays++;
     }
   }
@@ -745,14 +780,19 @@ export function checkSundaysOff(
 export function validateAllConstraints(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot,
-  currentAssignments: Array<{ date: string; duration_hours: number; shift_start: string; shift_end: string }>
+  currentAssignments: Array<{ date: string; duration_hours: number; shift_start: string; shift_end: string }>,
+  preCalculatedDateSet?: Set<string>
 ): ConstraintViolation[] {
   const violations: ConstraintViolation[] = [];
+  
+  // Performance optimization: Pre-calculate date set for all children
+  const dateSet = preCalculatedDateSet || new Set(currentAssignments.map(a => a.date));
+  if (!preCalculatedDateSet) dateSet.add(shiftSlot.date);
 
   const maxHours = checkMaxHoursPerWeek(personnel, shiftSlot, currentAssignments);
   if (maxHours) violations.push(maxHours);
 
-  const daysOff = checkMinDaysOff(personnel, shiftSlot, currentAssignments);
+  const daysOff = checkMinDaysOff(personnel, shiftSlot, dateSet);
   if (daysOff) violations.push(daysOff);
 
   const rest = checkMinRestBetweenShifts(personnel, shiftSlot, currentAssignments);
@@ -764,7 +804,7 @@ export function validateAllConstraints(
   const prefs = checkPreferences(personnel, shiftSlot);
   if (prefs) violations.push(prefs);
 
-  const consecutive = checkMaxConsecutiveDays(personnel, shiftSlot, currentAssignments);
+  const consecutive = checkMaxConsecutiveDays(personnel, shiftSlot, dateSet);
   if (consecutive) violations.push(consecutive);
 
   const qualification = checkQualification(personnel, shiftSlot);
@@ -773,10 +813,76 @@ export function validateAllConstraints(
   const rotation = checkRotationPattern(personnel, shiftSlot);
   if (rotation) violations.push(rotation);
 
-  const sundayRule = checkSundaysOff(personnel, shiftSlot, currentAssignments);
+  const nightAuto = checkNightRotationAutomatic(personnel, shiftSlot, dateSet);
+  if (nightAuto) violations.push(nightAuto);
+
+  const sundayRule = checkSundaysOff(personnel, shiftSlot, dateSet);
   if (sundayRule) violations.push(sundayRule);
 
   return violations;
+}
+
+/**
+ * AUTO-DETECTION of 4x4 for Night Workers
+ * If someone is doing Night shifts in Airport, they MUST follow 4x4 
+ * (Max 4 consecutive, Min 3 rest after streak)
+ */
+function checkNightRotationAutomatic(
+  personnel: PersonnelAvailability,
+  shiftSlot: ShiftSlot,
+  dateSet: Set<string>
+): ConstraintViolation | null {
+  const startHour = parseInt(shiftSlot.shift_start.split(':')[0], 10);
+  const isNight = startHour >= 20 || startHour <= 6;
+  const isAirport = (shiftSlot.position_name || personnel.main_position_name || '').toUpperCase().includes('AEROPUERTO');
+
+  if (!isNight || !isAirport) return null;
+
+  // LÓGICA DE ESPEJO DINÁMICO (Agnóstica a nombres y fechas fijas)
+  const slotDate = parseISO(shiftSlot.date);
+  const mirrorDateStr = format(addDays(slotDate, -4), 'yyyy-MM-dd');
+
+  // 1. Si hay rastro hace 4 días, el espejo manda
+  if (dateSet.has(mirrorDateStr)) {
+    const d1 = format(slotDate, 'dd');
+    const d2 = format(addDays(slotDate, -4), 'dd');
+    return {
+      type: 'rotation_violation',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: `REGLA 4x4: ${d1} - 4 = ${d2}. El día ${d2} trabajó, por lo tanto el ${d1} debe descansar.`,
+      severity: 'error',
+    };
+  }
+
+  // 2. Si no hay rastro (inicio de historial), usamos el offset para arrancar el ciclo
+  // pero el offset se calcula DINÁMICAMENTE si es posible
+  const anchorDate = parseISO('2026-04-01T12:00:00Z');
+  const diff = differenceInCalendarDays(slotDate, anchorDate);
+  const offset = personnel.is_turn_b ? 2 : 6; 
+  const cyclePos = (diff + offset) % 8;
+
+  // Solo aplicamos la matemática de anclaje si NO tenemos datos en el historial cercano
+  // Esto permite que si alguien se enferma y cambia su ciclo, la IA se adapte al nuevo rastro
+  let hasRecentHistory = false;
+  for (let i = 1; i <= 8; i++) {
+    if (dateSet.has(format(addDays(slotDate, -i), 'yyyy-MM-dd'))) {
+      hasRecentHistory = true;
+      break;
+    }
+  }
+
+  if (!hasRecentHistory && cyclePos >= 4) {
+    return {
+      type: 'rotation_violation',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: `INICIO DE CICLO (Turno ${personnel.is_turn_b ? 'B' : 'A'})`,
+      severity: 'error',
+    };
+  }
+
+  return null;
 }
 
 /**

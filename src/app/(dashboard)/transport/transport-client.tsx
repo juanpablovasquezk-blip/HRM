@@ -1,0 +1,429 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { format, parseISO, addDays } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { 
+  ChevronLeft, 
+  ChevronRight, 
+  Copy, 
+  Check, 
+  Clock, 
+  MapPin, 
+  User, 
+  Hash, 
+  ThumbsUp, 
+  ThumbsDown,
+  Car,
+  Info
+} from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+import type { TransportRequestWithDetails, Company, TransportType, TransportStatus } from '@/types/database';
+import { updateTransportRequest, generateTransportRequests, clearTransportRequests, sendTransportNotification } from './actions';
+import { Button } from '@/components/ui/button';
+import { Loader2, RefreshCw, Trash2, Send } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+
+interface RequestCardProps {
+  req: TransportRequestWithDetails;
+  onUpdate: (id: string, updates: any) => Promise<void>;
+  onCopyToClipboard: (text: string, id: string) => void;
+  copiedId: string | null;
+}
+
+const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: RequestCardProps) => {
+  const [localData, setLocalData] = useState({
+    reservation_number: req.reservation_number || '',
+    pickup_time: req.pickup_time ? req.pickup_time.substring(0, 5) : '',
+    observations: req.observations || ''
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const [isNotifying, setIsNotifying] = useState(false);
+
+  // Sync local data if req changes (e.g. from parent state update)
+  useEffect(() => {
+    setLocalData({
+      reservation_number: req.reservation_number || '',
+      pickup_time: req.pickup_time ? req.pickup_time.substring(0, 5) : '',
+      observations: req.observations || ''
+    });
+  }, [req.reservation_number, req.pickup_time, req.observations]);
+
+  const hasChanges = 
+    localData.reservation_number !== (req.reservation_number || '') ||
+    localData.pickup_time !== (req.pickup_time ? req.pickup_time.substring(0, 5) : '') ||
+    localData.observations !== (req.observations || '');
+
+  const saveChanges = async () => {
+    setIsSaving(true);
+    await onUpdate(req.id, localData);
+    setIsSaving(false);
+  };
+
+  const handleNotify = async () => {
+    setIsNotifying(true);
+    const res = await sendTransportNotification(req.id);
+    if (res.success) {
+      toast.success('WhatsApp enviado correctamente');
+    } else {
+      toast.error('Error al enviar: ' + res.error);
+    }
+    setIsNotifying(false);
+  };
+
+  const isDataComplete = 
+    req.reservation_number && 
+    req.pickup_time && 
+    req.pickup_address && 
+    req.destination_address;
+
+  const showNotifyButton = req.transport_type === 'REQUERIDO' || req.transport_type === 'EMPRESA';
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-all">
+      {/* Header */}
+      <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+        <div className="flex items-center gap-2">
+          <div className={`p-1.5 rounded-lg ${req.type === 'ENTRADA' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'}`}>
+            <Clock className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-900 uppercase text-sm">
+              {req.personnel?.first_name} {req.personnel?.last_name_father}
+            </h3>
+            <p className="text-[10px] text-slate-500 font-mono uppercase">
+              Turno: {req.assignment?.shift?.start_time.substring(0,5)} - {req.assignment?.shift?.end_time.substring(0,5)} | {req.assignment?.area?.name}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <select 
+            value={req.transport_type}
+            onChange={(e) => onUpdate(req.id, { transport_type: e.target.value as TransportType })}
+            className="text-xs font-bold border-slate-200 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            <option value="PENDIENTE">PENDIENTE</option>
+            <option value="REQUERIDO">REQUIERE TRANSPORTE</option>
+            <option value="PROPIO">MOVILIZACIÓN PROPIA</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Addresses */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+              <MapPin className="w-3 h-3" /> Origen
+            </span>
+            <div className="flex items-start gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100 group">
+              <p className="text-xs text-slate-700 flex-1 leading-relaxed">{req.pickup_address}</p>
+              <button 
+                onClick={() => onCopyToClipboard(req.pickup_address || '', req.id + '-origin')}
+                className="text-slate-400 hover:text-indigo-600 p-1"
+              >
+                {copiedId === req.id + '-origin' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+              <MapPin className="w-3 h-3" /> Destino
+            </span>
+            <div className="flex items-start gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100 group">
+              <p className="text-xs text-slate-700 flex-1 leading-relaxed">{req.destination_address}</p>
+              <button 
+                onClick={() => onCopyToClipboard(req.destination_address || '', req.id + '-dest')}
+                className="text-slate-400 hover:text-indigo-600 p-1"
+              >
+                {copiedId === req.id + '-dest' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Admin Inputs */}
+        {(req.transport_type === 'REQUERIDO' || req.transport_type === 'EMPRESA') && (
+          <div className="bg-indigo-50/50 p-3 rounded-lg border border-indigo-100 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-indigo-700 uppercase flex items-center gap-1">
+                  <Hash className="w-3 h-3" /> Nro Reserva
+                </label>
+                <input 
+                  type="text" 
+                  value={localData.reservation_number}
+                  onChange={(e) => setLocalData({ ...localData, reservation_number: e.target.value })}
+                  className="w-full text-xs p-2 rounded border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500"
+                  placeholder="Ingresar reserva..."
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-indigo-700 uppercase flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Hora Recogida
+                </label>
+                <input 
+                  type="time" 
+                  value={localData.pickup_time}
+                  onChange={(e) => setLocalData({ ...localData, pickup_time: e.target.value })}
+                  className="w-full text-xs p-2 rounded border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 gap-2">
+              {hasChanges ? (
+                <button 
+                  onClick={saveChanges}
+                  disabled={isSaving}
+                  className="w-full py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 active:scale-95 disabled:opacity-50"
+                >
+                  {isSaving ? 'Guardando...' : 'Guardar Cambios de Reserva'}
+                </button>
+              ) : (
+                <button 
+                  onClick={handleNotify}
+                  disabled={!isDataComplete || isNotifying}
+                  className={`w-full py-2 flex items-center justify-center gap-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 disabled:opacity-30 disabled:grayscale ${isDataComplete ? 'bg-emerald-600 text-white shadow-emerald-200 hover:bg-emerald-700' : 'bg-slate-200 text-slate-500 shadow-none cursor-not-allowed'}`}
+                >
+                  {isNotifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                  {isDataComplete ? 'Enviar Notificación WhatsApp' : 'Datos Incompletos para Notificar'}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Observations & Confirmation */}
+        <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-100">
+           <div className="flex-1 flex items-center gap-2">
+              <Info className="w-3.5 h-3.5 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Observaciones..."
+                value={localData.observations}
+                onChange={(e) => setLocalData({ ...localData, observations: e.target.value })}
+                onBlur={() => hasChanges && !isSaving && saveChanges()}
+                className="flex-1 text-[11px] border-none focus:ring-0 p-0 text-slate-600 placeholder:text-slate-300"
+              />
+           </div>
+           
+           <div className="flex items-center gap-2">
+              <button 
+                onClick={() => onUpdate(req.id, { status: 'CONFORME' })}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition-colors text-[10px] font-bold uppercase"
+              >
+                <ThumbsUp className="w-3.5 h-3.5" /> Conforme
+              </button>
+              <button 
+                onClick={() => onUpdate(req.id, { status: 'NO_CONFORME' })}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors text-[10px] font-bold uppercase"
+              >
+                <ThumbsDown className="w-3.5 h-3.5" /> No Conforme
+              </button>
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+RequestCard.displayName = 'RequestCard';
+
+interface Props {
+  initialRequests: TransportRequestWithDetails[];
+  selectedDate: string;
+  companies: Company[];
+}
+
+export default function TransportClient({
+  initialRequests,
+  selectedDate,
+  companies
+}: Props) {
+  const router = useRouter();
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [requests, setRequests] = useState<TransportRequestWithDetails[]>(initialRequests);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Persistence: Redirect if no date in URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get('date')) {
+      const lastDate = localStorage.getItem('hrm_last_transport_date');
+      if (lastDate && lastDate !== selectedDate) {
+        router.push(`/transport?date=${lastDate}`);
+      }
+    }
+  }, []);
+
+  // Save date on change
+  useEffect(() => {
+    if (selectedDate) {
+      localStorage.setItem('hrm_last_transport_date', selectedDate);
+    }
+  }, [selectedDate]);
+
+  useEffect(() => {
+    setRequests(initialRequests);
+  }, [initialRequests]);
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    const res = await generateTransportRequests(selectedDate);
+    if (res.success) {
+      toast.success('Transporte sincronizado');
+      router.refresh();
+    } else {
+      toast.error('Error al sincronizar');
+    }
+    setIsSyncing(false);
+  };
+
+  const handleClear = async () => {
+    if (confirm('¿Estás seguro de ELIMINAR TODAS las solicitudes de transporte de este día?')) {
+      const res = await clearTransportRequests(selectedDate);
+      if (res.success) {
+        toast.success('Transporte limpiado');
+        router.refresh();
+      } else {
+        toast.error('Error al limpiar');
+      }
+    }
+  };
+
+  const handleDateChange = (newDate: string) => {
+    router.push(`/transport?date=${newDate}`);
+  };
+
+  const handleUpdate = async (id: string, updates: any) => {
+    // Optimistic update
+    setRequests(current => 
+      current.map(r => r.id === id ? { ...r, ...updates } : r)
+    );
+
+    const res = await updateTransportRequest(id, updates);
+    if (res.success) {
+      toast.success('Actualizado');
+    } else {
+      toast.error('Error: ' + res.error);
+      setRequests(initialRequests);
+    }
+  };
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+    toast.success('Dirección copiada');
+  };
+
+  const activeRequests = requests.filter(r => 
+    r.status === 'ABIERTO' && r.transport_type !== 'PROPIO'
+  );
+
+  const entries = activeRequests.filter(r => r.type === 'ENTRADA');
+  const exits = activeRequests.filter(r => r.type === 'SALIDA');
+
+  return (
+    <div className="space-y-6 h-full flex flex-col">
+      {/* Date Toolbar - Sticky at the very top */}
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-xl shadow-md border border-slate-200 sticky top-0 z-40">
+        <div className="flex items-center gap-3">
+          <button onClick={() => handleDateChange(format(addDays(parseISO(selectedDate), -1), 'yyyy-MM-dd'))} className="p-2 hover:bg-slate-100 rounded-lg transition-colors"><ChevronLeft className="w-5 h-5" /></button>
+          <input 
+            type="date" 
+            value={selectedDate} 
+            onChange={(e) => handleDateChange(e.target.value)}
+            className="px-4 py-2 bg-white rounded-lg border border-slate-200 font-bold text-slate-800 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all cursor-pointer"
+          />
+          <button onClick={() => handleDateChange(format(addDays(parseISO(selectedDate), 1), 'yyyy-MM-dd'))} className="p-2 hover:bg-slate-100 rounded-lg transition-colors"><ChevronRight className="w-5 h-5" /></button>
+          
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleSync} 
+            disabled={isSyncing}
+            className="ml-4 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+          >
+            {isSyncing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+            Sincronizar Planificación
+          </Button>
+
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleClear} 
+            className="text-red-400 hover:text-red-600 hover:bg-red-50"
+            title="Borrar todos los transportes de este día"
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Limpiar Todo
+          </Button>
+        </div>
+        
+        <div className="flex items-center gap-4 text-xs">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full font-bold uppercase">
+             {entries.length} Entradas Pendientes
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-700 rounded-full font-bold uppercase">
+             {exits.length} Salidas Pendientes
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1 min-h-0 overflow-hidden pb-4">
+        {/* ENTRADAS */}
+        <div className="flex flex-col min-h-0 bg-slate-50/50 rounded-2xl border border-slate-200 overflow-hidden shadow-inner">
+          <div className="flex items-center gap-2 border-b border-slate-200 p-4 bg-white sticky top-0 z-20 shadow-sm">
+             <div className="w-1.5 h-6 bg-blue-600 rounded-full" />
+             <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Entradas (A la Empresa)</h2>
+             <Badge variant="outline" className="ml-auto bg-blue-50 text-blue-700 border-blue-100">{entries.length}</Badge>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+            {entries.length > 0 ? entries.map(req => (
+              <RequestCard 
+                key={req.id} 
+                req={req} 
+                onUpdate={handleUpdate} 
+                onCopyToClipboard={copyToClipboard}
+                copiedId={copiedId}
+              />
+            )) : (
+              <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 bg-white/50">
+                <Clock className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                No hay ingresos para esta fecha
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* SALIDAS */}
+        <div className="flex flex-col min-h-0 bg-slate-50/50 rounded-2xl border border-slate-200 overflow-hidden shadow-inner">
+          <div className="flex items-center gap-2 border-b border-slate-200 p-4 bg-white sticky top-0 z-20 shadow-sm">
+             <div className="w-1.5 h-6 bg-orange-600 rounded-full" />
+             <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Salidas (A Domicilio)</h2>
+             <Badge variant="outline" className="ml-auto bg-orange-50 text-orange-700 border-orange-100">{exits.length}</Badge>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+            {exits.length > 0 ? exits.map(req => (
+              <RequestCard 
+                key={req.id} 
+                req={req} 
+                onUpdate={handleUpdate} 
+                onCopyToClipboard={copyToClipboard}
+                copiedId={copiedId}
+              />
+            )) : (
+              <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 bg-white/50">
+                <Clock className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                No hay salidas para esta fecha
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

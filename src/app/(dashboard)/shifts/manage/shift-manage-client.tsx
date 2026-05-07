@@ -27,6 +27,7 @@ interface ShiftManageClientProps {
     end_time: string;
     duration_hours: number;
     requires_transport: boolean;
+    geov?: number | null;
     company_id?: string;
   }>;
   companies: Array<{ id: string; name: string }>;
@@ -68,6 +69,7 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
     (form.elements.namedItem('name') as HTMLInputElement).value = shift.name;
     (form.elements.namedItem('start_time') as HTMLInputElement).value = shift.start_time;
     (form.elements.namedItem('end_time') as HTMLInputElement).value = shift.end_time;
+    (form.elements.namedItem('geov') as HTMLInputElement).value = shift.geov || '';
     (form.elements.namedItem('company_id') as HTMLSelectElement).value = shift.company_id || companies[0]?.id;
     
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -133,10 +135,14 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
               <Input id="shift-end" name="end_time" type="time" required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="shift-company">Compañía</Label>
-              <select id="shift-company" name="company_id" required
+              <Label htmlFor="shift-geov">GeoV</Label>
+              <Input id="shift-geov" name="geov" type="number" step="0.01" placeholder="0.00" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="shift-company">Compañía (Opcional)</Label>
+              <select id="shift-company" name="company_id"
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                <option value="">Seleccionar</option>
+                <option value="">Cualquier Compañía</option>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
@@ -162,7 +168,9 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
                 <TableHead>Turno</TableHead>
                 <TableHead>Entrada</TableHead>
                 <TableHead>Salida</TableHead>
+                <TableHead>Compañía</TableHead>
                 <TableHead>Duración</TableHead>
+                <TableHead>GeoV</TableHead>
                 <TableHead>Transporte</TableHead>
                 <TableHead className="w-[100px]"></TableHead>
               </TableRow>
@@ -173,7 +181,13 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
                   <TableCell className="font-medium">{shift.name}</TableCell>
                   <TableCell className="font-mono text-sm">{shift.start_time?.slice(0, 5)}</TableCell>
                   <TableCell className="font-mono text-sm">{shift.end_time?.slice(0, 5)}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-[10px] font-medium uppercase">
+                      {companies.find(c => c.id === shift.company_id)?.name || 'Cualquier Compañía'}
+                    </Badge>
+                  </TableCell>
                   <TableCell><Badge variant="secondary">{shift.duration_hours}h</Badge></TableCell>
+                  <TableCell className="font-bold text-indigo-600">{shift.geov ?? '-'}</TableCell>
                   <TableCell>
                     {shift.requires_transport
                       ? <Badge className="bg-blue-100 text-orange-700 dark:bg-blue-900/30 dark:text-blue-400">Sí</Badge>

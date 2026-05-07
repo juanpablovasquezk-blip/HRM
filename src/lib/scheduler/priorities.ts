@@ -23,10 +23,11 @@ export function getSlotPriority(
 
   // 3. AIRPORT OPERATORS (especially 04:00, 13:30, 22:00)
   if (pos.includes('AEROPUERTO')) {
-    if (shft.includes('04')) return 94; // Critical
-    if (shft.includes('22')) return 90; // High
-    if (shft.includes('13:30')) return 85; // High
-    if (shft.includes('07')) return 40; // Low (eventual)
+    if (shft.includes('04')) return 100;
+    if (shft.includes('05')) return 95;
+    if (shft.includes('07')) return 90;
+    if (shft.includes('22')) return 85;
+    if (shft.includes('13:30')) return 80;
     return 70;
   }
 
@@ -60,6 +61,9 @@ export function getSlotPriority(
 export const REINFORCEMENT_CONFIG: Record<string, { shift_start: string }> = {
   'SUPERVISOR': { shift_start: '07:00' },
   'SUP': { shift_start: '07:00' },
-  'OPERADOR FEDEX': { shift_start: '05:00' },
+  'OPERADOR FEDEX': { shift_start: '04:00' },
   'OPERADOR DHL': { shift_start: '05:00' },
+  'AEROPUERTO': { shift_start: '07:00' },
+  'GRUA': { shift_start: '07:00' },
+  'HORQUILLA': { shift_start: '07:00' },
 };

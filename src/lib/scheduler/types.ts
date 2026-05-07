@@ -22,7 +22,7 @@ export interface CandidateScore {
 }
 
 export interface ConstraintViolation {
-  type: 'max_hours' | 'min_days_off' | 'min_rest' | 'birthday' | 'preference' | 'rotation_violation';
+  type: 'max_hours' | 'min_days_off' | 'min_rest' | 'birthday' | 'preference' | 'rotation_violation' | 'fatigue' | 'consecutive_days';
   personnel_id: string;
   date: string;
   message: string;
@@ -34,6 +34,8 @@ export interface ScheduleResult {
   violations?: ConstraintViolation[];
   coverage: number;
   count: number;
+  diagnosticLogs?: any[];
+  error?: string;
   stats?: {
     total_slots: number;
     filled_slots: number;
@@ -53,6 +55,11 @@ export interface AssignmentCandidate {
   is_locked: boolean;
   is_manual: boolean;
   frozen_by_rule: boolean;
+  is_extra?: boolean;
+  is_confirmed?: boolean;
+  is_validated?: boolean;
+  is_published?: boolean;
+  original_shift_id?: string | null;
 }
 
 export interface PersonnelAvailability {
@@ -69,12 +76,15 @@ export interface PersonnelAvailability {
   fixed_shift_name?: string;
   rotation_pattern: string | null;
   has_special_contract: boolean;
+  hire_date: string | null;
+  termination_date: string | null;
   // Computed during scheduling
   weekly_hours: number;
   days_off_count: number;
   last_shift_end: Date | null;
   assigned_dates: Set<string>;
   leave_dates: Set<string>;
+  area_id: string;
   is_turn_b: boolean;
 }
 
@@ -89,6 +99,7 @@ export interface ShiftSlot {
   shift_duration_hours: number;
   required_count: number;
   filled_count: number;
+  is_extra?: boolean;
   position_name?: string;
   area_name?: string;
   shift_name?: string;

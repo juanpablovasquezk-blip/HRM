@@ -12,13 +12,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Plus, Users as UsersIcon, FileSpreadsheet, Edit } from 'lucide-react';
+import { Plus, Users as UsersIcon, FileSpreadsheet, Edit, AlertTriangle, CheckCircle2, Clock, ClipboardCheck } from 'lucide-react';
 import { PersonnelFilters } from './personnel-filters';
+import { differenceInDays, parseISO } from 'date-fns';
 
 export default async function PersonnelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string }>;
+  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'all' }>;
 }) {
   const params = await searchParams;
   const supabase = await createClient();
@@ -42,9 +43,15 @@ export default async function PersonnelPage({
 
   let query = supabase
     .from('personnel')
-    .select('*, company:companies(name)')
-    .eq('is_active', true)
+    .select('*, company:companies(name), documents(id, definition_id, expiration_date, status)')
     .order('last_name_father', { ascending: true });
+
+  const status = params.status || 'active';
+  if (status === 'active') {
+    query = query.eq('is_active', true);
+  } else if (status === 'inactive') {
+    query = query.eq('is_active', false);
+  }
 
   if (params.company_id) {
     query = query.eq('company_id', params.company_id);
@@ -60,11 +67,12 @@ export default async function PersonnelPage({
     );
   }
 
-  const [{ data: personnel }, { data: positions }, { data: companies }, { data: shifts }] = await Promise.all([
+  const [{ data: personnel }, { data: positions }, { data: companies }, { data: shifts }, { data: definitions }] = await Promise.all([
     query,
     supabase.from('positions').select('id, name'),
     supabase.from('companies').select('id, name').order('name'),
-    supabase.from('shifts').select('id, name')
+    supabase.from('shifts').select('id, name'),
+    supabase.from('document_definitions').select('*').eq('is_active', true)
   ]);
 
   const positionMap = Object.fromEntries((positions || []).map(p => [p.id, p.name]));
@@ -77,7 +85,7 @@ export default async function PersonnelPage({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Personal</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Gestiona tu fuerza laboral — {personnel?.length ?? 0} trabajadores activos
+            Gestiona tu fuerza laboral — {personnel?.length ?? 0} trabajadores {status === 'active' ? 'activos' : status === 'inactive' ? 'de baja' : 'registrados'}
           </p>
         </div>
         <div className="flex gap-2">
@@ -103,6 +111,7 @@ export default async function PersonnelPage({
             initialSearch={params.search} 
             initialCompanyId={params.company_id} 
             initialPositionId={params.position_id}
+            initialStatus={status}
             companies={companies || []} 
             positions={positions || []}
           />
@@ -137,16 +146,61 @@ export default async function PersonnelPage({
                       company: { name: string } | null;
                       rotation_pattern: string | null;
                       fixed_shift_id: string | null;
+                      documents: Array<{ definition_id: string; expiration_date: string | null; status: string }>;
                     };
+
+                    // Compliance Calculation
+                    const personDefs = (definitions || []).filter(def => 
+                      !def.applicable_positions || def.applicable_positions.length === 0 || 
+                      def.applicable_positions.includes(person.main_position)
+                    );
+                    const mandatoryIds = personDefs.filter(d => d.is_mandatory).map(d => d.id);
+                    const uploadedIds = person.documents.map(d => d.definition_id);
+                    
+                    const isMissingMandatory = mandatoryIds.some(id => !uploadedIds.includes(id));
+                    const hasExpired = person.documents.some(d => d.expiration_date && differenceInDays(parseISO(d.expiration_date), new Date()) < 0);
+                    const isExpiringSoon = person.documents.some(d => d.expiration_date && differenceInDays(parseISO(d.expiration_date), new Date()) < 30 && differenceInDays(parseISO(d.expiration_date), new Date()) >= 0);
+                    const hasPendingApproval = person.documents.some(d => d.status === 'PENDING');
+
+                    let complianceStatus: 'critical' | 'warning' | 'review' | 'ok' = 'ok';
+                    if (isMissingMandatory || hasExpired) complianceStatus = 'critical';
+                    else if (hasPendingApproval) complianceStatus = 'review';
+                    else if (isExpiringSoon) complianceStatus = 'warning';
+
                     return (
                     <TableRow key={person.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                       <TableCell>
-                        <Link
-                          href={`/personnel/${person.id}`}
-                          className="font-medium text-orange-600 hover:text-orange-700 dark:text-blue-400 hover:underline"
-                        >
-                          {person.first_name} {person.last_name_father} {person.last_name_mother}
-                        </Link>
+                        <div className="flex flex-col gap-0.5">
+                          <Link
+                            href={`/personnel/${person.id}`}
+                            className="font-medium text-orange-600 hover:text-orange-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1.5"
+                          >
+                            {person.first_name} {person.last_name_father} {person.last_name_mother}
+                            {complianceStatus === 'critical' && (
+                              <AlertTriangle className="h-3.5 w-3.5 text-red-500 fill-red-50" />
+                            )}
+                            {complianceStatus === 'review' && (
+                              <ClipboardCheck className="h-3.5 w-3.5 text-indigo-500" />
+                            )}
+                            {complianceStatus === 'warning' && (
+                              <Clock className="h-3.5 w-3.5 text-amber-500" />
+                            )}
+                            {complianceStatus === 'ok' && uploadedIds.length > 0 && (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                            )}
+                          </Link>
+                          <div className="flex gap-1">
+                            {complianceStatus === 'critical' && (
+                              <span className="text-[9px] font-bold text-red-600 uppercase tracking-tight">Acción Requerida</span>
+                            )}
+                            {complianceStatus === 'review' && (
+                              <span className="text-[9px] font-bold text-indigo-600 uppercase tracking-tight">Por Aprobar</span>
+                            )}
+                            {complianceStatus === 'warning' && (
+                              <span className="text-[9px] font-bold text-amber-600 uppercase tracking-tight">Vence Pronto</span>
+                            )}
+                          </div>
+                        </div>
                       </TableCell>
                       <TableCell className="font-mono text-sm">
                         {person.rut}

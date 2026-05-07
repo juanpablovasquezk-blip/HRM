@@ -7,9 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Layers, Plus, Trash2, Calendar, MapPin, Briefcase, Clock, Loader2, RefreshCw, Shield, ChevronDown } from 'lucide-react';
+import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate } from '@/app/(dashboard)/shifts/actions';
+import { Layers, Plus, Trash2, Calendar, MapPin, Briefcase, Clock, Loader2, RefreshCw, Shield, ChevronDown, Edit2, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement } from '@/app/(dashboard)/shifts/actions';
 
 interface ReqClientProps {
   initialReqs: any[];
@@ -29,10 +29,38 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
   const [searchQuery, setSearchQuery] = useState('');
   const [filterAreaId, setFilterAreaId] = useState('all');
   const [filterPositionId, setFilterPositionId] = useState('all');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  
+  // Form states
+  const [areaId, setAreaId] = useState('');
+  const [posId, setPosId] = useState('');
+  const [shiftId, setShiftId] = useState('');
+  const [count, setCount] = useState('');
+  const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5]);
+
   const router = useRouter();
 
   const filteredTemplates = useMemo(() => {
-    return templates.filter(tmpl => {
+    // Create lookup maps for performance
+    const areaMap = new Map(areas.map(a => [a.id, a]));
+    const shiftMap = new Map(shifts.map(s => [s.id, s]));
+    const posMap = new Map();
+    areas.forEach(a => {
+      (a.positions || []).forEach((p: any) => posMap.set(p.id, p));
+    });
+
+    return templates.map(tmpl => {
+      const area = areaMap.get(tmpl.area_id);
+      const shift = shiftMap.get(tmpl.shift_id);
+      const position = posMap.get(tmpl.position_id);
+      
+      return {
+        ...tmpl,
+        area: area || { name: 'Desconocido' },
+        shift: shift || { name: 'Desconocido' },
+        position: position || { name: 'Desconocido' }
+      };
+    }).filter(tmpl => {
       const areaName = (tmpl.area?.name || '').toLowerCase();
       const posName = (tmpl.position?.name || '').toLowerCase();
       const matchesSearch = areaName.includes(searchQuery.toLowerCase()) || posName.includes(searchQuery.toLowerCase());
@@ -40,24 +68,58 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
       const matchesPos = filterPositionId === 'all' || (tmpl.position as any)?.name === filterPositionId;
       return matchesSearch && matchesArea && matchesPos;
     });
-  }, [templates, searchQuery, filterAreaId, filterPositionId]);
+  }, [templates, searchQuery, filterAreaId, filterPositionId, areas, shifts]);
 
-  const selectedArea = areas.find((a) => a.id === selectedAreaId);
+  const selectedArea = areas.find((a) => a.id === areaId);
   const availablePositions = selectedArea?.positions || [];
 
   const handleCreateTemplate = (formData: FormData) => {
     formData.set('company_id', companyId);
     startTransition(async () => {
-      const result = await createTemplate(formData);
+      let result;
+      if (editingId) {
+        result = await updateTemplate(editingId, formData);
+      } else {
+        result = await createTemplate(formData);
+      }
+
       if (result.error) toast.error('Error', { description: result.error });
       else {
-        toast.success('Regla de dotación creada');
-        setSelectedAreaId('');
-        const form = document.getElementById('template-form') as HTMLFormElement;
-        if (form) form.reset();
+        toast.success(editingId ? 'Regla actualizada' : 'Regla de dotación creada');
+        setEditingId(null);
+        setAreaId('');
+        setPosId('');
+        setShiftId('');
+        setCount('');
+        setSelectedDays([1, 2, 3, 4, 5]);
         router.refresh();
       }
     });
+  };
+
+  const handleEditClick = (e: React.MouseEvent, tmpl: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    console.log('Editing template:', tmpl.id);
+    
+    setEditingId(tmpl.id);
+    setAreaId(tmpl.area_id || '');
+    setPosId(tmpl.position_id || '');
+    setShiftId(tmpl.shift_id || '');
+    setCount(tmpl.required_count?.toString() || '');
+    setSelectedDays(tmpl.days_of_week || []);
+    
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    setAreaId('');
+    setPosId('');
+    setShiftId('');
+    setCount('');
+    setSelectedDays([1, 2, 3, 4, 5]);
   };
 
   const handleDeleteTemplate = (id: string) => {
@@ -114,9 +176,16 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
         {/* Create Template Form */}
         <Card className="border-orange-200 dark:border-orange-900 shadow-sm border-t-4 border-t-orange-500">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Plus className="h-4 w-4 text-orange-600" />
-              Nueva Regla
+            <CardTitle className="text-base flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {editingId ? <Edit2 className="h-4 w-4 text-blue-600" /> : <Plus className="h-4 w-4 text-orange-600" />}
+                {editingId ? 'Editando Regla' : 'Nueva Regla'}
+              </div>
+              {editingId && (
+                <Button variant="ghost" size="sm" onClick={resetForm} className="h-8 text-xs text-slate-500">
+                  <X className="w-3 h-3 mr-1" /> Cancelar Edición
+                </Button>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -124,7 +193,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                 <div className="space-y-2">
                   <Label className="flex gap-1 items-center"><MapPin className="h-3 w-3"/>Área</Label>
-                  <select name="area_id" required value={selectedAreaId} onChange={(e) => setSelectedAreaId(e.target.value)}
+                  <select name="area_id" required value={areaId} onChange={(e) => setAreaId(e.target.value)}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                     <option value="">Seleccionar</option>
                     {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -133,7 +202,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
 
                 <div className="space-y-2">
                   <Label className="flex gap-1 items-center"><Briefcase className="h-3 w-3"/>Cargo</Label>
-                  <select name="position_id" required disabled={!selectedAreaId}
+                  <select name="position_id" required disabled={!areaId} value={posId} onChange={(e) => setPosId(e.target.value)}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50">
                     <option value="">Seleccionar</option>
                     {availablePositions.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -142,7 +211,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
 
                 <div className="space-y-2">
                   <Label className="flex gap-1 items-center"><Clock className="h-3 w-3"/>Turno</Label>
-                  <select name="shift_id" required
+                  <select name="shift_id" required value={shiftId} onChange={(e) => setShiftId(e.target.value)}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                     <option value="">Seleccionar</option>
                     {shifts.map(s => <option key={s.id} value={s.id}>{s.name} ({s.duration_hours}h)</option>)}
@@ -151,7 +220,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
 
                 <div className="space-y-2">
                   <Label>Cant. Personas</Label>
-                  <Input name="required_count" type="number" min="1" placeholder="Ej: 5" required className="font-bold" />
+                  <Input name="required_count" type="number" min="1" placeholder="Ej: 5" required className="font-bold" value={count} onChange={(e) => setCount(e.target.value)} />
                 </div>
               </div>
 
@@ -164,15 +233,27 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
                       { label: 'J', val: 4 }, { label: 'V', val: 5 }, { label: 'S', val: 6 }, { label: 'D', val: 0 }
                     ].map((day) => (
                       <label key={day.val} className="flex items-center gap-2 cursor-pointer bg-white dark:bg-slate-950 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-orange-500 transition-colors shadow-sm">
-                        <input type="checkbox" name="days_of_week" value={day.val} defaultChecked={day.val >= 1 && day.val <= 5} className="accent-orange-600 w-4 h-4" />
+                        <input 
+                          type="checkbox" 
+                          name="days_of_week" 
+                          value={day.val} 
+                          checked={selectedDays.includes(day.val)} 
+                          onChange={(e) => {
+                            const val = day.val;
+                            setSelectedDays(prev => 
+                              e.target.checked ? [...prev, val] : prev.filter(d => d !== val)
+                            );
+                          }}
+                          className="accent-orange-600 w-4 h-4" 
+                        />
                         <span className="text-sm font-medium">{day.label}</span>
                       </label>
                     ))}
                   </div>
                 </div>
 
-                <Button type="submit" disabled={isPending} className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/25 px-8">
-                  {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar Regla'}
+                <Button type="submit" disabled={isPending} className={`px-8 shadow-lg shadow-orange-500/25 ${editingId ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gradient-to-r from-orange-500 to-orange-600 text-white'}`}>
+                  {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : (editingId ? 'Actualizar Regla' : 'Guardar Regla')}
                 </Button>
               </div>
             </form>
@@ -195,7 +276,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
               value={filterAreaId}
               onChange={(e) => setFilterAreaId(e.target.value)}
            >
-              <option value="all">Todas las áreas</option>
+              <option key="all" value="all">Todas las áreas</option>
               {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
            </select>
            <select 
@@ -203,10 +284,13 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
               value={filterPositionId}
               onChange={(e) => setFilterPositionId(e.target.value)}
            >
-              <option value="all">Todos los cargos</option>
-              {Array.from(new Set(templates.map(t => (t.position as any)?.name))).sort().map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
+              <option key="all" value="all">Todos los cargos</option>
+              {Array.from(new Set(templates.map(t => (t.position as any)?.name)))
+                .filter(Boolean)
+                .sort()
+                .map(name => (
+                  <option key={String(name)} value={String(name)}>{String(name)}</option>
+                ))}
            </select>
         </div>
 
@@ -222,8 +306,14 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {filteredTemplates.map((tmpl: any) => {
               const days: number[] = tmpl.days_of_week || [];
+              const isEditingThis = editingId === tmpl.id;
+              
               return (
-                <Card key={tmpl.id} className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
+                <Card key={tmpl.id} className={`transition-all duration-300 ${
+                  isEditingThis 
+                    ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-lg scale-[1.02] z-10' 
+                    : 'border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md'
+                }`}>
                   <CardContent className="p-4">
                       {/* ... rest of existing card content ... */}
                     <div className="flex items-start justify-between gap-3">
@@ -241,13 +331,22 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
+                      <div className="flex items-center gap-2">
+                        <div className="text-right mr-1">
                           <div className="text-xl font-bold text-orange-600 dark:text-orange-400 leading-none">{tmpl.required_count}</div>
-                          <div className="text-[9px] text-muted-foreground uppercase tracking-wider">pers.</div>
+                          <div className="text-[9px] text-muted-foreground uppercase tracking-wider text-right">pers.</div>
                         </div>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => handleDeleteTemplate(tmpl.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          type="button"
+                          className={`h-8 w-8 ${isEditingThis ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-blue-600'}`} 
+                          onClick={(e) => handleEditClick(e, tmpl)}
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600" onClick={() => handleDeleteTemplate(tmpl.id)}>
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>

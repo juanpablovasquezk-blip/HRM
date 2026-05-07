@@ -18,6 +18,7 @@ const LEAVE_TYPES = [
   { value: 'sick', label: 'Licencia Médica' },
   { value: 'personal', label: 'Día Administrativo' },
   { value: 'maternity', label: 'Paternidad/Maternidad' },
+  { value: 'free_request', label: 'Solicitud de Libre' },
   { value: 'other', label: 'Otro' },
 ];
 

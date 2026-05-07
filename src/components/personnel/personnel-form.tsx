@@ -28,11 +28,35 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const [prefersNight, setPrefersNight] = useState(personnel?.prefers_night ?? false);
   const [avoidsNight, setAvoidsNight] = useState(personnel?.avoids_night ?? false);
   const [hasSpecialContract, setHasSpecialContract] = useState(personnel?.has_special_contract ?? false);
+  const [isActive, setIsActive] = useState(personnel?.is_active ?? true);
   const [selectedSecondary, setSelectedSecondary] = useState<string[]>(
     (personnel?.secondary_positions as string[]) || []
   );
   const [isPrio04, setIsPrio04] = useState(personnel?.rotation_pattern?.includes('PRIO-04') || false);
   const [dropdownValue, setDropdownValue] = useState<string>('');
+  
+  // Stabilize initial values for uncontrolled inputs to satisfy Base UI
+  const [initialValues] = useState(() => {
+    const addr = (personnel?.address as { street?: string; city?: string; region?: string }) || {};
+    return {
+      first_name: personnel?.first_name || '',
+      last_name_father: personnel?.last_name_father || '',
+      last_name_mother: personnel?.last_name_mother || '',
+      rut: personnel?.rut || '',
+      email: personnel?.email || '',
+      birth_date: personnel?.birth_date || '',
+      phone: personnel?.phone || '',
+      address_street: addr.street || '',
+      address_city: addr.city || '',
+      address_region: addr.region || '',
+      driver_licenses: personnel?.driver_licenses?.join(', ') || '',
+      main_position: personnel?.main_position || '',
+      rotation_pattern: personnel?.rotation_pattern || '5x2',
+      fixed_shift_id: personnel?.fixed_shift_id || '',
+      hire_date: personnel?.hire_date || '',
+      termination_date: personnel?.termination_date || '',
+    };
+  });
 
   const address = (personnel?.address as { street?: string; city?: string; region?: string }) || {};
 
@@ -40,6 +64,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
     formData.set('prefers_night', String(prefersNight));
     formData.set('avoids_night', String(avoidsNight));
     formData.set('has_special_contract', String(hasSpecialContract));
+    formData.set('is_active', String(isActive));
     formData.set('secondary_positions', selectedSecondary.join(','));
 
     // Manage rotation pattern + priority tags
@@ -81,31 +106,31 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="first_name">Nombre *</Label>
-            <Input id="first_name" name="first_name" defaultValue={personnel?.first_name} required placeholder="Juan" />
+            <Input id="first_name" name="first_name" defaultValue={initialValues.first_name} required placeholder="Juan" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="last_name_father">Apellido Paterno *</Label>
-            <Input id="last_name_father" name="last_name_father" defaultValue={personnel?.last_name_father} required placeholder="Pérez" />
+            <Input id="last_name_father" name="last_name_father" defaultValue={initialValues.last_name_father} required placeholder="Pérez" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="last_name_mother">Apellido Materno</Label>
-            <Input id="last_name_mother" name="last_name_mother" defaultValue={personnel?.last_name_mother} placeholder="García" />
+            <Input id="last_name_mother" name="last_name_mother" defaultValue={initialValues.last_name_mother} placeholder="García" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="rut">RUT *</Label>
-            <Input id="rut" name="rut" defaultValue={personnel?.rut} required placeholder="12.345.678-9" />
+            <Input id="rut" name="rut" defaultValue={initialValues.rut} required placeholder="12.345.678-9" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="email">Email (para acceso al sistema)</Label>
-            <Input id="email" name="email" type="email" defaultValue={personnel?.email || ''} placeholder="juan.perez@ejemplo.com" />
+            <Input id="email" name="email" type="email" defaultValue={initialValues.email} placeholder="juan.perez@ejemplo.com" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="birth_date">Fecha de Nacimiento *</Label>
-            <Input id="birth_date" name="birth_date" type="date" defaultValue={personnel?.birth_date} required />
+            <Input id="birth_date" name="birth_date" type="date" defaultValue={initialValues.birth_date} required />
           </div>
           <div className="space-y-2">
             <Label htmlFor="phone">Teléfono</Label>
-            <Input id="phone" name="phone" defaultValue={personnel?.phone} placeholder="+56 9 1234 5678" />
+            <Input id="phone" name="phone" defaultValue={initialValues.phone} placeholder="+56 9 1234 5678" />
           </div>
         </CardContent>
       </Card>
@@ -118,15 +143,15 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
         <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="space-y-2 md:col-span-3">
             <Label htmlFor="address_street">Calle</Label>
-            <Textarea id="address_street" name="address_street" defaultValue={address.street} placeholder="Av. Providencia 1234" rows={2} />
+            <Textarea id="address_street" name="address_street" defaultValue={initialValues.address_street} placeholder="Av. Providencia 1234" rows={2} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="address_city">Ciudad</Label>
-            <Input id="address_city" name="address_city" defaultValue={address.city} placeholder="Santiago" />
+            <Input id="address_city" name="address_city" defaultValue={initialValues.address_city} placeholder="Santiago" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="address_region">Región</Label>
-            <Input id="address_region" name="address_region" defaultValue={address.region} placeholder="Metropolitana" />
+            <Input id="address_region" name="address_region" defaultValue={initialValues.address_region} placeholder="Metropolitana" />
           </div>
         </CardContent>
       </Card>
@@ -155,7 +180,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
             <Label htmlFor="main_position">Cargo Principal</Label>
             <select id="main_position" name="main_position"
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              defaultValue={personnel?.main_position || ''}>
+              defaultValue={initialValues.main_position}>
               <option value="">Por asignar / Sin cargo</option>
               {uniquePositions.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -244,7 +269,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
               Licencias de Conducir{' '}
               <span className="text-xs text-muted-foreground">(separadas por coma)</span>
             </Label>
-            <Input id="driver_licenses" name="driver_licenses" defaultValue={personnel?.driver_licenses?.join(', ')} placeholder="B, C, D" />
+            <Input id="driver_licenses" name="driver_licenses" defaultValue={initialValues.driver_licenses} placeholder="B, C, D" />
           </div>
         </CardContent>
       </Card>
@@ -262,7 +287,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
                 id="rotation_pattern" 
                 name="rotation_pattern"
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                defaultValue={personnel?.rotation_pattern || '5x2'}
+                defaultValue={initialValues.rotation_pattern}
               >
                 <option value="5x2">5x2 (Semanal / Rotativo)</option>
                 <option value="5X2-RELEVO-A">5x2 Relevo A (Fin de semana libre Sem 1)</option>
@@ -290,7 +315,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
                 id="fixed_shift_id" 
                 name="fixed_shift_id"
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                defaultValue={personnel?.fixed_shift_id || ''}
+                defaultValue={initialValues.fixed_shift_id}
               >
                 <option value="">Ninguno / Rotativo</option>
                 {shifts.map((s) => (
@@ -304,13 +329,13 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
 
             <div className="space-y-2">
               <Label htmlFor="hire_date">Fecha de Ingreso (Contratación)</Label>
-              <Input id="hire_date" name="hire_date" type="date" defaultValue={personnel?.hire_date || ''} />
+              <Input id="hire_date" name="hire_date" type="date" defaultValue={initialValues.hire_date} />
               <p className="text-[10px] text-muted-foreground italic">No se podrán asignar turnos antes de esta fecha.</p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="termination_date">Fecha de Baja (Si renuncia)</Label>
-              <Input id="termination_date" name="termination_date" type="date" defaultValue={personnel?.termination_date || ''} />
+              <Input id="termination_date" name="termination_date" type="date" defaultValue={initialValues.termination_date} />
               <p className="text-[10px] text-muted-foreground italic">Pasada esta fecha, el trabajador quedará bloqueado en el roster.</p>
             </div>
 
@@ -353,6 +378,14 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
               <p className="text-xs text-muted-foreground">Evitar asignar turnos nocturnos cuando sea posible</p>
             </div>
             <Switch id="avoids_night" checked={avoidsNight} onCheckedChange={(checked) => { setAvoidsNight(checked); if (checked) setPrefersNight(false); }} />
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="is_active" className={!isActive ? 'text-red-600 font-bold' : ''}>Estado Activo</Label>
+              <p className="text-xs text-muted-foreground">Si se desactiva, el trabajador no aparecerá en el roster ni en el listado principal</p>
+            </div>
+            <Switch id="is_active" checked={isActive} onCheckedChange={setIsActive} />
           </div>
         </CardContent>
       </Card>

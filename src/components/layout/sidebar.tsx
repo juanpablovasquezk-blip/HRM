@@ -15,6 +15,7 @@ import {
   BarChart3,
   Settings,
   Grid3X3,
+  ClipboardList,
   ChevronLeft,
   LogOut,
 } from 'lucide-react';
@@ -42,6 +43,8 @@ const navItems: NavItem[] = [
   { label: 'Documentos', href: '/documents', icon: FileText, requiredPermission: 'manageDocuments' },
   { label: 'Turnos', href: '/shifts', icon: CalendarDays },
   { label: 'Roster (Plan)', href: '/shifts/roster', icon: Grid3X3 },
+  { label: 'Roster Individual', href: '/reports/individual-roster', icon: FileText, requiredPermission: 'viewReports' },
+  { label: 'Planificación Diaria', href: '/shifts/daily', icon: ClipboardList },
   { label: 'Licencias', href: '/leaves', icon: Briefcase },
   { label: 'Transporte', href: '/transport', icon: Bus, requiredPermission: 'manageTransport' },
   { label: 'Reportes', href: '/reports', icon: BarChart3, requiredPermission: 'viewReports' },

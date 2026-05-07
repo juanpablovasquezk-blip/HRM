@@ -98,6 +98,7 @@ export async function createPersonnel(
     hire_date: (formData.get('hire_date') as string) || null,
     termination_date: (formData.get('termination_date') as string) || null,
     has_special_contract: formData.get('has_special_contract') === 'true',
+    is_active: formData.get('is_active') === 'true',
     address: {
       street: (formData.get('address_street') as string) || '',
       city: (formData.get('address_city') as string) || '',
@@ -140,6 +141,7 @@ export async function updatePersonnel(
     hire_date: (formData.get('hire_date') as string) || null,
     termination_date: (formData.get('termination_date') as string) || null,
     has_special_contract: formData.get('has_special_contract') === 'true',
+    is_active: formData.get('is_active') === 'true',
     address: {
       street: (formData.get('address_street') as string) || '',
       city: (formData.get('address_city') as string) || '',
@@ -224,4 +226,28 @@ export async function bulkImportPersonnel(
 
   revalidatePath('/personnel');
   return { imported: personnelToInsert.length, error: null };
+}
+
+export async function updateDocumentStatus(
+  documentId: string,
+  status: 'APPROVED' | 'REJECTED' | 'PENDING',
+  rejectionReason?: string
+): Promise<{ success: boolean; error: string | null }> {
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from('documents')
+    .update({ 
+      status, 
+      rejection_reason: rejectionReason || null,
+      reviewed_at: new Date().toISOString()
+    })
+    .eq('id', documentId);
+
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath('/personnel');
+  // We don't have the personnel ID here easily to revalidate specific path, 
+  // but revalidatePath with a layout or the whole folder works.
+  return { success: true, error: null };
 }

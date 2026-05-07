@@ -40,6 +40,7 @@ export default async function LeavesPage() {
     personal: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400',
     maternity: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400',
     other: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400',
+    free_request: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400',
   };
 
   const renderTable = (data: any[]) => {
@@ -73,10 +74,16 @@ export default async function LeavesPage() {
                   )}
                 </TableCell>
                 <TableCell>
-                  <Badge className={typeBadge[leave.type] || typeBadge.other}>
+                  <Badge className={
+                    (leave.type === 'other' && leave.reason === 'Solicitud mensual de días libres')
+                      ? typeBadge.free_request 
+                      : (typeBadge[leave.type] || typeBadge.other)
+                  }>
                     {leave.type === 'vacation' ? 'Vacaciones' : 
                      leave.type === 'sick' ? 'Licencia Médica' : 
-                     leave.type === 'personal' ? 'Administrativo' : leave.type}
+                     leave.type === 'personal' ? 'Administrativo' : 
+                     (leave.type === 'other' && leave.reason === 'Solicitud mensual de días libres') ? 'Solicitud de Libre' : 
+                     leave.type === 'other' ? 'Otro' : leave.type}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-sm">{leave.start_date}</TableCell>

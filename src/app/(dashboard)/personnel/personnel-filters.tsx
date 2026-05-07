@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -19,6 +20,7 @@ interface PersonnelFiltersProps {
   initialSearch?: string;
   initialCompanyId?: string;
   initialPositionId?: string;
+  initialStatus?: 'active' | 'inactive' | 'all';
   companies: Company[];
   positions: Position[];
 }
@@ -45,11 +47,31 @@ export function PersonnelFilters({
   const currentSearch = searchParams.get('search') || '';
   const currentCompanyId = searchParams.get('company_id') || '';
   const currentPositionId = searchParams.get('position_id') || '';
+  const currentStatus = searchParams.get('status') || 'active';
+
+  const [searchTerm, setSearchTerm] = useState(currentSearch);
+
+  // Debounce effect for search
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      if (searchTerm !== currentSearch) {
+        updateFilter('search', searchTerm);
+      }
+    }, 400);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm]);
+
+  // Sync local state if currentSearch changes from outside (e.g. Clear button)
+  useEffect(() => {
+    setSearchTerm(currentSearch);
+  }, [currentSearch]);
 
   // Deduplicate positions by name for the filter dropdown
   const uniquePositions = Array.from(
     new Map(positions.map(p => [p.name, p])).values()
   ).sort((a, b) => a.name.localeCompare(b.name));
+
   return (
     <div className="flex gap-2">
       <div className="relative flex-1 max-w-md">
@@ -57,8 +79,8 @@ export function PersonnelFilters({
         <Input
           name="search"
           placeholder="Buscar por nombre o RUT..."
-          value={currentSearch}
-          onChange={(e) => updateFilter('search', e.target.value)}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
           className="pl-10"
           id="personnel-search"
         />
@@ -93,7 +115,19 @@ export function PersonnelFilters({
           ))}
         </select>
       </div>
-      {(currentSearch || currentCompanyId || currentPositionId) && (
+      <div className="flex-1 max-w-[200px]">
+        <select
+          name="status"
+          value={currentStatus}
+          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onChange={(e) => updateFilter('status', e.target.value)}
+        >
+          <option value="active">Solo Activos</option>
+          <option value="inactive">Solo Bajas</option>
+          <option value="all">Todos</option>
+        </select>
+      </div>
+      {(currentSearch || currentCompanyId || currentPositionId || currentStatus !== 'active') && (
         <Button 
           variant="ghost" 
           onClick={() => router.push(pathname)}
