@@ -21,9 +21,7 @@ export default function GeoVictoriaClient() {
   const handleDownload = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await getGeoVictoriaData({ startDate, endDate, onlyManual });
-
-      if (error) throw new Error(error);
+      const { data } = await getGeoVictoriaData({ startDate, endDate, onlyManual });
 
       if (!data || data.length === 0) {
         toast.info('No se encontraron registros para el período seleccionado');
