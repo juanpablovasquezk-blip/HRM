@@ -15,22 +15,54 @@ import {
   FileText
 } from 'lucide-react';
 
-export default function PersonnelClient({ personnel }: { personnel: any[] }) {
+export default function PersonnelClient({ 
+  personnel, 
+  documentDefs, 
+  documents 
+}: { 
+  personnel: any[], 
+  documentDefs: any[], 
+  documents: any[] 
+}) {
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Enhanced personnel with compliance data
+  const enhancedPersonnel = useMemo(() => {
+    return personnel.map(p => {
+      const userDocs = documents.filter(d => d.personnel_id === p.id);
+      
+      // Calculate expired
+      const expired_docs = userDocs
+        .filter(d => d.status === 'APPROVED' && d.expiration_date && new Date(d.expiration_date) < new Date())
+        .map(d => documentDefs.find(def => def.id === d.definition_id)?.name || d.type);
+
+      // Calculate missing (mandatory only)
+      const missing_docs = documentDefs
+        .filter(def => def.is_mandatory)
+        .filter(def => !userDocs.some(d => d.definition_id === def.id))
+        .map(def => def.name);
+
+      return {
+        ...p,
+        missing_docs,
+        expired_docs
+      };
+    });
+  }, [personnel, documentDefs, documents]);
+
   const filteredPersonnel = useMemo(() => {
-    return personnel.filter(p => {
+    return enhancedPersonnel.filter(p => {
       const fullName = `${p.first_name} ${p.last_name_father} ${p.last_name_mother || ''}`.toLowerCase();
       return fullName.includes(searchTerm.toLowerCase());
     });
-  }, [personnel, searchTerm]);
+  }, [enhancedPersonnel, searchTerm]);
 
   // Stats
   const stats = useMemo(() => {
-    const total = personnel.length;
-    const withIssues = personnel.filter(p => (p.missing_docs?.length || 0) > 0 || (p.expired_docs?.length || 0) > 0).length;
+    const total = enhancedPersonnel.length;
+    const withIssues = enhancedPersonnel.filter(p => (p.missing_docs?.length || 0) > 0 || (p.expired_docs?.length || 0) > 0).length;
     return { total, withIssues, compliant: total - withIssues };
-  }, [personnel]);
+  }, [enhancedPersonnel]);
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
