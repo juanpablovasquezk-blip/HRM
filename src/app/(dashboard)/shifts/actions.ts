@@ -209,15 +209,17 @@ export async function deleteRequirement(id: string) {
   return { success: true, error: null };
 }
 
-export async function listRequirements(date?: string) {
+export async function listRequirements(startDate?: string, endDate?: string) {
   const supabase = await createClient();
   let query = supabase
     .from('shift_requirements')
     .select('*, shift:shifts(name, start_time, end_time), area:areas(name), position:positions(name)')
     .order('date', { ascending: true });
 
-  if (date) {
-    query = query.eq('date', date);
+  if (startDate && endDate) {
+    query = query.gte('date', startDate).lte('date', endDate);
+  } else if (startDate) {
+    query = query.eq('date', startDate);
   } else {
     // Default to current month to keep page light
     const start = format(startOfMonth(new Date()), 'yyyy-MM-dd');
