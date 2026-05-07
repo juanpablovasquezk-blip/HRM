@@ -229,3 +229,36 @@ export async function clearTransportRequests(date: string) {
   revalidatePath('/transport');
   return { success: true };
 }
+
+export async function createTransportLog(formData: FormData) {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('No autorizado');
+
+    const personnel_id = formData.get('personnel_id') as string;
+    const date = formData.get('date') as string;
+    const reservation_number = formData.get('reservation_number') as string;
+    const issues = formData.get('issues') as string;
+    const used_company_transport = formData.get('used_company_transport') === 'true';
+
+    const { error } = await supabase
+      .from('transport_logs')
+      .insert({
+        personnel_id,
+        date,
+        reservation_number: reservation_number || null,
+        issues: issues || null,
+        used_company_transport,
+        logged_by: user.id
+      });
+
+    if (error) throw error;
+
+    revalidatePath('/transport');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error creating transport log:', error);
+    return { success: false, error: error.message };
+  }
+}
