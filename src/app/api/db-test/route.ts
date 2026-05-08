@@ -15,10 +15,10 @@ export async function GET() {
   // 2. Filtrado por activos
   const { count: total_activos } = await supabase.from('personnel').select('*', { count: 'exact', head: true }).eq('is_active', true);
   
-  // 3. Consulta completa con orden (como la página)
+  // 3. Consulta completa con relación EXPLICITA
   const { data: personnel, error } = await supabase
     .from('personnel')
-    .select('*, company:companies(name)')
+    .select('*, company:companies!personnel_company_id_fkey(name)')
     .eq('is_active', true)
     .order('last_name_father', { ascending: true })
     .limit(5);
