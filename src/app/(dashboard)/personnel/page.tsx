@@ -23,6 +23,16 @@ export default async function PersonnelPage({
 }) {
   const params = await searchParams;
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  let userCompanyId = params.company_id;
+  
+  if (!userCompanyId && user) {
+    const { data: profile } = await supabase.from('users').select('company_id').eq('id', user.id).single();
+    if (profile?.company_id) {
+      userCompanyId = profile.company_id;
+    }
+  }
 
   let positionIds: string[] = [];
   if (params.position_id) {
@@ -46,15 +56,15 @@ export default async function PersonnelPage({
     .select('*, company:companies(name), documents(id, definition_id, expiration_date, status)')
     .order('last_name_father', { ascending: true });
 
+  if (userCompanyId) {
+    query = query.eq('company_id', userCompanyId);
+  }
+
   const status = params.status || 'active';
   if (status === 'active') {
     query = query.eq('is_active', true);
   } else if (status === 'inactive') {
     query = query.eq('is_active', false);
-  }
-
-  if (params.company_id) {
-    query = query.eq('company_id', params.company_id);
   }
 
   if (positionIds.length > 0) {
