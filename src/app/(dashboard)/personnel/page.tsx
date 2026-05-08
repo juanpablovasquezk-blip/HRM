@@ -172,29 +172,9 @@ export default async function PersonnelPage({
                             className="font-medium text-orange-600 hover:text-orange-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1.5"
                           >
                             {person.first_name} {person.last_name_father} {person.last_name_mother}
-                            {complianceStatus === 'critical' && (
-                              <AlertTriangle className="h-3.5 w-3.5 text-red-500 fill-red-50" />
-                            )}
-                            {complianceStatus === 'review' && (
-                              <ClipboardCheck className="h-3.5 w-3.5 text-indigo-500" />
-                            )}
-                            {complianceStatus === 'warning' && (
-                              <Clock className="h-3.5 w-3.5 text-amber-500" />
-                            )}
-                            {complianceStatus === 'ok' && uploadedIds.length > 0 && (
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                            )}
                           </Link>
                           <div className="flex gap-1">
-                            {complianceStatus === 'critical' && (
-                              <span className="text-[9px] font-bold text-red-600 uppercase tracking-tight">Acción Requerida</span>
-                            )}
-                            {complianceStatus === 'review' && (
-                              <span className="text-[9px] font-bold text-indigo-600 uppercase tracking-tight">Por Aprobar</span>
-                            )}
-                            {complianceStatus === 'warning' && (
-                              <span className="text-[9px] font-bold text-amber-600 uppercase tracking-tight">Vence Pronto</span>
-                            )}
+                            {/* Status messages hidden during debug */}
                           </div>
                         </div>
                       </TableCell>
