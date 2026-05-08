@@ -303,7 +303,21 @@ export default function DailyPlanningClient({
       message += `${startTime} - ${endTime} ${condName} - ${ayudName}\n`;
     });
 
-    // 3. Copy to clipboard
+    // 3. Add Supervisors section ONLY on Weekends (Saturday=6, Sunday=0)
+    const dayOfWeek = parseISO(selectedDate).getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      if (supervisors.length > 0) {
+        message += `\nSupervisores en turno:\n`;
+        supervisors.forEach(s => {
+          const shiftName = s.shift?.name.toUpperCase() || '';
+          const shiftAbbr = shiftName.includes('AM') ? 'AM' : (shiftName.includes('PM') ? 'PM' : '');
+          const phone = s.personnel?.phone || '';
+          message += `${shiftAbbr} ${formatName(s.personnel)} ${phone}\n`;
+        });
+      }
+    }
+
+    // 4. Copy to clipboard
     navigator.clipboard.writeText(message);
     toast.success('Texto para correo copiado al portapapeles');
   };
