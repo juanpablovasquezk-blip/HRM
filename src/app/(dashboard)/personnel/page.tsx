@@ -53,7 +53,7 @@ export default async function PersonnelPage({
 
   let query = supabase
     .from('personnel')
-    .select('*, company:companies(name)')
+    .select('*, company:companies!personnel_company_id_fkey(name), documents(id, definition_id, expiration_date, status)')
     .order('last_name_father', { ascending: true });
 
   if (userCompanyId) {
@@ -159,9 +159,23 @@ export default async function PersonnelPage({
                       documents: Array<{ definition_id: string; expiration_date: string | null; status: string }>;
                     };
 
-                    // Compliance Calculation (Simplified for Debug)
-                    const uploadedIds: string[] = [];
-                    const complianceStatus: 'critical' | 'warning' | 'review' | 'ok' = 'ok';
+                    // Compliance Calculation
+                    const personDefs = (definitions || []).filter(def => 
+                      !def.applicable_positions || def.applicable_positions.length === 0 || 
+                      def.applicable_positions.includes(person.main_position)
+                    );
+                    const mandatoryIds = personDefs.filter(d => d.is_mandatory).map(d => d.id);
+                    const uploadedIds = person.documents.map(d => d.definition_id);
+                    
+                    const isMissingMandatory = mandatoryIds.some(id => !uploadedIds.includes(id));
+                    const hasExpired = person.documents.some(d => d.expiration_date && differenceInDays(parseISO(d.expiration_date), new Date()) < 0);
+                    const isExpiringSoon = person.documents.some(d => d.expiration_date && differenceInDays(parseISO(d.expiration_date), new Date()) < 30 && differenceInDays(parseISO(d.expiration_date), new Date()) >= 0);
+                    const hasPendingApproval = person.documents.some(d => d.status === 'PENDING');
+
+                    let complianceStatus: 'critical' | 'warning' | 'review' | 'ok' = 'ok';
+                    if (isMissingMandatory || hasExpired) complianceStatus = 'critical';
+                    else if (hasPendingApproval) complianceStatus = 'review';
+                    else if (isExpiringSoon) complianceStatus = 'warning';
 
                     return (
                     <TableRow key={person.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
@@ -172,9 +186,29 @@ export default async function PersonnelPage({
                             className="font-medium text-orange-600 hover:text-orange-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1.5"
                           >
                             {person.first_name} {person.last_name_father} {person.last_name_mother}
+                            {complianceStatus === 'critical' && (
+                              <AlertTriangle className="h-3.5 w-3.5 text-red-500 fill-red-50" />
+                            )}
+                            {complianceStatus === 'review' && (
+                              <ClipboardCheck className="h-3.5 w-3.5 text-indigo-500" />
+                            )}
+                            {complianceStatus === 'warning' && (
+                              <Clock className="h-3.5 w-3.5 text-amber-500" />
+                            )}
+                            {complianceStatus === 'ok' && uploadedIds.length > 0 && (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                            )}
                           </Link>
                           <div className="flex gap-1">
-                            {/* Status messages hidden during debug */}
+                            {complianceStatus === 'critical' && (
+                              <span className="text-[9px] font-bold text-red-600 uppercase tracking-tight">Acción Requerida</span>
+                            )}
+                            {complianceStatus === 'review' && (
+                              <span className="text-[9px] font-bold text-indigo-600 uppercase tracking-tight">Por Aprobar</span>
+                            )}
+                            {complianceStatus === 'warning' && (
+                              <span className="text-[9px] font-bold text-amber-600 uppercase tracking-tight">Vence Pronto</span>
+                            )}
                           </div>
                         </div>
                       </TableCell>
