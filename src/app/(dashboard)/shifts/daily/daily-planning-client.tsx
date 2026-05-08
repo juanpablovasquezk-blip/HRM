@@ -32,7 +32,7 @@ import type {
   Shift 
 } from '@/types/database';
 import { deleteAssignment, deleteRequirement } from '../actions';
-import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, resetDailyPlan } from './actions';
+import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, resetDailyPlan, updateAssignmentShift } from './actions';
 import { RotateCcw, Mail, Copy } from 'lucide-react';
 
 interface Props {
@@ -204,6 +204,12 @@ export default function DailyPlanningClient({
       if (res.success) toast.success('Requerimiento eliminado');
       else toast.error('Error: ' + res.error);
     }
+  };
+  
+  const handleUpdateShift = async (assignmentId: string, shiftId: string) => {
+    const res = await updateAssignmentShift(assignmentId, shiftId);
+    if (res.success) toast.success('Turno actualizado');
+    else toast.error('Error al actualizar turno');
   };
 
   // Corrected BlueExpress filtering (using activeAssignments to respect cancellations)
@@ -666,9 +672,22 @@ export default function DailyPlanningClient({
                 <tr key={pair.id} className="group">
                   <td className="py-1 font-mono text-[10px] text-slate-500">{pair.time}</td>
                   <td className="py-1 font-bold uppercase text-[12px] relative">
-                    <span className={pair.conductor?.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}>
-                      {pair.conductor ? formatName(pair.conductor.personnel) : '-'}
-                    </span>
+                    <div className="flex flex-col gap-0.5">
+                      <span className={pair.conductor?.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}>
+                        {pair.conductor ? formatName(pair.conductor.personnel) : '-'}
+                      </span>
+                      {pair.conductor && (
+                        <select 
+                          className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
+                          value={pair.conductor.shift_id}
+                          onChange={(e) => handleUpdateShift(pair.conductor.id, e.target.value)}
+                        >
+                          {shifts.map(s => (
+                            <option key={s.id} value={s.id}>{s.name} ({s.start_time.substring(0,5)})</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
                     {pair.conductor && (
                       <button onClick={() => handleDeleteAssignment(pair.conductor.id)} className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 text-red-400 no-print">
                          <AlertTriangle className="w-3 h-3" />
@@ -676,9 +695,22 @@ export default function DailyPlanningClient({
                     )}
                   </td>
                   <td className="py-1 font-bold uppercase text-[12px] relative">
-                    <span className={pair.ayudante?.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}>
-                      {pair.ayudante ? formatName(pair.ayudante.personnel) : '-'}
-                    </span>
+                    <div className="flex flex-col gap-0.5">
+                      <span className={pair.ayudante?.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}>
+                        {pair.ayudante ? formatName(pair.ayudante.personnel) : '-'}
+                      </span>
+                      {pair.ayudante && (
+                        <select 
+                          className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
+                          value={pair.ayudante.shift_id}
+                          onChange={(e) => handleUpdateShift(pair.ayudante.id, e.target.value)}
+                        >
+                          {shifts.map(s => (
+                            <option key={s.id} value={s.id}>{s.name} ({s.start_time.substring(0,5)})</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
                     {pair.ayudante && (
                       <button onClick={() => handleDeleteAssignment(pair.ayudante.id)} className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 text-red-400 no-print">
                          <AlertTriangle className="w-3 h-3" />

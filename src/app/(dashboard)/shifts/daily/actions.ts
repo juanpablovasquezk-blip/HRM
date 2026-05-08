@@ -6,6 +6,21 @@ import { parseISO, format, addDays, subDays } from 'date-fns';
 import type { ShiftAssignmentWithDetails, PersonnelWithDetails, ShiftRequirementWithDetails, Position, Shift } from '@/types/database';
 import { generateTransportRequests } from '../../transport/actions';
 
+export async function updateAssignmentShift(assignmentId: string, shiftId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from('shift_assignments')
+    .update({ 
+      shift_id: shiftId,
+      is_manual: true 
+    })
+    .eq('id', assignmentId);
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath('/shifts/daily');
+  return { success: true };
+}
+
 /**
  * Fetch all data for the daily operational view
  */
