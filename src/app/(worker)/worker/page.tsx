@@ -52,18 +52,7 @@ export default async function WorkerHomePage() {
           </div>
         </div>
 
-        {bannerConfig && (
-          <a href="/worker/documents" className={`flex items-center gap-3 p-4 rounded-3xl text-white shadow-xl ${bannerConfig.color} animate-pulse`}>
-            <div className="h-10 w-10 bg-white/20 rounded-2xl flex items-center justify-center shrink-0">
-              {bannerConfig.icon}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-black uppercase opacity-80 tracking-widest leading-none mb-1">Atención Requerida</p>
-              <p className="text-sm font-bold leading-tight">{bannerConfig.message}</p>
-            </div>
-            <ChevronRight className="h-5 w-5 opacity-60" />
-          </a>
-        )}
+        {/* Banner disabled during debug */}
       </div>
 
       {/* Main Content */}
