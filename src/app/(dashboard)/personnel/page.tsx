@@ -43,7 +43,7 @@ export default async function PersonnelPage({
 
   let query = supabase
     .from('personnel')
-    .select('*, company:companies!personnel_company_id_fkey(name)')
+    .select('*, company:companies!personnel_company_id_fkey(name), documents:documents!documents_personnel_id_fkey(id, definition_id, expiration_date, status)')
     .order('last_name_father', { ascending: true });
 
   const status = params.status || 'active';
@@ -151,7 +151,7 @@ export default async function PersonnelPage({
                       def.applicable_positions.includes(person.main_position)
                     );
                     const mandatoryIds = personDefs.filter(d => d.is_mandatory).map(d => d.id);
-                    const uploadedIds = person.documents.map(d => d.definition_id);
+                    const uploadedIds = (person.documents || []).map(d => d.definition_id);
                     
                     const isMissingMandatory = mandatoryIds.some(id => !uploadedIds.includes(id));
                     const hasExpired = person.documents.some(d => d.expiration_date && differenceInDays(parseISO(d.expiration_date), new Date()) < 0);

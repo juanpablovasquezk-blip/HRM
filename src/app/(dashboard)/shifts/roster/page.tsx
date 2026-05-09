@@ -27,7 +27,7 @@ export default async function RosterPage({
     { data: positions },
     { data: requirements }
   ] = await Promise.all([
-    supabase.from('personnel').select('*, company:companies(name)').eq('is_active', true).order('last_name_father'),
+    supabase.from('personnel').select('*, company:companies!personnel_company_id_fkey(name)').eq('is_active', true).order('last_name_father'),
     supabase.from('shifts').select('*').order('start_time'),
     supabase.from('areas').select('*, positions(*)').order('name'),
     supabase.from('shift_assignments').select('*').gte('date', startDate).lte('date', endDate),
