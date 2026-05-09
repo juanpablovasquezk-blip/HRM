@@ -19,18 +19,14 @@ export async function GET() {
 
   if (!pos) return NextResponse.json({ error: 'No se encontró el cargo Supervisor en Atrex' });
 
-  // 2. Revisar si alguien lo usa
-  const { count: usersCount } = await supabase.from('personnel').select('*', { count: 'exact', head: true }).eq('main_position', pos.id);
-  const { count: asgCount } = await supabase.from('shift_assignments').select('*', { count: 'exact', head: true }).eq('position_id', pos.id);
-  const { count: reqCount } = await supabase.from('shift_requirements').select('*', { count: 'exact', head: true }).eq('position_id', pos.id);
+  // 2. Revisar quién lo usa
+  const { data: personnel } = await supabase.from('personnel')
+    .select('first_name, last_name_father')
+    .eq('main_position', pos.id);
 
   return NextResponse.json({
-    posicion_detectada: pos,
-    trabajadores_usandolo: usersCount,
-    asignaciones_usandolo: asgCount,
-    requerimientos_usandolo: reqCount,
-    mensaje: (usersCount! > 0 || asgCount! > 0 || reqCount! > 0) 
-      ? 'BLOQUEADO: Hay registros vinculados a este cargo.' 
-      : 'Debería poder borrarse. Si falla, es por otra restricción.'
+    cargo_atrex: pos.name,
+    trabajadores_a_cambiar: personnel?.map(p => `${p.first_name} ${p.last_name_father}`) || [],
+    mensaje: 'Debes cambiar el cargo a estos trabajadores antes de poder borrar el cargo de Atrex.'
   })
 }
