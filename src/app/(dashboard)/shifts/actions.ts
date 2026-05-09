@@ -268,13 +268,22 @@ export async function createTemplate(formData: FormData) {
 }
 
 export async function listTemplates() {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from('requirement_templates')
-    .select('*')
-    .eq('is_active', true)
-    .order('created_at', { ascending: false });
-  return { data: data || [], error: error?.message || null };
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('requirement_templates')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.warn('requirement_templates table might be missing:', error.message);
+      return { data: [], error: null };
+    }
+    return { data: data || [], error: null };
+  } catch (e) {
+    return { data: [], error: null };
+  }
 }
 
 export async function updateTemplate(id: string, formData: FormData) {
