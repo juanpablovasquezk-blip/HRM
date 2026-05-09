@@ -9,26 +9,14 @@ export async function GET() {
   
   const supabase = createClient(url!, key!)
   
-  // 1. Total bruto
-  const { count: total_total } = await supabase.from('personnel').select('*', { count: 'exact', head: true });
-  
-  // 2. Filtrado por activos
-  const { count: total_activos } = await supabase.from('personnel').select('*', { count: 'exact', head: true }).eq('is_active', true);
-  
-  // 3. Consulta completa con relación EXPLICITA
-  const { data: personnel, error } = await supabase
-    .from('personnel')
-    .select('*, company:companies!personnel_company_id_fkey(name)')
-    .eq('is_active', true)
-    .order('last_name_father', { ascending: true })
-    .limit(5);
+  const { data: tables, error } = await supabase
+    .from('pg_catalog.pg_tables')
+    .select('tablename')
+    .eq('schemaname', 'public');
 
   return NextResponse.json({
-    total_total: total_total || 0,
-    total_activos: total_activos || 0,
-    total_ordenados_con_data: personnel?.length || 0,
+    tables: tables || [],
     error_en_consulta: error,
-    muestra_nombres: personnel?.map(p => `${p.first_name} ${p.last_name_father}`) || [],
     url_detectada: url?.substring(0, 20) + '...',
     timestamp: new Date().toISOString()
   })
