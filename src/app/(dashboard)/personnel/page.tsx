@@ -64,13 +64,30 @@ export default async function PersonnelPage({
     );
   }
 
-  const [{ data: personnel }, { data: positions }, { data: companies }, { data: shifts }, { data: definitions }] = await Promise.all([
+  const [
+    { data: personnel, error: pErr }, 
+    { data: positions, error: posErr }, 
+    { data: companies, error: cErr }, 
+    { data: shifts, error: sErr }, 
+    { data: definitions, error: dErr }
+  ] = await Promise.all([
     query,
     supabase.from('positions').select('id, name'),
     supabase.from('companies').select('id, name').order('name'),
     supabase.from('shifts').select('id, name'),
     supabase.from('document_definitions').select('*').eq('is_active', true)
   ]);
+
+  if (pErr || posErr || cErr || sErr || dErr) {
+    return (
+      <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-600">
+        <h2 className="font-bold mb-2">Error detectado en la base de datos:</h2>
+        <pre className="text-xs overflow-auto">
+          {JSON.stringify({ personnel: pErr, positions: posErr, companies: cErr, shifts: sErr, definitions: dErr }, null, 2)}
+        </pre>
+      </div>
+    );
+  }
 
   const positionMap = Object.fromEntries((positions || []).map(p => [p.id, p.name]));
   const shiftMap = Object.fromEntries((shifts || []).map(s => [s.id, s.name]));
