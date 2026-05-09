@@ -10,11 +10,12 @@ export default async function EditPersonnelPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: person, error }, { data: companies }, { data: positions }, { data: shifts }] = await Promise.all([
+  const [{ data: person, error }, { data: companies }, { data: positions }, { data: shifts }, { data: areas }] = await Promise.all([
     supabase.from('personnel').select('*').eq('id', id).single(),
     supabase.from('companies').select('id, name').order('name'),
-    supabase.from('positions').select('id, name').order('name'),
+    supabase.from('positions').select('id, name, area:areas(name)').order('name'),
     supabase.from('shifts').select('id, name, start_time, end_time').order('name'),
+    supabase.from('areas').select('id, name').order('name'),
   ]);
 
   if (error || !person) notFound();
@@ -39,6 +40,7 @@ export default async function EditPersonnelPage({
         companies={JSON.parse(JSON.stringify(companies || []))}
         positions={JSON.parse(JSON.stringify(positions || []))}
         shifts={JSON.parse(JSON.stringify(shifts || []))}
+        areas={JSON.parse(JSON.stringify(areas || []))}
       />
     </div>
   );
