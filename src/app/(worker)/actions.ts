@@ -201,25 +201,8 @@ export async function getWorkerTransportHistory(from?: string, to?: string) {
 }
 
 export async function getActiveDocumentDefinitions() {
-  const session = await getWorkerSession();
-  if (!session) return [];
-
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from('document_definitions')
-    .select('*')
-    .eq('is_active', true)
-    .order('is_mandatory', { ascending: false });
-  
-  if (!data) return [];
-
-  // Filter definitions: 
-  // 1. If applicable_positions is empty, it applies to everyone.
-  // 2. If not empty, only if it includes the worker's main_position.
-  return data.filter(def => {
-    if (!def.applicable_positions || def.applicable_positions.length === 0) return true;
-    return def.applicable_positions.includes(session.main_position);
-  });
+  // Temporarily returning empty array until the correct table is identified
+  return [];
 }
 
 export async function getWorkerDocuments() {

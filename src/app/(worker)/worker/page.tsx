@@ -27,41 +27,15 @@ export default async function WorkerHomePage() {
 
   const tomorrowFormatted = format(parseISO(data.date), "EEEE d 'de' MMMM", { locale: es });
 
-  // Document Compliance Check for Banner
+  // Document Compliance Check (Temporarily disabled until tables are fixed)
+  /*
   const supabase = await createClient();
   const [{ data: definitions }, { data: userDocs }] = await Promise.all([
     supabase.from('document_definitions').select('*').eq('is_active', true),
     supabase.from('documents').select('*').eq('personnel_id', session.id)
   ]);
-
-  const personDefs = (definitions || []).filter(def => 
-    !def.applicable_positions || def.applicable_positions.length === 0 || 
-    def.applicable_positions.includes(session.main_position)
-  );
-  
-  const mandatoryIds = personDefs.filter(d => d.is_mandatory).map(d => d.id);
-  const uploadedIds = (userDocs || []).map(d => d.definition_id);
-  
-  const isMissingMandatory = mandatoryIds.some(id => !uploadedIds.includes(id));
-  const hasExpired = (userDocs || []).some(d => d.expiration_date && differenceInDays(parseISO(d.expiration_date), new Date()) < 0);
-  const isExpiringSoon = (userDocs || []).some(d => d.expiration_date && differenceInDays(parseISO(d.expiration_date), new Date()) < 15 && differenceInDays(parseISO(d.expiration_date), new Date()) >= 0);
-
+  */
   let bannerConfig = null;
-  if (isMissingMandatory || hasExpired) {
-    bannerConfig = {
-      type: 'critical',
-      message: 'Tienes documentos obligatorios pendientes o vencidos',
-      icon: <AlertCircle className="h-5 w-5" />,
-      color: 'bg-red-500 shadow-red-200'
-    };
-  } else if (isExpiringSoon) {
-    bannerConfig = {
-      type: 'warning',
-      message: 'Tienes documentos que vencen pronto',
-      icon: <Clock className="h-5 w-5" />,
-      color: 'bg-orange-500 shadow-orange-200'
-    };
-  }
 
   const { data: freeRequests } = await getWorkerFreeRequests(session.id);
 
