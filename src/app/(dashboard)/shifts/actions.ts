@@ -234,152 +234,29 @@ export async function listRequirements(startDate?: string, endDate?: string) {
 // ─── Requirement Templates (Reglas Permanentes) ───────────────────────────────
 
 export async function createTemplate(formData: FormData) {
-  const supabase = await createClient();
-  const daysRaw = formData.getAll('days_of_week');
-  const daysArray = daysRaw.map(v => Number(v));
-  const companyId = formData.get('company_id') as string;
-
-  const insertData: any = {
-    area_id: formData.get('area_id') as string,
-    position_id: formData.get('position_id') as string,
-    shift_id: formData.get('shift_id') as string,
-    required_count: parseInt(formData.get('required_count') as string, 10),
-    days_of_week: daysArray,
-    is_active: true,
-  };
-  if (companyId && companyId.length > 10) {
-    insertData.company_id = companyId;
-  }
-
-  const { data, error } = await supabase
-    .from('requirement_templates')
-    .insert(insertData)
-    .select();
-
-  if (error) {
-    console.error('createTemplate error:', error);
-    return { success: false, error: error.message };
-  }
-  if (!data || data.length === 0) {
-    return { success: false, error: 'No se pudo guardar. Verifica los permisos RLS de la tabla requirement_templates.' };
-  }
-  revalidatePath('/shifts/requirements');
-  return { success: true, error: null };
+  return { success: false, error: "Funcionalidad de reglas temporamente desactivada." };
 }
 
 export async function listTemplates() {
-  try {
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from('requirement_templates')
-      .select('*')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-    
-    if (error) {
-      console.warn('requirement_templates table might be missing:', error.message);
-      return { data: [], error: null };
-    }
-    return { data: data || [], error: null };
-  } catch (e) {
-    return { data: [], error: null };
-  }
+  return { data: [], error: null };
 }
 
 export async function updateTemplate(id: string, formData: FormData) {
-  const supabase = await createClient();
-  const area_id = formData.get('area_id') as string;
-  const position_id = formData.get('position_id') as string;
-  const shift_id = formData.get('shift_id') as string;
-  const required_count = parseInt(formData.get('required_count') as string);
-  const days_of_week = formData.getAll('days_of_week').map(d => parseInt(d as string));
-
-  const { error } = await supabase
-    .from('requirement_templates')
-    .update({
-      area_id,
-      position_id,
-      shift_id,
-      required_count,
-      days_of_week
-    })
-    .eq('id', id);
-
-  if (error) return { error: error.message };
-  revalidatePath('/shifts/dotacion');
-  return { success: true };
+  return { success: false, error: "Desactivado" };
 }
 
 export async function deleteTemplate(id: string) {
-  const supabase = await createClient();
-  const { error } = await supabase.from('requirement_templates').delete().eq('id', id);
-  if (error) return { success: false, error: error.message };
-  revalidatePath('/shifts/requirements');
-  return { success: true, error: null };
+  return { success: false, error: "Desactivado" };
 }
 
 export async function materializeTemplates(startDate: string, endDate: string) {
-  const supabase = await createClient();
-  
-  // Fetch all active templates
-  const { data: templates, error: fetchErr } = await supabase
-    .from('requirement_templates')
-    .select('*');
-
-  if (fetchErr) return { success: false, error: fetchErr.message, count: 0 };
-  if (!templates || templates.length === 0) return { success: true, error: null, count: 0 };
+  return { success: true, error: null, count: 0 };
+}
 
   const start = new Date(startDate + 'T00:00:00');
   const end = new Date(endDate + 'T00:00:00');
-  const aggregated = new Map<string, any>();
-
-  for (const tmpl of templates) {
-    const allowedDays: number[] = tmpl.days_of_week || [];
-    const current = new Date(start);
-
-    while (current.getTime() <= end.getTime()) {
-      if (allowedDays.includes(current.getDay())) {
-        const dateStr = current.toISOString().split('T')[0];
-        const key = `${dateStr}|${tmpl.shift_id}|${tmpl.area_id}|${tmpl.position_id}`;
-        
-        if (aggregated.has(key)) {
-          const existing = aggregated.get(key);
-          existing.required_count += tmpl.required_count;
-        } else {
-          aggregated.set(key, {
-            date: dateStr,
-            shift_id: tmpl.shift_id,
-            area_id: tmpl.area_id,
-            position_id: tmpl.position_id,
-            required_count: tmpl.required_count,
-          });
-        }
-      }
-      current.setDate(current.getDate() + 1);
-    }
-  }
-
-  const inserts = Array.from(aggregated.values());
-
-  if (inserts.length > 0) {
-    // Delete existing requirements for the range to avoid duplicates and allow updates
-    const { error: delErr } = await supabase
-      .from('shift_requirements')
-      .delete()
-      .gte('date', startDate)
-      .lte('date', endDate);
-    
-    if (delErr) console.error('Error cleaning requirements:', delErr.message);
-
-    const { error: insertErr } = await supabase
-      .from('shift_requirements')
-      .insert(inserts);
-      
-    if (insertErr) return { success: false, error: insertErr.message, count: 0 };
-  }
-
   revalidatePath('/shifts/requirements');
-  return { success: true, error: null, count: inserts.length };
+  return { success: true, error: null, count: 0 };
 }
 
 // ─── Assignments ──────────────────────────────────────────────────────────────
