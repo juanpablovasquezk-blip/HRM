@@ -250,11 +250,6 @@ export async function deleteTemplate(id: string) {
 }
 
 export async function materializeTemplates(startDate: string, endDate: string) {
-  return { success: true, error: null, count: 0 };
-}
-
-  const start = new Date(startDate + 'T00:00:00');
-  const end = new Date(endDate + 'T00:00:00');
   revalidatePath('/shifts/requirements');
   return { success: true, error: null, count: 0 };
 }
