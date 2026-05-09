@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+export const dynamic = 'force-dynamic';
 import { RosterGridClient } from './roster-grid-client';
 import { startOfMonth, endOfMonth, format, startOfWeek, endOfWeek } from 'date-fns';
 import { es } from 'date-fns/locale';

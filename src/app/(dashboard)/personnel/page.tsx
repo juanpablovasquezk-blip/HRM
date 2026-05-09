@@ -1,4 +1,5 @@
 import Link from 'next/link';
+export const dynamic = 'force-dynamic';
 import { createClient } from '@/lib/supabase/server';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
