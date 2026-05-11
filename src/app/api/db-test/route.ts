@@ -9,16 +9,19 @@ export async function GET() {
   
   const supabase = createClient(url!, key!)
   
-  // Intentar leer la tabla de reglas directamente
-  const { data, error } = await supabase
-    .from('requirement_templates')
-    .select('count')
-    .limit(1);
+  const tablesToCheck = ['shift_requirements', 'shift_assignments', 'requirement_templates', 'areas', 'personnel'];
+  const results: any = {};
+
+  for (const table of tablesToCheck) {
+    const { error } = await supabase.from(table).select('count').limit(1);
+    results[table] = {
+      existe: !error || (error.code !== 'PGRST204' && error.code !== 'PGRST205'),
+      error: error ? { code: error.code, message: error.message } : null
+    };
+  }
 
   return NextResponse.json({
-    tabla_existe: !error || error.code !== 'PGRST204',
-    error_detectado: error,
-    mensaje: error ? 'La tabla NO existe o hay un error de permisos.' : 'La tabla EXISTE y es accesible.',
+    analisis_de_tablas: results,
     timestamp: new Date().toISOString()
   })
 }
