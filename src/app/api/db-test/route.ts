@@ -9,14 +9,16 @@ export async function GET() {
   
   const supabase = createClient(url!, key!)
   
-  const { data: tables, error } = await supabase
-    .from('pg_catalog.pg_tables')
-    .select('tablename')
-    .eq('schemaname', 'public');
+  // Intentar leer la tabla de reglas directamente
+  const { data, error } = await supabase
+    .from('requirement_templates')
+    .select('count')
+    .limit(1);
 
   return NextResponse.json({
-    tablas_encontradas: tables?.map(t => t.tablename) || [],
-    error_consulta: error,
+    tabla_existe: !error || error.code !== 'PGRST204',
+    error_detectado: error,
+    mensaje: error ? 'La tabla NO existe o hay un error de permisos.' : 'La tabla EXISTE y es accesible.',
     timestamp: new Date().toISOString()
   })
 }
