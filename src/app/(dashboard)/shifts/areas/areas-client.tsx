@@ -119,9 +119,14 @@ export function AreasClient({ initialAreas, userCompanyId }: AreasClientProps) {
                             className="h-3 w-3 ml-1 text-red-400 hover:text-red-600 cursor-pointer transition-colors" 
                             onClick={(e) => {
                                e.stopPropagation();
-                               if (confirm(`¿Eliminar el cargo "${pos.name}"?`)) {
-                                 startTransition(() => { deletePosition(pos.id); });
-                               }
+                               startTransition(async () => {
+                                 const result = await deletePosition(pos.id);
+                                 if (result.error) {
+                                   toast.error(`No se pudo eliminar: ${result.error}`);
+                                 } else {
+                                   toast.success('Cargo eliminado');
+                                 }
+                               });
                             }} 
                           />
                         </Badge>
