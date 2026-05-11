@@ -17,11 +17,12 @@ import type { Personnel } from '@/types/database';
 interface PersonnelFormProps {
   personnel?: Personnel;
   companies?: { id: string; name: string }[];
-  positions?: { id: string; name: string }[];
+  positions?: { id: string; name: string; area?: { name: string } }[];
   shifts?: { id: string; name: string; start_time: string; end_time: string }[];
+  areas?: { id: string; name: string }[];
 }
 
-export function PersonnelForm({ personnel, companies = [], positions = [], shifts = [] }: PersonnelFormProps) {
+export function PersonnelForm({ personnel, companies = [], positions = [], shifts = [], areas = [] }: PersonnelFormProps) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
   const isEditing = !!personnel;
@@ -90,10 +91,6 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
     });
   };
 
-  // Deduplicate positions by name (same role can exist in multiple areas)
-  const uniquePositions = Array.from(
-    new Map(positions.map(p => [p.name, p])).values()
-  ).sort((a, b) => a.name.localeCompare(b.name));
   const positionMap = Object.fromEntries(positions.map(p => [p.id, p.name]));
 
   return (
@@ -182,8 +179,10 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               defaultValue={initialValues.main_position}>
               <option value="">Por asignar / Sin cargo</option>
-              {uniquePositions.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
+              {positions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} {p.area?.name ? `(${p.area.name})` : ''}
+                </option>
               ))}
             </select>
           </div>
@@ -209,10 +208,12 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
                 }}
               >
                 <option value="">+ Agregar cargo secundario...</option>
-                {uniquePositions
+                {positions
                   .filter(p => !selectedSecondary.includes(p.id))
                   .map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                    <option key={p.id} value={p.id}>
+                      {p.name} {p.area?.name ? `(${p.area.name})` : ''}
+                    </option>
                   ))
                 }
               </select>
