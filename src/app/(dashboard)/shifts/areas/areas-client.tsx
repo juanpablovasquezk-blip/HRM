@@ -116,10 +116,12 @@ export function AreasClient({ initialAreas, userCompanyId }: AreasClientProps) {
                           <Briefcase className="h-3 w-3 text-slate-400" /> 
                           {pos.name}
                           <Trash2 
-                            className="h-3 w-3 ml-1 text-red-500/0 hover:text-red-500 group-hover:text-red-500/50 cursor-pointer ml-1 transition-colors" 
+                            className="h-3 w-3 ml-1 text-red-400 hover:text-red-600 cursor-pointer transition-colors" 
                             onClick={(e) => {
                                e.stopPropagation();
-                               startTransition(() => { deletePosition(pos.id); });
+                               if (confirm(`¿Eliminar el cargo "${pos.name}"?`)) {
+                                 startTransition(() => { deletePosition(pos.id); });
+                               }
                             }} 
                           />
                         </Badge>
