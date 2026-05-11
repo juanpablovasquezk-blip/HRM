@@ -266,9 +266,64 @@ export async function deleteTemplate(id: string) {
   return { success: true, error: null };
 }
 
+export async function updateTemplate(id: string, formData: FormData) {
+  const supabase = await createClient();
+  const days = formData.get('days_of_week') as string;
+  const { error } = await supabase.from('requirement_templates').update({
+    area_id: formData.get('area_id') as string,
+    position_id: formData.get('position_id') as string,
+    shift_id: formData.get('shift_id') as string,
+    required_count: parseInt(formData.get('required_count') as string),
+    days_of_week: days.split(',').map(Number),
+  }).eq('id', id);
+  
+  if (error) return { success: false, error: error.message };
+  revalidatePath('/shifts/dotacion');
+  return { success: true, error: null };
+}
+
 export async function materializeTemplates(startDate: string, endDate: string) {
+  const supabase = await createClient();
+  
+  // 1. Obtener todas las reglas
+  const { data: templates, error: tError } = await supabase.from('requirement_templates').select('*');
+  if (tError) return { success: false, error: tError.message };
+  if (!templates || templates.length === 0) return { success: true, error: null, count: 0 };
+
+  const start = parseISO(startDate);
+  const end = parseISO(endDate);
+  const days = eachDayOfInterval({ start, end });
+  
+  const inserts: any[] = [];
+
+  // 2. Generar requerimientos día por día basados en las reglas
+  for (const day of days) {
+    const dayOfWeek = getDay(day); // 0 (Sun) to 6 (Sat)
+    // El sistema usa 1 (Mon) a 7 (Sun)
+    const normalizedDay = dayOfWeek === 0 ? 7 : dayOfWeek;
+
+    for (const template of templates) {
+      if (template.days_of_week.includes(normalizedDay)) {
+        inserts.push({
+          area_id: template.area_id,
+          position_id: template.position_id,
+          shift_id: template.shift_id,
+          required_count: template.required_count,
+          date: format(day, 'yyyy-MM-dd')
+        });
+      }
+    }
+  }
+
+  if (inserts.length > 0) {
+    const { error: iError } = await supabase.from('shift_requirements').upsert(inserts, {
+       onConflict: 'area_id,position_id,shift_id,date'
+    });
+    if (iError) return { success: false, error: iError.message };
+  }
+
   revalidatePath('/shifts/requirements');
-  return { success: true, error: null, count: 0 };
+  return { success: true, error: null, count: inserts.length };
 }
 
 // ─── Assignments ──────────────────────────────────────────────────────────────
