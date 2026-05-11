@@ -234,19 +234,36 @@ export async function listRequirements(startDate?: string, endDate?: string) {
 // ─── Requirement Templates (Reglas Permanentes) ───────────────────────────────
 
 export async function createTemplate(formData: FormData) {
-  return { success: false, error: "Funcionalidad de reglas temporamente desactivada." };
+  const supabase = await createClient();
+  const days = formData.get('days_of_week') as string;
+  const { error } = await supabase.from('requirement_templates').insert({
+    area_id: formData.get('area_id') as string,
+    position_id: formData.get('position_id') as string,
+    shift_id: formData.get('shift_id') as string,
+    required_count: parseInt(formData.get('required_count') as string),
+    days_of_week: days.split(',').map(Number),
+  });
+  
+  if (error) return { success: false, error: error.message };
+  revalidatePath('/shifts/dotacion');
+  return { success: true, error: null };
 }
 
 export async function listTemplates() {
-  return { data: [], error: null };
-}
-
-export async function updateTemplate(id: string, formData: FormData) {
-  return { success: false, error: "Desactivado" };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('requirement_templates')
+    .select('*, area:areas(name), position:positions(name), shift:shifts(name)');
+  if (error) return { data: [], error: error.message };
+  return { data, error: null };
 }
 
 export async function deleteTemplate(id: string) {
-  return { success: false, error: "Desactivado" };
+  const supabase = await createClient();
+  const { error } = await supabase.from('requirement_templates').delete().eq('id', id);
+  if (error) return { success: false, error: error.message };
+  revalidatePath('/shifts/dotacion');
+  return { success: true, error: null };
 }
 
 export async function materializeTemplates(startDate: string, endDate: string) {
