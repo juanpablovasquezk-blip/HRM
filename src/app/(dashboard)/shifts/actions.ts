@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { generateSchedule, partialRecalculate } from '@/lib/scheduler';
 import type { RecalculationInput } from '@/lib/scheduler/types';
-import { parseISO, format, endOfWeek, startOfWeek, isAfter, startOfMonth, endOfMonth } from 'date-fns';
+import { parseISO, format, endOfWeek, startOfWeek, isAfter, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns';
 
 // ─── Auth Helpers ─────────────────────────────────────────────────────────────
 
