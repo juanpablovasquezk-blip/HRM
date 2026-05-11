@@ -115,8 +115,10 @@ export function AreasClient({ initialAreas, userCompanyId }: AreasClientProps) {
                         <Badge key={pos.id} variant="secondary" className="font-normal text-xs flex items-center gap-1 group py-1">
                           <Briefcase className="h-3 w-3 text-slate-400" /> 
                           {pos.name}
-                          <Trash2 
-                            className="h-3 w-3 ml-1 text-red-400 hover:text-red-600 cursor-pointer transition-colors" 
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50 ml-1" 
                             onClick={(e) => {
                                e.stopPropagation();
                                startTransition(async () => {
@@ -127,8 +129,10 @@ export function AreasClient({ initialAreas, userCompanyId }: AreasClientProps) {
                                    toast.success('Cargo eliminado');
                                  }
                                });
-                            }} 
-                          />
+                            }}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
                         </Badge>
                       ))}
                     </div>
