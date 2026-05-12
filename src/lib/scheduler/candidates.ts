@@ -136,31 +136,33 @@ function scorePreference(
   personnel: PersonnelAvailability,
   shiftSlot: ShiftSlot
 ): number {
+  let score = 75; // Default
+
   if (personnel.fixed_shift_id && personnel.fixed_shift_id === shiftSlot.shift_id) {
-    return 1000;
+    score = 1000;
+  } else {
+    const startHour = parseInt(shiftSlot.shift_start.split(':')[0], 10);
+    const isNightShift = startHour >= 20 || startHour < 6;
+    const hasNightInPattern = (personnel.rotation_pattern || '').toUpperCase().includes('NOCHE');
+
+    if (isNightShift && (personnel.prefers_night || hasNightInPattern)) score = 100;
+    else if (isNightShift && personnel.avoids_night) score = 10;
+    else if (!isNightShift && personnel.avoids_night) score = 100;
+    else if (!isNightShift && (personnel.prefers_night || hasNightInPattern)) score = 50;
+
+    const hasPrio04 = (personnel.rotation_pattern || '').includes('PRIO-04');
+    const isSupervisor04 = (shiftSlot.position_name || '').toUpperCase().includes('SUPERVISOR') && shiftSlot.shift_start.includes('04');
+
+    if (hasPrio04 && isSupervisor04) score = 800;
+    else if (!hasPrio04 && isSupervisor04) score = 300;
   }
-
-  const startHour = parseInt(shiftSlot.shift_start.split(':')[0], 10);
-  const isNightShift = startHour >= 20 || startHour < 6;
-  const hasNightInPattern = (personnel.rotation_pattern || '').toUpperCase().includes('NOCHE');
-
-  if (isNightShift && (personnel.prefers_night || hasNightInPattern)) return 100;
-  if (isNightShift && personnel.avoids_night) return 10;
-  if (!isNightShift && personnel.avoids_night) return 100;
-  if (!isNightShift && (personnel.prefers_night || hasNightInPattern)) return 50;
-
-  const hasPrio04 = (personnel.rotation_pattern || '').includes('PRIO-04');
-  const isSupervisor04 = (shiftSlot.position_name || '').toUpperCase().includes('SUPERVISOR') && shiftSlot.shift_start.includes('04');
-
-  if (hasPrio04 && isSupervisor04) return 800;
-  if (!hasPrio04 && isSupervisor04) return 300;
 
   // Transport Preference Penalty
   if (shiftSlot.requires_transport && !personnel.requires_transport) {
-    return -5000; // Strong discouragement, but not a hard block
+    score -= 5000; // Strong discouragement
   }
 
-  return 75;
+  return score;
 }
 
 function scoreHoursBalance(
