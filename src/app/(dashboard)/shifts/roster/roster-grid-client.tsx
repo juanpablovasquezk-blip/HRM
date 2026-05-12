@@ -1992,6 +1992,32 @@ export function RosterGridClient({
                          </p>
                        </div>
                     </div>
+
+                    {/* Diagnostic Logs Expansion */}
+                    {simLogs && simLogs.length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-emerald-200 dark:border-emerald-800">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="w-full text-[10px] h-7 gap-2 bg-white dark:bg-slate-900 border-emerald-200 text-emerald-700"
+                          onClick={() => setDiagnosticLogs(diagnosticLogs ? null : simLogs)}
+                        >
+                          <Terminal className="h-3 w-3" />
+                          {diagnosticLogs ? 'Ocultar Diagnóstico' : '¿Por qué dio 0%? Ver Diagnóstico'}
+                        </Button>
+                        
+                        {diagnosticLogs && (
+                          <div className="mt-2 p-3 bg-slate-950 text-emerald-400 font-mono text-[9px] rounded-lg border border-slate-800 max-h-40 overflow-y-auto space-y-1">
+                            {diagnosticLogs.map((log, i) => (
+                              <div key={i} className="flex gap-2">
+                                <span className="text-slate-600 select-none">{i+1}.</span>
+                                <span>{log}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                  </div>
              )}
 
