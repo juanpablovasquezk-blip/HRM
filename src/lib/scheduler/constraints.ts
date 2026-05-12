@@ -797,6 +797,35 @@ export function checkSundaysOff(
   return null;
 }
 
+/**
+ * Check if today is the personnel's birthday
+ */
+export function checkBirthday(
+  personnel: PersonnelAvailability,
+  shiftSlot: ShiftSlot
+): ConstraintViolation | null {
+  if (!personnel.birth_date) return null;
+
+  try {
+    const bDate = parseISO(personnel.birth_date);
+    const sDate = parseISO(shiftSlot.date);
+    
+    // Check Month and Day
+    if (bDate.getMonth() === sDate.getMonth() && bDate.getDate() === sDate.getDate()) {
+      return {
+        type: 'birthday',
+        personnel_id: personnel.personnel_id,
+        date: shiftSlot.date,
+        message: `Hoy es el cumpleaños de ${personnel.first_name}. Priorizar descanso.`,
+        severity: 'warning', // Warning so it doesn't hard-block if no one else exists
+      };
+    }
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
+
 
 export function validateAllConstraints(
   personnel: PersonnelAvailability,
@@ -842,6 +871,9 @@ export function validateAllConstraints(
 
   const sundayRule = checkSundaysOff(personnel, shiftSlot, dateSet);
   if (sundayRule) violations.push(sundayRule);
+
+  const vBirthday = checkBirthday(personnel, shiftSlot);
+  if (vBirthday) violations.push(vBirthday);
 
   return violations;
 }
