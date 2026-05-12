@@ -80,7 +80,7 @@ export async function partialRecalculate(
   // 3. Load requirements for the date range
   let reqQuery = supabase
     .from('shift_requirements')
-    .select('*, shift:shifts(start_time, end_time, duration_hours)')
+    .select('*, shift:shifts(start_time, end_time, duration_hours, requires_transport)')
     .gte('date', startDate)
     .lte('date', endDate);
 
@@ -108,7 +108,7 @@ export async function partialRecalculate(
 
   // Build available slots (requirements minus protected fulfillment)
   const slots: ShiftSlot[] = (requirements || []).map((req) => {
-    const shift = req.shift as { start_time: string; end_time: string; duration_hours: number } | null;
+    const shift = req.shift as { start_time: string; end_time: string; duration_hours: number; requires_transport: boolean } | null;
     const filledByProtected = protectedAssignments.filter(
       (a) =>
         a.date === req.date &&
@@ -128,6 +128,7 @@ export async function partialRecalculate(
       shift_duration_hours: shift?.duration_hours || 8,
       required_count: req.required_count,
       filled_count: filledByProtected,
+      requires_transport: shift?.requires_transport ?? false,
     };
   }).filter((s) => s.filled_count < s.required_count); // Only slots that need filling
 
@@ -169,6 +170,7 @@ export async function partialRecalculate(
       termination_date: p.termination_date,
       area_id: p.area_id || '',
       is_turn_b: p.is_turn_b || false,
+      requires_transport: p.requires_transport ?? true,
       weekly_hours: protectedForPerson.reduce((sum, a) => {
         const shift = a.shift as { duration_hours: number } | null;
         return sum + (shift?.duration_hours || 0);

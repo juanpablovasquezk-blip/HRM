@@ -16,9 +16,8 @@ import type { Leave } from '@/types/database';
 const LEAVE_TYPES = [
   { value: 'vacation', label: 'Vacaciones' },
   { value: 'sick', label: 'Licencia Médica' },
-  { value: 'personal', label: 'Día Administrativo' },
+  { value: 'personal', label: 'Día Administrativo / Libre' },
   { value: 'maternity', label: 'Paternidad/Maternidad' },
-  { value: 'free_request', label: 'Solicitud de Libre' },
   { value: 'other', label: 'Otro' },
 ];
 
