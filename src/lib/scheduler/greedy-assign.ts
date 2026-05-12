@@ -155,6 +155,80 @@ export function greedyAssign(
   }
 
   // =========================================================================
+  // PASS -0.7: SUPERVISOR CRITICAL COVERAGE (AERO > BASE)
+  // =========================================================================
+  if (startDateStr && endDateStr) {
+    const supervisors = personnelPool.filter(p => normStr(p.main_position_name).includes('SUPERVISOR'));
+    const supervisorSlots = slots.filter(s => normStr(s.position_name).includes('SUPERVISOR'));
+    
+    // Sort slots: Aero first, then Base. Then Weekend first.
+    const sortedSupSlots = [...supervisorSlots].sort((a, b) => {
+      const isAeroA = normStr(a.area_name).includes('AEROPUERTO');
+      const isAeroB = normStr(b.area_name).includes('AEROPUERTO');
+      if (isAeroA !== isAeroB) return isAeroA ? -1 : 1;
+      
+      const dA = parseISO(a.date);
+      const isWkA = dA.getDay() === 0 || dA.getDay() === 6;
+      const isWkB = parseISO(b.date).getDay() === 0 || parseISO(b.date).getDay() === 6;
+      if (isWkA !== isWkB) return isWkA ? -1 : 1;
+      
+      return a.date.localeCompare(b.date);
+    });
+
+    for (const slot of sortedSupSlots) {
+      const alreadyAssigned = assignments.filter(a => a.date === slot.date && a.position_id === slot.position_id && a.area_id === slot.area_id).length;
+      if (alreadyAssigned >= slot.required_count) continue;
+
+      // Find candidates who have this as main position
+      const candidates = supervisors.filter(p => {
+        if (p.assigned_dates.has(slot.date) || p.leave_dates.has(slot.date)) return false;
+        if (p.main_position !== slot.position_id) return false;
+        return true;
+      });
+
+      if (candidates.length > 0) {
+        // Simple ranking for this pass
+        const ranked = candidates.sort((a, b) => {
+          // Prioritize by pattern match (e.g. PRIO-04 for 04:00)
+          const shft = slot.shift_start || '';
+          const hasPrio04A = (a.rotation_pattern || '').includes('PRIO-04');
+          const hasPrio04B = (b.rotation_pattern || '').includes('PRIO-04');
+          if (shft.includes('04') && hasPrio04A !== hasPrio04B) return hasPrio04A ? -1 : 1;
+          
+          return a.first_name.localeCompare(b.first_name);
+        });
+
+        for (const p of ranked) {
+          const state = personnelState.get(p.personnel_id)!;
+          const violations = validateAllConstraints(p, slot, state.assignments);
+          if (!hasHardViolation(violations)) {
+            assignments.push({
+              personnel_id: p.personnel_id,
+              shift_id: slot.shift_id,
+              date: slot.date,
+              area_id: slot.area_id,
+              position_id: slot.position_id,
+              status: 'scheduled',
+              is_locked: false,
+              is_manual: false,
+              frozen_by_rule: true,
+            });
+            state.assignments.push({
+              date: slot.date,
+              duration_hours: slot.shift_duration_hours,
+              shift_start: slot.shift_start,
+              shift_end: slot.shift_end,
+            });
+            p.assigned_dates.add(slot.date);
+            p.weekly_hours += slot.shift_duration_hours;
+            break; // Filled this slot requirement (1 person)
+          }
+        }
+      }
+    }
+  }
+
+  // =========================================================================
   // PASS -1: EXPLICIT BLUE EXPRESS INJECTION
   // =========================================================================
   if (startDateStr && endDateStr && allShifts && allShifts.length > 0) {
