@@ -401,6 +401,25 @@ export function checkQualification(
 }
 
 /**
+ * Check transport requirements
+ */
+export function checkTransport(
+  personnel: PersonnelAvailability,
+  shiftSlot: ShiftSlot
+): ConstraintViolation | null {
+  if (shiftSlot.requires_transport && !personnel.requires_transport) {
+    return {
+      type: 'preference',
+      personnel_id: personnel.personnel_id,
+      date: shiftSlot.date,
+      message: `Este turno requiere transporte y el trabajador no lo tiene habilitado`,
+      severity: 'error',
+    };
+  }
+  return null;
+}
+
+/**
  * Check rotation pattern (e.g., Mon-Fri only)
  */
 export function checkRotationPattern(
@@ -797,6 +816,9 @@ export function validateAllConstraints(
 
   const rest = checkMinRestBetweenShifts(personnel, shiftSlot, currentAssignments);
   if (rest) violations.push(rest);
+
+  const transport = checkTransport(personnel, shiftSlot);
+  if (transport) violations.push(transport);
 
   const birthday = checkBirthdayOff(personnel, shiftSlot);
   if (birthday) violations.push(birthday);
