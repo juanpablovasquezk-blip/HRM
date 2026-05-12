@@ -235,13 +235,13 @@ export async function listRequirements(startDate?: string, endDate?: string) {
 
 export async function createTemplate(formData: FormData) {
   const supabase = await createClient();
-  const days = formData.get('days_of_week') as string;
+  const days = formData.getAll('days_of_week').map(Number);
   const { error } = await supabase.from('requirement_templates').insert({
     area_id: formData.get('area_id') as string,
     position_id: formData.get('position_id') as string,
     shift_id: formData.get('shift_id') as string,
     required_count: parseInt(formData.get('required_count') as string),
-    days_of_week: days.split(',').map(Number),
+    days_of_week: days,
   });
   
   if (error) return { success: false, error: error.message };
@@ -268,13 +268,13 @@ export async function deleteTemplate(id: string) {
 
 export async function updateTemplate(id: string, formData: FormData) {
   const supabase = await createClient();
-  const days = formData.get('days_of_week') as string;
+  const days = formData.getAll('days_of_week').map(Number);
   const { error } = await supabase.from('requirement_templates').update({
     area_id: formData.get('area_id') as string,
     position_id: formData.get('position_id') as string,
     shift_id: formData.get('shift_id') as string,
     required_count: parseInt(formData.get('required_count') as string),
-    days_of_week: days.split(',').map(Number),
+    days_of_week: days,
   }).eq('id', id);
   
   if (error) return { success: false, error: error.message };
