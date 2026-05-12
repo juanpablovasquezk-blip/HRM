@@ -294,26 +294,38 @@ export async function materializeTemplates(startDate: string, endDate: string) {
   const end = parseISO(endDate);
   const days = eachDayOfInterval({ start, end });
   
-  const inserts: any[] = [];
+  // Usar un mapa para agrupar y sumar requerimientos que coincidan en la misma clave
+  const groupedInserts = new Map<string, any>();
 
   // 2. Generar requerimientos día por día basados en las reglas
   for (const day of days) {
-    const dayOfWeek = getDay(day); // 0 (Sun) to 6 (Sat)
-    // El sistema usa 1 (Mon) a 7 (Sun)
-    const normalizedDay = dayOfWeek === 0 ? 7 : dayOfWeek;
+    const dayOfWeek = getDay(day); 
+    const normalizedDay = dayOfWeek === 0 ? 0 : dayOfWeek; // 0=Dom, 1=Lun en requirements-client
+
+    const dateStr = format(day, 'yyyy-MM-dd');
 
     for (const template of templates) {
       if (template.days_of_week.includes(normalizedDay)) {
-        inserts.push({
-          area_id: template.area_id,
-          position_id: template.position_id,
-          shift_id: template.shift_id,
-          required_count: template.required_count,
-          date: format(day, 'yyyy-MM-dd')
-        });
+        const key = `${template.area_id}-${template.position_id}-${template.shift_id}-${dateStr}`;
+        
+        if (groupedInserts.has(key)) {
+          // Si ya existe, sumamos la dotación
+          groupedInserts.get(key).required_count += template.required_count;
+        } else {
+          // Si es nuevo, lo añadimos
+          groupedInserts.set(key, {
+            area_id: template.area_id,
+            position_id: template.position_id,
+            shift_id: template.shift_id,
+            required_count: template.required_count,
+            date: dateStr
+          });
+        }
       }
     }
   }
+
+  const inserts = Array.from(groupedInserts.values());
 
   if (inserts.length > 0) {
     const { error: iError } = await supabase.from('shift_requirements').upsert(inserts, {
@@ -322,6 +334,7 @@ export async function materializeTemplates(startDate: string, endDate: string) {
     if (iError) return { success: false, error: iError.message };
   }
 
+  revalidatePath('/shifts/dotacion');
   revalidatePath('/shifts/requirements');
   return { success: true, error: null, count: inserts.length };
 }
