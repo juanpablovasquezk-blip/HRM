@@ -98,6 +98,7 @@ export async function createPersonnel(
     hire_date: (formData.get('hire_date') as string) || null,
     termination_date: (formData.get('termination_date') as string) || null,
     has_special_contract: formData.get('has_special_contract') === 'true',
+    requires_transport: formData.get('requires_transport') === 'true',
     is_active: formData.get('is_active') === 'true',
     address: {
       street: (formData.get('address_street') as string) || '',
@@ -141,6 +142,7 @@ export async function updatePersonnel(
     hire_date: (formData.get('hire_date') as string) || null,
     termination_date: (formData.get('termination_date') as string) || null,
     has_special_contract: formData.get('has_special_contract') === 'true',
+    requires_transport: formData.get('requires_transport') === 'true',
     is_active: formData.get('is_active') === 'true',
     address: {
       street: (formData.get('address_street') as string) || '',

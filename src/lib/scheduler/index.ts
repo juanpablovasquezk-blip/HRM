@@ -54,7 +54,7 @@ export async function generateSchedule(
 
   let reqQuery = supabase
     .from('shift_requirements')
-    .select('*, shift:shifts(name, start_time, end_time, duration_hours), area:areas(name), positions(name)')
+    .select('*, shift:shifts(name, start_time, end_time, duration_hours, requires_transport), area:areas(name), positions(name)')
     .gte('date', format(startDate, 'yyyy-MM-dd'))
     .lte('date', format(endDate, 'yyyy-MM-dd'));
 
@@ -231,6 +231,7 @@ export async function generateSchedule(
       leave_dates: leaveDates,
       area_id: (p.main_position_obj as any)?.area_id || '',
       is_turn_b: isTurnB,
+      requires_transport: p.requires_transport ?? true,
     };
   });
 
@@ -268,6 +269,7 @@ export async function generateSchedule(
         position_name: (req.positions as any)?.name,
         area_name: (req.area as any)?.name,
         shift_name: (req.shift as any)?.name,
+        requires_transport: shift?.requires_transport ?? false,
       };
     }).filter((s) => {
       // FORZAR: No filtrar NUNCA los slots de Aeropuerto para que la matemática 4x4 vea el historial completo

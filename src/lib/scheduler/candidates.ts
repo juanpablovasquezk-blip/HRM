@@ -155,6 +155,11 @@ function scorePreference(
   if (hasPrio04 && isSupervisor04) return 800;
   if (!hasPrio04 && isSupervisor04) return 300;
 
+  // Transport Preference Penalty
+  if (shiftSlot.requires_transport && !personnel.requires_transport) {
+    return -5000; // Strong discouragement, but not a hard block
+  }
+
   return 75;
 }
 

@@ -29,6 +29,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const [prefersNight, setPrefersNight] = useState(personnel?.prefers_night ?? false);
   const [avoidsNight, setAvoidsNight] = useState(personnel?.avoids_night ?? false);
   const [hasSpecialContract, setHasSpecialContract] = useState(personnel?.has_special_contract ?? false);
+  const [requiresTransport, setRequiresTransport] = useState((personnel as any)?.requires_transport ?? true);
   const [isActive, setIsActive] = useState(personnel?.is_active ?? true);
   const [selectedSecondary, setSelectedSecondary] = useState<string[]>(
     (personnel?.secondary_positions as string[]) || []
@@ -65,6 +66,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
     formData.set('prefers_night', String(prefersNight));
     formData.set('avoids_night', String(avoidsNight));
     formData.set('has_special_contract', String(hasSpecialContract));
+    formData.set('requires_transport', String(requiresTransport));
     formData.set('is_active', String(isActive));
     formData.set('secondary_positions', selectedSecondary.join(','));
 
@@ -379,6 +381,14 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
               <p className="text-xs text-muted-foreground">Evitar asignar turnos nocturnos cuando sea posible</p>
             </div>
             <Switch id="avoids_night" checked={avoidsNight} onCheckedChange={(checked) => { setAvoidsNight(checked); if (checked) setPrefersNight(false); }} />
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="requires_transport">Requiere Transporte</Label>
+              <p className="text-xs text-muted-foreground">Si se desactiva, la IA evitará darle turnos que necesiten transporte (prioridad baja)</p>
+            </div>
+            <Switch id="requires_transport" checked={requiresTransport} onCheckedChange={setRequiresTransport} />
           </div>
           <Separator />
           <div className="flex items-center justify-between">

@@ -86,6 +86,7 @@ export interface PersonnelAvailability {
   leave_dates: Set<string>;
   area_id: string;
   is_turn_b: boolean;
+  requires_transport: boolean;
 }
 
 export interface ShiftSlot {
@@ -103,4 +104,5 @@ export interface ShiftSlot {
   position_name?: string;
   area_name?: string;
   shift_name?: string;
+  requires_transport: boolean;
 }
