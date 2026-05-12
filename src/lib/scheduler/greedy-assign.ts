@@ -355,13 +355,12 @@ export function greedyAssign(
       
       const config = Object.entries(REINFORCEMENT_CONFIG).find(([key]) => pPosName.includes(key))?.[1];
       if (!config) continue; 
-      if (pRot.includes('4X4') || pRot.includes('7X7') || pRot.includes('NOCHE') || p.has_special_contract) continue; 
+      if (pRot.includes('4X4') || pRot.includes('7X7') || pRot.includes('NOCHE') || p.has_special_contract || pPosName.includes('SUPERVISOR')) continue; 
 
       // DETERMINAR TURNO DE REFUERZO: Intentar encontrar un turno que ya se use en esa área para ese cargo
       const isAero = pPosName.includes('AEROPUERTO');
       const reinforcementShift = allShifts.find(s => {
         const sName = normStr(s.name);
-        if (isAero) return sName.includes('AM 07');
         
         // Priorizar turnos que ya tengan requerimientos hoy
         return s.start_time.includes(config.shift_start) && !sName.includes('7X7');
@@ -593,9 +592,10 @@ export function greedyAssign(
     log(`[FINAL_REVIEW] Iniciando revisión de cuota de 5 días para personal 5x2...`);
     
     for (const p of personnelPool) {
-      // Ignorar patrones que NO son de 5 días (como 4x4 o 7x7)
+      // Ignorar patrones que NO son de 5 días (como 4x4 o 7x7) o puestos críticos como SUPERVISOR
       const pattern = (p.rotation_pattern || '').toUpperCase();
-      if (pattern.includes('4X4') || pattern.includes('7X7')) continue;
+      const posName = normStr(p.main_position_name);
+      if (pattern.includes('4X4') || pattern.includes('7X7') || posName.includes('SUPERVISOR')) continue;
 
       const state = personnelState.get(p.personnel_id)!;
       
