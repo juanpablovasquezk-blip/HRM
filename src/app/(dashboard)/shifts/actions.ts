@@ -618,13 +618,21 @@ export async function runScheduler(startDate: string, endDate: string, areaId?: 
     revalidatePath('/shifts/assignments');
     revalidatePath('/shifts/roster');
     
+    // Diagnóstico extra para ver qué pasó en el servidor
+    console.log(`[Scheduler] Terminado. Cobertura: ${result.coverage}%, Turnos: ${result.count}`);
+    console.log(`[Scheduler] Detalle: ${result.stats?.total_requirements || 0} reqs, ${result.stats?.personnel_count || 0} personas`);
+
     return { 
       success: true, 
       coverage: result.coverage,
       count: result.count,
       stats: result.stats,
       auditSummary: auditSummary.length > 0 ? auditSummary : null,
-      diagnosticLogs: (result as any).diagnosticLogs || []
+      diagnosticLogs: [
+        `Requerimientos encontrados: ${result.stats?.total_requirements || 0}`,
+        `Personal disponible para IA: ${result.stats?.personnel_count || 0}`,
+        ...(result as any).diagnosticLogs || []
+      ]
     };
   } catch (err) {
     return {
@@ -640,10 +648,18 @@ export async function runPartialRecalc(input: RecalculationInput) {
     const result = await partialRecalculate(input);
     revalidatePath('/shifts/assignments');
     revalidatePath('/dashboard');
+    
+    // Diagnóstico extra para ver qué pasó
+    console.log(`[Partial Recalc] Terminado. Cobertura: ${result.coverage}%, Turnos: ${result.count}`);
+
     return { 
       success: true, 
       data: result, 
-      diagnosticLogs: (result as any).diagnosticLogs || [],
+      diagnosticLogs: [
+        `Slots totales: ${result.stats?.total_slots || 0}`,
+        `Personal evaluado: ${result.stats?.recalculated_count || 0}`,
+        ...(result as any).diagnosticLogs || []
+      ],
       error: null 
     };
   } catch (err) {
