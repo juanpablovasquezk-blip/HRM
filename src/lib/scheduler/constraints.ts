@@ -772,25 +772,27 @@ export function checkSundaysOff(
   // GET LIST OF SUNDAYS (Memoized)
   const sundaysInMonth = getSundaysInMonth(monthKey, mStart, mEnd);
   
-  let assignedSundays = 0;
+  let totalSundaysWorking = 0;
   for (const sunDate of sundaysInMonth) {
     if (dateSet.has(sunDate)) {
-      assignedSundays++;
+      totalSundaysWorking++;
     }
   }
 
-  const totalSundaysWorking = assignedSundays; // Current one is already in dateSet
-  const sundaysOffCount = sundaysInMonth.length - totalSundaysWorking;
+  const maxAllowedWorking = sundaysInMonth.length - 2;
 
-  if (sundaysOffCount < 2) {
+  if (totalSundaysWorking > maxAllowedWorking) {
+    const offRemaining = sundaysInMonth.length - totalSundaysWorking;
     return {
       type: 'min_days_off',
       personnel_id: personnel.personnel_id,
       date: shiftSlot.date,
-      message: `Debe tener al menos 2 domingos libres al mes (quedarían: ${sundaysOffCount})`,
+      message: `Límite legal: Debe tener al menos 2 domingos libres (quedarían: ${offRemaining})`,
       severity: 'error',
     };
   }
+
+  return null;
 
   return null;
 }

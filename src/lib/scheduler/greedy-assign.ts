@@ -170,16 +170,33 @@ export function greedyAssign(
     const supervisors = personnelPool.filter(p => normStr(p.main_position_name).includes('SUPERVISOR'));
     const supervisorSlots = slots.filter(s => normStr(s.position_name).includes('SUPERVISOR'));
     
-    // Sort slots: Aero first, then Base. Then Weekend first.
+    // Sort slots: 
+    // 1. Aero first. 
+    // 2. High-demand days (Mon, Tue, Fri have 2 supervisors) first.
+    // 3. Weekend first.
+    // 4. AM 04 first (Critical).
     const sortedSupSlots = [...supervisorSlots].sort((a, b) => {
       const isAeroA = normStr(a.area_name).includes('AEROPUERTO');
       const isAeroB = normStr(b.area_name).includes('AEROPUERTO');
       if (isAeroA !== isAeroB) return isAeroA ? -1 : 1;
       
-      const dA = parseISO(a.date);
-      const isWkA = dA.getDay() === 0 || dA.getDay() === 6;
-      const isWkB = parseISO(b.date).getDay() === 0 || parseISO(b.date).getDay() === 6;
+      const dateA = parseISO(a.date);
+      const dateB = parseISO(b.date);
+      const dayA = dateA.getDay(); // 0=Sun, 1=Mon...
+      const dayB = dateB.getDay();
+
+      // High demand days: Mon (1), Tue (2), Fri (5)
+      const isHighA = dayA === 1 || dayA === 2 || dayA === 5;
+      const isHighB = dayB === 1 || dayB === 2 || dayB === 5;
+      if (isHighA !== isHighB) return isHighA ? -1 : 1;
+
+      const isWkA = dayA === 0 || dayA === 6;
+      const isWkB = dayB === 0 || dayB === 6;
       if (isWkA !== isWkB) return isWkA ? -1 : 1;
+
+      const is04A = (a.shift_start || '').includes('04');
+      const is04B = (b.shift_start || '').includes('04');
+      if (is04A !== is04B) return is04A ? -1 : 1;
       
       return a.date.localeCompare(b.date);
     });
