@@ -17,8 +17,9 @@ export function getSlotPriority(
 
   // 2. SUPERVISORS (All supervisor shifts are high priority)
   if (pos.includes('SUPERVISOR')) {
-    if (shft.includes('04')) return 98; // Extreme priority
-    return 96; // High priority (higher than operators)
+    if (shft.includes('04')) return 98; // Extreme priority (Aero)
+    if (area.toUpperCase().includes('AEROPUERTO')) return 97; // Aero AM 07 > Base AM 07
+    return 96; // Base AM 07
   }
 
   // 3. AIRPORT OPERATORS (especially 04:00, 13:30, 22:00)
@@ -59,8 +60,6 @@ export function getSlotPriority(
  * and which shift they should use as reinforcement.
  */
 export const REINFORCEMENT_CONFIG: Record<string, { shift_start: string }> = {
-  'SUPERVISOR': { shift_start: '07:00' },
-  'SUP': { shift_start: '07:00' },
   'OPERADOR FEDEX': { shift_start: '04:00' },
   'OPERADOR DHL': { shift_start: '05:00' },
   'AEROPUERTO': { shift_start: '07:00' },
