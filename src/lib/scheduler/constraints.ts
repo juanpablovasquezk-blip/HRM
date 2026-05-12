@@ -732,7 +732,7 @@ function getSundaysInMonth(monthKey: string, mStart: Date, mEnd: Date): string[]
   const sundays: string[] = [];
   let curr = new Date(mStart);
   while (curr <= mEnd) {
-    if (curr.getDay() === 0) {
+    if (isSunday(curr)) {
       sundays.push(format(curr, 'yyyy-MM-dd'));
     }
     curr.setDate(curr.getDate() + 1);
@@ -779,7 +779,7 @@ export function checkSundaysOff(
     }
   }
 
-  const totalSundaysWorking = assignedSundays + 1; // Including the current one
+  const totalSundaysWorking = assignedSundays; // Current one is already in dateSet
   const sundaysOffCount = sundaysInMonth.length - totalSundaysWorking;
 
   if (sundaysOffCount < 2) {

@@ -103,8 +103,17 @@ export function greedyAssign(
         const dStr = format(simDate, 'yyyy-MM-dd');
         const dayOfWeek = simDate.getDay();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const isSundayDay = dayOfWeek === 0;
 
         if (isWeekend && !state.assignments.some(a => a.date === dStr) && !p.leave_dates.has(dStr)) {
+          // Additional Sunday check for specialists: Ensure max 3 working Sundays
+          if (isSundayDay) {
+            const currentSundays = state.assignments.filter(a => {
+              const d = parseISO(a.date);
+              return d.getDay() === 0;
+            }).length;
+            if (currentSundays >= 3) continue; 
+          }
           const slot = slots.find(s => s.date === dStr && s.shift_id === pmShift.id && (assignments.filter(a => a.date === s.date && a.shift_id === s.shift_id).length < s.required_count));
           
           if (slot) {
