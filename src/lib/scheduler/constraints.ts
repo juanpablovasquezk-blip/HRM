@@ -781,13 +781,13 @@ export function checkSundaysOff(
 
   const maxAllowedWorking = sundaysInMonth.length - 2;
 
-  if (totalSundaysWorking > maxAllowedWorking) {
-    const offRemaining = sundaysInMonth.length - totalSundaysWorking;
+  // We add +1 because we are evaluating assigning the CURRENT Sunday
+  if (totalSundaysWorking + 1 > maxAllowedWorking) {
     return {
       type: 'min_days_off',
       personnel_id: personnel.personnel_id,
       date: shiftSlot.date,
-      message: `Límite legal: Debe tener al menos 2 domingos libres (quedarían: ${offRemaining})`,
+      message: `Límite legal Art. 38: Debe tener al menos 2 domingos libres al mes. (Ya tiene ${totalSundaysWorking} asignados)`,
       severity: 'error',
     };
   }
