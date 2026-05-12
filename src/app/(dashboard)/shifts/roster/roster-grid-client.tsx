@@ -43,7 +43,8 @@ import {
   Terminal,
   Zap,
   Truck,
-  FileText
+  FileText,
+  Cake
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -117,6 +118,7 @@ interface Personnel {
   hire_date: string | null;
   termination_date: string | null;
   has_special_contract: boolean;
+  birth_date: string | null;
 }
 
 interface RosterGridProps {
@@ -1532,6 +1534,15 @@ export function RosterGridClient({
                     const isTerminated = person.termination_date && dateStr > person.termination_date;
                     const isPreHire = person.hire_date && dateStr < person.hire_date;
                     const isBlocked = isTerminated || isPreHire;
+                    
+                    const isBirthday = person.birth_date && (() => {
+                      try {
+                        const bDate = parseISO(person.birth_date);
+                        return format(bDate, 'MM-dd') === format(day, 'MM-dd');
+                      } catch (e) {
+                        return false;
+                      }
+                    })();
 
                     return (
                       <td 
@@ -1544,12 +1555,20 @@ export function RosterGridClient({
                           isSunday(day) && "bg-slate-50/30 dark:bg-slate-900/10",
                           isToday(day) && "bg-orange-50/40 dark:bg-orange-900/20 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.1)]",
                           isBlocked && "bg-slate-100 dark:bg-slate-900/80 cursor-not-allowed opacity-50 repeating-bg-stripe",
+                          isBirthday && !isBlocked && "bg-rose-50/60 dark:bg-rose-900/20 ring-1 ring-rose-200 dark:ring-rose-800 inset-0",
                           draggingAssignment?.personnel_id === person.id && draggingAssignment?.date !== dateStr && "bg-indigo-50/50 dark:bg-indigo-900/20 ring-2 ring-indigo-300 ring-inset",
                           selectedCells.some(c => c.personId === person.id && c.dateStr === dateStr)
                             ? "bg-orange-100/50 dark:bg-orange-900/30 ring-2 ring-orange-500 ring-inset z-10" 
                             : "hover:ring-2 hover:ring-orange-500/20"
                         )}
                       >
+                        {/* Birthday Indicator */}
+                        {isBirthday && !isBlocked && (
+                          <div className="absolute top-1 left-1 z-20 animate-bounce pointer-events-none">
+                            <Cake className="h-3 w-3 text-rose-500" />
+                          </div>
+                        )}
+                        
                         {/* Multi-select checkbox indicator */}
                         {!isBlocked && (
                           <div className={cn(
