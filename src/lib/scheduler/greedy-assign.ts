@@ -99,14 +99,17 @@ export function greedyAssign(
       const dayA = dateA.getDay(); 
       const dayB = dateB.getDay();
 
-      const isHighA = dayA === 1 || dayA === 2 || dayA === 5;
-      const isHighB = dayB === 1 || dayB === 2 || dayB === 5;
-      if (isHighA !== isHighB) return isHighA ? -1 : 1;
-
+      // 1. Weekend First (Critical for isolation)
       const isWkA = dayA === 0 || dayA === 6;
       const isWkB = dayB === 0 || dayB === 6;
       if (isWkA !== isWkB) return isWkA ? -1 : 1;
 
+      // 2. High demand days (Mon, Tue, Fri)
+      const isHighA = dayA === 1 || dayA === 2 || dayA === 5;
+      const isHighB = dayB === 1 || dayB === 2 || dayB === 5;
+      if (isHighA !== isHighB) return isHighA ? -1 : 1;
+
+      // 3. AM 04 First
       const is04A = (a.shift_start || '').includes('04');
       const is04B = (b.shift_start || '').includes('04');
       if (is04A !== is04B) return is04A ? -1 : 1;

@@ -878,14 +878,12 @@ export async function getMonthlyAudit(startDate: string, areaId?: string, person
       });
 
       let sundaysOff = 0;
-      let currD = new Date(monthStart);
-      while (currD <= monthEnd) {
-        if (currD.getDay() === 0) {
-          const dStr = format(currD, 'yyyy-MM-dd');
-          if (!pAssignments.some(a => a.date === dStr)) sundaysOff++;
-        }
-        currD.setDate(currD.getDate() + 1);
-      }
+      const monthSundays = eachDayOfInterval({ start: monthStart, end: monthEnd }).filter(d => d.getDay() === 0);
+      
+      monthSundays.forEach(sun => {
+        const dStr = format(sun, 'yyyy-MM-dd');
+        if (!pAssignments.some(a => a.date === dStr)) sundaysOff++;
+      });
 
       return {
         personId: p.id,
