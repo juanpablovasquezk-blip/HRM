@@ -210,7 +210,8 @@ export function greedyAssign(
                   filled_count: 0,
                   shift_name: targetShift.name,
                   position_name: p.main_position_name,
-                  area_name: 'BLUE EXPRESS'
+                  area_name: 'BLUE EXPRESS',
+                  requires_transport: targetShift.requires_transport ?? false,
                };
                
                const violations = validateAllConstraints(p, virtualSlot, state.assignments);
@@ -460,6 +461,7 @@ export function greedyAssign(
                     position_name: p.main_position_name,
                     area_name: '',
                     shift_name: effectiveShiftName,
+                    requires_transport: todayReq?.requires_transport || targetShift.requires_transport || false,
                   };
 
                   const violations = validateAllConstraints(p, phantomSlot, state.assignments);
@@ -660,6 +662,7 @@ export function greedyAssign(
                 filled_count: 0,
                 shift_name: effName,
                 position_name: p.main_position_name,
+                requires_transport: todayReq?.requires_transport || reinforcementShift.requires_transport || false,
               };
 
               const violations = validateAllConstraints(p, phantom, state.assignments);
