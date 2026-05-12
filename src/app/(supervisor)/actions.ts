@@ -10,14 +10,15 @@ import { sendWhatsAppMessage, getSystemSettings } from '@/lib/ultramsg';
 export async function loginAsSupervisor(email: string) {
   const supabase = await createClient();
   
-  // First, find the ID for the 'Supervisor' position to compare
-  const { data: posData } = await supabase
+  // First, find all IDs for positions containing 'Supervisor'
+  const { data: posList } = await supabase
     .from('positions')
     .select('id')
-    .ilike('name', 'Supervisor')
-    .single();
+    .ilike('name', '%Supervisor%');
 
-  // Find personnel with this email AND (Supervisor role OR Supervisor position)
+  const supervisorPosIds = posList?.map(p => p.id) || [];
+
+  // Find personnel with this email
   const query = supabase
     .from('personnel')
     .select('*')
@@ -32,7 +33,7 @@ export async function loginAsSupervisor(email: string) {
   const isSupervisor = 
     personnel.role === 'Supervisor' || 
     personnel.role === 'Admin' ||
-    (posData && personnel.main_position === posData.id);
+    (personnel.main_position && supervisorPosIds.includes(personnel.main_position));
 
   if (!isSupervisor) {
     return { success: false, error: 'Acceso denegado. No tienes cargo de supervisor.' };
