@@ -620,7 +620,7 @@ export async function runScheduler(startDate: string, endDate: string, areaId?: 
     
     // Diagnóstico extra para ver qué pasó en el servidor
     console.log(`[Scheduler] Terminado. Cobertura: ${result.coverage}%, Turnos: ${result.count}`);
-    console.log(`[Scheduler] Detalle: ${result.stats?.total_requirements || 0} reqs, ${result.stats?.personnel_count || 0} personas`);
+    console.log(`[Scheduler] Detalle: ${result.stats?.total_slots || 0} slots, ${result.stats?.filled_slots || 0} llenos`);
 
     return { 
       success: true, 
@@ -629,8 +629,8 @@ export async function runScheduler(startDate: string, endDate: string, areaId?: 
       stats: result.stats,
       auditSummary: auditSummary.length > 0 ? auditSummary : null,
       diagnosticLogs: [
-        `Requerimientos encontrados: ${result.stats?.total_requirements || 0}`,
-        `Personal disponible para IA: ${result.stats?.personnel_count || 0}`,
+        `Requerimientos encontrados: ${result.stats?.total_slots || 0}`,
+        `Personal evaluado: ${result.stats?.recalculated_count || 0}`,
         ...(result as any).diagnosticLogs || []
       ]
     };
@@ -657,7 +657,7 @@ export async function runPartialRecalc(input: RecalculationInput) {
       data: result, 
       diagnosticLogs: [
         `Slots totales: ${result.stats?.total_slots || 0}`,
-        `Personal evaluado: ${result.stats?.recalculated_count || 0}`,
+        `Asignaciones recalculadas: ${result.stats?.recalculated_count || 0}`,
         ...(result as any).diagnosticLogs || []
       ],
       error: null 
@@ -666,7 +666,7 @@ export async function runPartialRecalc(input: RecalculationInput) {
     return {
       success: false,
       data: null,
-      error: err instanceof Error ? err.message : 'Recalculation failed',
+      error: err instanceof Error ? err.message : 'Partial recalculation failed',
     };
   }
 }
