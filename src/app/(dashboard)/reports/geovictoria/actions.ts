@@ -3,14 +3,29 @@
 import { createClient } from '@/lib/supabase/server';
 import { format, parseISO, eachDayOfInterval, isSaturday, isSunday, isWeekend } from 'date-fns';
 
-export async function getPersonnelForFilter() {
+export interface GeoVictoriaRecord {
+  DNI: string;
+  'ID Turno': number;
+  Dia: number;
+  Mes: number;
+  Año: number;
+  'ID Centro de Costo': string;
+}
+
+export interface PersonnelFilterItem {
+  id: string;
+  first_name: string;
+  last_name_father: string;
+}
+
+export async function getPersonnelForFilter(): Promise<{ data: PersonnelFilterItem[] }> {
   const supabase = await createClient();
   const { data } = await supabase
     .from('personnel')
     .select('id, first_name, last_name_father')
     .eq('is_active', true)
     .order('first_name');
-  return { data: data || [] };
+  return { data: (data as PersonnelFilterItem[]) || [] };
 }
 
 export async function getGeoVictoriaData(filters: {
@@ -18,7 +33,8 @@ export async function getGeoVictoriaData(filters: {
   endDate: string;
   onlyManual: boolean;
   personnelIds?: string[];
-}) {
+  costCenterId?: string;
+}): Promise<{ data: GeoVictoriaRecord[] }> {
   const supabase = await createClient();
 
   const start = parseISO(filters.startDate);
@@ -83,7 +99,7 @@ export async function getGeoVictoriaData(filters: {
     });
 
     const daysInRange = eachDayOfInterval({ start, end });
-    const results: any[] = [];
+    const results: GeoVictoriaRecord[] = [];
 
     // 4. Generate rows for each person and each day
     for (const person of personnelList) {
@@ -128,7 +144,7 @@ export async function getGeoVictoriaData(filters: {
           Dia: day.getDate(),
           Mes: day.getMonth() + 1,
           Año: day.getFullYear(),
-          'ID Centro de Costo': ''
+          'ID Centro de Costo': filters.costCenterId || ''
         });
       }
     }

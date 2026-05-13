@@ -15,6 +15,10 @@ export const metadata: Metadata = {
   description:
     "Production-ready Workforce & HR Management Platform for logistics and airport operations. Personnel management, shift scheduling, document compliance, and more.",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/icon.png",
+    apple: "/icon.png",
+  },
 };
 
 export default function RootLayout({

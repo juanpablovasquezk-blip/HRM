@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Download, FileSpreadsheet, Search, Loader2, AlertCircle, Check, ChevronsUpDown, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
-import { getGeoVictoriaData, getPersonnelForFilter } from './actions';
+import { getGeoVictoriaData, getPersonnelForFilter, type PersonnelFilterItem, type GeoVictoriaRecord } from './actions';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -23,8 +23,9 @@ export default function GeoVictoriaClient() {
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [onlyManual, setOnlyManual] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [personnelList, setPersonnelList] = useState<any[]>([]);
+  const [personnelList, setPersonnelList] = useState<PersonnelFilterItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [costCenterId, setCostCenterId] = useState('');
   const [isPersonnelOpen, setIsPersonnelOpen] = useState(false);
 
   useEffect(() => {
@@ -42,7 +43,8 @@ export default function GeoVictoriaClient() {
         startDate, 
         endDate, 
         onlyManual,
-        personnelIds: selectedIds.length > 0 ? selectedIds : undefined
+        personnelIds: selectedIds.length > 0 ? selectedIds : undefined,
+        costCenterId: costCenterId || undefined
       });
 
       if (!data || data.length === 0) {
@@ -104,6 +106,18 @@ export default function GeoVictoriaClient() {
                 className="font-bold"
               />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="cost-center" className="text-xs font-bold uppercase text-slate-500">ID Centro de Costo (Opcional)</Label>
+            <Input 
+              id="cost-center" 
+              placeholder="Ej: CC001" 
+              value={costCenterId}
+              onChange={(e) => setCostCenterId(e.target.value)}
+              className="font-mono"
+            />
+            <p className="text-[10px] text-slate-400">Si se especifica, se aplicará a todos los registros del Excel (Columna F).</p>
           </div>
 
           <div className="space-y-2">

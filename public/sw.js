@@ -2,8 +2,8 @@ const CACHE_NAME = 'hrm-roster-v1';
 const urlsToCache = [
   '/dashboard',
   '/manifest.json',
-  '/icon.jpg',
-  '/logo.jpg'
+  '/icon.png',
+  '/logo.png'
 ];
 
 self.addEventListener('install', (event) => {

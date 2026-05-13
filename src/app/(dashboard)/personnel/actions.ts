@@ -253,3 +253,73 @@ export async function updateDocumentStatus(
   // but revalidatePath with a layout or the whole folder works.
   return { success: true, error: null };
 }
+import { createAdminClient } from '@/lib/supabase/admin';
+
+export async function enablePersonnelAccess(
+  personnelId: string,
+  email: string,
+  role: 'SUPERVISOR' | 'USER'
+): Promise<{ success: boolean; error: string | null }> {
+  const supabase = await createClient();
+  const adminClient = createAdminClient();
+
+  try {
+    // 1. Get personnel info for the password (RUT)
+    const { data: person, error: fetchError } = await supabase
+      .from('personnel')
+      .select('rut, first_name, last_name_father')
+      .eq('id', personnelId)
+      .single();
+
+    if (fetchError || !person) throw new Error('No se encontró la ficha del trabajador');
+
+    const cleanRut = person.rut.replace(/[.-]/g, '').toUpperCase();
+    const fullName = `${person.first_name} ${person.last_name_father}`;
+
+    // 2. Create user in Supabase Auth
+    const { data: authUser, error: authError } = await adminClient.auth.admin.createUser({
+      email,
+      password: cleanRut,
+      email_confirm: true,
+      user_metadata: { 
+        full_name: fullName,
+        role: role
+      }
+    });
+
+    if (authError) throw new Error(`Error Auth: ${authError.message}`);
+    if (!authUser.user) throw new Error('No se pudo crear el usuario en Auth');
+
+    const userId = authUser.user.id;
+
+    // 3. Link to Personnel record
+    const { error: linkError } = await supabase
+      .from('personnel')
+      .update({ user_id: userId, email })
+      .eq('id', personnelId);
+
+    if (linkError) throw new Error(`Error vinculación: ${linkError.message}`);
+
+    // 4. Create record in custom 'users' table
+    const { error: profileError } = await supabase
+      .from('users')
+      .insert({
+        id: userId,
+        email,
+        full_name: fullName,
+        role: role,
+        created_at: new Date().toISOString()
+      });
+
+    if (profileError) {
+      console.warn('Warning: Profile record not created, but Auth user exists:', profileError.message);
+    }
+
+    revalidatePath('/personnel');
+    revalidatePath(`/personnel/${personnelId}`);
+    return { success: true, error: null };
+  } catch (error: any) {
+    console.error('Error enabling access:', error);
+    return { success: false, error: error.message };
+  }
+}
