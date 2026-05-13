@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
@@ -230,7 +231,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
   const session = await getSupervisorSession();
   if (!session) return { success: false };
 
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
   
   // 1. Get personnel and assignment data
   const { data: asg, error: fetchErr } = await supabase
@@ -409,7 +410,7 @@ export async function updateTransportType(requestId: string, type: 'PROPIO' | 'E
   const session = await getSupervisorSession();
   if (!session) return { success: false, error: 'No session' };
 
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
   const userName = `${session.first_name} ${session.last_name}`;
 
   const { error } = await supabase
@@ -430,7 +431,7 @@ export async function updateArrivalStatus(personnelId: string, date: string, sta
   const session = await getSupervisorSession();
   if (!session) return { success: false };
 
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
   const { error } = await supabase
     .from('transport_requests')
     .update({ 
