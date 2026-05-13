@@ -26,6 +26,7 @@ export default async function RosterPage({
           assignments={data.assignments}
           shifts={data.shifts}
           areas={data.areas}
+          positions={data.positions}
           month={data.month}
         />
       </div>

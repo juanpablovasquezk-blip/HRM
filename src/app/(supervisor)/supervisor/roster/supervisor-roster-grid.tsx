@@ -20,6 +20,7 @@ interface Props {
   assignments: any[];
   shifts: any[];
   areas: any[];
+  positions: any[];
   month: string;
 }
 
@@ -28,6 +29,7 @@ export default function SupervisorRosterGrid({
   assignments, 
   shifts, 
   areas, 
+  positions,
   month 
 }: Props) {
   const monthDate = parseISO(month + '-01T12:00:00Z');
@@ -45,6 +47,10 @@ export default function SupervisorRosterGrid({
     });
     return map;
   }, [assignments]);
+
+  const positionMap = useMemo(() => {
+    return Object.fromEntries((positions || []).map(p => [p.id, p.name]));
+  }, [positions]);
 
   // Sort personnel by area/position
   const sortedPersonnel = useMemo(() => {
@@ -108,7 +114,7 @@ export default function SupervisorRosterGrid({
                     {person.first_name} {person.last_name_father}
                   </p>
                   <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest truncate">
-                    {person.main_position || 'Sin Cargo'}
+                    {positionMap[person.main_position] || person.main_position || 'Sin Cargo'}
                   </p>
                 </td>
                 {days.map(day => {
