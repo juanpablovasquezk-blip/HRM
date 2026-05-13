@@ -35,10 +35,13 @@ export async function loginAsWorker(email: string) {
 }
 
 export async function logoutWorker() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+
   const cookieStore = await cookies();
   cookieStore.delete('worker_email');
   cookieStore.delete('worker_id');
-  redirect('/worker/login');
+  redirect('/login');
 }
 
 export async function getWorkerSession() {

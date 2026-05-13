@@ -58,10 +58,13 @@ export async function loginAsSupervisor(email: string) {
 }
 
 export async function logoutSupervisor() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+
   const cookieStore = await cookies();
   cookieStore.delete('supervisor_id');
   cookieStore.delete('supervisor_email');
-  redirect('/supervisor/login');
+  redirect('/login');
 }
 
 export async function getSupervisorSession() {
