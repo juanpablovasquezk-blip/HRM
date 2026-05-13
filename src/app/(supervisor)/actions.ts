@@ -103,7 +103,7 @@ export async function getDailyPlanning(date?: string) {
   const session = await getSupervisorSession();
   if (!session) return null;
 
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
   const chileTime = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Santiago"}));
   const targetDate = date || format(chileTime, 'yyyy-MM-dd');
 
@@ -444,7 +444,7 @@ export async function updateArrivalStatus(personnelId: string, date: string, sta
 }
 
 export async function getMonthlyPlanning(month?: string) {
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
   const targetMonth = month || format(new Date(), 'yyyy-MM');
   const startDate = `${targetMonth}-01`;
   
