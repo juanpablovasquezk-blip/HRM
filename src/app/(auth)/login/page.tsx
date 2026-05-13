@@ -34,17 +34,10 @@ export default function LoginPage() {
         return;
       }
 
-      const role = data.user?.user_metadata?.role || 'USER';
       toast.success('¡Bienvenido!');
       
-      // Client-side redirection for faster feedback
-      if (role === 'ADMIN' || role === 'HR') {
-        router.push('/dashboard');
-      } else if (role === 'SUPERVISOR') {
-        router.push('/supervisor');
-      } else {
-        router.push('/worker');
-      }
+      // Always go to role-selection to handle multi-role users
+      router.push('/role-selection');
       
       router.refresh();
     } catch (e) {
