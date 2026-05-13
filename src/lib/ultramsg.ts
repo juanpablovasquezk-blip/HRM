@@ -26,8 +26,15 @@ export async function sendWhatsAppMessage(to: string, message: string) {
   // 1. Try to get settings from Database first
   const dbSettings = await getSystemSettings();
   
-  let instanceId = dbSettings.ultramsg_instance_id || process.env.ULTRAMSG_INSTANCE_ID;
-  const token = dbSettings.ultramsg_token || process.env.ULTRAMSG_TOKEN;
+  let instanceId = dbSettings.ultramsg_instance_id;
+  let token = dbSettings.ultramsg_token;
+  let source = 'DATABASE';
+
+  if (!instanceId || !token) {
+    instanceId = process.env.ULTRAMSG_INSTANCE_ID;
+    token = process.env.ULTRAMSG_TOKEN;
+    source = 'ENVIRONMENT';
+  }
 
   if (instanceId && !instanceId.startsWith('instance')) {
     instanceId = `instance${instanceId}`;
@@ -35,7 +42,11 @@ export async function sendWhatsAppMessage(to: string, message: string) {
 
   if (!instanceId || !token) {
     console.error('UltraMsg credentials not found in DB or Environment');
-    return { success: false, error: 'Configuración faltante' };
+    return { 
+      success: false, 
+      error: 'Configuración faltante',
+      debug: { dbKeys: Object.keys(dbSettings) }
+    };
   }
 
   const controller = new AbortController();
@@ -73,7 +84,7 @@ export async function sendWhatsAppMessage(to: string, message: string) {
     
     // UltraMsg returns { "sent": "true", ... } on success
     if (data.sent === 'true' || data.sent === true || data.id) {
-      return { success: true, data };
+      return { success: true, data, debug: { source } };
     } else {
       console.error('UltraMsg API Error:', data);
       return { 
@@ -89,7 +100,7 @@ export async function sendWhatsAppMessage(to: string, message: string) {
     return { 
       success: false, 
       error: `Error de conexión: ${errorMsg} (URL: ${url})`,
-      debug: { url, error: errorMsg }
+      debug: { url, error: errorMsg, source }
     };
   }
 }
