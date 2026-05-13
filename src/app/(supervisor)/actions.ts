@@ -369,17 +369,21 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
           // Send to Group
           let groupSent = false;
+          let groupError = null;
           if (groupId) {
             const res = await sendWhatsAppMessage(groupId, message);
             groupSent = res.success;
+            groupError = res.error;
           }
           
           // Send to Worker
           let workerSent = false;
+          let workerError = null;
           if (phone) {
             const cleanPhone = phone.replace(/\D/g, '');
             const res = await sendWhatsAppMessage(cleanPhone, message);
             workerSent = res.success;
+            workerError = res.error;
           }
 
           revalidatePath('/supervisor/transport');
@@ -388,6 +392,8 @@ export async function updateTransportMobilization(personnelId: string, date: str
             whatsapp: { 
               group: groupSent, 
               worker: workerSent, 
+              groupError,
+              workerError,
               debug: debugInfo 
             } 
           };

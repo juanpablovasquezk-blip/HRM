@@ -139,11 +139,16 @@ export default function TransportClient({ initialData }: { initialData: any }) {
       if (res.success) {
         let msg = `Asignado: ${type}`;
         if (dbType === 'PROPIO' && res.whatsapp) {
-          const { group, worker } = res.whatsapp;
-          if (group && worker) msg += ' | WhatsApp enviado a Grupo y Trabajador ✅';
-          else if (group) msg += ' | Enviado a Grupo, falló Trabajador ⚠️';
-          else if (worker) msg += ' | Enviado a Trabajador, falló Grupo ⚠️';
-          else msg += ' | Fallaron ambos WhatsApp ❌';
+          const { group, worker, groupError, workerError } = res.whatsapp;
+          if (group && worker) {
+            msg += ' | WhatsApp enviado a Grupo y Trabajador ✅';
+          } else if (group) {
+            msg += ` | Enviado a Grupo, falló Trabajador ⚠️ (${workerError || 'Error desconocido'})`;
+          } else if (worker) {
+            msg += ` | Enviado a Trabajador, falló Grupo ⚠️ (${groupError || 'Error desconocido'})`;
+          } else {
+            msg += ` | Fallaron ambos WhatsApp ❌ (${groupError || workerError || 'Error de servicio'})`;
+          }
         }
         toast.success(msg);
       } else {

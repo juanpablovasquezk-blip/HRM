@@ -5,9 +5,10 @@ import { type Role } from '@/types/database';
 // ---------------------------------------------------------------------------
 
 export const ROLE_HIERARCHY: Record<Role, number> = {
-  ADMIN: 4,
-  HR: 3,
-  SUPERVISOR: 2,
+  ADMIN: 5,
+  HR: 4,
+  SUPERVISOR: 3,
+  AIRPORT_ASSISTANT: 2,
   USER: 1,
 };
 
@@ -18,6 +19,8 @@ export interface Permission {
   manageLeaves: boolean;
   approveLeaves: boolean;
   viewReports: boolean;
+  viewPersonnel: boolean;
+  viewShifts: boolean;
   manageTransport: boolean;
   overrideFreeze: boolean;
   manageUsers: boolean;
@@ -33,6 +36,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission> = {
     manageLeaves: true,
     approveLeaves: true,
     viewReports: true,
+    viewPersonnel: true,
+    viewShifts: true,
     manageTransport: true,
     overrideFreeze: true,
     manageUsers: true,
@@ -46,6 +51,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission> = {
     manageLeaves: true,
     approveLeaves: true,
     viewReports: true,
+    viewPersonnel: true,
+    viewShifts: true,
     manageTransport: false,
     overrideFreeze: false,
     manageUsers: false,
@@ -59,8 +66,25 @@ const ROLE_PERMISSIONS: Record<Role, Permission> = {
     manageLeaves: false,
     approveLeaves: true,
     viewReports: true,
+    viewPersonnel: true,
+    viewShifts: true,
     manageTransport: true,
     overrideFreeze: true,
+    manageUsers: false,
+    manageAreas: false,
+    runScheduler: false,
+  },
+  AIRPORT_ASSISTANT: {
+    managePersonnel: false,
+    manageDocuments: false,
+    manageShifts: false,
+    manageLeaves: false,
+    approveLeaves: false,
+    viewReports: true,
+    viewPersonnel: true,
+    viewShifts: true,
+    manageTransport: true,
+    overrideFreeze: false,
     manageUsers: false,
     manageAreas: false,
     runScheduler: false,
@@ -72,6 +96,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission> = {
     manageLeaves: false,
     approveLeaves: false,
     viewReports: false,
+    viewPersonnel: false,
+    viewShifts: false,
     manageTransport: false,
     overrideFreeze: false,
     manageUsers: false,
@@ -105,6 +131,7 @@ export function getRoleLabel(role: Role): string {
     ADMIN: 'Administrator',
     HR: 'Human Resources',
     SUPERVISOR: 'Supervisor',
+    AIRPORT_ASSISTANT: 'Asistente Administrativo',
     USER: 'Employee',
   };
   return labels[role];
@@ -115,6 +142,7 @@ export function getRoleBadgeColor(role: Role): string {
     ADMIN: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
     HR: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
     SUPERVISOR: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+    AIRPORT_ASSISTANT: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
     USER: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
   };
   return colors[role];

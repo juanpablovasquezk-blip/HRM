@@ -39,12 +39,12 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: 'Panel Principal', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Personal', href: '/personnel', icon: Users, requiredPermission: 'managePersonnel' },
+  { label: 'Personal', href: '/personnel', icon: Users, requiredPermission: 'viewPersonnel' },
   { label: 'Documentos', href: '/documents', icon: FileText, requiredPermission: 'manageDocuments' },
-  { label: 'Turnos', href: '/shifts', icon: CalendarDays },
-  { label: 'Roster (Plan)', href: '/shifts/roster', icon: Grid3X3 },
+  { label: 'Turnos', href: '/shifts', icon: CalendarDays, requiredPermission: 'viewShifts' },
+  { label: 'Roster (Plan)', href: '/shifts/roster', icon: Grid3X3, requiredPermission: 'viewShifts' },
   { label: 'Roster Individual', href: '/reports/individual-roster', icon: FileText, requiredPermission: 'viewReports' },
-  { label: 'Planificación Diaria', href: '/shifts/daily', icon: ClipboardList },
+  { label: 'Planificación Diaria', href: '/shifts/daily', icon: ClipboardList, requiredPermission: 'viewShifts' },
   { label: 'Licencias', href: '/leaves', icon: Briefcase },
   { label: 'Transporte', href: '/transport', icon: Bus, requiredPermission: 'manageTransport' },
   { label: 'Reportes', href: '/reports', icon: BarChart3, requiredPermission: 'viewReports' },

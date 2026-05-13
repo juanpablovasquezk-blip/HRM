@@ -16,8 +16,12 @@ export async function sendWhatsAppMessage(to: string, message: string) {
   // 1. Try to get settings from Database first
   const dbSettings = await getSystemSettings();
   
-  const instanceId = dbSettings.ultramsg_instance_id || process.env.ULTRAMSG_INSTANCE_ID;
+  let instanceId = dbSettings.ultramsg_instance_id || process.env.ULTRAMSG_INSTANCE_ID;
   const token = dbSettings.ultramsg_token || process.env.ULTRAMSG_TOKEN;
+
+  if (instanceId && !instanceId.startsWith('instance')) {
+    instanceId = `instance${instanceId}`;
+  }
 
   if (!instanceId || !token) {
     console.error('UltraMsg credentials not found in DB or Environment');
@@ -43,14 +47,29 @@ export async function sendWhatsAppMessage(to: string, message: string) {
     });
 
     clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`UltraMsg HTTP Error ${response.status}:`, errText);
+      return { success: false, error: `Error HTTP ${response.status}` };
+    }
+
     const data = await response.json();
-    return { success: true, data };
+    
+    // UltraMsg returns { "sent": "true", ... } on success
+    if (data.sent === 'true' || data.sent === true || data.id) {
+      return { success: true, data };
+    } else {
+      console.error('UltraMsg API Error:', data);
+      return { success: false, error: data.error || data.message || 'Error desconocido en API' };
+    }
   } catch (error: any) {
     clearTimeout(timeoutId);
-    console.error('UltraMsg Error:', error.name === 'AbortError' ? 'Timeout' : error.message);
+    const errorMsg = error.name === 'AbortError' ? 'Timeout' : error.message;
+    console.error('UltraMsg Exception:', errorMsg);
     return { 
       success: false, 
-      error: error.name === 'AbortError' ? 'Error: El servicio de WhatsApp no responde (Timeout)' : error.message 
+      error: error.name === 'AbortError' ? 'Error: El servicio de WhatsApp no responde (Timeout)' : errorMsg 
     };
   }
 }

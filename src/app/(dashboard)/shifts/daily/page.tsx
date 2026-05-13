@@ -11,10 +11,20 @@ export default async function DailyPlanningPage(props: {
 }) {
   const searchParams = await props.searchParams;
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const role = (user?.user_metadata?.role as any) || 'USER';
+  const { hasPermission } = await import('@/lib/auth/roles');
+  const canEdit = hasPermission(role, 'manageShifts');
+  
   const date = searchParams.date || format(new Date(), 'yyyy-MM-dd');
 
   // Fetch baseline data
-  const { assignments, requirements, error } = await getDailyOperationalData(date);
+  let { assignments, requirements, error } = await getDailyOperationalData(date);
+  
+  // Filter for Administrative Assistant: Only see confirmed/validated data
+  if (role === 'AIRPORT_ASSISTANT' && assignments) {
+    assignments = assignments.filter(a => a.is_confirmed);
+  }
   
   // Fetch metadata for the "Add Extra" form
   const { data: areas } = await supabase.from('areas').select('*').order('name');
@@ -48,6 +58,7 @@ export default async function DailyPlanningPage(props: {
           positions={positions || []}
           shifts={shifts || []}
           selectedDate={date}
+          readOnly={!canEdit}
         />
       )}
     </div>

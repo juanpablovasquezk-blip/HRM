@@ -10,6 +10,11 @@ import { sendWhatsAppMessage, getSystemSettings } from '@/lib/ultramsg';
 export async function updateTransportRequest(id: string, updates: any) {
   try {
     const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(user.user_metadata?.role)) {
+      throw new Error('No autorizado');
+    }
+
     const { error } = await supabase
       .from('transport_requests')
       .update(updates)
@@ -28,6 +33,10 @@ export async function updateTransportRequest(id: string, updates: any) {
 export async function sendTransportNotification(requestId: string) {
   try {
     const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(user.user_metadata?.role)) {
+      throw new Error('No autorizado');
+    }
     // 1. Get Core Transport Request
     const { data: tr, error: trErr } = await supabase
       .from('transport_requests')
@@ -128,6 +137,12 @@ export async function getTransportRequests(date: string) {
 }
 
 export async function generateTransportRequests(date: string) {
+  const supabaseAuth = await createClient();
+  const { data: { user } } = await supabaseAuth.auth.getUser();
+  if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(user.user_metadata?.role)) {
+    return { success: false, error: 'No autorizado' };
+  }
+
   const supabase = await createAdminClient();
   
   // 1. Get all confirmed assignments for that date
@@ -220,6 +235,12 @@ export async function generateTransportRequests(date: string) {
 }
 
 export async function clearTransportRequests(date: string) {
+  const supabaseAuth = await createClient();
+  const { data: { user } } = await supabaseAuth.auth.getUser();
+  if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(user.user_metadata?.role)) {
+    return { success: false, error: 'No autorizado' };
+  }
+
   const supabase = await createAdminClient();
   const { error } = await supabase
     .from('transport_requests')

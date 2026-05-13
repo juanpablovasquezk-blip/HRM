@@ -8,12 +8,27 @@ export async function globalLogout() {
   const supabase = await createClient();
   await supabase.auth.signOut();
 
-  // Clear legacy cookies for complete cleanup
+  // Clear cookies
   const cookieStore = await cookies();
-  cookieStore.delete('supervisor_id');
-  cookieStore.delete('supervisor_email');
-  cookieStore.delete('worker_id');
-  cookieStore.delete('worker_email');
+  const allCookies = cookieStore.getAll();
+  
+  // Names of specific cookies to clear
+  const toClear = [
+    'supervisor_id', 'supervisor_email', 
+    'worker_id', 'worker_email',
+    'hrm_role_preference'
+  ];
+  
+  toClear.forEach(name => {
+    cookieStore.delete(name);
+  });
+
+  // Also try to clear Supabase cookies (usually start with sb-)
+  allCookies.forEach(c => {
+    if (c.name.startsWith('sb-')) {
+      cookieStore.delete(c.name);
+    }
+  });
 
   redirect('/login');
 }

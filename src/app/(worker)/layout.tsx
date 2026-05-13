@@ -32,11 +32,12 @@ export default function WorkerLayout({
 
   useEffect(() => {
     const getRole = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setRole(user?.user_metadata?.role || 'USER');
+      const { getUserRole } = await import('@/app/role-actions');
+      const currentRole = await getUserRole();
+      setRole(currentRole || 'USER');
     };
     getRole();
-  }, [supabase]);
+  }, []);
 
   const navItems = [
     { label: 'Mañana', href: '/worker', icon: Clock },

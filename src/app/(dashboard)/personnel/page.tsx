@@ -13,9 +13,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Plus, Users as UsersIcon, FileSpreadsheet, Edit, AlertTriangle, CheckCircle2, Clock, ClipboardCheck, ShieldCheck } from 'lucide-react';
+import { Plus, Users as UsersIcon, FileSpreadsheet, Edit, AlertTriangle, CheckCircle2, Clock, ClipboardCheck, ShieldCheck, FileText } from 'lucide-react';
 import { PersonnelFilters } from './personnel-filters';
 import { differenceInDays, parseISO } from 'date-fns';
+import { hasPermission } from '@/lib/auth/roles';
+import { Role } from '@/types/database';
 
 export default async function PersonnelPage({
   searchParams,
@@ -24,6 +26,10 @@ export default async function PersonnelPage({
 }) {
   const params = await searchParams;
   const supabase = await createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  const role = (user?.user_metadata?.role as Role) || 'USER';
+  const canEdit = hasPermission(role, 'managePersonnel');
 
   let positionIds: string[] = [];
   if (params.position_id) {
@@ -100,20 +106,22 @@ export default async function PersonnelPage({
             Gestiona tu fuerza laboral — {personnel?.length ?? 0} trabajadores {status === 'active' ? 'activos' : status === 'inactive' ? 'de baja' : 'registrados'}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Link href="/personnel/import">
-            <Button variant="outline" className="border-slate-200 text-slate-600 hover:text-orange-600">
-              <FileSpreadsheet className="mr-2 h-4 w-4" />
-              Importar Masivo
-            </Button>
-          </Link>
-          <Link href="/personnel/new">
-            <Button className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-lg shadow-orange-500/25">
-              <Plus className="mr-2 h-4 w-4" />
-              Agregar Personal
-            </Button>
-          </Link>
-        </div>
+        {canEdit && (
+          <div className="flex gap-2">
+            <Link href="/personnel/import">
+              <Button variant="outline" className="border-slate-200 text-slate-600 hover:text-orange-600">
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                Importar Masivo
+              </Button>
+            </Link>
+            <Link href="/personnel/new">
+              <Button className="bg-gradient-to-r from-orange-50 to-orange-100 border-orange-200 text-orange-700 hover:bg-orange-100">
+                <Plus className="mr-2 h-4 w-4" />
+                Agregar Personal
+              </Button>
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Search */}
@@ -225,11 +233,19 @@ export default async function PersonnelPage({
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Link href={`/personnel/${person.id}/edit`}>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
-                             <Edit className="h-4 w-4" />
-                          </Button>
-                        </Link>
+                        {canEdit ? (
+                          <Link href={`/personnel/${person.id}/edit`}>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
+                               <Edit className="h-4 w-4" />
+                            </Button>
+                          </Link>
+                        ) : (
+                          <Link href={`/personnel/${person.id}`}>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
+                               <FileText className="h-4 w-4" />
+                            </Button>
+                          </Link>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

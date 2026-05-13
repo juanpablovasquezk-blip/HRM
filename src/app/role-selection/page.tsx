@@ -24,8 +24,10 @@ export default function RoleSelectionPage() {
           return;
         }
 
-        const role = user.user_metadata?.role || 'USER';
-        const isManagement = ['ADMIN', 'SUPERVISOR', 'HR'].includes(role);
+        // Fetch latest role from server (securely fetches from DB via Admin Client)
+        const { getUserRole } = await import('@/app/role-actions');
+        const role = await getUserRole() || 'USER';
+        const isManagement = ['ADMIN', 'SUPERVISOR', 'HR', 'AIRPORT_ASSISTANT'].includes(role);
 
         // Check if exists in personnel table
         const { data: personnel } = await supabase

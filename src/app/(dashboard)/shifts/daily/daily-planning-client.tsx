@@ -42,6 +42,7 @@ interface Props {
   positions: Position[];
   shifts: Shift[];
   selectedDate: string;
+  readOnly?: boolean;
 }
 
 export default function DailyPlanningClient({
@@ -50,7 +51,8 @@ export default function DailyPlanningClient({
   areas,
   positions,
   shifts,
-  selectedDate
+  selectedDate,
+  readOnly = false
 }: Props) {
   const router = useRouter();
   const reportRef = useRef<HTMLDivElement>(null);
@@ -435,22 +437,26 @@ export default function DailyPlanningClient({
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          <button 
-            onClick={() => setIsAddingExtra(!isAddingExtra)} 
-            className="flex flex-col items-center justify-center gap-1 w-28 h-16 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all font-bold uppercase tracking-tight text-[9px] shadow-sm active:scale-95 text-center leading-tight whitespace-normal p-2"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Dotación Extra</span>
-          </button>
+          {!readOnly && (
+            <button 
+              onClick={() => setIsAddingExtra(!isAddingExtra)} 
+              className="flex flex-col items-center justify-center gap-1 w-28 h-16 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all font-bold uppercase tracking-tight text-[9px] shadow-sm active:scale-95 text-center leading-tight whitespace-normal p-2"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Dotación Extra</span>
+            </button>
+          )}
 
-          <button 
-            onClick={handleReset}
-            className="flex flex-col items-center justify-center gap-1 w-28 h-16 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all font-bold uppercase tracking-tight text-[9px] shadow-sm text-center leading-tight whitespace-normal p-2"
-            title="Borrar cambios manuales y volver al Roster Maestro"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Restaurar Original</span>
-          </button>
+          {!readOnly && (
+            <button 
+              onClick={handleReset}
+              className="flex flex-col items-center justify-center gap-1 w-28 h-16 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all font-bold uppercase tracking-tight text-[9px] shadow-sm text-center leading-tight whitespace-normal p-2"
+              title="Borrar cambios manuales y volver al Roster Maestro"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Restaurar Original</span>
+            </button>
+          )}
 
           {isConfirmed && (
             <button 
@@ -470,18 +476,20 @@ export default function DailyPlanningClient({
             <span>Exportar Reporte PDF</span>
           </button>
           
-          <button 
-            onClick={handleConfirm} 
-            disabled={isConfirming} 
-            className={`flex flex-col items-center justify-center gap-1 w-28 h-16 rounded-xl shadow-lg font-bold uppercase tracking-tight text-[9px] transition-all active:scale-95 disabled:opacity-50 text-center leading-tight whitespace-normal p-2 ${
-              isConfirmed 
-                ? 'bg-white text-emerald-700 border-2 border-emerald-500 hover:bg-emerald-50' 
-                : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-200'
-            }`}
-          >
-            {isConfirming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-            <span>{isConfirmed ? 'Actualizar Sincronización' : 'Confirmar Planificación'}</span>
-          </button>
+          {!readOnly && (
+            <button 
+              onClick={handleConfirm} 
+              disabled={isConfirming} 
+              className={`flex flex-col items-center justify-center gap-1 w-28 h-16 rounded-xl shadow-lg font-bold uppercase tracking-tight text-[9px] transition-all active:scale-95 disabled:opacity-50 text-center leading-tight whitespace-normal p-2 ${
+                isConfirmed 
+                  ? 'bg-white text-emerald-700 border-2 border-emerald-500 hover:bg-emerald-50' 
+                  : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-200'
+              }`}
+            >
+              {isConfirming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+              <span>{isConfirmed ? 'Actualizar Sincronización' : 'Confirmar Planificación'}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -525,7 +533,11 @@ export default function DailyPlanningClient({
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
                       <span className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>{formatName(a.personnel)}</span>
-                      <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print"><AlertTriangle className="w-3 h-3" /></button>
+                      {!readOnly && (
+                        <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print">
+                          <AlertTriangle className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -549,7 +561,11 @@ export default function DailyPlanningClient({
                       <span className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>
                         {formatName(a.personnel)}
                       </span>
-                      <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print"><AlertTriangle className="w-3 h-3" /></button>
+                      {!readOnly && (
+                        <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print">
+                          <AlertTriangle className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -690,7 +706,7 @@ export default function DailyPlanningClient({
                       <span className={pair.conductor?.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}>
                         {pair.conductor ? formatName(pair.conductor.personnel) : '-'}
                       </span>
-                      {pair.conductor && (
+                      {pair.conductor && !readOnly && (
                         <select 
                           className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
                           value={pair.conductor.shift_id}
@@ -702,7 +718,7 @@ export default function DailyPlanningClient({
                         </select>
                       )}
                     </div>
-                    {pair.conductor && (
+                    {pair.conductor && !readOnly && (
                       <button onClick={() => handleDeleteAssignment(pair.conductor.id)} className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 text-red-400 no-print">
                          <AlertTriangle className="w-3 h-3" />
                       </button>
@@ -713,7 +729,7 @@ export default function DailyPlanningClient({
                       <span className={pair.ayudante?.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}>
                         {pair.ayudante ? formatName(pair.ayudante.personnel) : '-'}
                       </span>
-                      {pair.ayudante && (
+                      {pair.ayudante && !readOnly && (
                         <select 
                           className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
                           value={pair.ayudante.shift_id}
@@ -725,7 +741,7 @@ export default function DailyPlanningClient({
                         </select>
                       )}
                     </div>
-                    {pair.ayudante && (
+                    {pair.ayudante && !readOnly && (
                       <button onClick={() => handleDeleteAssignment(pair.ayudante.id)} className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 text-red-400 no-print">
                          <AlertTriangle className="w-3 h-3" />
                       </button>
@@ -749,19 +765,23 @@ export default function DailyPlanningClient({
                   <div className="text-indigo-800 font-bold text-xs">DOTACIÓN EXTRA: {req.area?.name} - {req.position?.name} ({req.shift?.name})</div>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full uppercase">{left} pendientes</span>
-                    <button onClick={() => handleDeleteRequirement(req.id)} className="text-red-400 hover:text-red-600 p-1" title="Eliminar requerimiento completo">
-                      <AlertTriangle className="w-3 h-3" />
-                    </button>
+                    {!readOnly && (
+                      <button onClick={() => handleDeleteRequirement(req.id)} className="text-red-400 hover:text-red-600 p-1" title="Eliminar requerimiento completo">
+                        <AlertTriangle className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                </div>
-               <div className="grid grid-cols-2 gap-4">
-                  {Array.from({ length: left }).map((_, i) => (
-                    <select key={i} className="w-full p-2 bg-white rounded border border-indigo-200 text-xs font-bold uppercase" onFocus={() => loadAvailable(req.position_id)} onChange={(e) => handleAssignExtra(req.position_id, req.shift_id, req.area_id, e.target.value)} defaultValue="">
-                       <option value="" disabled>Seleccionar libre...</option>
-                       {loadingAvailable === req.position_id ? <option>Cargando...</option> : (availablePersonnel[req.position_id] || []).map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name_father} {p.fatigue_warnings.length > 0 ? `(⚠️)` : ''}</option>)}
-                    </select>
-                  ))}
-               </div>
+               {!readOnly && (
+                 <div className="grid grid-cols-2 gap-4">
+                    {Array.from({ length: left }).map((_, i) => (
+                      <select key={i} className="w-full p-2 bg-white rounded border border-indigo-200 text-xs font-bold uppercase" onFocus={() => loadAvailable(req.position_id)} onChange={(e) => handleAssignExtra(req.position_id, req.shift_id, req.area_id, e.target.value)} defaultValue="">
+                         <option value="" disabled>Seleccionar libre...</option>
+                         {loadingAvailable === req.position_id ? <option>Cargando...</option> : (availablePersonnel[req.position_id] || []).map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name_father} {p.fatigue_warnings.length > 0 ? `(⚠️)` : ''}</option>)}
+                      </select>
+                    ))}
+                 </div>
+               )}
             </div>
           );
         })}

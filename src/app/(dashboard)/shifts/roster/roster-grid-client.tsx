@@ -130,6 +130,7 @@ interface RosterGridProps {
   positions: Position[];
   requirements: any[];
   currentMonth: string;
+  readOnly?: boolean;
 }
 
 export function RosterGridClient({
@@ -140,7 +141,8 @@ export function RosterGridClient({
   leaves,
   positions,
   requirements,
-  currentMonth
+  currentMonth,
+  readOnly = false
 }: RosterGridProps) {
   const router = useRouter();
   const [search, setSearch] = useState('');
@@ -286,6 +288,7 @@ export function RosterGridClient({
   }, [personnel, positionFilter, areaFilter, positions]);
 
   const handleCellClick = (person: Personnel, date: Date) => {
+    if (readOnly) return;
     const dateStr = format(date, 'yyyy-MM-dd');
     
     setSelectedCells(prev => {
@@ -1209,101 +1212,109 @@ export function RosterGridClient({
             </DialogContent>
           </Dialog>
         </div>
-          <Button 
-            variant="default" 
-            size="sm" 
-            className="h-9 bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 shadow-sm"
-            onClick={() => {
-              const isCurrentMonth = format(new Date(), 'yyyy-MM') === format(monthDate, 'yyyy-MM');
-              setPlanningRange({
-                from: isCurrentMonth ? format(new Date(), 'yyyy-MM-dd') : format(days[0], 'yyyy-MM-dd'),
-                to: format(days[days.length - 1], 'yyyy-MM-dd')
-              });
-              setAiActionMode('needs');
-              setIsAiConfigOpen(true);
-            }}
-            disabled={isPending}
-          >
-            <Calendar className="h-4 w-4 mr-2" />
-            Necesidades
-          </Button>
-          
-          <Button 
-            variant="default" 
-            size="sm" 
-            className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 shadow-sm"
-            onClick={() => {
-              const isCurrentMonth = format(new Date(), 'yyyy-MM') === format(monthDate, 'yyyy-MM');
-              setPlanningRange({
-                from: isCurrentMonth ? format(new Date(), 'yyyy-MM-dd') : format(days[0], 'yyyy-MM-dd'),
-                to: format(days[days.length - 1], 'yyyy-MM-dd')
-              });
-              setAiActionMode('scheduling');
-              setIsAiConfigOpen(true);
-            }}
-            disabled={isPending || aiStep === 'scheduling'}
-          >
-            {isPending && aiStep !== 'completed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
-            Asistente IA
-          </Button>
+        {!readOnly && (
+          <div className="flex items-center gap-1 border-l pl-3 ml-auto border-slate-200">
+            <Button 
+              variant="default" 
+              size="sm" 
+              className="h-9 bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 shadow-sm"
+              onClick={() => {
+                const isCurrentMonth = format(new Date(), 'yyyy-MM') === format(monthDate, 'yyyy-MM');
+                setPlanningRange({
+                  from: isCurrentMonth ? format(new Date(), 'yyyy-MM-dd') : format(days[0], 'yyyy-MM-dd'),
+                  to: format(days[days.length - 1], 'yyyy-MM-dd')
+                });
+                setAiActionMode('needs');
+                setIsAiConfigOpen(true);
+              }}
+              disabled={isPending}
+            >
+              <Calendar className="h-4 w-4 mr-2" />
+              Necesidades
+            </Button>
+            
+            <Button 
+              variant="default" 
+              size="sm" 
+              className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 shadow-sm"
+              onClick={() => {
+                const isCurrentMonth = format(new Date(), 'yyyy-MM') === format(monthDate, 'yyyy-MM');
+                setPlanningRange({
+                  from: isCurrentMonth ? format(new Date(), 'yyyy-MM-dd') : format(days[0], 'yyyy-MM-dd'),
+                  to: format(days[days.length - 1], 'yyyy-MM-dd')
+                });
+                setAiActionMode('scheduling');
+                setIsAiConfigOpen(true);
+              }}
+              disabled={isPending || aiStep === 'scheduling'}
+            >
+              {isPending && aiStep !== 'completed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
+              Asistente IA
+            </Button>
 
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="h-9 border-orange-500 bg-orange-50/30 text-orange-700 hover:bg-orange-50 text-xs font-bold uppercase shadow-sm px-4"
-            onClick={handleAudit}
-          >
-            <FileText className="h-4 w-4 mr-2 text-orange-500" />
-            Reporte Mensual
-          </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="h-9 border-orange-500 bg-orange-50/30 text-orange-700 hover:bg-orange-50 text-xs font-bold uppercase shadow-sm px-4"
+              onClick={handleAudit}
+            >
+              <FileText className="h-4 w-4 mr-2 text-orange-500" />
+              Reporte Mensual
+            </Button>
 
-          {/* New Admin Controls */}
-          <div className="flex items-center gap-1 border-l pl-3 ml-1 border-slate-200">
-             <Button 
-                variant="outline" 
-                size="sm" 
-                className="h-8 border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-xs px-2"
-                onClick={handleValidateVisible}
-                disabled={isPending}
-                title="Validar todos los turnos visibles en la grilla"
-              >
-                <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-indigo-600" />
-                Validar Todo
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className={cn(
-                  "h-8 text-indigo-700 hover:bg-indigo-50 text-[10px] uppercase font-bold",
-                  selectedCells.length > 0 && "bg-indigo-50 border border-indigo-100"
-                )}
-                onClick={handleValidateSelection}
-                disabled={isPending || (selectedCells.length === 0)}
-              >
-                {selectedCells.length > 0 ? `Validar Selección (${selectedCells.length})` : 'Validar Selección'}
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="h-8 border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs ml-1"
-                onClick={handlePublishRange}
-                disabled={isPending}
-              >
-                <Sparkles className="h-3.5 w-3.5 mr-1 text-emerald-600" />
-                Publicar
-              </Button>
+            <div className="flex items-center gap-1 border-l pl-3 ml-1 border-slate-200">
+               <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="h-8 border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-xs px-2"
+                  onClick={handleValidateVisible}
+                  disabled={isPending}
+                  title="Validar todos los turnos visibles en la grilla"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-indigo-600" />
+                  Validar Todo
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="h-8 border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs ml-1"
+                  onClick={handlePublishRange}
+                  disabled={isPending}
+                >
+                  <Sparkles className="h-3.5 w-3.5 mr-1 text-emerald-600" />
+                  Publicar
+                </Button>
+            </div>
+
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="h-8 text-red-500 border-red-200 hover:bg-red-50 text-xs ml-2"
+              onClick={handleClearAI}
+              disabled={isPending}
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1" />
+              Limpiar
+            </Button>
           </div>
+        )}
 
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="h-8 text-red-500 border-red-200 hover:bg-red-50 text-xs"
-            onClick={handleClearAI}
-            disabled={isPending}
-          >
-            <Trash2 className="h-3.5 w-3.5 mr-1" />
-            Limpiar
-          </Button>
+        {readOnly && (
+          <div className="ml-auto flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="h-9 border-orange-500 bg-orange-50/30 text-orange-700 hover:bg-orange-50 text-xs font-bold uppercase shadow-sm px-4"
+              onClick={handleAudit}
+            >
+              <FileText className="h-4 w-4 mr-2 text-orange-500" />
+              Reporte Mensual
+            </Button>
+            <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-200 font-bold uppercase text-[9px] px-2 py-1">
+              Modo Solo Lectura
+            </Badge>
+          </div>
+        )}
         </div>
 
       {/* Roster Grid Wrapper */}
