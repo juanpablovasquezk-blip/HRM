@@ -6,22 +6,44 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Download, FileSpreadsheet, Search, Loader2, AlertCircle } from 'lucide-react';
+import { Download, FileSpreadsheet, Search, Loader2, AlertCircle, Check, ChevronsUpDown, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
-import { getGeoVictoriaData } from './actions';
+import { getGeoVictoriaData, getPersonnelForFilter } from './actions';
 import { format } from 'date-fns';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
+import { useEffect } from 'react';
 
 export default function GeoVictoriaClient() {
   const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-01'));
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [onlyManual, setOnlyManual] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [personnelList, setPersonnelList] = useState<any[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isPersonnelOpen, setIsPersonnelOpen] = useState(false);
+
+  useEffect(() => {
+    const fetchPersonnel = async () => {
+      const { data } = await getPersonnelForFilter();
+      setPersonnelList(data);
+    };
+    fetchPersonnel();
+  }, []);
 
   const handleDownload = async () => {
     setIsLoading(true);
     try {
-      const { data } = await getGeoVictoriaData({ startDate, endDate, onlyManual });
+      const { data } = await getGeoVictoriaData({ 
+        startDate, 
+        endDate, 
+        onlyManual,
+        personnelIds: selectedIds.length > 0 ? selectedIds : undefined
+      });
 
       if (!data || data.length === 0) {
         toast.info('No se encontraron registros para el período seleccionado');
@@ -82,6 +104,101 @@ export default function GeoVictoriaClient() {
                 className="font-bold"
               />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs font-bold uppercase text-slate-500">Filtrar por Personal (Opcional)</Label>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {selectedIds.length > 0 ? (
+                selectedIds.map(id => {
+                  const person = personnelList.find(p => p.id === id);
+                  return (
+                    <Badge key={id} variant="secondary" className="bg-blue-50 text-blue-700 border-blue-100 flex items-center gap-1 py-1">
+                      {person?.first_name} {person?.last_name_father}
+                      <X 
+                        className="h-3 w-3 cursor-pointer hover:text-blue-900" 
+                        onClick={() => setSelectedIds(prev => prev.filter(i => i !== id))}
+                      />
+                    </Badge>
+                  );
+                })
+              ) : (
+                <span className="text-xs text-slate-400 italic">Todos los trabajadores incluidos</span>
+              )}
+            </div>
+            
+            <Popover open={isPersonnelOpen} onOpenChange={setIsPersonnelOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={isPersonnelOpen}
+                  className="w-full justify-between h-10 border-slate-200 bg-white"
+                >
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-slate-400" />
+                    <span className="text-sm font-medium">
+                      {selectedIds.length === 0 
+                        ? "Seleccionar personas..." 
+                        : `${selectedIds.length} seleccionados`}
+                    </span>
+                  </div>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[400px] p-0" align="start">
+                <Command className="border-none">
+                  <CommandInput placeholder="Buscar por nombre..." />
+                  <CommandList>
+                    <CommandEmpty>No se encontraron resultados.</CommandEmpty>
+                    <CommandGroup className="max-h-[300px] overflow-auto">
+                      {personnelList.map((person) => (
+                        <CommandItem
+                          key={person.id}
+                          onSelect={() => {
+                            setSelectedIds(prev => 
+                              prev.includes(person.id)
+                                ? prev.filter(id => id !== person.id)
+                                : [...prev, person.id]
+                            );
+                          }}
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
+                          <div className={cn(
+                            "flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
+                            selectedIds.includes(person.id)
+                              ? "bg-primary text-primary-foreground"
+                              : "opacity-50 [&_svg]:invisible"
+                          )}>
+                            <Check className={cn("h-3 w-3")} />
+                          </div>
+                          <span className="flex-1">{person.first_name} {person.last_name_father}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+                {selectedIds.length > 0 && (
+                  <div className="p-2 border-t border-slate-100 flex justify-between items-center bg-slate-50/50">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => setSelectedIds([])}
+                      className="text-xs h-7"
+                    >
+                      Limpiar selección
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      onClick={() => setIsPersonnelOpen(false)}
+                      className="text-xs h-7 bg-slate-800"
+                    >
+                      Cerrar
+                    </Button>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">

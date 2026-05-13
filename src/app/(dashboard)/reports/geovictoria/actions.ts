@@ -3,10 +3,21 @@
 import { createClient } from '@/lib/supabase/server';
 import { format, parseISO, eachDayOfInterval, isSaturday, isSunday, isWeekend } from 'date-fns';
 
+export async function getPersonnelForFilter() {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from('personnel')
+    .select('id, first_name, last_name_father')
+    .eq('is_active', true)
+    .order('first_name');
+  return { data: data || [] };
+}
+
 export async function getGeoVictoriaData(filters: {
   startDate: string;
   endDate: string;
   onlyManual: boolean;
+  personnelIds?: string[];
 }) {
   const supabase = await createClient();
 
@@ -14,10 +25,16 @@ export async function getGeoVictoriaData(filters: {
   const end = parseISO(filters.endDate);
 
   try {
-    const { data: personnelList } = await supabase
+    let personnelQuery = supabase
       .from('personnel')
       .select('id, rut')
       .eq('is_active', true);
+
+    if (filters.personnelIds && filters.personnelIds.length > 0) {
+      personnelQuery = personnelQuery.in('id', filters.personnelIds);
+    }
+
+    const { data: personnelList } = await personnelQuery;
 
     if (!personnelList) return { data: [] };
 
@@ -39,15 +56,25 @@ export async function getGeoVictoriaData(filters: {
     if (filters.onlyManual) {
       assignmentsQuery = assignmentsQuery.eq('is_manual', true);
     }
+    
+    if (filters.personnelIds && filters.personnelIds.length > 0) {
+      assignmentsQuery = assignmentsQuery.in('personnel_id', filters.personnelIds);
+    }
 
     const { data: assignments } = await assignmentsQuery;
 
     // 3. Get approved leaves (Vacations, Medical, etc.)
-    const { data: leaves } = await supabase
+    let leavesQuery = supabase
       .from('leaves')
       .select('*')
       .eq('status', 'approved')
       .or(`start_date.lte.${filters.endDate},end_date.gte.${filters.startDate}`);
+
+    if (filters.personnelIds && filters.personnelIds.length > 0) {
+      leavesQuery = leavesQuery.in('personnel_id', filters.personnelIds);
+    }
+
+    const { data: leaves } = await leavesQuery;
 
     // Create lookup maps for performance
     const assignmentMap = new Map();
@@ -100,7 +127,8 @@ export async function getGeoVictoriaData(filters: {
           'ID Turno': geoVId,
           Dia: day.getDate(),
           Mes: day.getMonth() + 1,
-          Año: day.getFullYear()
+          Año: day.getFullYear(),
+          'ID Centro de Costo': ''
         });
       }
     }
