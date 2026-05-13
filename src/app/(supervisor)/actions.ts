@@ -320,15 +320,21 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
   // 4. WhatsApp Notification for PROPIO
   if (!dbError && mobilization === 'PROPIO' && asg) {
+    let debugInfo = 'Iniciando';
     try {
       const pData = asg.personnel;
       const sData = asg.shift;
       const aData = asg.area;
+      
+      // Resiliently get position name
+      const posObj = asg.position;
+      const positionName = (Array.isArray(posObj) ? posObj[0]?.name : posObj?.name) || '';
+      const positionNameUpper = positionName.toUpperCase();
+      
+      debugInfo = `Persona: ${pData?.first_name || 'No encontrada'}`;
 
       if (pData) {
-        // Correct supervisor detection using joined position name or role
-        const positionName = (asg.position?.name || '').toUpperCase();
-        const isSupervisor = pData.role === 'Supervisor' || positionName.includes('SUPERVISOR');
+        const isSupervisor = pData.role === 'Supervisor' || positionNameUpper.includes('SUPERVISOR');
         
         if (!isSupervisor) {
           const name = `${pData.first_name} ${pData.last_name_father}`.toUpperCase();
@@ -338,28 +344,27 @@ export async function updateTransportMobilization(personnelId: string, date: str
           
           const message = `SR. ${name}\nTURNO ${dateStr}: ${hourStr}\nLLEGA POR SUS PROPIOS MEDIOS\n\n*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
           
-          console.log('[WHATSAPP] Enviando mensaje a:', name, 'Tel:', phone);
+          debugInfo += ` | Msg listo | Tel: ${phone || 'Sin tel'}`;
 
           // Determine Group
           const dbSettings = await getSystemSettings();
-          const areaNameSearch = (aData?.name || '').toUpperCase();
-          const posNameSearch = positionName;
+          const areaNameSearch = (Array.isArray(aData) ? aData[0]?.name : aData?.name) || '';
+          const areaNameUpper = areaNameSearch.toUpperCase();
 
-          const combinedSearch = `${areaNameSearch} ${posNameSearch}`.replace(/\s+/g, ''); 
+          const combinedSearch = `${areaNameUpper} ${positionNameUpper}`.replace(/\s+/g, ''); 
           let groupId = dbSettings.ultramsg_group_others;
 
           if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
           else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
           else if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
 
-          console.log('[WHATSAPP] Destino Grupo:', groupId);
+          debugInfo += ` | Grupo: ${groupId || 'No hallado'}`;
 
           // Send to Group
           let groupSent = false;
           if (groupId) {
             const res = await sendWhatsAppMessage(groupId, message);
             groupSent = res.success;
-            if (!res.success) console.error('[WHATSAPP] Error Grupo:', res.error);
           }
           
           // Send to Worker
@@ -368,17 +373,26 @@ export async function updateTransportMobilization(personnelId: string, date: str
             const cleanPhone = phone.replace(/\D/g, '');
             const res = await sendWhatsAppMessage(cleanPhone, message);
             workerSent = res.success;
-            if (!res.success) console.error('[WHATSAPP] Error Trabajador:', res.error);
           }
 
           revalidatePath('/supervisor/transport');
-          return { success: true, whatsapp: { group: groupSent, worker: workerSent } };
+          return { 
+            success: true, 
+            whatsapp: { 
+              group: groupSent, 
+              worker: workerSent, 
+              debug: debugInfo 
+            } 
+          };
         } else {
-          console.log('[WHATSAPP] Omitido por ser Supervisor');
+          return { success: true, whatsapp: { debug: 'Omitido: Es Supervisor' } };
         }
+      } else {
+        return { success: true, whatsapp: { debug: 'Error: No hay datos de personal' } };
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('NOTIFY CATCH ERROR:', e);
+      return { success: true, whatsapp: { debug: `Error: ${e.message}` } };
     }
   }
   
