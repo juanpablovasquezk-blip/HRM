@@ -250,13 +250,19 @@ export async function updateTransportMobilization(personnelId: string, date: str
     .eq('id', assignmentId)
     .single();
 
-  if (fetchErr || !asg) {
+  if (fetchErr) {
     console.error('FETCH ERROR:', fetchErr);
-    return { success: false, error: `No se encontró la asignación ${assignmentId}` };
   }
 
-  const personnel = asg?.personnel as any;
-  const areaName = (asg?.area as any)?.name?.toUpperCase() || '';
+  let personnel = asg?.personnel as any;
+  let areaName = (asg?.area as any)?.name?.toUpperCase() || '';
+
+  if (!asg) {
+    console.warn(`ASG MISSING for ID ${assignmentId}. Fetching personnel ${personnelId} fallback.`);
+    const { data: pFallback } = await supabase.from('personnel').select('*').eq('id', personnelId).single();
+    personnel = pFallback;
+  }
+
   const addressObj = personnel?.address;
   
   // Robust Address Parsing
@@ -320,12 +326,12 @@ export async function updateTransportMobilization(personnelId: string, date: str
   }
 
   // 4. WhatsApp Notification for PROPIO
-  if (!dbError && mobilization === 'PROPIO' && asg) {
+  if (!dbError && mobilization === 'PROPIO' && personnel) {
     let debugInfo = 'Iniciando';
     try {
-      const pData = asg.personnel;
-      const sData = asg.shift;
-      const aData = asg.area;
+      const pData = personnel;
+      const sData = asg?.shift;
+      const aData = asg?.area;
       
       // Resiliently get position name
       const posObj = asg.position;
@@ -339,7 +345,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
         
         if (!isSupervisor) {
           const name = `${pData.first_name} ${pData.last_name_father}`.toUpperCase();
-          const dateStr = format(parseISO(asg.date), 'dd-MM-yyyy');
+          const dateStr = format(parseISO(asg?.date || date), 'dd-MM-yyyy');
           const hourStr = sData?.start_time?.substring(0,5) || '00:00';
           const phone = pData.phone;
           
