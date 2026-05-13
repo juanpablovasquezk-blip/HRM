@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Plus, Users as UsersIcon, FileSpreadsheet, Edit, AlertTriangle, CheckCircle2, Clock, ClipboardCheck } from 'lucide-react';
+import { Plus, Users as UsersIcon, FileSpreadsheet, Edit, AlertTriangle, CheckCircle2, Clock, ClipboardCheck, ShieldCheck } from 'lucide-react';
 import { PersonnelFilters } from './personnel-filters';
 import { differenceInDays, parseISO } from 'date-fns';
 
@@ -174,6 +174,9 @@ export default async function PersonnelPage({
                             className="font-medium text-orange-600 hover:text-orange-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1.5"
                           >
                             {person.first_name} {person.last_name_father} {person.last_name_mother}
+                            {person.user_id && (
+                              <ShieldCheck className="h-3.5 w-3.5 text-blue-500 fill-blue-50" title="Acceso habilitado" />
+                            )}
                           </Link>
                           <div className="flex gap-1">
                             {/* Status messages hidden during debug */}
