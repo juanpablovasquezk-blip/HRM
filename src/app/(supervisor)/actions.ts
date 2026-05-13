@@ -113,6 +113,7 @@ export async function getDailyPlanning(date?: string) {
     .select(`
       id, 
       date, 
+      personnel_id,
       status, 
       is_confirmed,
       attendance_status,
