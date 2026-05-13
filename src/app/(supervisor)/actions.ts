@@ -250,8 +250,9 @@ export async function updateTransportMobilization(personnelId: string, date: str
     .eq('id', assignmentId)
     .single();
 
-  if (fetchErr) {
+  if (fetchErr || !asg) {
     console.error('FETCH ERROR:', fetchErr);
+    return { success: false, error: `No se encontró la asignación ${assignmentId}` };
   }
 
   const personnel = asg?.personnel as any;
