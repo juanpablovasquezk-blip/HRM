@@ -65,7 +65,15 @@ export async function updateSession(request: NextRequest) {
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.SUPABASE_SERVICE_ROLE_KEY!
       );
-      const { data: dbUser } = await adminSupabase.from('users').select('role').eq('id', user.id).single();
+      
+      // Try ID first, fallback to Email
+      let { data: dbUser } = await adminSupabase.from('users').select('role').eq('id', user.id).single();
+      
+      if (!dbUser && user.email) {
+        const { data: emailUser } = await adminSupabase.from('users').select('role').eq('email', user.email).single();
+        dbUser = emailUser;
+      }
+
       if (dbUser?.role) role = dbUser.role;
     }
     

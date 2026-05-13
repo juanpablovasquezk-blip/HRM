@@ -10,11 +10,21 @@ export async function getUserRole() {
   if (!user) return null;
 
   const adminSupabase = createAdminClient();
-  const { data: dbUser } = await adminSupabase
+  let { data: dbUser } = await adminSupabase
     .from('users')
     .select('role')
     .eq('id', user.id)
     .single();
+
+  // Fallback to email if ID match fails
+  if (!dbUser && user.email) {
+    const { data: emailUser } = await adminSupabase
+      .from('users')
+      .select('role')
+      .eq('email', user.email)
+      .single();
+    dbUser = emailUser;
+  }
 
   return dbUser?.role || user.user_metadata?.role || 'USER';
 }
@@ -26,11 +36,16 @@ export async function syncUserMetadata() {
   if (!user) return { success: false };
 
   const adminSupabase = createAdminClient();
-  const { data: dbUser } = await adminSupabase
+  let { data: dbUser } = await adminSupabase
     .from('users')
     .select('role')
     .eq('id', user.id)
     .single();
+
+  if (!dbUser && user.email) {
+    const { data: emailUser } = await adminSupabase.from('users').select('role').eq('email', user.email).single();
+    dbUser = emailUser;
+  }
 
   if (dbUser?.role) {
     const { error } = await adminSupabase.auth.admin.updateUserById(user.id, {

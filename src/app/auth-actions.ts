@@ -10,18 +10,9 @@ export async function globalLogout() {
 
   // Clear cookies
   const cookieStore = await cookies();
+  
+  // Get all cookies and delete any that look like Supabase or session cookies
   const allCookies = cookieStore.getAll();
-  
-  // Names of specific cookies to clear
-  const toClear = [
-    'supervisor_id', 'supervisor_email', 
-    'worker_id', 'worker_email',
-    'hrm_role_preference'
-  ];
-  
-  toClear.forEach(name => {
-    cookieStore.delete(name);
-  });
 
   // Also try to clear Supabase cookies (usually start with sb-)
   allCookies.forEach(c => {
