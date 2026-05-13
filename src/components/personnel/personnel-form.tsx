@@ -34,6 +34,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const [selectedSecondary, setSelectedSecondary] = useState<string[]>(
     (personnel?.secondary_positions as string[]) || []
   );
+  const [enableAccess, setEnableAccess] = useState(!!personnel?.user_id);
   const [isPrio04, setIsPrio04] = useState(personnel?.rotation_pattern?.includes('PRIO-04') || false);
   const [dropdownValue, setDropdownValue] = useState<string>('');
   
@@ -69,6 +70,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
     formData.set('requires_transport', String(requiresTransport));
     formData.set('is_active', String(isActive));
     formData.set('secondary_positions', selectedSecondary.join(','));
+    formData.set('enable_access', String(enableAccess));
 
     // Manage rotation pattern + priority tags
     let pattern = formData.get('rotation_pattern') as string;
@@ -130,6 +132,18 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
           <div className="space-y-2">
             <Label htmlFor="phone">Teléfono</Label>
             <Input id="phone" name="phone" defaultValue={initialValues.phone} placeholder="+56 9 1234 5678" />
+          </div>
+          
+          <div className="flex items-center justify-between p-4 rounded-xl border border-blue-100 bg-blue-50/30 md:col-span-2">
+            <div className="space-y-0.5">
+              <Label className="text-blue-900 font-bold">Acceso al Sistema</Label>
+              <p className="text-[11px] text-blue-700">Crea un usuario automáticamente usando el email y RUT (como clave inicial).</p>
+            </div>
+            <Switch 
+              checked={enableAccess} 
+              onCheckedChange={setEnableAccess} 
+              disabled={!!personnel?.user_id} // Disable if already has access
+            />
           </div>
         </CardContent>
       </Card>

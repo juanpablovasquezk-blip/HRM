@@ -107,9 +107,21 @@ export async function createPersonnel(
     },
   };
 
-  const { error } = await supabase.from('personnel').insert(personnelData);
+  const { data: person, error: insertError } = await supabase.from('personnel').insert(personnelData).select('id').single();
+  if (insertError) return { success: false, error: insertError.message };
 
-  if (error) return { success: false, error: error.message };
+  // Handle system access if requested
+  if (formData.get('enable_access') === 'true' && personnelData.email) {
+    // Determine role based on position
+    let role: 'SUPERVISOR' | 'USER' = 'USER';
+    if (personnelData.main_position) {
+      const { data: pos } = await supabase.from('positions').select('name').eq('id', personnelData.main_position).single();
+      if (pos?.name.toUpperCase().includes('SUPERVISOR')) {
+        role = 'SUPERVISOR';
+      }
+    }
+    await enablePersonnelAccess(person.id, personnelData.email, role);
+  }
 
   revalidatePath('/personnel');
   return { success: true, error: null };
@@ -157,6 +169,23 @@ export async function updatePersonnel(
     .eq('id', id);
 
   if (error) return { success: false, error: error.message };
+
+  // Handle system access if requested and not already enabled
+  const enableRequested = formData.get('enable_access') === 'true';
+  if (enableRequested && updateData.email) {
+    // Check if user already linked
+    const { data: existing } = await supabase.from('personnel').select('user_id').eq('id', id).single();
+    if (!existing?.user_id) {
+      let role: 'SUPERVISOR' | 'USER' = 'USER';
+      if (updateData.main_position) {
+        const { data: pos } = await supabase.from('positions').select('name').eq('id', updateData.main_position).single();
+        if (pos?.name.toUpperCase().includes('SUPERVISOR')) {
+          role = 'SUPERVISOR';
+        }
+      }
+      await enablePersonnelAccess(id, updateData.email, role);
+    }
+  }
 
   revalidatePath('/personnel');
   revalidatePath(`/personnel/${id}`);

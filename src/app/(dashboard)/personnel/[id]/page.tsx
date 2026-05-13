@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ArrowLeft, Edit, FileText, Cake, Moon, SunMedium, AlertTriangle, Mail, Repeat, CalendarCheck, Pin } from 'lucide-react';
+import { ArrowLeft, Edit, FileText, Cake, Moon, SunMedium, AlertTriangle, Mail, Repeat, CalendarCheck, Pin, ShieldCheck, User } from 'lucide-react';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { DocumentActions } from './document-actions';
@@ -70,6 +70,12 @@ export default async function PersonnelDetailPage({
           <p className="text-muted-foreground text-sm mt-0.5">
             {person.rut} · {(person.company as { name: string } | null)?.name}
           </p>
+          {person.user_id && (
+            <Badge className="mt-2 bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200 flex w-fit items-center gap-1.5">
+              <ShieldCheck className="h-3 w-3" />
+              Acceso Habilitado
+            </Badge>
+          )}
         </div>
         <Link href={`/personnel/${id}/edit`}>
           <Button variant="outline">
