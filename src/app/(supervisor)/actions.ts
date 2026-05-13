@@ -65,10 +65,27 @@ export async function logoutSupervisor() {
 
 export async function getSupervisorSession() {
   const cookieStore = await cookies();
-  const id = cookieStore.get('supervisor_id')?.value;
+  let id = cookieStore.get('supervisor_id')?.value;
+  
+  const supabase = await createClient();
+  
+  if (!id) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: personnel } = await supabase
+        .from('personnel')
+        .select('*')
+        .eq('email', user.email?.trim().toLowerCase())
+        .single();
+      
+      if (personnel) {
+        id = personnel.id;
+      }
+    }
+  }
+
   if (!id) return null;
 
-  const supabase = await createClient();
   const { data } = await supabase
     .from('personnel')
     .select('*')

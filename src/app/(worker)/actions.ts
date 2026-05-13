@@ -43,12 +43,27 @@ export async function logoutWorker() {
 
 export async function getWorkerSession() {
   const cookieStore = await cookies();
-  const id = cookieStore.get('worker_id')?.value;
-  const email = cookieStore.get('worker_email')?.value;
-  
-  if (!id || !email) return null;
+  let id = cookieStore.get('worker_id')?.value;
   
   const supabase = await createClient();
+
+  if (!id) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: personnel } = await supabase
+        .from('personnel')
+        .select('id')
+        .eq('email', user.email?.trim().toLowerCase())
+        .single();
+      
+      if (personnel) {
+        id = personnel.id;
+      }
+    }
+  }
+
+  if (!id) return null;
+  
   const { data } = await supabase
     .from('personnel')
     .select('*')
