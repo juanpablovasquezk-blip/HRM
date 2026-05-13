@@ -50,8 +50,12 @@ export async function sendWhatsAppMessage(to: string, message: string) {
     
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`UltraMsg HTTP Error ${response.status}:`, errText);
-      return { success: false, error: `Error HTTP ${response.status}` };
+      console.error(`UltraMsg HTTP Error ${response.status} at ${url}:`, errText);
+      return { 
+        success: false, 
+        error: `Error HTTP ${response.status} (URL: ${url})`,
+        debug: { url, status: response.status, response: errText }
+      };
     }
 
     const data = await response.json();
@@ -61,7 +65,11 @@ export async function sendWhatsAppMessage(to: string, message: string) {
       return { success: true, data };
     } else {
       console.error('UltraMsg API Error:', data);
-      return { success: false, error: data.error || data.message || 'Error desconocido en API' };
+      return { 
+        success: false, 
+        error: data.error || data.message || 'Error desconocido en API',
+        debug: { url, data }
+      };
     }
   } catch (error: any) {
     clearTimeout(timeoutId);
@@ -69,7 +77,8 @@ export async function sendWhatsAppMessage(to: string, message: string) {
     console.error('UltraMsg Exception:', errorMsg);
     return { 
       success: false, 
-      error: error.name === 'AbortError' ? 'Error: El servicio de WhatsApp no responde (Timeout)' : errorMsg 
+      error: `Error de conexión: ${errorMsg} (URL: ${url})`,
+      debug: { url, error: errorMsg }
     };
   }
 }
