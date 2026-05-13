@@ -319,86 +319,62 @@ export async function updateTransportMobilization(personnelId: string, date: str
   }
 
   // 4. WhatsApp Notification for PROPIO
-  if (!dbError && mobilization === 'PROPIO') {
+  if (!dbError && mobilization === 'PROPIO' && asg) {
     try {
-      // Fetch data again specifically for the message to be 100% sure
-      const { data: fullAsg, error: fullErr } = await supabase
-        .from('shift_assignments')
-        .select('*')
-        .eq('id', assignmentId)
-        .single();
+      const pData = asg.personnel;
+      const sData = asg.shift;
+      const aData = asg.area;
 
-      if (fullErr || !fullAsg) {
-        console.error('NOTIFY FETCH ERROR:', fullErr);
-      } else {
-        // 1. Get Personnel Data (Direct)
-        const { data: pData } = await supabase
-          .from('personnel')
-          .select('*, position:positions(name)')
-          .eq('id', fullAsg.personnel_id)
-          .single();
-
-        // 2. Get Shift Data (Direct)
-        const { data: sData } = await supabase
-          .from('shifts')
-          .select('*')
-          .eq('id', fullAsg.shift_id)
-          .single();
-
-        // 3. Get Area Data (Direct)
-        const { data: aData } = await supabase
-          .from('areas')
-          .select('*')
-          .eq('id', fullAsg.area_id)
-          .single();
-
-        if (pData) {
-          // We don't notify supervisors
-          const isSupervisor = pData.role === 'Supervisor' || ((pData as any).position?.name || '').toUpperCase().includes('SUPERVISOR');
-          
-          if (!isSupervisor) {
+      if (pData) {
+        // Correct supervisor detection using joined position name or role
+        const positionName = (asg.position?.name || '').toUpperCase();
+        const isSupervisor = pData.role === 'Supervisor' || positionName.includes('SUPERVISOR');
+        
+        if (!isSupervisor) {
           const name = `${pData.first_name} ${pData.last_name_father}`.toUpperCase();
-          const dateStr = format(parseISO(fullAsg.date), 'dd-MM-yyyy');
+          const dateStr = format(parseISO(asg.date), 'dd-MM-yyyy');
           const hourStr = sData?.start_time?.substring(0,5) || '00:00';
           const phone = pData.phone;
           
           const message = `SR. ${name}\nTURNO ${dateStr}: ${hourStr}\nLLEGA POR SUS PROPIOS MEDIOS\n\n*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
           
+          console.log('[WHATSAPP] Enviando mensaje a:', name, 'Tel:', phone);
+
           // Determine Group
           const dbSettings = await getSystemSettings();
-          let areaName = (aData?.name || '').toUpperCase();
-          let positionName = (pData?.main_position_name || '').toUpperCase();
+          const areaNameSearch = (aData?.name || '').toUpperCase();
+          const posNameSearch = positionName;
 
-          // If position name is missing, fetch it from the ID
-          if (!positionName && pData?.main_position) {
-            const { data: posData } = await supabase.from('positions').select('name').eq('id', pData.main_position).single();
-            positionName = (posData?.name || '').toUpperCase();
-          }
-
-          const combinedSearch = `${areaName} ${positionName}`.replace(/\s+/g, ''); // Remove spaces to match FEDEX and FED EX
+          const combinedSearch = `${areaNameSearch} ${posNameSearch}`.replace(/\s+/g, ''); 
           let groupId = dbSettings.ultramsg_group_others;
 
           if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
           else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
           else if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
 
+          console.log('[WHATSAPP] Destino Grupo:', groupId);
+
           // Send to Group
           let groupSent = false;
           if (groupId) {
             const res = await sendWhatsAppMessage(groupId, message);
             groupSent = res.success;
+            if (!res.success) console.error('[WHATSAPP] Error Grupo:', res.error);
           }
           
           // Send to Worker
           let workerSent = false;
           if (phone) {
-            const res = await sendWhatsAppMessage(phone.replace(/\D/g, ''), message);
+            const cleanPhone = phone.replace(/\D/g, '');
+            const res = await sendWhatsAppMessage(cleanPhone, message);
             workerSent = res.success;
+            if (!res.success) console.error('[WHATSAPP] Error Trabajador:', res.error);
           }
 
           revalidatePath('/supervisor/transport');
           return { success: true, whatsapp: { group: groupSent, worker: workerSent } };
-          }
+        } else {
+          console.log('[WHATSAPP] Omitido por ser Supervisor');
         }
       }
     } catch (e) {
