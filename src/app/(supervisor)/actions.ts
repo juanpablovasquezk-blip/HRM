@@ -374,6 +374,9 @@ export async function updateTransportMobilization(personnelId: string, date: str
             const res = await sendWhatsAppMessage(groupId, message);
             groupSent = res.success;
             groupError = res.error;
+            if (!res.success) console.error(`WhatsApp Group Error (${groupId}):`, res.error);
+          } else {
+            groupError = "No se encontró ID de grupo configurado";
           }
           
           // Send to Worker
@@ -384,6 +387,9 @@ export async function updateTransportMobilization(personnelId: string, date: str
             const res = await sendWhatsAppMessage(cleanPhone, message);
             workerSent = res.success;
             workerError = res.error;
+            if (!res.success) console.error(`WhatsApp Worker Error (${cleanPhone}):`, res.error);
+          } else {
+            workerError = "Trabajador no tiene teléfono registrado";
           }
 
           revalidatePath('/supervisor/transport');
@@ -392,8 +398,8 @@ export async function updateTransportMobilization(personnelId: string, date: str
             whatsapp: { 
               group: groupSent, 
               worker: workerSent, 
-              groupError,
-              workerError,
+              groupError: groupError || 'Error desconocido',
+              workerError: workerError || 'Error desconocido',
               debug: debugInfo 
             } 
           };

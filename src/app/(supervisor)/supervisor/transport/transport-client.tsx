@@ -147,7 +147,10 @@ export default function TransportClient({ initialData }: { initialData: any }) {
           } else if (worker) {
             msg += ` | Enviado a Trabajador, falló Grupo ⚠️ (${groupError || 'Error desconocido'})`;
           } else {
-            msg += ` | Fallaron ambos WhatsApp ❌ (${groupError || workerError || 'Error de servicio'})`;
+            const errors = [];
+            if (groupError) errors.push(`Grupo: ${groupError}`);
+            if (workerError) errors.push(`Trabajador: ${workerError}`);
+            msg += ` | Fallaron ambos WhatsApp ❌ (${errors.join(' | ') || 'Error de servicio'})`;
           }
         }
         toast.success(msg);
