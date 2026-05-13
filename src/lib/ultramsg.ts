@@ -2,12 +2,22 @@ import { createAdminClient } from './supabase/admin';
 
 export async function getSystemSettings() {
   const supabase = await createAdminClient();
-  const { data } = await supabase.from('system_settings').select('*');
+  const { data, error } = await supabase.from('system_settings').select('*');
+  
+  if (error) {
+    console.error('DATABASE ERROR fetching settings:', error);
+    return { _error: error.message };
+  }
   
   const settings: Record<string, string> = {};
   data?.forEach(item => {
     settings[item.key] = item.value;
   });
+  
+  if (Object.keys(settings).length === 0) {
+    console.warn('SYSTEM SETTINGS TABLE IS EMPTY');
+    return { _warn: 'table_empty' };
+  }
   
   return settings;
 }

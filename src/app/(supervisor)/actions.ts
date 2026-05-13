@@ -358,6 +358,13 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
           // Determine Group
           const dbSettings = await getSystemSettings();
+          
+          if (dbSettings._error || dbSettings._warn) {
+            debugInfo += ` | DB_SETTINGS_ISSUE: ${dbSettings._error || dbSettings._warn}`;
+          } else {
+            debugInfo += ` | DB_KEYS: ${Object.keys(dbSettings).join(',')}`;
+          }
+
           const areaNameSearch = (Array.isArray(aData) ? aData[0]?.name : aData?.name) || '';
           const areaNameUpper = areaNameSearch.toUpperCase();
 
