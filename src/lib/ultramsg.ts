@@ -26,8 +26,8 @@ export async function sendWhatsAppMessage(to: string, message: string) {
   // 1. Try to get settings from Database first
   const dbSettings = await getSystemSettings();
   
-  let instanceId = dbSettings.ultramsg_instance_id;
-  let token = dbSettings.ultramsg_token;
+  let instanceId: string | undefined = dbSettings.ultramsg_instance_id;
+  let token: string | undefined = dbSettings.ultramsg_token;
   let source = 'DATABASE';
 
   if (!instanceId || !token) {
