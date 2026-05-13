@@ -1,7 +1,7 @@
-import { createClient } from './supabase/server';
+import { createAdminClient } from './supabase/admin';
 
 export async function getSystemSettings() {
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
   const { data } = await supabase.from('system_settings').select('*');
   
   const settings: Record<string, string> = {};

@@ -334,7 +334,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
         // 1. Get Personnel Data (Direct)
         const { data: pData } = await supabase
           .from('personnel')
-          .select('*')
+          .select('*, position:positions(name)')
           .eq('id', fullAsg.personnel_id)
           .single();
 
@@ -354,7 +354,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
         if (pData) {
           // We don't notify supervisors
-          const isSupervisor = pData.role === 'Supervisor' || (pData.main_position || '').toUpperCase().includes('SUPERVISOR');
+          const isSupervisor = pData.role === 'Supervisor' || ((pData as any).position?.name || '').toUpperCase().includes('SUPERVISOR');
           
           if (!isSupervisor) {
           const name = `${pData.first_name} ${pData.last_name_father}`.toUpperCase();
