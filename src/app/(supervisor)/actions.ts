@@ -242,10 +242,10 @@ export async function updateTransportMobilization(personnelId: string, date: str
     .from('shift_assignments')
     .select(`
       *,
-      area:areas(name),
-      position:positions(name),
-      shift:shifts(*),
-      personnel:personnel(address, first_name, last_name_father, phone, role)
+      area:areas!shift_assignments_area_id_fkey(name),
+      position:positions!shift_assignments_position_id_fkey(name),
+      shift:shifts!shift_assignments_shift_id_fkey(*),
+      personnel:personnel!shift_assignments_personnel_id_fkey(address, first_name, last_name_father, phone, role)
     `)
     .eq('id', assignmentId)
     .single();
