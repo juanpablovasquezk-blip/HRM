@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -128,23 +128,22 @@ export default function GeoVictoriaClient() {
             </div>
             
             <Popover open={isPersonnelOpen} onOpenChange={setIsPersonnelOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={isPersonnelOpen}
-                  className="w-full justify-between h-10 border-slate-200 bg-white"
-                >
-                  <div className="flex items-center gap-2">
-                    <Users className="h-4 w-4 text-slate-400" />
-                    <span className="text-sm font-medium">
-                      {selectedIds.length === 0 
-                        ? "Seleccionar personas..." 
-                        : `${selectedIds.length} seleccionados`}
-                    </span>
-                  </div>
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
+              <PopoverTrigger
+                aria-expanded={isPersonnelOpen}
+                className={cn(
+                  buttonVariants({ variant: "outline" }),
+                  "w-full justify-between h-10 border-slate-200 bg-white font-normal"
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-slate-400" />
+                  <span className="text-sm font-medium">
+                    {selectedIds.length === 0 
+                      ? "Seleccionar personas..." 
+                      : `${selectedIds.length} seleccionados`}
+                  </span>
+                </div>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </PopoverTrigger>
               <PopoverContent className="w-[400px] p-0" align="start">
                 <Command className="border-none">
