@@ -344,7 +344,10 @@ export async function updateTransportMobilization(personnelId: string, date: str
         const isSupervisor = pData.role === 'Supervisor' || positionNameUpper.includes('SUPERVISOR');
         
         if (!isSupervisor) {
-          const name = `${pData.first_name} ${pData.last_name_father}`.toUpperCase();
+          const firstName = pData.first_name || '';
+          const lastName = pData.last_name_father || '';
+          const name = `${firstName} ${lastName}`.trim().toUpperCase() || 'TRABAJADOR';
+          
           const dateStr = format(parseISO(asg?.date || date), 'dd-MM-yyyy');
           const hourStr = sData?.start_time?.substring(0,5) || '00:00';
           const phone = pData.phone;
@@ -374,7 +377,10 @@ export async function updateTransportMobilization(personnelId: string, date: str
             const res = await sendWhatsAppMessage(groupId, message);
             groupSent = res.success;
             groupError = res.error;
-            if (!res.success) console.error(`WhatsApp Group Error (${groupId}):`, res.error);
+            if (!res.success) {
+              console.error(`WhatsApp Group Error (${groupId}):`, res.error);
+              debugInfo += ` | Error Grupo: ${res.error}`;
+            }
           } else {
             groupError = "No se encontró ID de grupo configurado";
           }
@@ -383,11 +389,18 @@ export async function updateTransportMobilization(personnelId: string, date: str
           let workerSent = false;
           let workerError = null;
           if (phone) {
-            const cleanPhone = phone.replace(/\D/g, '');
-            const res = await sendWhatsAppMessage(cleanPhone, message);
-            workerSent = res.success;
-            workerError = res.error;
-            if (!res.success) console.error(`WhatsApp Worker Error (${cleanPhone}):`, res.error);
+            const cleanPhone = phone.toString().replace(/\D/g, '');
+            if (cleanPhone.length >= 8) {
+              const res = await sendWhatsAppMessage(cleanPhone, message);
+              workerSent = res.success;
+              workerError = res.error;
+              if (!res.success) {
+                console.error(`WhatsApp Worker Error (${cleanPhone}):`, res.error);
+                debugInfo += ` | Error Trabajador: ${res.error}`;
+              }
+            } else {
+              workerError = `Teléfono inválido: ${phone}`;
+            }
           } else {
             workerError = "Trabajador no tiene teléfono registrado";
           }
@@ -398,20 +411,29 @@ export async function updateTransportMobilization(personnelId: string, date: str
             whatsapp: { 
               group: groupSent, 
               worker: workerSent, 
-              groupError: groupError || 'Error desconocido',
-              workerError: workerError || 'Error desconocido',
+              groupError: groupError || (groupSent ? null : 'Error desconocido'),
+              workerError: workerError || (workerSent ? null : 'Error desconocido'),
               debug: debugInfo 
             } 
           };
         } else {
-          return { success: true, whatsapp: { debug: 'Omitido: Es Supervisor' } };
+          return { success: true, whatsapp: { group: false, worker: false, debug: 'Omitido: Es Supervisor' } };
         }
       } else {
-        return { success: true, whatsapp: { debug: 'Error: No hay datos de personal' } };
+        return { success: true, whatsapp: { group: false, worker: false, debug: 'Error: No hay datos de personal' } };
       }
     } catch (e: any) {
       console.error('NOTIFY CATCH ERROR:', e);
-      return { success: true, whatsapp: { debug: `Error: ${e.message}` } };
+      return { 
+        success: true, 
+        whatsapp: { 
+          group: false, 
+          worker: false, 
+          groupError: `Error interno: ${e.message}`,
+          workerError: `Error interno: ${e.message}`,
+          debug: `CATCH: ${e.message} | State: ${debugInfo}` 
+        } 
+      };
     }
   }
   

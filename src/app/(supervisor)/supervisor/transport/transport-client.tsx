@@ -150,7 +150,15 @@ export default function TransportClient({ initialData }: { initialData: any }) {
             const errors = [];
             if (groupError) errors.push(`Grupo: ${groupError}`);
             if (workerError) errors.push(`Trabajador: ${workerError}`);
-            msg += ` | Fallaron ambos WhatsApp ❌ (${errors.join(' | ') || 'Error de servicio'})`;
+            
+            const errorMsg = errors.join(' | ');
+            if (errorMsg) {
+              msg += ` | Fallaron ambos WhatsApp ❌ (${errorMsg})`;
+            } else if (res.whatsapp.debug) {
+              msg += ` | Error de servicio ❌ (${res.whatsapp.debug})`;
+            } else {
+              msg += ' | Fallaron ambos WhatsApp ❌ (Error de servicio)';
+            }
           }
         }
         toast.success(msg);
