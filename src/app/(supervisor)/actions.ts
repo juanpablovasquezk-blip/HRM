@@ -362,7 +362,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
           const hourStr = sData?.start_time?.substring(0,5) || '00:00';
           const phone = pData.phone;
           
-          const message = `SR. ${name}\nTURNO ${dateStr}: ${hourStr}\nLLEGA POR SUS PROPIOS MEDIOS`;
+          const message = `SR. ${name}\nTURNO ${dateStr}: ${hourStr}\nLLEGA POR SUS PROPIOS MEDIOS\n\n*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
           
           // Determine Group
           const dbSettings = await getSystemSettings();
