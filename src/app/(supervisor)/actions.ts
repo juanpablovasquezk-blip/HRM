@@ -330,15 +330,15 @@ export async function updateTransportMobilization(personnelId: string, date: str
     let debugInfo = 'Iniciando';
     try {
       const pData = personnel;
-      const sData = asg?.shift;
-      const aData = asg?.area;
+      debugInfo = `Persona: ${pData?.first_name || 'No encontrada'} | ASG_ID: ${assignmentId}`;
+
+      const sData = asg?.shift as any;
+      const aData = asg?.area as any;
       
       // Resiliently get position name
-      const posObj = asg.position;
+      const posObj = asg?.position as any;
       const positionName = (Array.isArray(posObj) ? posObj[0]?.name : posObj?.name) || '';
       const positionNameUpper = positionName.toUpperCase();
-      
-      debugInfo = `Persona: ${pData?.first_name || 'No encontrada'}`;
 
       if (pData) {
         const isSupervisor = pData.role === 'Supervisor' || positionNameUpper.includes('SUPERVISOR');
