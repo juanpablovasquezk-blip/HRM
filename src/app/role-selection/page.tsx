@@ -3,13 +3,16 @@
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Users, User, ArrowRight } from 'lucide-react';
+import { globalLogout } from '../auth-actions';
 
 export default function RoleSelectionPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
       <div className="max-w-md w-full space-y-6">
         <div className="text-center space-y-2">
-          <img src="/logo.png" alt="Logo" className="h-16 mx-auto mb-4" />
+          <div className="mx-auto mb-4 relative h-[80px] w-auto inline-flex items-center justify-center">
+            <img src="/logo.png" alt="Logo" className="h-full w-auto object-contain" />
+          </div>
           <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">¿Cómo quieres ingresar?</h1>
           <p className="text-slate-500 text-sm font-medium">Selecciona el modo de vista para continuar</p>
         </div>
@@ -47,11 +50,12 @@ export default function RoleSelectionPage() {
         </div>
 
         <div className="text-center pt-4">
-          <Link href="/login">
-            <button className="text-slate-400 hover:text-slate-600 text-xs font-bold uppercase tracking-widest">
-              Volver al Login
-            </button>
-          </Link>
+          <button 
+            onClick={() => globalLogout()}
+            className="text-slate-400 hover:text-red-500 text-xs font-bold uppercase tracking-widest transition-colors"
+          >
+            Volver al Login (Cerrar Sesión)
+          </button>
         </div>
       </div>
     </div>
