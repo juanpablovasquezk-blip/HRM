@@ -398,6 +398,9 @@ export async function updateTransportMobilization(personnelId: string, date: str
   }
   
   revalidatePath('/supervisor/transport');
+  if (mobilization === 'PROPIO') {
+    return { success: true, whatsapp: { debug: 'DEBUG: Salió del bloque sin retornar nada' } };
+  }
   return { success: true };
 }
 
