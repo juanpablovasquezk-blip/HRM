@@ -158,6 +158,7 @@ export default async function PersonnelPage({
                       company: { name: string } | null;
                       rotation_pattern: string | null;
                       fixed_shift_id: string | null;
+                      user_id: string | null;
                       documents: Array<{ definition_id: string; expiration_date: string | null; status: string }>;
                     };
 
@@ -175,7 +176,7 @@ export default async function PersonnelPage({
                           >
                             {person.first_name} {person.last_name_father} {person.last_name_mother}
                             {person.user_id && (
-                              <ShieldCheck className="h-3.5 w-3.5 text-blue-500 fill-blue-50" title="Acceso habilitado" />
+                              <ShieldCheck className="h-3.5 w-3.5 text-blue-500 fill-blue-50" />
                             )}
                           </Link>
                           <div className="flex gap-1">
