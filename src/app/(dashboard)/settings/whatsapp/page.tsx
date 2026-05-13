@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { MessageSquare, Save, ShieldCheck, Key, Hash, Send, Users } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { saveWhatsAppSettings } from './actions';
 
 export default function WhatsAppSettings() {
   const [loading, setLoading] = useState(true);
@@ -51,17 +52,12 @@ export default function WhatsAppSettings() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const updates = Object.entries(settings).map(([key, value]) => ({
-        key,
-        value,
-        updated_at: new Date().toISOString()
-      }));
+      const result = await saveWhatsAppSettings(settings);
 
-      const { error } = await supabase
-        .from('system_settings')
-        .upsert(updates, { onConflict: 'key' });
-
-      if (error) throw error;
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      
       toast.success('Configuración guardada correctamente');
     } catch (error: any) {
       toast.error('Error al guardar: ' + error.message);
