@@ -91,11 +91,26 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
+    // Define restricted paths per role
+    const adminOnlyPaths = ['/personnel', '/documents', '/settings', '/dashboard', '/shifts/roster'];
+    const isAdminOnlyPath = adminOnlyPaths.some(p => pathname.startsWith(p));
+
     // Role Selection & Management Path Protection
-    if ((pathname.startsWith('/role-selection') || isManagementPath) && !authorizedRoles.includes(role)) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/worker';
-      return NextResponse.redirect(url);
+    if (pathname.startsWith('/role-selection') || isManagementPath) {
+      // 1. Basic auth check
+      if (!authorizedRoles.includes(role)) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/worker';
+        return NextResponse.redirect(url);
+      }
+
+      // 2. Granular role protection
+      if (isAdminOnlyPath && role !== 'ADMIN' && role !== 'HR') {
+        const url = request.nextUrl.clone();
+        // Redirect non-admins to their specific dashboard or worker view
+        url.pathname = role === 'SUPERVISOR' ? '/supervisor' : '/worker';
+        return NextResponse.redirect(url);
+      }
     }
 
     // Supervisor path protection

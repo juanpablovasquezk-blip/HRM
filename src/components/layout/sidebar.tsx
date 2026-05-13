@@ -140,19 +140,21 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       <Separator className="opacity-60" />
 
-      {/* Settings Link */}
-      <div className="px-3 py-2">
-        <Link
-          href="/settings"
-          className={cn(
-            'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800/50 transition-all duration-200',
-            collapsed && 'justify-center px-2'
-          )}
-        >
-          <Settings className="h-[18px] w-[18px] shrink-0" />
-          {!collapsed && <span>Ajustes</span>}
-        </Link>
-      </div>
+      {/* Settings Link (Only for ADMIN/HR) */}
+      {(role === 'ADMIN' || role === 'HR') && (
+        <div className="px-3 py-2">
+          <Link
+            href="/settings"
+            className={cn(
+              'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800/50 transition-all duration-200',
+              collapsed && 'justify-center px-2'
+            )}
+          >
+            <Settings className="h-[18px] w-[18px] shrink-0" />
+            {!collapsed && <span>Ajustes</span>}
+          </Link>
+        </div>
+      )}
 
       {/* User Profile */}
       <div className="border-t border-slate-200/80 dark:border-slate-800 p-3">

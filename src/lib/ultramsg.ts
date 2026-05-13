@@ -31,8 +31,9 @@ export async function sendWhatsAppMessage(to: string, message: string) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
+  const url = `https://api.ultramsg.com/${instanceId}/messages/chat`;
+
   try {
-    const url = `https://api.ultramsg.com/${instanceId}/messages/chat`;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
