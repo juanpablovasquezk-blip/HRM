@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { MessageSquare, Save, ShieldCheck, Key, Hash, Send, Users } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { saveWhatsAppSettings } from './actions';
+import { saveWhatsAppSettings, getWhatsAppSettings } from './actions';
 
 export default function WhatsAppSettings() {
   const [loading, setLoading] = useState(true);
@@ -27,21 +27,23 @@ export default function WhatsAppSettings() {
   useEffect(() => {
     async function loadSettings() {
       try {
-        const { data, error } = await supabase
-          .from('system_settings')
-          .select('*');
+        const result = await getWhatsAppSettings();
         
-        if (error) throw error;
+        if (!result.success) throw new Error(result.error);
 
+        const data = result.data || {};
         const newSettings = { ...settings };
-        data.forEach(item => {
-          if (item.key in newSettings) {
-            newSettings[item.key as keyof typeof settings] = item.value;
+        
+        Object.keys(newSettings).forEach(key => {
+          if (key in data) {
+            newSettings[key as keyof typeof settings] = data[key];
           }
         });
+
         setSettings(newSettings);
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error loading settings:', error);
+        toast.error('Error al cargar configuración: ' + error.message);
       } finally {
         setLoading(false);
       }

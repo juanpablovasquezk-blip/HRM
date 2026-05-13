@@ -29,3 +29,22 @@ export async function saveWhatsAppSettings(settings: Record<string, string>) {
     return { success: false, error: error.message };
   }
 }
+
+export async function getWhatsAppSettings() {
+  try {
+    const supabase = await createAdminClient();
+    const { data, error } = await supabase.from('system_settings').select('*');
+    
+    if (error) throw error;
+    
+    const settings: Record<string, string> = {};
+    data?.forEach(item => {
+      settings[item.key] = item.value;
+    });
+    
+    return { success: true, data: settings };
+  } catch (error: any) {
+    console.error('Error fetching settings via action:', error);
+    return { success: false, error: error.message };
+  }
+}
