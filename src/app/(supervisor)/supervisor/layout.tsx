@@ -9,7 +9,8 @@ import {
   Bus, 
   Users, 
   FileText,
-  LogOut
+  LogOut,
+  User
 } from 'lucide-react';
 
 export default function SupervisorLayout({
@@ -25,6 +26,7 @@ export default function SupervisorLayout({
     { icon: Bus, label: 'Transporte', href: '/supervisor/transport', active: pathname.startsWith('/supervisor/transport'), className: 'flex' },
     { icon: Users, label: 'Personal', href: '/supervisor/personnel', active: pathname.startsWith('/supervisor/personnel'), className: 'flex' },
     { icon: FileText, label: 'Roster', href: '/supervisor/roster', active: pathname.startsWith('/supervisor/roster'), className: 'hidden md:flex' },
+    { icon: User, label: 'Mi Roster', href: '/worker', active: false, className: 'flex' },
   ];
 
   return (

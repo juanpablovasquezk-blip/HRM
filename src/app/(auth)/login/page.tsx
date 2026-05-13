@@ -22,61 +22,71 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (error) {
-        toast.error('Login failed', {
+        toast.error('Error de acceso', {
           description: error.message,
         });
         return;
       }
 
-      toast.success('Welcome back!');
-      router.push('/dashboard');
+      const role = data.user?.user_metadata?.role || 'USER';
+      toast.success('¡Bienvenido!');
+      
+      // Client-side redirection for faster feedback
+      if (role === 'ADMIN' || role === 'HR') {
+        router.push('/dashboard');
+      } else if (role === 'SUPERVISOR') {
+        router.push('/supervisor');
+      } else {
+        router.push('/worker');
+      }
+      
       router.refresh();
-    } catch {
-      toast.error('An unexpected error occurred');
+    } catch (e) {
+      toast.error('Ocurrió un error inesperado');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Card className="border-0 shadow-2xl shadow-blue-900/10 bg-white/80 backdrop-blur-xl dark:bg-slate-900/80">
+    <Card className="border-0 shadow-2xl shadow-orange-900/10 bg-white/80 backdrop-blur-xl dark:bg-slate-900/80">
       <CardHeader className="text-center pb-2">
-        <div className="mx-auto mb-4 relative h-[70px] w-auto inline-flex items-center justify-center">
-          <img src="/logo.jpg" alt="Minerquim Logo" className="h-full w-auto object-contain" />
+        <div className="mx-auto mb-4 relative h-[80px] w-auto inline-flex items-center justify-center">
+          <img src="/logo.png" alt="HRM Logo" className="h-full w-auto object-contain" />
         </div>
-        <CardTitle className="text-2xl font-bold tracking-tight">
-          Grupo Minerquim
+        <CardTitle className="text-2xl font-bold tracking-tight text-slate-900">
+          Plataforma de Gestión
         </CardTitle>
         <CardDescription className="text-base text-muted-foreground/80">
-          Workforce & HR Management Platform
+          Ingresa tus credenciales para continuar
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-6">
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email" className="text-sm font-medium">
-              Email Address
+              Correo Electrónico
             </Label>
             <Input
               id="email"
               type="email"
-              placeholder="admin@company.com"
+              placeholder="tu@email.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="h-11"
+              className="h-11 rounded-xl border-slate-200 focus:ring-orange-500 focus:border-orange-500"
               autoComplete="email"
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="password" className="text-sm font-medium">
-              Password
+              Contraseña (RUT)
             </Label>
             <Input
               id="password"
@@ -85,17 +95,17 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="h-11"
+              className="h-11 rounded-xl border-slate-200 focus:ring-orange-500 focus:border-orange-500"
               autoComplete="current-password"
             />
           </div>
           <Button
             type="submit"
-            className="w-full h-11 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-medium shadow-lg shadow-orange-500/25 transition-all duration-200"
+            className="w-full h-11 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold rounded-xl shadow-lg shadow-orange-500/25 transition-all duration-200"
             disabled={loading}
           >
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Sign In
+            Iniciar Sesión
           </Button>
         </form>
       </CardContent>

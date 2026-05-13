@@ -9,10 +9,13 @@ import {
   Bus, 
   LogOut,
   User,
-  FileText
+  FileText,
+  Users
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { logoutWorker } from './actions';
+import { createClient } from '@/lib/supabase/client';
+import { useState, useEffect } from 'react';
 
 export default function WorkerLayout({
   children,
@@ -24,12 +27,27 @@ export default function WorkerLayout({
 
   if (isLoginPage) return <>{children}</>;
 
+  const [role, setRole] = useState<string | null>(null);
+  const supabase = createClient();
+
+  useEffect(() => {
+    const getRole = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setRole(user?.user_metadata?.role || 'USER');
+    };
+    getRole();
+  }, [supabase]);
+
   const navItems = [
     { label: 'Mañana', href: '/worker', icon: Clock },
     { label: 'Mi Mes', href: '/worker/roster', icon: CalendarDays },
     { label: 'Mis Docs', href: '/worker/documents', icon: FileText },
     { label: 'Movilidad', href: '/worker/transport', icon: Bus },
   ];
+
+  if (role === 'SUPERVISOR' || role === 'ADMIN') {
+    navItems.push({ label: 'Gestión', href: '/supervisor', icon: Users });
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 font-sans text-slate-900">
