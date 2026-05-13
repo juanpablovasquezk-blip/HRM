@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { format, parseISO } from 'date-fns';
 
@@ -107,7 +108,7 @@ export async function sendTransportNotification(requestId: string) {
 }
 
 export async function getTransportRequests(date: string) {
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
   const { data, error } = await supabase
     .from('transport_requests')
     .select(`
@@ -127,7 +128,7 @@ export async function getTransportRequests(date: string) {
 }
 
 export async function generateTransportRequests(date: string) {
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
   
   // 1. Get all confirmed assignments for that date
   const { data: assignments, error: assErr } = await supabase
@@ -219,7 +220,7 @@ export async function generateTransportRequests(date: string) {
 }
 
 export async function clearTransportRequests(date: string) {
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
   const { error } = await supabase
     .from('transport_requests')
     .delete()
