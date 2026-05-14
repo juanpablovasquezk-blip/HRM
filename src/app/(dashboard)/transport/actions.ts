@@ -148,10 +148,36 @@ export async function sendTransportNotification(requestId: string) {
     else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
     else if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
 
-    // 6. Send to both in parallel using cached settings
+    // 6. Find 04:00 Supervisor for the individual message
+    let supervisorName = 'SUPERVISOR DE TURNO';
+    try {
+      const { data: supervisors } = await supabase
+        .from('shift_assignments')
+        .select('personnel(first_name, last_name_father), shifts(start_time)')
+        .eq('date', tr.date)
+        .eq('status', 'scheduled');
+      
+      const sup0400 = supervisors?.find((s: any) => 
+        s.shifts?.start_time?.startsWith('04:00') && 
+        (s.personnel?.first_name || '').toUpperCase() !== 'PENDIENTE'
+      );
+
+      if (sup0400) {
+        const p = Array.isArray(sup0400.personnel) ? sup0400.personnel[0] : sup0400.personnel;
+        if (p) {
+          supervisorName = `${p.first_name} ${p.last_name_father}`;
+        }
+      }
+    } catch (e) {
+      console.error('Error finding supervisor:', e);
+    }
+
+    const individualMessage = `*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*\n\n${message}\n\nSi tiene problemas con su recogida, contactarse con Transvip al (2) 2677 3000. Si no lo pasan a buscar, contactese con el supervisor *${supervisorName}* a las 04:00.`;
+
+    // 7. Send to both in parallel using cached settings
     const sendPromises = [];
     if (groupId) sendPromises.push(sendWhatsAppMessage(groupId, message, dbSettings));
-    if (phone) sendPromises.push(sendWhatsAppMessage(phone.replace(/\D/g, ''), message, dbSettings));
+    if (phone) sendPromises.push(sendWhatsAppMessage(phone.replace(/\D/g, ''), individualMessage, dbSettings));
 
     const results = await Promise.all(sendPromises);
     const failed = results.find(r => !r.success);

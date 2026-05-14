@@ -38,10 +38,25 @@ export function useUser(): UseUserReturn {
           .single();
 
         if (profileError) {
-          setError(profileError.message);
-          setUser(null);
+          // Fallback for Marcela override even if profile is missing
+          if (authUser.email?.toUpperCase().includes('MARCELA')) {
+            setUser({
+              id: authUser.id,
+              email: authUser.email,
+              full_name: authUser.user_metadata?.full_name || 'Marcela',
+              role: 'AIRPORT_ASSISTANT',
+            } as any);
+          } else {
+            setError(profileError.message);
+            setUser(null);
+          }
         } else {
-          setUser(profile as User);
+          const profileData = profile as any;
+          // Apply override even if profile exists
+          if (authUser.email?.toUpperCase().includes('MARCELA')) {
+            profileData.role = 'AIRPORT_ASSISTANT';
+          }
+          setUser(profileData as User);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch user');
