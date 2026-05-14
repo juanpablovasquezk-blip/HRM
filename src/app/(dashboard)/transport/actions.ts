@@ -135,7 +135,7 @@ export async function sendTransportNotification(requestId: string) {
 }
 
 export async function getTransportRequests(date: string) {
-  const supabase = await createAdminClient();
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from('transport_requests')
     .select(`
@@ -161,7 +161,7 @@ export async function generateTransportRequests(date: string) {
       return { success: false, error: 'No autorizado' };
     }
 
-    const supabase = await createAdminClient();
+    const supabase = createAdminClient();
     
     // 1. Get all confirmed assignments for that date
     const { data: assignments, error: assErr } = await supabase
@@ -277,7 +277,7 @@ export async function clearTransportRequests(date: string) {
     return { success: false, error: 'No autorizado' };
   }
 
-  const supabase = await createAdminClient();
+  const supabase = createAdminClient();
   console.log('[TRANSPORT] Clearing requests for date:', date);
   const { error } = await supabase
     .from('transport_requests')
