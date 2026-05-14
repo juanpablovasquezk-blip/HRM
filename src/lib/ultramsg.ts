@@ -39,9 +39,9 @@ export async function getSystemSettings() {
   return settings;
 }
 
-export async function sendWhatsAppMessage(to: string, message: string) {
-  // 1. Try to get settings from Database first
-  const dbSettings = await getSystemSettings();
+export async function sendWhatsAppMessage(to: string, message: string, existingSettings?: any) {
+  // 1. Use existing settings or fetch from DB
+  const dbSettings = existingSettings || await getSystemSettings();
   
   let instanceId: string | undefined = dbSettings.ultramsg_instance_id;
   let token: string | undefined = dbSettings.ultramsg_token;

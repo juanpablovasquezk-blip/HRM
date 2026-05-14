@@ -20,13 +20,18 @@ async function getAuthorizedRole() {
     if (dbUser?.role) role = dbUser.role.toUpperCase();
   }
   
+  // Emergency override for Marcela (Management access)
+  if (user.email?.toUpperCase().includes('MARCELA')) {
+    role = 'ASSISTANT';
+  }
+  
   return role;
 }
 
 export async function updateTransportRequest(id: string, updates: any) {
   try {
     const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(role)) {
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(role)) {
       throw new Error('No autorizado');
     }
 
@@ -50,7 +55,7 @@ export async function updateTransportRequest(id: string, updates: any) {
 export async function sendTransportNotification(requestId: string) {
   try {
     const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(role)) {
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(role)) {
       throw new Error('No autorizado');
     }
     
@@ -84,10 +89,13 @@ export async function sendTransportNotification(requestId: string) {
     let areaName = '';
 
     if (asg) {
-      const { data: sData } = await supabase.from('shifts').select('start_time').eq('id', asg.shift_id).single();
-      const { data: aData } = await supabase.from('areas').select('name').eq('id', asg.area_id).single();
-      shiftStart = sData?.start_time?.substring(0, 5) || '00:00';
-      areaName = (aData?.name || '').toUpperCase();
+      const [sDataRes, aDataRes] = await Promise.all([
+        supabase.from('shifts').select('start_time').eq('id', asg.shift_id).single(),
+        supabase.from('areas').select('name').eq('id', asg.area_id).single()
+      ]);
+      
+      shiftStart = sDataRes.data?.start_time?.substring(0, 5) || '00:00';
+      areaName = (aDataRes.data?.name || '').toUpperCase();
     }
 
     // 4. Exclude Supervisors
@@ -123,14 +131,24 @@ export async function sendTransportNotification(requestId: string) {
     else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
     else if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
 
-    // 6. Send to both
-    if (groupId) await sendWhatsAppMessage(groupId, message);
-    if (phone) await sendWhatsAppMessage(phone.replace(/\D/g, ''), message);
+    // 6. Send to both in parallel using cached settings
+    const sendPromises = [];
+    if (groupId) sendPromises.push(sendWhatsAppMessage(groupId, message, dbSettings));
+    if (phone) sendPromises.push(sendWhatsAppMessage(phone.replace(/\D/g, ''), message, dbSettings));
 
+    const results = await Promise.all(sendPromises);
+    const failed = results.find(r => !r.success);
+    
+    if (failed) {
+      console.error('WhatsApp failed:', failed);
+      return { success: false, error: failed.error || 'Error al enviar uno de los mensajes' };
+    }
+
+    revalidatePath('/transport');
     return { success: true };
   } catch (error: any) {
-    console.error('Error sending WhatsApp:', error);
-    return { success: false, error: error.message };
+    console.error('Error sending WhatsApp notification:', error);
+    return { success: false, error: error.message || 'Error desconocido en el servidor' };
   }
 }
 
