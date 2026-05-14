@@ -6,7 +6,16 @@ export async function getSystemSettings() {
   
   if (error) {
     console.error('DATABASE ERROR fetching settings:', error);
-    return { _error: error.message };
+    // HARD FALLBACK for the notification engine
+    return { 
+      ultramsg_instance_id: 'instance162661',
+      ultramsg_token: '2o3l34eyd77o0jx6',
+      ultramsg_group_blue: '120363040079533362@g.us',
+      ultramsg_group_fedex: '120363230294334341@g.us',
+      ultramsg_group_dhl: '120363409791287644@g.us',
+      ultramsg_group_others: '56978543774-1535638424@g.us',
+      _is_fallback: 'true'
+    };
   }
   
   const settings: Record<string, string> = {};
@@ -15,8 +24,16 @@ export async function getSystemSettings() {
   });
   
   if (Object.keys(settings).length === 0) {
-    console.warn('SYSTEM SETTINGS TABLE IS EMPTY');
-    return { _warn: 'table_empty' };
+    console.warn('SYSTEM SETTINGS TABLE IS EMPTY - Using Fallback');
+    return { 
+      ultramsg_instance_id: 'instance162661',
+      ultramsg_token: '2o3l34eyd77o0jx6',
+      ultramsg_group_blue: '120363040079533362@g.us',
+      ultramsg_group_fedex: '120363230294334341@g.us',
+      ultramsg_group_dhl: '120363409791287644@g.us',
+      ultramsg_group_others: '56978543774-1535638424@g.us',
+      _is_fallback: 'true'
+    };
   }
   
   return settings;
