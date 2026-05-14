@@ -241,10 +241,10 @@ export async function updateTransportMobilization(personnelId: string, date: str
     .from('shift_assignments')
     .select(`
       *,
-      area:areas(name, whatsapp_group_id),
-      position:positions(name, whatsapp_group_id),
-      shift:shifts(*),
-      personnel:personnel(address, first_name, last_name_father, phone, role)
+      area:areas!shift_assignments_area_id_fkey(name),
+      position:positions!shift_assignments_position_id_fkey(name, whatsapp_group_id),
+      shift:shifts!shift_assignments_shift_id_fkey(id, name, start_time, end_time),
+      personnel:personnel!shift_assignments_personnel_id_fkey(address, first_name, last_name_father, phone, role)
     `)
     .eq('id', assignmentId)
     .single();
@@ -352,15 +352,10 @@ export async function updateTransportMobilization(personnelId: string, date: str
         const isSupervisor = pData.role === 'Supervisor' || positionNameUpper.includes('SUPERVISOR');
         
         if (!isSupervisor) {
-          const firstName = pData.first_name || '';
-          const lastName = pData.last_name_father || '';
-          const name = `${firstName} ${lastName}`.trim().toUpperCase() || 'TRABAJADOR';
-          
-          const dateStr = format(parseISO(asg?.date || date), 'dd-MM-yyyy');
-          const hourStr = sData?.start_time?.substring(0,5) || '00:00';
+          const shiftTime = sData?.start_time?.substring(0, 5) || '00:00';
           const phone = pData.phone;
           
-          const message = `SR. ${name}\nTURNO ${dateStr}: ${hourStr}\nLLEGA POR SUS PROPIOS MEDIOS\n\n*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
+          const message = `SR. ${pData.first_name} ${pData.last_name_father}\nTURNO ${format(parseISO(date), 'dd-MM-yyyy')}: ${shiftTime}\n${mobilization === 'PROPIO' ? 'LLEGA POR SUS PROPIOS MEDIOS' : 'RECORRIDO EMPRESA'}\n\nESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA`;
           
           debugInfo += ` | Msg listo | Tel: ${phone || 'Sin tel'}`;
 
