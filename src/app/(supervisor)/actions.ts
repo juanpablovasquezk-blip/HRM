@@ -140,7 +140,7 @@ export async function getDailyPlanning(date?: string) {
   return {
     assignments: assignments || [],
     transport: transport || [],
-    shifts: (await supabase.from('shifts').select('id, name, start_time').order('name')).data || [],
+    shifts: (await supabase.from('shifts').select('id, name, start_time, end_time').order('name')).data || [],
     date: targetDate
   };
 }
