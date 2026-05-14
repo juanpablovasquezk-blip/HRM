@@ -242,10 +242,10 @@ export async function updateTransportMobilization(personnelId: string, date: str
     .from('shift_assignments')
     .select(`
       *,
-      area:areas!shift_assignments_area_id_fkey(name),
-      position:positions!shift_assignments_position_id_fkey(name),
-      shift:shifts!shift_assignments_shift_id_fkey(*),
-      personnel:personnel!shift_assignments_personnel_id_fkey(address, first_name, last_name_father, phone, role)
+      area:areas(name),
+      position:positions(name),
+      shift:shifts(*),
+      personnel:personnel(address, first_name, last_name_father, phone, role)
     `)
     .eq('id', assignmentId)
     .single();
@@ -333,10 +333,19 @@ export async function updateTransportMobilization(personnelId: string, date: str
       debugInfo = `Persona: ${pData?.first_name || 'No encontrada'} | ASG_ID: ${assignmentId}`;
 
       const sData = asg?.shift as any;
-      const aData = asg?.area as any;
-      
-      // Resiliently get position name
-      const posObj = asg?.position as any;
+      let aData = asg?.area as any;
+      let posObj = asg?.position as any;
+
+      // FALLBACK: If join failed, fetch area and position manually
+      if (!aData && (asg as any)?.area_id) {
+        const { data } = await supabase.from('areas').select('name').eq('id', (asg as any).area_id).single();
+        if (data) aData = data;
+      }
+      if (!posObj && (asg as any)?.position_id) {
+        const { data } = await supabase.from('positions').select('name').eq('id', (asg as any).position_id).single();
+        if (data) posObj = data;
+      }
+
       const positionName = (Array.isArray(posObj) ? posObj[0]?.name : posObj?.name) || '';
       const positionNameUpper = positionName.toUpperCase();
 
