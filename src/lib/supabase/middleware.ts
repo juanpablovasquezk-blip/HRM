@@ -96,8 +96,10 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone();
       if (role === 'ADMIN' || role === 'HR') {
         url.pathname = '/dashboard';
-      } else if (role === 'SUPERVISOR' || role === 'AIRPORT_ASSISTANT' || role === 'ASSISTANT') {
+      } else if (role === 'SUPERVISOR' || role === 'ASSISTANT') {
         url.pathname = '/role-selection';
+      } else if (role === 'AIRPORT_ASSISTANT') {
+        url.pathname = '/worker';
       } else {
         url.pathname = '/worker';
       }

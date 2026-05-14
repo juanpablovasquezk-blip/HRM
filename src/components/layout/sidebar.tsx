@@ -55,6 +55,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { user, role, signOut } = useUser();
 
   const filteredNavItems = navItems.filter((item) => {
+    // Specific filtering for Airport Assistant role
+    if (role === 'AIRPORT_ASSISTANT') {
+      const hiddenLabels = ['Turnos', 'Licencias', 'Reportes'];
+      if (hiddenLabels.includes(item.label)) return false;
+    }
+
     if (!item.requiredPermission) return true;
     if (!role) return false;
     return hasPermission(role, item.requiredPermission as keyof import('@/lib/auth/roles').Permission);

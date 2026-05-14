@@ -13,8 +13,7 @@ export default async function DailyPlanningPage(props: {
   const supabase = await createClient();
   const { getUserRole } = await import('@/app/role-actions');
   const role = await getUserRole();
-  const { hasPermission } = await import('@/lib/auth/roles');
-  const canEdit = hasPermission(role as any, 'manageShifts');
+  const canEdit = ['ADMIN', 'HR', 'SUPERVISOR'].includes(role || '');
   
   const date = searchParams.date || format(new Date(), 'yyyy-MM-dd');
 

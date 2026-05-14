@@ -61,7 +61,7 @@ export async function getUserRole() {
     dbUser = emailUser;
   }
 
-  let finalRole = dbUser?.role || user.user_metadata?.role || 'USER';
+  let finalRole = (dbUser?.role || user.user_metadata?.role || 'USER').toUpperCase().trim();
   
   // Emergency override for Marcela (Management access)
   if (user.email?.toUpperCase().includes('MARCELA') && finalRole !== 'ADMIN' && finalRole !== 'HR') {

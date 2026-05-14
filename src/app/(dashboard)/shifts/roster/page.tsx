@@ -14,8 +14,7 @@ export default async function RosterPage({
   const { data: { user: authUser } } = await supabase.auth.getUser();
   const { getUserRole } = await import('@/app/role-actions');
   const role = await getUserRole();
-  const { hasPermission } = await import('@/lib/auth/roles');
-  const canEdit = hasPermission(role as any, 'manageShifts');
+  const canEdit = ['ADMIN', 'HR', 'SUPERVISOR'].includes(role || '');
   console.log(`[ROSTER] User: ${authUser?.email}, Role: ${role}, CanEdit: ${canEdit}`);
 
   // Use the month from URL or the current month as base
