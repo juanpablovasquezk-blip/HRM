@@ -11,10 +11,12 @@ export default async function RosterPage({
 }) {
   const params = await searchParams;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const role = (user?.user_metadata?.role as any) || 'USER';
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  const { getUserRole } = await import('@/app/role-actions');
+  const role = await getUserRole();
   const { hasPermission } = await import('@/lib/auth/roles');
-  const canEdit = hasPermission(role, 'manageShifts');
+  const canEdit = hasPermission(role as any, 'manageShifts');
+  console.log(`[ROSTER] User: ${authUser?.email}, Role: ${role}, CanEdit: ${canEdit}`);
 
   // Use the month from URL or the current month as base
   const currentMonthDate = params.month ? new Date(params.month + '-01T00:00:00') : new Date();

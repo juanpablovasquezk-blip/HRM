@@ -27,9 +27,9 @@ export default async function PersonnelPage({
   const params = await searchParams;
   const supabase = await createClient();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  const role = (user?.user_metadata?.role as Role) || 'USER';
-  const canEdit = hasPermission(role, 'managePersonnel');
+  const { getUserRole } = await import('@/app/role-actions');
+  const role = await getUserRole();
+  const canEdit = hasPermission(role as any, 'managePersonnel');
 
   let positionIds: string[] = [];
   if (params.position_id) {
