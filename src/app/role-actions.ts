@@ -17,7 +17,8 @@ export async function getUserRole() {
     if (workerId) {
       const { data: p } = await adminSupabase.from('personnel').select('main_position_name').eq('id', workerId).single();
       const pos = (p?.main_position_name || '').toUpperCase();
-      if (pos.includes('ASISTENTE') || pos.includes('ASSISTANT')) return 'ASSISTANT';
+      // Broad check to ensure access for Marcela and others
+      if (pos.includes('ASISTENTE') || pos.includes('ASSISTANT') || pos.includes('ADMINISTRATIVO')) return 'ASSISTANT';
       if (pos.includes('SUPERVISOR')) return 'SUPERVISOR';
     }
     return 'USER';
