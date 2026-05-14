@@ -336,6 +336,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
       const sData = shiftData as any;
       let posObj = posData as any;
+      let aData = areaData as any;
 
       // FALLBACK: If join failed, fetch area and position manually
       if (!aData && (asg as any)?.area_id) {
@@ -357,9 +358,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
           const shiftTime = sData?.start_time?.substring(0, 5) || '00:00';
           const phone = pData.phone;
           
-          const message = `SR. ${pData.first_name} ${pData.last_name_father}\nTURNO ${format(parseISO(date), 'dd-MM-yyyy')}: ${shiftTime}\n${mobilization === 'PROPIO' ? 'LLEGA POR SUS PROPIOS MEDIOS' : 'RECORRIDO EMPRESA'}\n\nESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA`;
-          
-          debugInfo += ` | Msg listo | Tel: ${phone || 'Sin tel'}`;
+          debugInfo += ` | Prep Msg | Tel: ${phone || 'Sin tel'}`;
 
           // Determine Group
           const dbSettings = await getSystemSettings();
@@ -391,7 +390,10 @@ export async function updateTransportMobilization(personnelId: string, date: str
              }
           }
 
-          console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area: "${detectedAreaName}", PosGroup: "${finalPositionGroupId}", AreaGroup: "${finalAreaGroupId}"`);
+          console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area: "${detectedAreaName}", PosGroup: "${finalPositionGroupId}"`);
+
+          const groupNameTag = finalPositionGroupId ? (finalPositionGroupId.includes('12036304') ? 'BLUE' : finalPositionGroupId.includes('DHL') || finalPositionGroupId.includes('12036340') ? 'DHL' : finalPositionGroupId.includes('FEDEX') || finalPositionGroupId.includes('12036323') ? 'FEDEX' : 'OTROS') : 'OTROS';
+          const message = `GRUPO: ${groupNameTag}\nSR. ${pData.first_name} ${pData.last_name_father}\nTURNO ${format(parseISO(date), 'dd-MM-yyyy')}: ${shiftTime}\n${mobilization === 'PROPIO' ? 'LLEGA POR SUS PROPIOS MEDIOS' : 'RECORRIDO EMPRESA'}\n\nESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA`;
 
           // 3. FINAL ROUTING DECISION (Position > Others)
           const groupId = finalPositionGroupId || dbSettings.ultramsg_group_others;

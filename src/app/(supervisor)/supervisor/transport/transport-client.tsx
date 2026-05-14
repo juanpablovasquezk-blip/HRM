@@ -112,9 +112,23 @@ export default function TransportClient({ initialData }: { initialData: any }) {
     return { total: transportPersonnel.length, empresaCount, propioCount, pendienteCount, dbError: data.error };
   }, [transportPersonnel, data.error]);
 
-  const handleSetMobilization = (personnelId: string, type: 'Empresa' | 'Propio', assignmentId: any) => {
+  const handleSetMobilization = (assignment: any, type: 'Empresa' | 'Propio') => {
     const dbType = type === 'Empresa' ? 'REQUERIDO' : 'PROPIO';
+    const personnelId = assignment.personnel_id;
+    const assignmentId = assignment.id;
     const key = String(assignmentId);
+    
+    const shiftTime = assignment.shift?.start_time?.substring(0, 5) || '00:00';
+    const groupName = assignment.position?.whatsapp_group_id ? (assignment.position.whatsapp_group_id.includes('12036304') ? 'BLUE' : assignment.position.whatsapp_group_id.includes('DHL') || assignment.position.whatsapp_group_id.includes('12036340') ? 'DHL' : assignment.position.whatsapp_group_id.includes('FEDEX') || assignment.position.whatsapp_group_id.includes('12036323') ? 'FEDEX' : 'OTROS') : 'OTROS';
+    
+    const previewMessage = `Se enviará el siguiente WhatsApp:\n\n` +
+      `GRUPO: ${groupName}\n` +
+      `SR. ${assignment.personnel?.first_name} ${assignment.personnel?.last_name_father}\n` +
+      `TURNO: ${shiftTime}\n` +
+      `${type === 'Propio' ? 'LLEGA POR SUS PROPIOS MEDIOS' : 'RECORRIDO EMPRESA'}\n\n` +
+      `¿Deseas continuar?`;
+
+    if (!window.confirm(previewMessage)) return;
 
     // 1. Record override
     localOverrides.current[key] = { 
