@@ -243,7 +243,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
     .select(`
       *,
       area:areas(name, whatsapp_group_id),
-      position:positions(name),
+      position:positions(name, whatsapp_group_id),
       shift:shifts(*),
       personnel:personnel(address, first_name, last_name_father, phone, role)
     `)
@@ -342,7 +342,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
         if (data) aData = data;
       }
       if (!posObj && (asg as any)?.position_id) {
-        const { data } = await supabase.from('positions').select('name').eq('id', (asg as any).position_id).single();
+        const { data } = await supabase.from('positions').select('name, whatsapp_group_id').eq('id', (asg as any).position_id).single();
         if (data) posObj = data;
       }
 
@@ -376,8 +376,9 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
           let areaNameSearch = (Array.isArray(aData) ? aData[0]?.name : aData?.name) || '';
           let areaGroupId = (Array.isArray(aData) ? aData[0]?.whatsapp_group_id : aData?.whatsapp_group_id) || '';
+          let positionGroupId = (Array.isArray(posObj) ? posObj[0]?.whatsapp_group_id : posObj?.whatsapp_group_id) || '';
           
-          // CRITICAL FALLBACK: If area details are missing, fetch manually
+          // CRITICAL FALLBACK: If details are missing, fetch manually
           if (!areaNameSearch && (asg as any)?.area_id) {
              const { data: areaObj } = await supabase.from('areas').select('name, whatsapp_group_id').eq('id', (asg as any).area_id).single();
              if (areaObj) {
@@ -385,16 +386,20 @@ export async function updateTransportMobilization(personnelId: string, date: str
                areaGroupId = areaObj.whatsapp_group_id;
              }
           }
+          if (!positionGroupId && (asg as any)?.position_id) {
+             const { data: posObjManual } = await supabase.from('positions').select('whatsapp_group_id').eq('id', (asg as any).position_id).single();
+             if (posObjManual) positionGroupId = posObjManual.whatsapp_group_id;
+          }
 
           const areaNameUpper = (areaNameSearch || '').toUpperCase();
           const combinedSearch = `${areaNameUpper} ${positionNameUpper}`.replace(/\s+/g, ''); 
           
-          console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area: "${areaNameUpper}", GroupID: "${areaGroupId}"`);
+          console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area: "${areaNameUpper}", PosGroup: "${positionGroupId}", AreaGroup: "${areaGroupId}"`);
 
-          // FINAL ROUTING LOGIC: Priority 1: Direct Column | Priority 2: Keywords | Priority 3: Others
-          let groupId = areaGroupId || dbSettings.ultramsg_group_others;
+          // FINAL ROUTING LOGIC: Priority 1: Position ID | Priority 2: Area ID | Priority 3: Keywords | Priority 4: Others
+          let groupId = positionGroupId || areaGroupId || dbSettings.ultramsg_group_others;
 
-          if (!areaGroupId) {
+          if (!positionGroupId && !areaGroupId) {
             if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
             else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
             else if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
