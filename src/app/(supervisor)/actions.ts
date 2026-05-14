@@ -113,7 +113,7 @@ export async function getDailyPlanning(date?: string) {
       .select(`
         *,
         personnel:personnel!shift_assignments_personnel_id_fkey(*), 
-        shift:shifts!shift_assignments_shift_id_fkey(id, name, start_time, end_time), 
+        shift:shifts!shift_assignments_shift_id_fkey(id, name, start_time, end_time, requires_transport), 
         area:areas!shift_assignments_area_id_fkey(id, name), 
         position:positions!shift_assignments_position_id_fkey(id, name, whatsapp_group_id)
       `)

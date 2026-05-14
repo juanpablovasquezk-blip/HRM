@@ -79,7 +79,10 @@ export default function TransportClient({ initialData }: { initialData: any }) {
     return assignments.filter((asg: any) => {
       const shift = asg.shift;
       if (!shift) return false;
-      // Filter by transport window (23:00 - 06:30)
+      // FIRST CHECK: Manual override in shift settings
+      if (shift.requires_transport === false) return false;
+      
+      // SECOND CHECK: Standard transport window (23:00 - 06:30)
       return isWithinWindow(shift.start_time) || isWithinWindow(shift.end_time);
     }).map((asg: any) => {
       const transportData = reqMap[String(asg.id)] || reqMap[`p_${asg.personnel_id}`] || { 
