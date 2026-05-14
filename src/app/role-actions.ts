@@ -15,14 +15,22 @@ export async function getUserRole() {
     const workerId = cookieStore.get('worker_id')?.value;
     
     if (workerId) {
-      const { data: p } = await adminSupabase
+      const { data: p, error } = await adminSupabase
         .from('personnel')
         .select('id, main_position:positions(name)')
         .eq('id', workerId)
         .single();
       
+      if (error) {
+         // Fallback: check if we can get anything from anon client
+         const supabaseAnon = await createClient();
+         const { data: pAnon } = await supabaseAnon.from('personnel').select('id, main_position:positions(name)').eq('id', workerId).single();
+         const posName = ((pAnon?.main_position as any)?.name || '').toUpperCase();
+         if (posName.includes('ASISTENTE') || posName.includes('ASSISTANT') || posName.includes('ADMINISTRATIVO')) return 'ASSISTANT';
+      }
+
       const posName = ((p?.main_position as any)?.name || '').toUpperCase();
-      if (posName.includes('ASISTENTE') || posName.includes('ASSISTANT')) return 'ASSISTANT';
+      if (posName.includes('ASISTENTE') || posName.includes('ASSISTANT') || posName.includes('ADMINISTRATIVO')) return 'ASSISTANT';
       if (posName.includes('SUPERVISOR')) return 'SUPERVISOR';
     }
     return 'USER';
