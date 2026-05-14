@@ -374,17 +374,30 @@ export async function updateTransportMobilization(personnelId: string, date: str
             debugInfo += ` | DB_KEYS: ${Object.keys(dbSettings).join(',')}`;
           }
 
-          const areaNameSearch = (Array.isArray(aData) ? aData[0]?.name : aData?.name) || '';
-          const areaNameUpper = areaNameSearch.toUpperCase();
+          let areaNameSearch = (Array.isArray(aData) ? aData[0]?.name : aData?.name) || '';
+          
+          // CRITICAL FALLBACK: If area name is still empty, try to get it from personnel record
+          if (!areaNameSearch && pData?.area_id) {
+             const { data: areaObj } = await supabase.from('areas').select('name').eq('id', pData.area_id).single();
+             if (areaObj) areaNameSearch = areaObj.name;
+          }
 
+          const areaNameUpper = areaNameSearch.toUpperCase();
           const combinedSearch = `${areaNameUpper} ${positionNameUpper}`.replace(/\s+/g, ''); 
+          
+          console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area Found: "${areaNameUpper}", Combined: "${combinedSearch}"`);
+
           let groupId = dbSettings.ultramsg_group_others;
 
-          if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
-          else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
-          else if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
+          if (combinedSearch.includes('BLUE')) {
+            groupId = dbSettings.ultramsg_group_blue;
+          } else if (combinedSearch.includes('FEDEX')) {
+            groupId = dbSettings.ultramsg_group_fedex;
+          } else if (combinedSearch.includes('DHL')) {
+            groupId = dbSettings.ultramsg_group_dhl;
+          }
 
-          debugInfo += ` | Grupo: ${groupId || 'No hallado'}`;
+          debugInfo += ` | AreaDet: ${areaNameUpper} | Grupo: ${groupId === dbSettings.ultramsg_group_blue ? 'BLUE' : (groupId === dbSettings.ultramsg_group_others ? 'OTROS' : groupId)}`;
 
           // Send to Group
           let groupSent = false;
