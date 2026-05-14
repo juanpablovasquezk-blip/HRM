@@ -59,22 +59,35 @@ export async function updateSession(request: NextRequest) {
     const authorizedRoles = ['ADMIN', 'HR', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT'];
 
     // If attempting to access management OR role is missing, double check with DB
-    if (isManagementPath || !role) {
+    if (isManagementPath || pathname.startsWith('/supervisor') || !role) {
       const { createClient: createAdmin } = await import('@supabase/supabase-js');
       const adminSupabase = createAdmin(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.SUPABASE_SERVICE_ROLE_KEY!
       );
       
-      // Try ID first, fallback to Email
+      // 1. Check User Table
       let { data: dbUser } = await adminSupabase.from('users').select('role').eq('id', user.id).single();
-      
-      if (!dbUser && user.email) {
-        const { data: emailUser } = await adminSupabase.from('users').select('role').eq('email', user.email).single();
-        dbUser = emailUser;
-      }
-
       if (dbUser?.role) role = dbUser.role;
+
+      // 2. Check Personnel Table (Automatic by Position UUID)
+      if (user.email) {
+        const { data: personnel } = await adminSupabase
+          .from('personnel')
+          .select('main_position')
+          .eq('email', user.email.trim().toLowerCase())
+          .maybeSingle();
+        
+        if (personnel) {
+          const ASSISTANT_UUID = '62575116-4546-44a7-bb06-d0e3a8ad4df9';
+          const AIRPORT_ASSISTANT_UUID = '9a266902-5fce-425f-bca5-6c46787de302'; // Example
+          const SUPERVISOR_UUID = '17153543-abd7-43d1-9d0d-93b2353967d0';
+
+          if (personnel.main_position === ASSISTANT_UUID) role = 'ASSISTANT';
+          else if (personnel.main_position === SUPERVISOR_UUID) role = 'SUPERVISOR';
+          else if (personnel.main_position === AIRPORT_ASSISTANT_UUID) role = 'AIRPORT_ASSISTANT';
+        }
+      }
     }
     
     if (!role) role = 'USER';
