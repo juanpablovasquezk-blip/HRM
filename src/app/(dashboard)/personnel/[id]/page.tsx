@@ -18,6 +18,7 @@ import { format, differenceInDays, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { DocumentActions } from './document-actions';
 import { calculateDynamicExpiration, calculateIntervalExpiration } from '@/lib/utils/document-calc';
+import { AccessActions } from './access-actions';
 
 export default async function PersonnelDetailPage({
   params,
@@ -195,15 +196,26 @@ export default async function PersonnelDetailPage({
 
           <Card className="border-slate-200/60 dark:border-slate-800 shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base">Estado</CardTitle>
+              <CardTitle className="text-base">Estado y Acceso</CardTitle>
             </CardHeader>
-            <CardContent>
-              <Badge className={person.is_active
-                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-              }>
-                {person.is_active ? 'Activo' : 'Inactivo'}
-              </Badge>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <Badge className={person.is_active
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                  : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                }>
+                  {person.is_active ? 'Activo' : 'Inactivo'}
+                </Badge>
+              </div>
+              <Separator className="opacity-50" />
+              <div className="space-y-1">
+                <p className="text-[10px] uppercase text-muted-foreground font-bold">Credenciales del Sistema</p>
+                <AccessActions 
+                  personnelId={id} 
+                  hasAccess={!!person.user_id} 
+                  email={person.email} 
+                />
+              </div>
             </CardContent>
           </Card>
         </div>

@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, Shield } from 'lucide-react';
 import { toast } from 'sonner';
+import Link from 'next/link';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -78,7 +79,7 @@ export default function LoginPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="password" className="text-sm font-medium">
+            <Label htmlFor="password" title="Contraseña (RUT)" className="text-sm font-medium">
               Contraseña (RUT)
             </Label>
             <Input
@@ -91,6 +92,14 @@ export default function LoginPage() {
               className="h-11 rounded-xl border-slate-200 focus:ring-orange-500 focus:border-orange-500"
               autoComplete="current-password"
             />
+            <div className="flex justify-end">
+              <Link 
+                href="/forgot-password" 
+                className="text-xs text-orange-600 hover:text-orange-700 font-medium transition-colors"
+              >
+                ¿Olvidaste tu contraseña?
+              </Link>
+            </div>
           </div>
           <Button
             type="submit"

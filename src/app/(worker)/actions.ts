@@ -89,7 +89,7 @@ export async function getWorkerTomorrowData() {
   const [todayAssignmentsRes, todayTransportRes, tomorrowAssignmentsRes, tomorrowTransportRes] = await Promise.all([
     supabase
       .from('shift_assignments')
-      .select('*, shift:shifts(*)')
+      .select('*, shift:shifts!shift_assignments_shift_id_fkey(*)')
       .eq('personnel_id', session.id)
       .eq('date', todayStr)
       .neq('status', 'cancelled'),

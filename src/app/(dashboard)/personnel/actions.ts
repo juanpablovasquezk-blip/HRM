@@ -352,3 +352,35 @@ export async function enablePersonnelAccess(
     return { success: false, error: error.message };
   }
 }
+
+export async function resetPasswordToRut(
+  personnelId: string
+): Promise<{ success: boolean; error: string | null }> {
+  const supabase = await createClient();
+  const adminClient = createAdminClient();
+
+  try {
+    const { data: person, error: fetchError } = await supabase
+      .from('personnel')
+      .select('rut, email, user_id')
+      .eq('id', personnelId)
+      .single();
+
+    if (fetchError || !person) throw new Error('No se encontró la ficha del trabajador');
+    if (!person.user_id) throw new Error('El trabajador no tiene acceso al sistema activado');
+
+    const cleanRut = person.rut.replace(/[.-]/g, '').toUpperCase();
+
+    const { error: authError } = await adminClient.auth.admin.updateUserById(
+      person.user_id,
+      { password: cleanRut }
+    );
+
+    if (authError) throw new Error(`Error Auth: ${authError.message}`);
+
+    return { success: true, error: null };
+  } catch (error: any) {
+    console.error('Error resetting password:', error);
+    return { success: false, error: error.message };
+  }
+}
