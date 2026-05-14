@@ -137,122 +137,121 @@ export async function getTransportRequests(date: string) {
 }
 
 export async function generateTransportRequests(date: string) {
-  const supabaseAuth = await createClient();
-  const { data: { user } } = await supabaseAuth.auth.getUser();
-  if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(user.user_metadata?.role)) {
-    return { success: false, error: 'No autorizado' };
-  }
+  try {
+    const supabaseAuth = await createClient();
+    const { data: { user } } = await supabaseAuth.auth.getUser();
+    if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(user.user_metadata?.role)) {
+      return { success: false, error: 'No autorizado' };
+    }
 
-  const supabase = await createAdminClient();
-  
-  // 1. Get all confirmed assignments for that date
-  const { data: assignments, error: assErr } = await supabase
-    .from('shift_assignments')
-    .select('*, personnel:personnel(*), area:areas(*), shift:shifts!shift_assignments_shift_id_fkey(*)')
-    .eq('date', date)
-    .eq('is_confirmed', true)
-    .neq('status', 'cancelled');
-
-  if (assErr) return { success: false, error: assErr.message };
-  if (!assignments || assignments.length === 0) return { success: true, message: 'No hay asignaciones confirmadas para procesar.' };
-
-  let createdCount = 0;
-
-  const isWithinWindow = (timeStr: string) => {
-    if (!timeStr) return false;
-    const hour = parseInt(timeStr.split(':')[0], 10);
-    const minute = parseInt(timeStr.split(':')[1], 10);
-    const timeVal = hour * 100 + minute;
-    // Window: 23:00 (2300) to 06:30 (0630)
-    return (timeVal >= 2300 || timeVal <= 630);
-  };
-
-  for (const ass of assignments) {
-    // Check if requests already exist to avoid duplicates
-    const { data: existing } = await supabase
-      .from('transport_requests')
-      .select('id')
-      .eq('assignment_id', ass.id);
-
-    if (existing && existing.length > 0) continue;
-
-    const personnel = ass.personnel;
-    if (!personnel) continue;
+    const supabase = await createAdminClient();
     
-    const shift = ass.shift;
-    if (!shift) continue;
+    // 1. Get all confirmed assignments for that date
+    const { data: assignments, error: assErr } = await supabase
+      .from('shift_assignments')
+      .select(`
+        *,
+        personnel:personnel(*),
+        area:areas(*),
+        shift:shifts!shift_assignments_shift_id_fkey(*)
+      `)
+      .eq('date', date)
+      .eq('is_confirmed', true)
+      .neq('status', 'cancelled');
 
-    // 0. Respect the Manual Override (requires_transport flag)
-    if (shift.requires_transport === false) continue;
+    if (assErr) throw assErr;
+    if (!assignments || assignments.length === 0) return { success: true, message: 'No hay asignaciones confirmadas.' };
 
-    const area = (ass as any).area;
-    const areaName = (area?.name || '').toUpperCase();
+    // 2. Get existing requests to avoid duplicates
+    const { data: existingReqs } = await supabase
+      .from('transport_requests')
+      .select('assignment_id')
+      .eq('date', date);
+    
+    const existingIds = new Set(existingReqs?.map(r => r.assignment_id) || []);
 
-    // Robust and Ultra-Safe Address Parsing for Origin
-    let homeAddress = null;
-    try {
+    const isWithinWindow = (timeStr: string) => {
+      if (!timeStr) return false;
+      const [h, m] = timeStr.split(':').map(Number);
+      const val = h * 100 + m;
+      return (val >= 2300 || val <= 630);
+    };
+
+    const newRequests: any[] = [];
+
+    for (const ass of assignments) {
+      if (existingIds.has(ass.id)) continue;
+      if (!ass.personnel || !ass.shift) continue;
+      if (ass.shift.requires_transport === false) continue;
+
+      const personnel = ass.personnel;
+      const shift = ass.shift;
+      const area = (ass as any).area;
+      const areaName = (area?.name || '').toUpperCase();
+
+      // Better Address Parsing
+      let homeAddress = "DIRECCIÓN NO INFORMADA EN FICHA";
       const addr = personnel.address;
-      if (typeof addr === 'string') {
-        homeAddress = addr.replace(/[\r\n]+/g, ' ').trim();
-      } else if (typeof addr === 'object' && addr !== null && !Array.isArray(addr)) {
-        const a = addr as any;
-        const parts = [
-          String(a.street || '').replace(/[\r\n]+/g, ' ').trim(),
-          String(a.city || '').replace(/[\r\n]+/g, ' ').trim(),
-          String(a.commune || a.region || '').replace(/[\r\n]+/g, ' ').trim()
-        ].filter(Boolean);
-        homeAddress = parts.length > 0 ? parts.join(', ') : (a.full_address || JSON.stringify(a));
+      if (addr) {
+        if (typeof addr === 'string') {
+          homeAddress = addr.replace(/[\r\n]+/g, ' ').trim();
+        } else if (typeof addr === 'object') {
+          const a = addr as any;
+          const parts = [
+            String(a.street || '').replace(/[\r\n]+/g, ' ').trim(),
+            String(a.city || '').replace(/[\r\n]+/g, ' ').trim(),
+            String(a.commune || a.region || '').replace(/[\r\n]+/g, ' ').trim()
+          ].filter(Boolean);
+          homeAddress = parts.length > 0 ? parts.join(', ') : (a.full_address || JSON.stringify(a));
+        }
       }
-    } catch (e) {
-      console.error('Error parsing address for personnel:', personnel.id, e);
-      homeAddress = "DIRECCIÓN NO INFORMADA EN FICHA";
-    }
-      
-    if (!homeAddress) homeAddress = "DIRECCIÓN NO INFORMADA EN FICHA";
 
-    // Determine plant address based on area (SMART MAPPING)
-    let plantAddress = "MINERQUIM PLANTA"; 
-    if (areaName.includes('BLUE')) {
-      plantAddress = "Los Maitenes Sur 9800, Pudahuel";
-    } else if (areaName.includes('BODEGA') || areaName.includes('DHL') || areaName.includes('FEDEX')) {
-      plantAddress = "Osvaldo Croquevielle 2207, Pudahuel";
-    } else if (areaName.includes('AEROPUERTO')) {
-      plantAddress = "Armando Cortinez Oriente 1704";
-    }
+      // Smart Plant Mapping
+      let plantAddress = "MINERQUIM PLANTA"; 
+      if (areaName.includes('BLUE')) plantAddress = "Los Maitenes Sur 9800, Pudahuel";
+      else if (areaName.includes('BODEGA') || areaName.includes('DHL') || areaName.includes('FEDEX')) plantAddress = "Osvaldo Croquevielle 2207, Pudahuel";
+      else if (areaName.includes('AEROPUERTO')) plantAddress = "Armando Cortinez Oriente 1704";
 
-    // Create ENTRADA (Home -> Plant) if start_time is in window
-    if (isWithinWindow(shift.start_time)) {
-      await supabase.from('transport_requests').insert({
-        personnel_id: ass.personnel_id,
-        assignment_id: ass.id,
-        date: ass.date,
-        type: 'ENTRADA',
-        status: 'ABIERTO',
-        transport_type: 'PENDIENTE',
-        pickup_address: homeAddress,
-        destination_address: plantAddress
-      });
-    }
+      // ENTRADA
+      if (isWithinWindow(shift.start_time)) {
+        newRequests.push({
+          personnel_id: ass.personnel_id,
+          assignment_id: ass.id,
+          date: ass.date,
+          type: 'ENTRADA',
+          status: 'ABIERTO',
+          transport_type: 'PENDIENTE',
+          pickup_address: homeAddress,
+          destination_address: plantAddress
+        });
+      }
 
-    // Create SALIDA (Plant -> Home) if end_time is in window
-    if (isWithinWindow(shift.end_time)) {
-      await supabase.from('transport_requests').insert({
-        personnel_id: ass.personnel_id,
-        assignment_id: ass.id,
-        date: ass.date,
-        type: 'SALIDA',
-        status: 'ABIERTO',
-        transport_type: 'PENDIENTE',
-        pickup_address: plantAddress,
-        destination_address: homeAddress
-      });
+      // SALIDA
+      if (isWithinWindow(shift.end_time)) {
+        newRequests.push({
+          personnel_id: ass.personnel_id,
+          assignment_id: ass.id,
+          date: ass.date,
+          type: 'SALIDA',
+          status: 'ABIERTO',
+          transport_type: 'PENDIENTE',
+          pickup_address: plantAddress,
+          destination_address: homeAddress
+        });
+      }
     }
 
-    createdCount++;
+    if (newRequests.length > 0) {
+      const { error: insErr } = await supabase.from('transport_requests').insert(newRequests);
+      if (insErr) throw insErr;
+    }
+
+    revalidatePath('/transport');
+    return { success: true, count: newRequests.length };
+  } catch (error: any) {
+    console.error('Error generateTransportRequests:', error);
+    return { success: false, error: error.message };
   }
-
-  revalidatePath('/transport');
-  return { success: true, count: createdCount };
 }
 
 export async function clearTransportRequests(date: string) {

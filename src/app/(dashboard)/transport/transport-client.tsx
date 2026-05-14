@@ -300,7 +300,7 @@ export default function TransportClient({
       toast.success('Transporte sincronizado');
       router.refresh();
     } else {
-      toast.error('Error al sincronizar');
+      toast.error('Error al sincronizar: ' + (res.error || 'Error desconocido'));
     }
     setIsSyncing(false);
   };
