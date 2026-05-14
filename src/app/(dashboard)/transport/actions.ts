@@ -62,6 +62,7 @@ export async function updateTransportRequest(id: string, updates: any) {
     }
     
     revalidatePath('/transport');
+    revalidatePath('/worker');
     return { success: true };
   } catch (error: any) {
     console.error('[SERVER] Error updateTransportRequest:', error);
@@ -153,24 +154,22 @@ export async function sendTransportNotification(requestId: string) {
     // 6. Find 04:00 Supervisor for the individual message
     let supervisorName = 'SUPERVISOR DE TURNO';
     try {
-      // Fetch assignments with personnel and their position name
-      const { data: assignments } = await supabase
+      // Fetch assignments with personnel and their assigned position for the day
+      const { data: assignments, error: asgErr } = await supabase
         .from('shift_assignments')
         .select(`
-          shifts(start_time),
-          personnel(
-            first_name, 
-            last_name_father,
-            positions!personnel_main_position_fkey(name)
-          )
+          shifts!shift_assignments_shift_id_fkey(start_time),
+          personnel(first_name, last_name_father),
+          positions(name)
         `)
         .eq('date', tr.date)
         .eq('status', 'scheduled');
+        
+      if (asgErr) throw asgErr;
       
       const sup0400 = assignments?.find((s: any) => {
         const startTime = s.shifts?.start_time || '';
-        const p = Array.isArray(s.personnel) ? s.personnel[0] : s.personnel;
-        const posName = (p?.positions?.name || '').toUpperCase();
+        const posName = (s.positions?.name || '').toUpperCase();
         return startTime.startsWith('04:00') && posName.includes('SUPERVISOR');
       });
 
@@ -337,6 +336,7 @@ export async function generateTransportRequests(date: string) {
     }
 
     revalidatePath('/transport');
+    revalidatePath('/worker');
     return { success: true, count: newRequests.length };
   } catch (error: any) {
     console.error('Error generateTransportRequests:', error);

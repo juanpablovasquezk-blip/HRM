@@ -86,6 +86,7 @@ export async function getWorkerTomorrowData() {
   const tomorrowStr = format(addDays(chileTime, 1), 'yyyy-MM-dd');
 
   // Fetch all potential data in parallel
+  const adminSupabase = createAdminClient();
   const [todayAssignmentsRes, todayTransportRes, tomorrowAssignmentsRes, tomorrowTransportRes] = await Promise.all([
     supabase
       .from('shift_assignments')
@@ -93,7 +94,7 @@ export async function getWorkerTomorrowData() {
       .eq('personnel_id', session.id)
       .eq('date', todayStr)
       .neq('status', 'cancelled'),
-    supabase
+    adminSupabase
       .from('transport_requests')
       .select('*')
       .eq('personnel_id', session.id)
@@ -104,7 +105,7 @@ export async function getWorkerTomorrowData() {
       .eq('personnel_id', session.id)
       .eq('date', tomorrowStr)
       .neq('status', 'cancelled'),
-    supabase
+    adminSupabase
       .from('transport_requests')
       .select('*')
       .eq('personnel_id', session.id)
@@ -143,7 +144,7 @@ export async function getWorkerTomorrowData() {
   // Robust transport fetching for tomorrow (including by assignment ID)
   const tomorrowAsgIds = assignments.map(a => a.id);
   if (tomorrowAsgIds.length > 0) {
-    const { data: extraTransport } = await supabase
+    const { data: extraTransport } = await adminSupabase
       .from('transport_requests')
       .select('*')
       .in('assignment_id', tomorrowAsgIds);
