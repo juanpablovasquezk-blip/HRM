@@ -15,22 +15,23 @@ export async function getUserRole() {
     const workerId = cookieStore.get('worker_id')?.value;
     
     if (workerId) {
-      const { data: p, error } = await adminSupabase
+      const { data: p } = await adminSupabase
         .from('personnel')
-        .select('id, main_position:positions(name)')
+        .select('main_position')
         .eq('id', workerId)
         .single();
       
-      if (error) {
-         // Fallback: check if we can get anything from anon client
-         const supabaseAnon = await createClient();
-         const { data: pAnon } = await supabaseAnon.from('personnel').select('id, main_position:positions(name)').eq('id', workerId).single();
-         const posName = ((pAnon?.main_position as any)?.name || '').toUpperCase();
-         if (posName.includes('ASISTENTE') || posName.includes('ASSISTANT') || posName.includes('ADMINISTRATIVO')) return 'ASSISTANT';
-      }
+      const posId = p?.main_position;
+      const ASSISTANT_UUID = '62575116-4546-44a7-bb06-d0e3a8ad4df9';
+      const SUPERVISOR_UUID = '17153543-abd7-43d1-9d0d-93b2353967d0';
 
-      const posName = ((p?.main_position as any)?.name || '').toUpperCase();
-      if (posName.includes('ASISTENTE') || posName.includes('ASSISTANT') || posName.includes('ADMINISTRATIVO')) return 'ASSISTANT';
+      if (posId === ASSISTANT_UUID) return 'ASSISTANT';
+      if (posId === SUPERVISOR_UUID) return 'SUPERVISOR';
+
+      // Fallback: check names if UUID check fails or for new roles
+      const { data: posData } = await adminSupabase.from('positions').select('name').eq('id', posId).single();
+      const posName = (posData?.name || '').toUpperCase();
+      if (posName.includes('ASISTENTE') || posName.includes('ASSISTANT')) return 'ASSISTANT';
       if (posName.includes('SUPERVISOR')) return 'SUPERVISOR';
     }
     return 'USER';
