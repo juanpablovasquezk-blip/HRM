@@ -333,7 +333,7 @@ export default function TransportClient({ initialData }: { initialData: any }) {
                 <div className="flex flex-col gap-2">
                   <button 
                     disabled={isPending}
-                    onClick={() => handleSetMobilization(p.personnel_id, 'Empresa', p.id)} 
+                    onClick={() => handleSetMobilization(p, 'Empresa')} 
                     className={`h-12 w-12 rounded-2xl flex items-center justify-center transition-all active:scale-90 border-2
                       ${(p.transport_data.transport_type === 'REQUERIDO' || p.transport_data.transport_type === 'Empresa') 
                         ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200' 
@@ -344,7 +344,7 @@ export default function TransportClient({ initialData }: { initialData: any }) {
                   </button>
                   <button 
                     disabled={isPending}
-                    onClick={() => handleSetMobilization(p.personnel_id, 'Propio', p.id)} 
+                    onClick={() => handleSetMobilization(p, 'Propio')} 
                     className={`h-12 w-12 rounded-2xl flex items-center justify-center transition-all active:scale-90 border-2
                       ${(p.transport_data.transport_type === 'PROPIO' || p.transport_data.transport_type === 'Propio') 
                         ? 'bg-amber-500 border-amber-600 text-white shadow-lg shadow-amber-200' 
