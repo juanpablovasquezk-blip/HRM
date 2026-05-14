@@ -114,10 +114,13 @@ export async function updateSession(request: NextRequest) {
     }
 
     // Supervisor path protection
-    if (pathname.startsWith('/supervisor') && role !== 'SUPERVISOR' && role !== 'ADMIN') {
-      const url = request.nextUrl.clone();
-      url.pathname = '/worker';
-      return NextResponse.redirect(url);
+    if (pathname.startsWith('/supervisor')) {
+      const isMarcela = user.email?.toUpperCase().includes('MARCELA');
+      if (role !== 'SUPERVISOR' && role !== 'ADMIN' && role !== 'ASSISTANT' && role !== 'AIRPORT_ASSISTANT' && !isMarcela) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/worker';
+        return NextResponse.redirect(url);
+      }
     }
   }
 
