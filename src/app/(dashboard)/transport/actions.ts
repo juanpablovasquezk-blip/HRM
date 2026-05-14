@@ -182,21 +182,32 @@ export async function generateTransportRequests(date: string) {
     const shift = ass.shift;
     if (!shift) continue;
 
+    // 0. Respect the Manual Override (requires_transport flag)
+    if (shift.requires_transport === false) continue;
+
     const area = (ass as any).area;
     const areaName = (area?.name || '').toUpperCase();
 
-    const homeAddress = personnel.address 
-      ? `${(personnel.address as any).street || ''}, ${(personnel.address as any).city || ''}` 
-      : null;
+    // Robust Address Parsing for Origin
+    let homeAddress = null;
+    const addr = personnel.address;
+    if (typeof addr === 'string') {
+      homeAddress = addr;
+    } else if (typeof addr === 'object' && addr !== null) {
+      const parts = [addr.street, addr.city, addr.commune].filter(Boolean);
+      homeAddress = parts.length > 0 ? parts.join(', ') : (addr.full_address || JSON.stringify(addr));
+    }
       
     if (!homeAddress) continue;
 
-    // Determine plant address based on area
+    // Determine plant address based on area (SMART MAPPING)
     let plantAddress = "MINERQUIM PLANTA"; 
-    if (areaName.includes('BODEGA')) {
-      plantAddress = "Osvaldo Croquevielle 2207, Pudahuel";
-    } else if (areaName.includes('BLUE') || areaName.includes('BLUEEXPRESS')) {
+    if (areaName.includes('BLUE')) {
       plantAddress = "Los Maitenes Sur 9800, Pudahuel";
+    } else if (areaName.includes('BODEGA') || areaName.includes('DHL') || areaName.includes('FEDEX')) {
+      plantAddress = "Osvaldo Croquevielle 2207, Pudahuel";
+    } else if (areaName.includes('AEROPUERTO')) {
+      plantAddress = "Armando Cortinez Oriente 1704";
     }
 
     // Create ENTRADA (Home -> Plant) if start_time is in window
