@@ -27,14 +27,18 @@ export default function WorkerLayout({
 
   if (isLoginPage) return <>{children}</>;
 
-  const [role, setRole] = useState<string | null>(null);
-  const supabase = createClient();
+  const [userName, setUserName] = useState<string | null>(null);
 
   useEffect(() => {
     const getRole = async () => {
       const { getUserRole } = await import('@/app/role-actions');
-      const currentRole = await getUserRole();
+      const { getWorkerSession } = await import('./actions');
+      const [currentRole, session] = await Promise.all([
+        getUserRole(),
+        getWorkerSession()
+      ]);
       setRole(currentRole || 'USER');
+      setUserName(session?.first_name || '');
     };
     getRole();
   }, []);
@@ -46,7 +50,9 @@ export default function WorkerLayout({
     { label: 'Movilidad', href: '/worker/transport', icon: Bus },
   ];
 
-  if (role === 'SUPERVISOR' || role === 'ADMIN' || role === 'ASSISTANT' || role === 'AIRPORT_ASSISTANT') {
+  const isMarcela = userName?.toUpperCase().includes('MARCELA');
+
+  if (role === 'SUPERVISOR' || role === 'ADMIN' || role === 'ASSISTANT' || role === 'AIRPORT_ASSISTANT' || isMarcela) {
     navItems.push({ label: 'Gestión', href: '/supervisor', icon: Users });
   }
 
