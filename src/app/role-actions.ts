@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server';
 export async function getUserRole() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  const adminSupabase = createAdminClient();
   
   if (!user) {
     // Fallback for workers logged in via cookies
