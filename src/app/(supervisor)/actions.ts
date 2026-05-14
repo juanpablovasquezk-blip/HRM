@@ -392,8 +392,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
           console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area: "${detectedAreaName}", PosGroup: "${finalPositionGroupId}"`);
 
-          const groupNameTag = finalPositionGroupId ? (finalPositionGroupId.includes('12036304') ? 'BLUE' : finalPositionGroupId.includes('DHL') || finalPositionGroupId.includes('12036340') ? 'DHL' : finalPositionGroupId.includes('FEDEX') || finalPositionGroupId.includes('12036323') ? 'FEDEX' : 'OTROS') : 'OTROS';
-          const message = `GRUPO: ${groupNameTag}\nSR. ${pData.first_name} ${pData.last_name_father}\nTURNO ${format(parseISO(date), 'dd-MM-yyyy')}: ${shiftTime}\n${mobilization === 'PROPIO' ? 'LLEGA POR SUS PROPIOS MEDIOS' : 'RECORRIDO EMPRESA'}\n\nESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA`;
+          const message = `SR. ${pData.first_name} ${pData.last_name_father}\nTURNO ${format(parseISO(date), 'dd-MM-yyyy')}: ${shiftTime}\n${mobilization === 'PROPIO' ? 'LLEGA POR SUS PROPIOS MEDIOS' : 'RECORRIDO EMPRESA'}\n\n*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
 
           // 3. FINAL ROUTING DECISION (Position > Others)
           const groupId = finalPositionGroupId || dbSettings.ultramsg_group_others;
