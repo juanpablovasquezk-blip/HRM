@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useTransition, useEffect } from 'react';
+import { useState, useMemo, useTransition, useEffect, memo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   format, 
@@ -233,6 +233,61 @@ export function RosterGridClient({
   const nextMonth = () => goToMonth(addMonths(monthDate, 1));
   const prevMonth = () => goToMonth(subMonths(monthDate, 1));
 
+  // INDEXING: Create fast lookup maps for performance
+  const assignmentsMap = useMemo(() => {
+    const map: Record<string, Record<string, Assignment>> = {};
+    assignments.forEach(a => {
+      if (!map[a.personnel_id]) map[a.personnel_id] = {};
+      map[a.personnel_id][a.date] = a;
+    });
+    return map;
+  }, [assignments]);
+
+  const leavesMap = useMemo(() => {
+    const map: Record<string, Leave[]> = {};
+    leaves.forEach(l => {
+      if (!map[l.personnel_id]) map[l.personnel_id] = [];
+      map[l.personnel_id].push(l);
+    });
+    return map;
+  }, [leaves]);
+
+  const shiftsMap = useMemo(() => {
+    const map: Record<string, Shift> = {};
+    shifts.forEach(s => { map[s.id] = s; });
+    return map;
+  }, [shifts]);
+
+  const areasMap = useMemo(() => {
+    const map: Record<string, Area> = {};
+    areas.forEach(a => { map[a.id] = a; });
+    return map;
+  }, [areas]);
+
+  const positionsMap = useMemo(() => {
+    const map: Record<string, Position> = {};
+    positions.forEach(p => { map[p.id] = p; });
+    return map;
+  }, [positions]);
+
+  const requirementsByDate = useMemo(() => {
+    const map: Record<string, any[]> = {};
+    (requirements || []).forEach(r => {
+      if (!map[r.date]) map[r.date] = [];
+      map[r.date].push(r);
+    });
+    return map;
+  }, [requirements]);
+
+  const assignmentsByDate = useMemo(() => {
+    const map: Record<string, Assignment[]> = {};
+    assignments.forEach(a => {
+      if (!map[a.date]) map[a.date] = [];
+      map[a.date].push(a);
+    });
+    return map;
+  }, [assignments]);
+
   const filteredPersonnel = useMemo(() => {
     const monthStartStr = format(startOfMonth(monthDate), 'yyyy-MM-dd');
     const monthEndStr = format(endOfMonth(monthDate), 'yyyy-MM-dd');
@@ -289,7 +344,7 @@ export function RosterGridClient({
     }).sort((a, b) => a.first_name.localeCompare(b.first_name));
   }, [personnel, positionFilter, areaFilter, positions]);
 
-  const handleCellClick = (person: Personnel, date: Date) => {
+  const handleCellClick = useCallback((person: Personnel, date: Date) => {
     if (readOnly) return;
     const dateStr = format(date, 'yyyy-MM-dd');
     
@@ -314,9 +369,9 @@ export function RosterGridClient({
         return [...prev, newCell];
       }
     });
-  };
+  }, [readOnly, positions]);
 
-  const handleToggleRow = (personId: string) => {
+  const handleToggleRow = useCallback((personId: string) => {
     const personDates = days.map(d => format(d, 'yyyy-MM-dd'));
     const isTerminated = (p: Personnel, d: string) => p.termination_date && d > p.termination_date;
     const isPreHire = (p: Personnel, d: string) => p.hire_date && d < p.hire_date;
@@ -335,7 +390,7 @@ export function RosterGridClient({
         return [...others, ...newOnes];
       });
     }
-  };
+  }, [days, personnel, selectedCells]);
 
   const handleToggleColumn = (dateStr: string) => {
     const isTerminated = (p: Personnel, d: string) => p.termination_date && d > p.termination_date;
@@ -849,12 +904,12 @@ export function RosterGridClient({
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-  };
+  }, []);
 
-  const handleDrop = async (e: React.DragEvent, personId: string, targetDate: string) => {
+  const handleDrop = useCallback(async (e: React.DragEvent, personId: string, targetDate: string) => {
     e.preventDefault();
     if (!draggingAssignment || draggingAssignment.personnel_id !== personId) {
       if (draggingAssignment && draggingAssignment.personnel_id !== personId) {
@@ -887,7 +942,7 @@ export function RosterGridClient({
       });
     }
     setDraggingAssignment(null);
-  };
+  }, [draggingAssignment, moveAssignment, router]);
 
   const handleConfirmMoveWithReason = () => {
     if (!reasonDialogOpen.assignment) return;
@@ -1393,16 +1448,14 @@ export function RosterGridClient({
                   const dateStr = format(day, 'yyyy-MM-dd');
                   
                   // Filter requirements based on current position filter
-                  const dailyReqs = (requirements || []).filter(r => {
-                    const dateMatch = r.date === dateStr;
-                    if (!dateMatch) return false;
-                    
+                  const dateReqs = requirementsByDate[dateStr] || [];
+                  const dailyReqs = dateReqs.filter(r => {
                     if (areaFilter && areaFilter !== "none") {
                       if (r.area_id !== areaFilter) return false;
                     }
                     
                     if (positionFilter && positionFilter !== "none") {
-                      const reqName = (r.position as any)?.name?.toUpperCase() || "";
+                      const reqName = r.position?.name?.toUpperCase() || "";
                       if (positionFilter.toUpperCase() !== reqName) return false;
                     }
                     return true;
@@ -1411,15 +1464,12 @@ export function RosterGridClient({
                   const dailyReqTotal = dailyReqs.reduce((sum, r) => sum + r.required_count, 0);
 
                   // Filter assignments based on shown positions
-                  const dailyAssignments = assignments.filter(a => {
-                    const dateMatch = a.date === dateStr;
-                    if (!dateMatch) return false;
-                    
+                  const dateAssignments = assignmentsByDate[dateStr] || [];
+                  const dailyAssignments = dateAssignments.filter(a => {
                     if (positionFilter && positionFilter !== "none") {
-                      const assignPosName = (positions || []).find(p => p.id === a.position_id)?.name?.toUpperCase() || "";
+                      const assignPosName = positionsMap[a.position_id]?.name?.toUpperCase() || "";
                       return positionFilter.toUpperCase() === assignPosName;
                     }
-                    
                     return true;
                   }).length;
 
@@ -1427,11 +1477,11 @@ export function RosterGridClient({
                   
                   // Detail for tooltip/audit
                   const shiftBreakdown = dailyReqs.map(r => {
-                    const shift = shifts.find(s => s.id === r.shift_id);
-                    const count = assignments.filter(a => {
-                      if (a.date !== dateStr || a.shift_id !== r.shift_id) return false;
+                    const shift = shiftsMap[r.shift_id];
+                    const count = dateAssignments.filter(a => {
+                      if (a.shift_id !== r.shift_id) return false;
                       if (!positionFilter) return true;
-                      const pName = (positions || []).find(p => p.id === a.position_id)?.name?.toUpperCase() || "";
+                      const pName = positionsMap[a.position_id]?.name?.toUpperCase() || "";
                       return pName === positionFilter.toUpperCase();
                     }).length;
                     return `${shift?.name || 'Turno'}: ${count}/${r.required_count}`;
@@ -1475,194 +1525,23 @@ export function RosterGridClient({
               </tr>
 
               {filteredPersonnel.map(person => (
-                <tr key={person.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors border-b border-slate-100 dark:border-slate-800">
-                  <td className="sticky left-0 z-30 bg-white dark:bg-slate-900 border-r border-slate-100 dark:border-slate-800 p-3 w-[240px] shadow-[4px_0_10px_-2px_rgba(0,0,0,0.1)]">
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        className="h-3.5 w-3.5 rounded border-slate-300"
-                        onChange={() => handleToggleRow(person.id)}
-                        checked={days.every(day => {
-                          const d = format(day, 'yyyy-MM-dd');
-                          if ((person.termination_date && d > person.termination_date) || (person.hire_date && d < person.hire_date)) return true;
-                          return selectedCells.some(c => c.personId === person.id && c.dateStr === d);
-                        })}
-                      />
-                      <div className="h-7 w-7 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400 relative">
-                         <UserIcon className="h-4 w-4" />
-                         {person.address && (
-                            <div className="absolute -top-1 -right-1 bg-white dark:bg-slate-900 rounded-full p-0.5 shadow-sm border border-orange-100">
-                              <MapPin className="h-2 w-2 text-indigo-500" />
-                            </div>
-                         )}
-                      </div>
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
-                          <span 
-                            className="text-sm font-semibold truncate max-w-[140px]"
-                            title={(() => {
-                              const addr = person.address;
-                              if (!addr) return `${person.first_name} ${person.last_name_father}`;
-                              if (typeof addr === 'string') return `${person.first_name} ${person.last_name_father}\nDirección: ${addr}`;
-                              const parts = [addr.street, addr.city, addr.region || addr.commune].filter(Boolean);
-                              return `${person.first_name} ${person.last_name_father}\nDirección: ${parts.length > 0 ? parts.join(', ') : "Incompleta"}`;
-                            })()}
-                          >
-                            {person.first_name} {person.last_name_father}
-                          </span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-orange-600 font-bold uppercase truncate max-w-[160px]">
-                             {positions.find(pos => pos.id === person.main_position)?.name || 'Sin Cargo'}
-                          </span>
-                          <span className="text-[9px] text-muted-foreground uppercase">
-                             {person.rotation_pattern || 'Estándar'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  {days.map(day => {
-                    const dateStr = format(day, 'yyyy-MM-dd');
-                    const assignment = assignments.find(a => a.personnel_id === person.id && a.date === dateStr);
-                    const shift = assignment ? shifts.find(s => s.id === assignment.shift_id) : null;
-                    const area = assignment ? areas.find(a => a.id === assignment.area_id) : null;
-                    const leave = leaves.find(l => 
-                      person.id === l.personnel_id && 
-                      dateStr >= l.start_date && 
-                      dateStr <= l.end_date
-                    );
-                    const isAirport = (positions.find(pos => pos.id === person.main_position)?.name || '').toUpperCase().includes('AEROPUERTO');
-                    
-                    const getLeaveLabel = (type: string) => {
-                      switch(type) {
-                        case 'vacation': return 'VAC';
-                        case 'sick': return 'LM';
-                        case 'personal': return 'ADM';
-                        case 'maternity': return 'MAT';
-                        case 'free_request': return 'SL';
-                        default: return 'ABS';
-                      }
-                    };
-                    const getLeaveColor = (type: string) => {
-                      switch(type) {
-                        case 'vacation': return 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 text-emerald-600';
-                        case 'sick': return 'bg-red-50 dark:bg-red-900/20 border-red-100 text-red-600';
-                        case 'personal': return 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 text-amber-600';
-                        case 'maternity': return 'bg-purple-50 dark:bg-purple-900/20 border-purple-100 text-purple-600';
-                        case 'free_request': return 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 text-blue-600';
-                        default: return 'bg-slate-50 dark:bg-slate-900/20 border-slate-100 text-slate-600';
-                      }
-                    };
-
-                    const isTerminated = person.termination_date && dateStr > person.termination_date;
-                    const isPreHire = person.hire_date && dateStr < person.hire_date;
-                    const isBlocked = isTerminated || isPreHire;
-                    
-                    const isBirthday = person.birth_date && (() => {
-                      try {
-                        const bDate = parseISO(person.birth_date);
-                        return format(bDate, 'MM-dd') === format(day, 'MM-dd');
-                      } catch (e) {
-                        return false;
-                      }
-                    })();
-
-                    return (
-                      <td 
-                        key={`${person.id}-${dateStr}`}
-                        onClick={() => !isBlocked && handleCellClick(person, day)}
-                        onDragOver={handleDragOver}
-                        onDrop={(e) => handleDrop(e, person.id, dateStr)}
-                        className={cn(
-                          "p-1 text-center border-b border-slate-50 dark:border-slate-900 cursor-pointer h-14 relative group transition-all",
-                          isSunday(day) && "bg-slate-50/30 dark:bg-slate-900/10",
-                          isToday(day) && "bg-orange-50/40 dark:bg-orange-900/20 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.1)]",
-                          isBlocked && "bg-slate-100 dark:bg-slate-900/80 cursor-not-allowed opacity-50 repeating-bg-stripe",
-                          isBirthday && !isBlocked && "bg-rose-50/60 dark:bg-rose-900/20 ring-1 ring-rose-200 dark:ring-rose-800 inset-0",
-                          draggingAssignment?.personnel_id === person.id && draggingAssignment?.date !== dateStr && "bg-indigo-50/50 dark:bg-indigo-900/20 ring-2 ring-indigo-300 ring-inset",
-                          selectedCells.some(c => c.personId === person.id && c.dateStr === dateStr)
-                            ? "bg-orange-100/50 dark:bg-orange-900/30 ring-2 ring-orange-500 ring-inset z-10" 
-                            : "hover:ring-2 hover:ring-orange-500/20"
-                        )}
-                      >
-                        {/* Birthday Indicator */}
-                        {isBirthday && !isBlocked && (
-                          <div className="absolute top-1 left-1 z-20 animate-bounce pointer-events-none">
-                            <Cake className="h-3 w-3 text-rose-500" />
-                          </div>
-                        )}
-                        
-                        {/* Multi-select checkbox indicator */}
-                        {!isBlocked && (
-                          <div className={cn(
-                            "absolute top-1 right-1 h-3 w-3 rounded-full border border-orange-300 dark:border-orange-700 transition-all z-20",
-                            selectedCells.some(c => c.personId === person.id && c.dateStr === dateStr)
-                              ? "bg-orange-500 border-orange-500 shadow-sm scale-110"
-                              : "bg-white/50 dark:bg-slate-950/50 opacity-0 group-hover:opacity-100"
-                          )}>
-                            {selectedCells.some(c => c.personId === person.id && c.dateStr === dateStr) && (
-                              <CheckCircle2 className="h-full w-full text-white p-[1px]" />
-                            )}
-                          </div>
-                        )}
-                        {isTerminated ? (
-                          <div className="h-full flex items-center justify-center">
-                             <span className="text-[10px] font-bold text-slate-400 rotate-45">BAJA</span>
-                          </div>
-                        ) : isPreHire ? (
-                          <div className="h-full flex items-center justify-center">
-                             <span className="text-[10px] font-bold text-slate-400">PRE</span>
-                          </div>
-                        ) : leave ? (
-                          <div className={cn(
-                             "h-full flex flex-col items-center justify-center rounded border font-black text-[10px]",
-                             getLeaveColor(leave.type)
-                          )}>
-                             {getLeaveLabel(leave.type)}
-                          </div>
-                        ) : (shift && assignment) ? (
-                          <div 
-                            draggable
-                            onDragStart={(e) => assignment && handleDragStart(e, assignment)}
-                            title={`${shift.name} | Area: ${area?.name || '---'} | Cargo: ${positions.find(p => p.id === assignment?.position_id)?.name || '---'}${assignment?.is_validated ? ' | VALIDADO' : ''}`}
-                            className={cn(
-                              "h-full flex flex-col items-center justify-center rounded border shadow-sm transition-all relative",
-                              assignment?.is_manual 
-                                ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700/50" 
-                                : "bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800/40",
-                              assignment?.is_validated && "ring-1 ring-indigo-500 border-indigo-200 shadow-indigo-100 dark:shadow-indigo-900/20",
-                              // Highlighting changes from AI original plan
-                              assignment?.original_shift_id && assignment?.original_shift_id !== assignment?.shift_id && 
-                              "border-orange-500 border-2 border-dashed shadow-[0_0_8px_rgba(249,115,22,0.3)]"
-                            )}
-                          >
-                             {assignment?.is_validated && (
-                               <div className="absolute -top-1 -left-1 bg-indigo-600 rounded-full p-0.5 shadow-sm z-10" title="Validado">
-                                 <CheckCircle2 className="h-4 w-4 text-white" />
-                               </div>
-                             )}
-                             {assignment?.is_published && (
-                               <div className="absolute -top-1 -right-1 bg-emerald-600 rounded-full p-0.5 shadow-sm z-10" title="Publicado">
-                                 <Check className="h-4 w-4 text-white" />
-                               </div>
-                             )}
-                             <span className="text-[9px] font-bold text-slate-700 dark:text-slate-300">
-                               {shift.start_time.slice(0, 5)}
-                             </span>
-                             <span className="text-[8px] uppercase font-bold text-muted-foreground truncate w-full px-1">
-                               {area?.name.split(' ')[0] || 'T'}
-                             </span>
-                          </div>
-                        ) : (
-                          <div className="h-full flex items-center justify-center opacity-10">
-                             <Plus className="h-3 w-3" />
-                          </div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
+                <PersonnelRow 
+                  key={person.id}
+                  person={person}
+                  days={days}
+                  assignmentsMap={assignmentsMap}
+                  shiftsMap={shiftsMap}
+                  areasMap={areasMap}
+                  positionsMap={positionsMap}
+                  leavesMap={leavesMap}
+                  positions={positions}
+                  selectedCells={selectedCells}
+                  draggingAssignment={draggingAssignment}
+                  handleToggleRow={handleToggleRow}
+                  handleCellClick={handleCellClick}
+                  handleDragOver={handleDragOver}
+                  handleDrop={handleDrop}
+                />
               ))}
             </tbody>
           </table>
@@ -2382,5 +2261,201 @@ export function RosterGridClient({
     </div>
   );
 }
+
+// --- MEMOIZED COMPONENTS FOR PERFORMANCE ---
+
+const PersonnelRow = memo(({ 
+  person, 
+  days, 
+  assignmentsMap, 
+  shiftsMap, 
+  areasMap, 
+  positionsMap, 
+  leavesMap, 
+  positions, 
+  selectedCells, 
+  draggingAssignment, 
+  handleToggleRow, 
+  handleCellClick, 
+  handleDragOver, 
+  handleDrop 
+}: any) => {
+  return (
+    <tr key={person.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors border-b border-slate-100 dark:border-slate-800">
+      <td className="sticky left-0 z-30 bg-white dark:bg-slate-900 border-r border-slate-100 dark:border-slate-800 p-3 w-[240px] shadow-[4px_0_10px_-2px_rgba(0,0,0,0.1)]">
+        <div className="flex items-center gap-2">
+          <input 
+            type="checkbox" 
+            className="h-3.5 w-3.5 rounded border-slate-300"
+            onChange={() => handleToggleRow(person.id)}
+            checked={days.every((day: any) => {
+              const d = format(day, 'yyyy-MM-dd');
+              if ((person.termination_date && d > person.termination_date) || (person.hire_date && d < person.hire_date)) return true;
+              return selectedCells.some((c: any) => c.personId === person.id && c.dateStr === d);
+            })}
+          />
+          <div className="h-7 w-7 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400 relative">
+             <UserIcon className="h-4 w-4" />
+             {person.address && (
+                <div className="absolute -top-1 -right-1 bg-white dark:bg-slate-900 rounded-full p-0.5 shadow-sm border border-orange-100">
+                  <MapPin className="h-2 w-2 text-indigo-500" />
+                </div>
+             )}
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <span 
+                className="text-sm font-semibold truncate max-w-[140px]"
+                title={(() => {
+                  const addr = person.address;
+                  if (!addr) return `${person.first_name} ${person.last_name_father}`;
+                  if (typeof addr === 'string') return `${person.first_name} ${person.last_name_father}\nDirección: ${addr}`;
+                  const parts = [addr.street, addr.city, addr.region || addr.commune].filter(Boolean);
+                  return `${person.first_name} ${person.last_name_father}\nDirección: ${parts.length > 0 ? parts.join(', ') : "Incompleta"}`;
+                })()}
+              >
+                {person.first_name} {person.last_name_father}
+              </span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[10px] text-orange-600 font-bold uppercase truncate max-w-[160px]">
+                 {positions.find((pos: any) => pos.id === person.main_position)?.name || 'Sin Cargo'}
+              </span>
+              <span className="text-[9px] text-muted-foreground uppercase">
+                 {person.rotation_pattern || 'Estándar'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </td>
+      {days.map((day: any) => {
+        const dateStr = format(day, 'yyyy-MM-dd');
+        const assignment = assignmentsMap[person.id]?.[dateStr];
+        const shift = assignment ? shiftsMap[assignment.shift_id] : null;
+        const area = assignment ? areasMap[assignment.area_id] : null;
+        const personLeaves = leavesMap[person.id] || [];
+        const leave = personLeaves.find((l: any) => 
+          dateStr >= l.start_date && 
+          dateStr <= l.end_date
+        );
+        const isAirport = (positionsMap[person.main_position]?.name || '').toUpperCase().includes('AEROPUERTO');
+        
+        const getLeaveLabel = (type: string) => {
+          switch(type) {
+            case 'vacation': return 'VAC';
+            case 'sick': return 'LM';
+            case 'personal': return 'ADM';
+            case 'maternity': return 'MAT';
+            case 'free_request': return 'SL';
+            default: return 'ABS';
+          }
+        };
+        const getLeaveColor = (type: string) => {
+          switch(type) {
+            case 'vacation': return 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 text-emerald-600';
+            case 'sick': return 'bg-red-50 dark:bg-red-900/20 border-red-100 text-red-600';
+            case 'personal': return 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 text-amber-600';
+            case 'maternity': return 'bg-purple-50 dark:bg-purple-900/20 border-purple-100 text-purple-600';
+            case 'free_request': return 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 text-blue-600';
+            default: return 'bg-slate-50 dark:bg-slate-900/20 border-slate-100 text-slate-600';
+          }
+        };
+
+        const isTerminated = person.termination_date && dateStr > person.termination_date;
+        const isPreHire = person.hire_date && dateStr < person.hire_date;
+        const isBlocked = isTerminated || isPreHire;
+        
+        const isBirthday = person.birth_date && (() => {
+          try {
+            const bDate = parseISO(person.birth_date);
+            return format(bDate, 'MM-dd') === format(day, 'MM-dd');
+          } catch (e) {
+            return false;
+          }
+        })();
+
+        return (
+          <td 
+            key={`${person.id}-${dateStr}`}
+            onClick={() => !isBlocked && handleCellClick(person, day)}
+            onDragOver={handleDragOver}
+            onDrop={(e) => handleDrop(e, person.id, dateStr)}
+            className={cn(
+              "p-1 text-center border-b border-slate-50 dark:border-slate-900 cursor-pointer h-14 relative group transition-all",
+              isSunday(day) && "bg-slate-50/30 dark:bg-slate-900/10",
+              isToday(day) && "bg-orange-50/40 dark:bg-orange-900/20 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.1)]",
+              isBlocked && "bg-slate-100 dark:bg-slate-900/80 cursor-not-allowed opacity-50 repeating-bg-stripe",
+              isBirthday && !isBlocked && "bg-rose-50/60 dark:bg-rose-900/20 ring-1 ring-rose-200 dark:ring-rose-800 inset-0",
+              draggingAssignment?.personnel_id === person.id && draggingAssignment?.date !== dateStr && "bg-indigo-50/50 dark:bg-indigo-900/20 ring-2 ring-indigo-300 ring-inset",
+              selectedCells.some((c: any) => c.personId === person.id && c.dateStr === dateStr)
+                ? "bg-orange-100/50 dark:bg-orange-900/30 ring-2 ring-orange-500 ring-inset z-10" 
+                : "hover:ring-2 hover:ring-orange-500/20"
+            )}
+          >
+            {/* Birthday Indicator */}
+            {isBirthday && !isBlocked && (
+              <div className="absolute top-1 left-1 z-20 animate-bounce pointer-events-none">
+                <Cake className="h-3 w-3 text-rose-500" />
+              </div>
+            )}
+            
+            {/* Multi-select checkbox indicator */}
+            {!isBlocked && (
+              <div className={cn(
+                "absolute top-1 right-1 h-3 w-3 rounded-full border border-orange-300 dark:border-orange-700 transition-all z-20",
+                selectedCells.some((c: any) => c.personId === person.id && c.dateStr === dateStr)
+                  ? "bg-orange-500 border-orange-500 scale-110 shadow-sm"
+                  : "bg-white/50 opacity-0 group-hover:opacity-100"
+              )}>
+                {selectedCells.some((c: any) => c.personId === person.id && c.dateStr === dateStr) && (
+                  <CheckCircle2 className="h-full w-full text-white p-0.5" />
+                )}
+              </div>
+            )}
+
+            <div className="relative z-10">
+              {leave ? (
+                <Badge 
+                  variant="outline" 
+                  className={cn("text-[9px] font-bold px-1 py-0 border", getLeaveColor(leave.type))}
+                >
+                  {getLeaveLabel(leave.type)}
+                </Badge>
+              ) : shift ? (
+                <div 
+                  className={cn(
+                    "flex flex-col items-center justify-center rounded-lg p-1 border shadow-sm transition-all",
+                    assignment?.status === 'confirmed' || assignment?.is_confirmed
+                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700" 
+                      : "bg-blue-500/10 border-blue-500/30 text-blue-700",
+                    assignment?.is_extra && "ring-2 ring-amber-400 ring-offset-1 ring-offset-white ring-inset",
+                    assignment?.status === 'cancelled' && "opacity-40 grayscale",
+                    isAirport && "border-indigo-400 border-dashed"
+                  )}
+                >
+                  <span className="text-[10px] font-black leading-tight uppercase">{shift.name}</span>
+                  <div className="flex items-center gap-0.5 mt-0.5">
+                    {assignment?.is_published ? (
+                      <Sparkles className="h-2 w-2 text-emerald-500" />
+                    ) : (
+                      <div className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                    )}
+                    <span className="text-[8px] opacity-70">
+                      {shift.start_time.substring(0, 5)}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <span className="text-[9px] font-bold text-slate-300/40">OFF</span>
+              )}
+            </div>
+          </td>
+        );
+      })}
+    </tr>
+  );
+});
+
+PersonnelRow.displayName = 'PersonnelRow';
 
 

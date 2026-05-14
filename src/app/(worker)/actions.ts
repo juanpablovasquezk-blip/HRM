@@ -85,24 +85,41 @@ export async function getWorkerTomorrowData() {
   const todayStr = format(chileTime, 'yyyy-MM-dd');
   const tomorrowStr = format(addDays(chileTime, 1), 'yyyy-MM-dd');
 
-  // 1. Check Today's data first for persistence rule
-  const { data: todayAssignments } = await supabase
-    .from('shift_assignments')
-    .select('*, shift:shifts(*)')
-    .eq('personnel_id', session.id)
-    .eq('date', todayStr)
-    .neq('status', 'cancelled');
+  // Fetch all potential data in parallel
+  const [todayAssignmentsRes, todayTransportRes, tomorrowAssignmentsRes, tomorrowTransportRes] = await Promise.all([
+    supabase
+      .from('shift_assignments')
+      .select('*, shift:shifts(*)')
+      .eq('personnel_id', session.id)
+      .eq('date', todayStr)
+      .neq('status', 'cancelled'),
+    supabase
+      .from('transport_requests')
+      .select('*')
+      .eq('personnel_id', session.id)
+      .eq('date', todayStr),
+    supabase
+      .from('shift_assignments')
+      .select('*, shift:shifts!shift_assignments_shift_id_fkey(*), area:areas(*), position:positions(*)')
+      .eq('personnel_id', session.id)
+      .eq('date', tomorrowStr)
+      .neq('status', 'cancelled'),
+    supabase
+      .from('transport_requests')
+      .select('*')
+      .eq('personnel_id', session.id)
+      .eq('date', tomorrowStr)
+  ]);
 
-  const { data: todayTransport } = await supabase
-    .from('transport_requests')
-    .select('*')
-    .eq('personnel_id', session.id)
-    .eq('date', todayStr);
+  const todayAssignments = todayAssignmentsRes.data || [];
+  const todayTransport = todayTransportRes.data || [];
+  const assignments = tomorrowAssignmentsRes.data || [];
+  let transport = tomorrowTransportRes.data || [];
 
   // Persistence Logic: If today has coordinated transport AND we are within 1 hour of shift start
-  const hasCoordinatedTransportToday = todayTransport?.some(t => t.transport_type === 'REQUERIDO' || t.transport_type === 'EMPRESA');
+  const hasCoordinatedTransportToday = todayTransport.some(t => t.transport_type === 'REQUERIDO' || t.transport_type === 'EMPRESA');
   
-  if (hasCoordinatedTransportToday && todayAssignments && todayAssignments.length > 0) {
+  if (hasCoordinatedTransportToday && todayAssignments.length > 0) {
     const firstShift = todayAssignments[0].shift;
     if (firstShift?.start_time) {
       const [h, m] = firstShift.start_time.split(':').map(Number);
@@ -117,31 +134,37 @@ export async function getWorkerTomorrowData() {
           personnel: session,
           date: todayStr,
           assignments: todayAssignments,
-          transport: todayTransport || []
+          transport: todayTransport
         };
       }
     }
   }
 
-  // Otherwise, show TOMORROW as usual
-  const { data: assignments } = await supabase
-    .from('shift_assignments')
-    .select('*, shift:shifts!shift_assignments_shift_id_fkey(*), area:areas(*), position:positions(*)')
-    .eq('personnel_id', session.id)
-    .eq('date', tomorrowStr)
-    .neq('status', 'cancelled');
-
-  const { data: transport } = await supabase
-    .from('transport_requests')
-    .select('*')
-    .eq('personnel_id', session.id)
-    .eq('date', tomorrowStr);
+  // Robust transport fetching for tomorrow (including by assignment ID)
+  const tomorrowAsgIds = assignments.map(a => a.id);
+  if (tomorrowAsgIds.length > 0) {
+    const { data: extraTransport } = await supabase
+      .from('transport_requests')
+      .select('*')
+      .in('assignment_id', tomorrowAsgIds);
+    
+    if (extraTransport && extraTransport.length > 0) {
+      // Merge and deduplicate
+      const transportIds = new Set(transport.map(t => t.id));
+      for (const et of extraTransport) {
+        if (!transportIds.has(et.id)) {
+          transport.push(et);
+          transportIds.add(et.id);
+        }
+      }
+    }
+  }
 
   return {
     personnel: session,
     date: tomorrowStr,
-    assignments: assignments || [],
-    transport: transport || []
+    assignments: assignments,
+    transport: transport
   };
 }
 
