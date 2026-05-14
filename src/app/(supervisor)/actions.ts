@@ -376,13 +376,21 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
           let areaNameSearch = (Array.isArray(aData) ? aData[0]?.name : aData?.name) || '';
           
-          // CRITICAL FALLBACK: If area name is still empty, try to get it from personnel record
-          if (!areaNameSearch && pData?.area_id) {
-             const { data: areaObj } = await supabase.from('areas').select('name').eq('id', pData.area_id).single();
-             if (areaObj) areaNameSearch = areaObj.name;
+          // CRITICAL FALLBACK: If area name is still empty, try to get it from personnel record or rotation pattern
+          if (!areaNameSearch) {
+             // Try by area_id if it exists in assignment
+             if ((asg as any)?.area_id) {
+               const { data: areaObj } = await supabase.from('areas').select('name').eq('id', (asg as any).area_id).single();
+               if (areaObj) areaNameSearch = areaObj.name;
+             }
+             
+             // Try by rotation pattern if area name is still missing
+             if (!areaNameSearch && pData?.rotation_pattern) {
+               areaNameSearch = pData.rotation_pattern;
+             }
           }
 
-          const areaNameUpper = areaNameSearch.toUpperCase();
+          const areaNameUpper = (areaNameSearch || '').toUpperCase();
           const combinedSearch = `${areaNameUpper} ${positionNameUpper}`.replace(/\s+/g, ''); 
           
           console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area Found: "${areaNameUpper}", Combined: "${combinedSearch}"`);
@@ -397,7 +405,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
             groupId = dbSettings.ultramsg_group_dhl;
           }
 
-          debugInfo += ` | AreaDet: ${areaNameUpper} | Grupo: ${groupId === dbSettings.ultramsg_group_blue ? 'BLUE' : (groupId === dbSettings.ultramsg_group_others ? 'OTROS' : groupId)}`;
+          debugInfo += ` | AreaDet: ${areaNameUpper.substring(0,10)} | Grupo: ${groupId === dbSettings.ultramsg_group_blue ? 'BLUE' : (groupId === dbSettings.ultramsg_group_others ? 'OTROS' : groupId)}`;
 
           // Send to Group
           let groupSent = false;
