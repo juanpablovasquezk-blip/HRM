@@ -27,6 +27,7 @@ export default function WorkerLayout({
 
   if (isLoginPage) return <>{children}</>;
 
+  const [role, setRole] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
 
   useEffect(() => {
