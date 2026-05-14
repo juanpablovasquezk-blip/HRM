@@ -304,7 +304,7 @@ export default function TransportClient({ initialData }: { initialData: any }) {
                         {p.area?.name}
                       </Badge>
                       <Badge variant="secondary" className="text-[8px] font-black uppercase py-0 px-2 bg-indigo-50 text-indigo-600 border-indigo-100 rounded-md">
-                        WA: {p.position?.whatsapp_group_id ? (p.position.whatsapp_group_id.includes('12036304') ? 'BLUE' : p.position.whatsapp_group_id.includes('DHL') || p.position.whatsapp_group_id.includes('12036340') ? 'DHL' : p.position.whatsapp_group_id.includes('FEDEX') || p.position.whatsapp_group_id.includes('12036323') ? 'FEDEX' : 'OTROS') : (p.area?.whatsapp_group_id ? (p.area.whatsapp_group_id.includes('BLUE') ? 'BLUE' : p.area.whatsapp_group_id.includes('DHL') ? 'DHL' : p.area.whatsapp_group_id.includes('FEDEX') ? 'FEDEX' : 'OTROS') : 'PEND')}
+                        WA: {p.position?.whatsapp_group_id ? (p.position.whatsapp_group_id.includes('12036304') ? 'BLUE' : p.position.whatsapp_group_id.includes('DHL') || p.position.whatsapp_group_id.includes('12036340') ? 'DHL' : p.position.whatsapp_group_id.includes('FEDEX') || p.position.whatsapp_group_id.includes('12036323') ? 'FEDEX' : 'OTROS') : 'OTROS'}
                       </Badge>
                       <span className={`text-[9px] font-black uppercase tracking-widest
                         ${p.transport_data.transport_type === 'PENDIENTE' ? 'text-orange-500 animate-pulse' : 'text-slate-500'}

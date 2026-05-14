@@ -114,7 +114,7 @@ export async function getDailyPlanning(date?: string) {
         *,
         personnel:personnel!shift_assignments_personnel_id_fkey(*), 
         shift:shifts!shift_assignments_shift_id_fkey(id, name, start_time, end_time), 
-        area:areas!shift_assignments_area_id_fkey(id, name, whatsapp_group_id), 
+        area:areas!shift_assignments_area_id_fkey(id, name), 
         position:positions!shift_assignments_position_id_fkey(id, name, whatsapp_group_id)
       `)
       .eq('date', targetDate)
@@ -378,12 +378,11 @@ export async function updateTransportMobilization(personnelId: string, date: str
           let finalAreaGroupId = '';
           let detectedAreaName = '';
 
-          // 1. Fetch Area details manually
+          // 1. Fetch Area details manually (Only for name diagnostic)
           if ((asg as any)?.area_id) {
-             const { data: areaObj } = await supabase.from('areas').select('name, whatsapp_group_id').eq('id', (asg as any).area_id).single();
+             const { data: areaObj } = await supabase.from('areas').select('name').eq('id', (asg as any).area_id).single();
              if (areaObj) {
                detectedAreaName = areaObj.name;
-               finalAreaGroupId = areaObj.whatsapp_group_id;
              }
           }
 
@@ -397,8 +396,8 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
           console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area: "${detectedAreaName}", PosGroup: "${finalPositionGroupId}", AreaGroup: "${finalAreaGroupId}"`);
 
-          // 3. FINAL ROUTING DECISION
-          const groupId = finalPositionGroupId || finalAreaGroupId || dbSettings.ultramsg_group_others;
+          // 3. FINAL ROUTING DECISION (Position > Others)
+          const groupId = finalPositionGroupId || dbSettings.ultramsg_group_others;
           
           debugInfo += ` | AreaDet: ${detectedAreaName.substring(0,10)} | PosID: ${finalPositionGroupId ? 'SI' : 'NO'} | AreaID: ${finalAreaGroupId ? 'SI' : 'NO'} | Final: ${groupId.substring(0,8)}...`;
 
