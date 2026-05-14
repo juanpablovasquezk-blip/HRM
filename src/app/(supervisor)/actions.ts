@@ -265,25 +265,29 @@ export async function updateTransportMobilization(personnelId: string, date: str
   if (!personnel) return { success: false, error: 'No se encontró el trabajador' };
 
   let areaName = (areaData as any)?.name?.toUpperCase() || '';
-  const addressObj = personnel?.address;
-  
   // Robust Address Parsing
   let homeAddress = 'DIRECCIÓN NO INFORMADA EN FICHA';
-  if (addressObj) {
-    if (typeof addressObj === 'object') {
-      const parts = [addressObj.street, addressObj.city, addressObj.commune].filter(Boolean);
-      homeAddress = parts.length > 0 ? parts.join(', ') : (addressObj.full_address || JSON.stringify(addressObj));
-    } else {
-      homeAddress = String(addressObj);
+  if (personnel?.address) {
+    const addr = personnel.address;
+    if (typeof addr === 'string') {
+      homeAddress = addr;
+    } else if (typeof addr === 'object') {
+      const parts = [addr.street, addr.city, addr.commune, addr.region].filter(Boolean);
+      homeAddress = parts.length > 0 ? parts.join(', ') : (addr.full_address || JSON.stringify(addr));
     }
   }
 
-  // Automated Destination Rules
+  // Automated Destination Rules (SMART MAPPING)
   let destinationAddress = 'PLANTA / BODEGA';
-  if (areaName.includes('BODEGA')) {
-    destinationAddress = 'Osvaldo Croquevielle 2207, Pudahuel';
-  } else if (areaName.includes('BLUE')) {
+  const areaNameUpper = areaName.toUpperCase();
+  const positionNameUpper = (posData as any)?.name?.toUpperCase() || '';
+
+  if (areaNameUpper.includes('BLUE') || positionNameUpper.includes('BLUE')) {
     destinationAddress = 'Los Maitenes Sur 9800, Pudahuel';
+  } else if (areaNameUpper.includes('BODEGA') || positionNameUpper.includes('BODEGA') || positionNameUpper.includes('DHL') || positionNameUpper.includes('FEDEX')) {
+    destinationAddress = 'Osvaldo Croquevielle 2207, Pudahuel';
+  } else if (areaNameUpper.includes('AEROPUERTO') || positionNameUpper.includes('AEROPUERTO')) {
+    destinationAddress = 'Armando Cortinez Oriente 1704';
   }
 
   // 2. CHECK if a record already exists for this assignment and type
