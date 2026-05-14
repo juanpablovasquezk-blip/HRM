@@ -44,7 +44,7 @@ export default function RoleSelectionPage() {
 
         // Smart Redirection
         if (hasManagementRole && !hasWorkerRole) {
-          router.push(role === 'ADMIN' || role === 'HR' ? '/dashboard' : '/supervisor');
+          router.push((role === 'ADMIN' || role === 'HR' || role === 'AIRPORT_ASSISTANT') ? '/dashboard' : '/supervisor');
         } else if (hasWorkerRole && !hasManagementRole) {
           router.push('/worker');
         } else if (!hasManagementRole && !hasWorkerRole) {

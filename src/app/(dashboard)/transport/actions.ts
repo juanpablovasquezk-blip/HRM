@@ -22,7 +22,7 @@ async function getAuthorizedRole() {
   
   // Emergency override for Marcela (Management access)
   if (user.email?.toUpperCase().includes('MARCELA')) {
-    role = 'ASSISTANT';
+    role = 'AIRPORT_ASSISTANT';
   }
   
   return role;
@@ -31,7 +31,7 @@ async function getAuthorizedRole() {
 export async function updateTransportRequest(id: string, updates: any) {
   try {
     const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(role)) {
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
       throw new Error('No autorizado');
     }
 
@@ -55,7 +55,7 @@ export async function updateTransportRequest(id: string, updates: any) {
 export async function sendTransportNotification(requestId: string) {
   try {
     const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(role)) {
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
       throw new Error('No autorizado');
     }
     
@@ -175,7 +175,7 @@ export async function getTransportRequests(date: string) {
 export async function generateTransportRequests(date: string) {
   try {
     const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(role)) {
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
       return { success: false, error: 'No autorizado' };
     }
 
@@ -291,7 +291,7 @@ export async function generateTransportRequests(date: string) {
 
 export async function clearTransportRequests(date: string) {
   const role = await getAuthorizedRole();
-  if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(role)) {
+  if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
     return { success: false, error: 'No autorizado' };
   }
 

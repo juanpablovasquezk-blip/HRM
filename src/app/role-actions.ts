@@ -65,7 +65,7 @@ export async function getUserRole() {
   
   // Emergency override for Marcela (Management access)
   if (user.email?.toUpperCase().includes('MARCELA')) {
-    finalRole = 'ASSISTANT';
+    finalRole = 'AIRPORT_ASSISTANT';
   }
 
   return finalRole;

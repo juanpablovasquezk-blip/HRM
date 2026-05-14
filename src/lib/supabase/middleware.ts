@@ -123,7 +123,9 @@ export async function updateSession(request: NextRequest) {
       if (isAdminOnlyPath && role !== 'ADMIN' && role !== 'HR' && !isMarcela) {
         const url = request.nextUrl.clone();
         // Redirect non-admins to their specific dashboard or worker view
-        url.pathname = (role === 'SUPERVISOR' || role === 'ASSISTANT') ? '/supervisor' : '/worker';
+        url.pathname = (role === 'SUPERVISOR') ? '/supervisor' : 
+                       (role === 'AIRPORT_ASSISTANT' || role === 'ADMIN' || role === 'HR') ? '/dashboard' : 
+                       '/worker';
         return NextResponse.redirect(url);
       }
     }
@@ -131,7 +133,7 @@ export async function updateSession(request: NextRequest) {
     // Supervisor path protection
     if (pathname.startsWith('/supervisor')) {
       const isMarcela = user.email?.toUpperCase().includes('MARCELA');
-      if (role !== 'SUPERVISOR' && role !== 'ADMIN' && role !== 'ASSISTANT' && role !== 'AIRPORT_ASSISTANT' && !isMarcela) {
+      if (role !== 'SUPERVISOR' && role !== 'ADMIN' && role !== 'AIRPORT_ASSISTANT' && !isMarcela) {
         const url = request.nextUrl.clone();
         url.pathname = '/worker';
         return NextResponse.redirect(url);
