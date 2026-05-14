@@ -61,10 +61,14 @@ export default function WorkerLayout({
           <span className="font-black text-sm uppercase tracking-tight text-slate-800">Mi Turno</span>
         </div>
         <button 
-          onClick={() => logoutWorker()} 
-          className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+          onClick={async () => {
+            await logoutWorker();
+            window.location.href = '/login';
+          }} 
+          className="flex items-center gap-2 px-3 py-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all font-bold text-xs"
         >
-          <LogOut className="h-5 w-5" />
+          <LogOut className="h-4 w-4" />
+          <span>Cerrar Sesión</span>
         </button>
       </header>
 
