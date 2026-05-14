@@ -199,7 +199,7 @@ export async function generateTransportRequests(date: string) {
         const parts = [
           String(a.street || '').replace(/[\r\n]+/g, ' ').trim(),
           String(a.city || '').replace(/[\r\n]+/g, ' ').trim(),
-          String(a.commune || '').replace(/[\r\n]+/g, ' ').trim()
+          String(a.commune || a.region || '').replace(/[\r\n]+/g, ' ').trim()
         ].filter(Boolean);
         homeAddress = parts.length > 0 ? parts.join(', ') : (a.full_address || JSON.stringify(a));
       }

@@ -44,7 +44,8 @@ import {
   Zap,
   Truck,
   FileText,
-  Cake
+  Cake,
+  MapPin
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -119,6 +120,7 @@ interface Personnel {
   termination_date: string | null;
   has_special_contract: boolean;
   birth_date: string | null;
+  address?: any;
 }
 
 interface RosterGridProps {
@@ -1486,14 +1488,25 @@ export function RosterGridClient({
                           return selectedCells.some(c => c.personId === person.id && c.dateStr === d);
                         })}
                       />
-                      <div className="h-7 w-7 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400">
+                      <div className="h-7 w-7 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400 relative">
                          <UserIcon className="h-4 w-4" />
+                         {person.address && (
+                            <div className="absolute -top-1 -right-1 bg-white dark:bg-slate-900 rounded-full p-0.5 shadow-sm border border-orange-100">
+                              <MapPin className="h-2 w-2 text-indigo-500" />
+                            </div>
+                         )}
                       </div>
                       <div className="flex flex-col">
                         <div className="flex items-center gap-2">
                           <span 
                             className="text-sm font-semibold truncate max-w-[140px]"
-                            title={`${person.first_name} ${person.last_name_father}`}
+                            title={(() => {
+                              const addr = person.address;
+                              if (!addr) return `${person.first_name} ${person.last_name_father}`;
+                              if (typeof addr === 'string') return `${person.first_name} ${person.last_name_father}\nDirección: ${addr}`;
+                              const parts = [addr.street, addr.city, addr.region || addr.commune].filter(Boolean);
+                              return `${person.first_name} ${person.last_name_father}\nDirección: ${parts.length > 0 ? parts.join(', ') : "Incompleta"}`;
+                            })()}
                           >
                             {person.first_name} {person.last_name_father}
                           </span>
@@ -1672,12 +1685,30 @@ export function RosterGridClient({
           
           <div className="py-4 space-y-4">
              <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg">
-                <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600">
+                <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 relative">
                    <UserIcon className="h-5 w-5" />
+                   {selectedCell?.person.address && (
+                     <div className="absolute -top-1 -right-1 bg-white dark:bg-slate-900 rounded-full p-0.5 shadow-sm border border-orange-100">
+                        <MapPin className="h-2.5 w-2.5 text-indigo-500" />
+                     </div>
+                   )}
                 </div>
-                <div>
-                   <p className="font-semibold">{selectedCell?.person.first_name} {selectedCell?.person.last_name_father}</p>
-                   <p className="text-xs text-muted-foreground uppercase">{selectedCell?.person.rotation_pattern || 'Asignación Manual'}</p>
+                <div className="flex-1 min-w-0">
+                   <p className="font-semibold truncate">{selectedCell?.person.first_name} {selectedCell?.person.last_name_father}</p>
+                   <div className="flex flex-col">
+                     <p className="text-[10px] text-muted-foreground uppercase font-bold">{selectedCell?.person.rotation_pattern || 'Asignación Manual'}</p>
+                     {selectedCell?.person.address && (
+                       <p className="text-[10px] text-indigo-600 font-medium truncate mt-0.5 flex items-center gap-1">
+                         <MapPin className="h-3 w-3" />
+                         {(() => {
+                           const addr = selectedCell.person.address;
+                           if (typeof addr === 'string') return addr;
+                           const parts = [addr.street, addr.city, addr.region || addr.commune].filter(Boolean);
+                           return parts.length > 0 ? parts.join(', ') : "Dirección incompleta";
+                         })()}
+                       </p>
+                     )}
+                   </div>
                 </div>
              </div>
 

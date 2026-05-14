@@ -118,10 +118,22 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: 
               <MapPin className="w-3 h-3" /> Origen
             </span>
             <div className="flex items-start gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100 group">
-              <p className="text-xs text-slate-700 flex-1 leading-relaxed">{req.pickup_address}</p>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-700 leading-relaxed truncate group-hover:whitespace-normal transition-all">{req.pickup_address}</p>
+                {req.pickup_address && !req.pickup_address.includes('FICHA') && (
+                  <a 
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(req.pickup_address)}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-[9px] text-indigo-500 hover:underline flex items-center gap-0.5 mt-0.5"
+                  >
+                    Ver en Mapa
+                  </a>
+                )}
+              </div>
               <button 
                 onClick={() => onCopyToClipboard(req.pickup_address || '', req.id + '-origin')}
-                className="text-slate-400 hover:text-indigo-600 p-1"
+                className="text-slate-400 hover:text-indigo-600 p-1 shrink-0"
               >
                 {copiedId === req.id + '-origin' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
@@ -132,10 +144,22 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: 
               <MapPin className="w-3 h-3" /> Destino
             </span>
             <div className="flex items-start gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100 group">
-              <p className="text-xs text-slate-700 flex-1 leading-relaxed">{req.destination_address}</p>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-700 leading-relaxed truncate group-hover:whitespace-normal transition-all">{req.destination_address}</p>
+                {req.destination_address && !req.destination_address.includes('FICHA') && (
+                  <a 
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(req.destination_address)}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-[9px] text-indigo-500 hover:underline flex items-center gap-0.5 mt-0.5"
+                  >
+                    Ver en Mapa
+                  </a>
+                )}
+              </div>
               <button 
                 onClick={() => onCopyToClipboard(req.destination_address || '', req.id + '-dest')}
-                className="text-slate-400 hover:text-indigo-600 p-1"
+                className="text-slate-400 hover:text-indigo-600 p-1 shrink-0"
               >
                 {copiedId === req.id + '-dest' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
