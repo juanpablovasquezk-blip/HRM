@@ -56,7 +56,7 @@ export async function updateSession(request: NextRequest) {
       '/leaves', '/reports', '/documents', '/settings'
     ];
     const isManagementPath = managementPaths.some(p => pathname.startsWith(p));
-    const authorizedRoles = ['ADMIN', 'HR', 'SUPERVISOR', 'AIRPORT_ASSISTANT'];
+    const authorizedRoles = ['ADMIN', 'HR', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT'];
 
     // If attempting to access management OR role is missing, double check with DB
     if (isManagementPath || !role) {
@@ -83,7 +83,7 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone();
       if (role === 'ADMIN' || role === 'HR') {
         url.pathname = '/dashboard';
-      } else if (role === 'SUPERVISOR' || role === 'AIRPORT_ASSISTANT') {
+      } else if (role === 'SUPERVISOR' || role === 'AIRPORT_ASSISTANT' || role === 'ASSISTANT') {
         url.pathname = '/role-selection';
       } else {
         url.pathname = '/worker';
@@ -108,7 +108,7 @@ export async function updateSession(request: NextRequest) {
       if (isAdminOnlyPath && role !== 'ADMIN' && role !== 'HR') {
         const url = request.nextUrl.clone();
         // Redirect non-admins to their specific dashboard or worker view
-        url.pathname = role === 'SUPERVISOR' ? '/supervisor' : '/worker';
+        url.pathname = (role === 'SUPERVISOR' || role === 'ASSISTANT') ? '/supervisor' : '/worker';
         return NextResponse.redirect(url);
       }
     }
