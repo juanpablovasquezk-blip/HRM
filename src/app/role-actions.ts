@@ -15,11 +15,15 @@ export async function getUserRole() {
     const workerId = cookieStore.get('worker_id')?.value;
     
     if (workerId) {
-      const { data: p } = await adminSupabase.from('personnel').select('main_position_name').eq('id', workerId).single();
-      const pos = (p?.main_position_name || '').toUpperCase();
-      // Broad check to ensure access for Marcela and others
-      if (pos.includes('ASISTENTE') || pos.includes('ASSISTANT') || pos.includes('ADMINISTRATIVO')) return 'ASSISTANT';
-      if (pos.includes('SUPERVISOR')) return 'SUPERVISOR';
+      const { data: p } = await adminSupabase
+        .from('personnel')
+        .select('id, main_position:positions(name)')
+        .eq('id', workerId)
+        .single();
+      
+      const posName = ((p?.main_position as any)?.name || '').toUpperCase();
+      if (posName.includes('ASISTENTE') || posName.includes('ASSISTANT')) return 'ASSISTANT';
+      if (posName.includes('SUPERVISOR')) return 'SUPERVISOR';
     }
     return 'USER';
   }
