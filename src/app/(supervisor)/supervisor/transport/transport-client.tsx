@@ -141,7 +141,7 @@ export default function TransportClient({ initialData }: { initialData: any }) {
         if (dbType === 'PROPIO' && res.whatsapp) {
           const { group, worker, groupError, workerError } = res.whatsapp;
           if (group && worker) {
-            msg += ' | WhatsApp enviado a Grupo y Trabajador ✅';
+            msg += ' | WhatsApp enviado a Grupo y Trabajador (v3) ✅';
           } else if (group) {
             msg += ` | Enviado a Grupo, falló Trabajador ⚠️ (${workerError || 'Error desconocido'})`;
           } else if (worker) {
