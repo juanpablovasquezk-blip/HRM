@@ -78,9 +78,9 @@ export default function TransportClient({ initialData }: { initialData: any }) {
 
     return assignments.filter((asg: any) => {
       const shift = asg.shift;
-      // if (!shift) return false;
-      // return isWithinWindow(shift.start_time) || isWithinWindow(shift.end_time);
-      return true; // TEMPORARY: Show all confirmed assignments for diagnostics
+      if (!shift) return false;
+      // Filter by transport window (23:00 - 06:30)
+      return isWithinWindow(shift.start_time) || isWithinWindow(shift.end_time);
     }).map((asg: any) => {
       const transportData = reqMap[String(asg.id)] || reqMap[`p_${asg.personnel_id}`] || { 
         transport_type: 'PENDIENTE', 
@@ -118,18 +118,6 @@ export default function TransportClient({ initialData }: { initialData: any }) {
     const assignmentId = assignment.id;
     const key = String(assignmentId);
     
-    const shiftTime = assignment.shift?.start_time?.substring(0, 5) || '00:00';
-    const groupName = assignment.position?.whatsapp_group_id ? (assignment.position.whatsapp_group_id.includes('12036304') ? 'BLUE' : assignment.position.whatsapp_group_id.includes('DHL') || assignment.position.whatsapp_group_id.includes('12036340') ? 'DHL' : assignment.position.whatsapp_group_id.includes('FEDEX') || assignment.position.whatsapp_group_id.includes('12036323') ? 'FEDEX' : 'OTROS') : 'OTROS';
-    
-    const previewMessage = `Se enviará el siguiente WhatsApp:\n\n` +
-      `GRUPO: ${groupName}\n` +
-      `SR. ${assignment.personnel?.first_name} ${assignment.personnel?.last_name_father}\n` +
-      `TURNO: ${shiftTime}\n` +
-      `${type === 'Propio' ? 'LLEGA POR SUS PROPIOS MEDIOS' : 'RECORRIDO EMPRESA'}\n\n` +
-      `¿Deseas continuar?`;
-
-    if (!window.confirm(previewMessage)) return;
-
     // 1. Record override
     localOverrides.current[key] = { 
       personnel_id: personnelId, 
