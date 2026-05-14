@@ -327,10 +327,13 @@ export default function TransportClient({
       current.map(r => r.id === id ? { ...r, ...updates } : r)
     );
 
+    console.log('[TRANSPORT] Updating:', id, updates);
     const res = await updateTransportRequest(id, updates);
     if (res.success) {
+      console.log('[TRANSPORT] Update Success');
       toast.success('Actualizado');
     } else {
+      console.error('[TRANSPORT] Update Failed:', res.error);
       toast.error('Error: ' + res.error);
       setRequests(initialRequests);
     }

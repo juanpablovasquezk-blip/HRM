@@ -72,6 +72,7 @@ export async function sendWhatsAppMessage(to: string, message: string, existingS
   const url = `https://api.ultramsg.com/${instanceId}/messages/chat`;
 
   try {
+    console.log(`[ULTRAMSG] Sending to ${to} via ${instanceId} (${source})...`);
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -89,7 +90,7 @@ export async function sendWhatsAppMessage(to: string, message: string, existingS
     
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`UltraMsg HTTP Error ${response.status} at ${url}:`, errText);
+      console.error(`[ULTRAMSG] HTTP Error ${response.status} at ${url}:`, errText);
       return { 
         success: false, 
         error: `Error HTTP ${response.status} (URL: ${url})`,
@@ -98,12 +99,13 @@ export async function sendWhatsAppMessage(to: string, message: string, existingS
     }
 
     const data = await response.json();
+    console.log('[ULTRAMSG] API Response:', data);
     
     // UltraMsg returns { "sent": "true", ... } on success
     if (data.sent === 'true' || data.sent === true || data.id) {
       return { success: true, data, debug: { source } };
     } else {
-      console.error('UltraMsg API Error:', data);
+      console.error('[ULTRAMSG] API Error:', data);
       return { 
         success: false, 
         error: data.error || data.message || 'Error desconocido en API',

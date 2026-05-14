@@ -8,24 +8,38 @@ import { format, parseISO } from 'date-fns';
 import { sendWhatsAppMessage, getSystemSettings } from '@/lib/ultramsg';
 
 async function getAuthorizedRole() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  try {
+    const supabase = await createClient();
+    
+    // 1. Try to get user with a timeout to prevent hangs
+    const userPromise = supabase.auth.getUser();
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Auth Timeout')), 5000)
+    );
+    
+    const { data: { user } } = await Promise.race([userPromise, timeoutPromise]) as any;
+    if (!user) return null;
 
-  let role = (user.user_metadata?.role || '').toUpperCase();
-  
-  if (!role) {
+    // 2. Check metadata first (fastest)
+    let role = (user.user_metadata?.role || '').toUpperCase();
+    
+    // 3. Emergency override for Marcela (Management access)
+    if (user.email?.toUpperCase().includes('MARCELA')) {
+      return 'AIRPORT_ASSISTANT';
+    }
+
+    if (role) return role;
+    
+    // 4. Fallback to DB check
     const adminSupabase = createAdminClient();
     const { data: dbUser } = await adminSupabase.from('users').select('role').eq('id', user.id).single();
-    if (dbUser?.role) role = dbUser.role.toUpperCase();
+    if (dbUser?.role) return dbUser.role.toUpperCase();
+    
+    return 'USER';
+  } catch (error) {
+    console.error('[AUTH] getAuthorizedRole error:', error);
+    return null;
   }
-  
-  // Emergency override for Marcela (Management access)
-  if (user.email?.toUpperCase().includes('MARCELA')) {
-    role = 'AIRPORT_ASSISTANT';
-  }
-  
-  return role;
 }
 
 export async function updateTransportRequest(id: string, updates: any) {
@@ -42,13 +56,16 @@ export async function updateTransportRequest(id: string, updates: any) {
       .update(updates)
       .eq('id', id);
 
-    if (error) throw error;
+    if (error) {
+      console.error('[DB] Error updateTransportRequest:', error);
+      return { success: false, error: error.message };
+    }
     
     revalidatePath('/transport');
     return { success: true };
   } catch (error: any) {
-    console.error('Error updating transport request:', error);
-    return { success: false, error: error.message };
+    console.error('[SERVER] Error updateTransportRequest:', error);
+    return { success: false, error: error.message || 'Error de conexión con el servidor' };
   }
 }
 
