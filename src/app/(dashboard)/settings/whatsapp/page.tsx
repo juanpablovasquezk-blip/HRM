@@ -40,7 +40,7 @@ export default function WhatsAppSettings() {
         
         Object.keys(newSettings).forEach(key => {
           if (key in data) {
-            newSettings[key as keyof typeof settings] = data[key];
+            newSettings[key as keyof typeof settings] = (data as Record<string, string>)[key];
           }
         });
 
