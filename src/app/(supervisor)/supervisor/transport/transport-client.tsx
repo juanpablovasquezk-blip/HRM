@@ -78,8 +78,9 @@ export default function TransportClient({ initialData }: { initialData: any }) {
 
     return assignments.filter((asg: any) => {
       const shift = asg.shift;
-      if (!shift) return false;
-      return isWithinWindow(shift.start_time) || isWithinWindow(shift.end_time);
+      // if (!shift) return false;
+      // return isWithinWindow(shift.start_time) || isWithinWindow(shift.end_time);
+      return true; // TEMPORARY: Show all confirmed assignments for diagnostics
     }).map((asg: any) => {
       const transportData = reqMap[String(asg.id)] || reqMap[`p_${asg.personnel_id}`] || { 
         transport_type: 'PENDIENTE', 
