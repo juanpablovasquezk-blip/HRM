@@ -123,12 +123,13 @@ export async function sendTransportNotification(requestId: string) {
     const dateStr = format(parseISO(tr.date), 'dd-MM-yyyy');
     const phone = pData.phone;
 
+    const warning = `*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
     let message = '';
     
     if (tr.transport_type === 'PROPIO') {
-      message = `SR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nLLEGA POR SUS PROPIOS MEDIOS\n\n*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
+      message = `${warning}\n\nSR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nLLEGA POR SUS PROPIOS MEDIOS`;
     } else {
-      message = `SR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nRESERVA NRO: ${tr.reservation_number || 'PENDIENTE'}\nHORA DE RECOGIDA: ${tr.pickup_time?.substring(0,5) || '--:--'}\nDESDE: ${tr.pickup_address || '---'}\nHASTA: ${tr.destination_address || '---'}\n\n*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
+      message = `${warning}\n\nSR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nRESERVA NRO: ${tr.reservation_number || 'PENDIENTE'}\nHORA DE RECOGIDA: ${tr.pickup_time?.substring(0,5) || '--:--'}\nDESDE: ${tr.pickup_address || '---'}\nHASTA: ${tr.destination_address || '---'}`;
     }
 
     // 5. Determine Group
@@ -141,43 +142,54 @@ export async function sendTransportNotification(requestId: string) {
       positionName = (posData?.name || '').toUpperCase();
     }
 
-    const combinedSearch = `${areaName} ${positionName}`.replace(/\s+/g, ''); // Remove spaces to match FEDEX and FED EX
+    const combinedSearch = `${areaName} ${positionName}`.replace(/\s+/g, ''); 
     
     let groupId = dbSettings.ultramsg_group_others;
     if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
     else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
     else if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
+    else if (combinedSearch.includes('AEROPUERTO')) groupId = dbSettings.ultramsg_group_others;
 
     // 6. Find 04:00 Supervisor for the individual message
     let supervisorName = 'SUPERVISOR DE TURNO';
     try {
-      const { data: supervisors } = await supabase
+      // Fetch assignments with personnel and their position name
+      const { data: assignments } = await supabase
         .from('shift_assignments')
-        .select('personnel(first_name, last_name_father), shifts(start_time)')
+        .select(`
+          shifts(start_time),
+          personnel(
+            first_name, 
+            last_name_father,
+            positions!personnel_main_position_fkey(name)
+          )
+        `)
         .eq('date', tr.date)
         .eq('status', 'scheduled');
       
-      const sup0400 = supervisors?.find((s: any) => 
-        s.shifts?.start_time?.startsWith('04:00') && 
-        (s.personnel?.first_name || '').toUpperCase() !== 'PENDIENTE'
-      );
+      const sup0400 = assignments?.find((s: any) => {
+        const startTime = s.shifts?.start_time || '';
+        const p = Array.isArray(s.personnel) ? s.personnel[0] : s.personnel;
+        const posName = (p?.positions?.name || '').toUpperCase();
+        return startTime.startsWith('04:00') && posName.includes('SUPERVISOR');
+      });
 
       if (sup0400) {
         const p = Array.isArray(sup0400.personnel) ? sup0400.personnel[0] : sup0400.personnel;
         if (p) {
-          supervisorName = `${p.first_name} ${p.last_name_father}`;
+          supervisorName = `${p.first_name} ${p.last_name_father}`.toUpperCase();
         }
       }
     } catch (e) {
       console.error('Error finding supervisor:', e);
     }
 
-    const individualMessage = `*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*\n\n${message}\n\nSi tiene problemas con su recogida, contactarse con Transvip al (2) 2677 3000. Si no lo pasan a buscar, contactese con el supervisor *${supervisorName}* a las 04:00.`;
+    const individualMessage = `${message}\n\nSi tiene problemas con su recogida, contactarse con Transvip al (2) 2677 3000. Si no lo pasan a buscar, contactese con el supervisor *${supervisorName}* a las 04:00.`;
 
     // 7. Send to both in parallel using cached settings
     const sendPromises = [];
     if (groupId) sendPromises.push(sendWhatsAppMessage(groupId, message, dbSettings));
-    if (phone) sendPromises.push(sendWhatsAppMessage(phone.replace(/\D/g, ''), individualMessage, dbSettings));
+    if (phone) sendPromises.push(sendWhatsAppMessage(phone.trim().replace(/\D/g, ''), individualMessage, dbSettings));
 
     const results = await Promise.all(sendPromises);
     const failed = results.find(r => !r.success);
