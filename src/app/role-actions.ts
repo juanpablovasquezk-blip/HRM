@@ -7,9 +7,21 @@ export async function getUserRole() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   
-  if (!user) return null;
+  if (!user) {
+    // Fallback for workers logged in via cookies
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const workerId = cookieStore.get('worker_id')?.value;
+    
+    if (workerId) {
+      const { data: p } = await adminSupabase.from('personnel').select('main_position_name').eq('id', workerId).single();
+      const pos = (p?.main_position_name || '').toUpperCase();
+      if (pos.includes('ASISTENTE') || pos.includes('ASSISTANT')) return 'ASSISTANT';
+      if (pos.includes('SUPERVISOR')) return 'SUPERVISOR';
+    }
+    return 'USER';
+  }
 
-  const adminSupabase = createAdminClient();
   let { data: dbUser } = await adminSupabase
     .from('users')
     .select('role')

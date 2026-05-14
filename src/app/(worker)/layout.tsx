@@ -46,7 +46,7 @@ export default function WorkerLayout({
     { label: 'Movilidad', href: '/worker/transport', icon: Bus },
   ];
 
-  if (role === 'SUPERVISOR' || role === 'ADMIN') {
+  if (role === 'SUPERVISOR' || role === 'ADMIN' || role === 'ASSISTANT' || role === 'AIRPORT_ASSISTANT') {
     navItems.push({ label: 'Gestión', href: '/supervisor', icon: Users });
   }
 
