@@ -51,9 +51,7 @@ export default function WorkerLayout({
     { label: 'Movilidad', href: '/worker/transport', icon: Bus },
   ];
 
-  const isMarcela = userName?.toUpperCase().includes('MARCELA');
-
-  if (role === 'SUPERVISOR' || role === 'ADMIN' || role === 'ASSISTANT' || role === 'AIRPORT_ASSISTANT' || isMarcela) {
+  if (role === 'SUPERVISOR' || role === 'ADMIN' || role === 'ASSISTANT' || role === 'AIRPORT_ASSISTANT') {
     navItems.push({ label: 'Gestión', href: '/supervisor', icon: Users });
   }
 
