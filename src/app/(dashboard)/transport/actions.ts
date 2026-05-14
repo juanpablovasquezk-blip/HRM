@@ -7,13 +7,30 @@ import { format, parseISO } from 'date-fns';
 
 import { sendWhatsAppMessage, getSystemSettings } from '@/lib/ultramsg';
 
+async function getAuthorizedRole() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  let role = (user.user_metadata?.role || '').toUpperCase();
+  
+  if (!role) {
+    const adminSupabase = createAdminClient();
+    const { data: dbUser } = await adminSupabase.from('users').select('role').eq('id', user.id).single();
+    if (dbUser?.role) role = dbUser.role.toUpperCase();
+  }
+  
+  return role;
+}
+
 export async function updateTransportRequest(id: string, updates: any) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(user.user_metadata?.role)) {
+    const role = await getAuthorizedRole();
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(role)) {
       throw new Error('No autorizado');
     }
+
+    const supabase = createAdminClient();
 
     const { error } = await supabase
       .from('transport_requests')
@@ -32,11 +49,12 @@ export async function updateTransportRequest(id: string, updates: any) {
 
 export async function sendTransportNotification(requestId: string) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(user.user_metadata?.role)) {
+    const role = await getAuthorizedRole();
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(role)) {
       throw new Error('No autorizado');
     }
+    
+    const supabase = createAdminClient();
     // 1. Get Core Transport Request
     const { data: tr, error: trErr } = await supabase
       .from('transport_requests')
@@ -138,9 +156,8 @@ export async function getTransportRequests(date: string) {
 
 export async function generateTransportRequests(date: string) {
   try {
-    const supabaseAuth = await createClient();
-    const { data: { user } } = await supabaseAuth.auth.getUser();
-    if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(user.user_metadata?.role)) {
+    const role = await getAuthorizedRole();
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(role)) {
       return { success: false, error: 'No autorizado' };
     }
 
@@ -255,19 +272,22 @@ export async function generateTransportRequests(date: string) {
 }
 
 export async function clearTransportRequests(date: string) {
-  const supabaseAuth = await createClient();
-  const { data: { user } } = await supabaseAuth.auth.getUser();
-  if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(user.user_metadata?.role)) {
+  const role = await getAuthorizedRole();
+  if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(role)) {
     return { success: false, error: 'No autorizado' };
   }
 
   const supabase = await createAdminClient();
+  console.log('[TRANSPORT] Clearing requests for date:', date);
   const { error } = await supabase
     .from('transport_requests')
     .delete()
     .eq('date', date);
     
-  if (error) return { success: false, error: error.message };
+  if (error) {
+    console.error('[TRANSPORT] Clear error:', error);
+    return { success: false, error: error.message };
+  }
   revalidatePath('/transport');
   return { success: true };
 }
