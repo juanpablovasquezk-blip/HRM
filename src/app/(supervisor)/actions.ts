@@ -242,7 +242,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
     .from('shift_assignments')
     .select(`
       *,
-      area:areas(name),
+      area:areas(name, whatsapp_group_id),
       position:positions(name),
       shift:shifts(*),
       personnel:personnel(address, first_name, last_name_father, phone, role)
@@ -338,7 +338,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
       // FALLBACK: If join failed, fetch area and position manually
       if (!aData && (asg as any)?.area_id) {
-        const { data } = await supabase.from('areas').select('name').eq('id', (asg as any).area_id).single();
+        const { data } = await supabase.from('areas').select('name, whatsapp_group_id').eq('id', (asg as any).area_id).single();
         if (data) aData = data;
       }
       if (!posObj && (asg as any)?.position_id) {
@@ -375,37 +375,32 @@ export async function updateTransportMobilization(personnelId: string, date: str
           }
 
           let areaNameSearch = (Array.isArray(aData) ? aData[0]?.name : aData?.name) || '';
+          let areaGroupId = (Array.isArray(aData) ? aData[0]?.whatsapp_group_id : aData?.whatsapp_group_id) || '';
           
-          // CRITICAL FALLBACK: If area name is still empty, try to get it from personnel record or rotation pattern
-          if (!areaNameSearch) {
-             // Try by area_id if it exists in assignment
-             if ((asg as any)?.area_id) {
-               const { data: areaObj } = await supabase.from('areas').select('name').eq('id', (asg as any).area_id).single();
-               if (areaObj) areaNameSearch = areaObj.name;
-             }
-             
-             // Try by rotation pattern if area name is still missing
-             if (!areaNameSearch && pData?.rotation_pattern) {
-               areaNameSearch = pData.rotation_pattern;
+          // CRITICAL FALLBACK: If area details are missing, fetch manually
+          if (!areaNameSearch && (asg as any)?.area_id) {
+             const { data: areaObj } = await supabase.from('areas').select('name, whatsapp_group_id').eq('id', (asg as any).area_id).single();
+             if (areaObj) {
+               areaNameSearch = areaObj.name;
+               areaGroupId = areaObj.whatsapp_group_id;
              }
           }
 
           const areaNameUpper = (areaNameSearch || '').toUpperCase();
           const combinedSearch = `${areaNameUpper} ${positionNameUpper}`.replace(/\s+/g, ''); 
           
-          console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area Found: "${areaNameUpper}", Combined: "${combinedSearch}"`);
+          console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area: "${areaNameUpper}", GroupID: "${areaGroupId}"`);
 
-          let groupId = dbSettings.ultramsg_group_others;
+          // FINAL ROUTING LOGIC: Priority 1: Direct Column | Priority 2: Keywords | Priority 3: Others
+          let groupId = areaGroupId || dbSettings.ultramsg_group_others;
 
-          if (combinedSearch.includes('BLUE')) {
-            groupId = dbSettings.ultramsg_group_blue;
-          } else if (combinedSearch.includes('FEDEX')) {
-            groupId = dbSettings.ultramsg_group_fedex;
-          } else if (combinedSearch.includes('DHL')) {
-            groupId = dbSettings.ultramsg_group_dhl;
+          if (!areaGroupId) {
+            if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
+            else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
+            else if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
           }
 
-          debugInfo += ` | AreaDet: ${areaNameUpper.substring(0,10)} | Grupo: ${groupId === dbSettings.ultramsg_group_blue ? 'BLUE' : (groupId === dbSettings.ultramsg_group_others ? 'OTROS' : groupId)}`;
+          debugInfo += ` | AreaDet: ${areaNameUpper.substring(0,10)} | FinalGroupId: ${groupId.substring(0,8)}...`;
 
           // Send to Group
           let groupSent = false;
