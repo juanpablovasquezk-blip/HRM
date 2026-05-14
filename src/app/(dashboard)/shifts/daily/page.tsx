@@ -11,10 +11,10 @@ export default async function DailyPlanningPage(props: {
 }) {
   const searchParams = await props.searchParams;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const role = (user?.user_metadata?.role as any) || 'USER';
+  const { getUserRole } = await import('@/app/role-actions');
+  const role = await getUserRole();
   const { hasPermission } = await import('@/lib/auth/roles');
-  const canEdit = hasPermission(role, 'manageShifts');
+  const canEdit = hasPermission(role as any, 'manageShifts');
   
   const date = searchParams.date || format(new Date(), 'yyyy-MM-dd');
 

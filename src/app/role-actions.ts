@@ -64,7 +64,8 @@ export async function getUserRole() {
   let finalRole = dbUser?.role || user.user_metadata?.role || 'USER';
   
   // Emergency override for Marcela (Management access)
-  if (user.email?.toUpperCase().includes('MARCELA')) {
+  // Only override if not already an ADMIN or HR to avoid downgrades
+  if (user.email?.toUpperCase().includes('MARCELA') && finalRole !== 'ADMIN' && finalRole !== 'HR') {
     finalRole = 'AIRPORT_ASSISTANT';
   }
 
