@@ -107,42 +107,41 @@ export async function getDailyPlanning(date?: string) {
   const chileTime = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Santiago"}));
   const targetDate = date || format(chileTime, 'yyyy-MM-dd');
 
-  // Try to fetch basic data first to avoid errors if new columns don't exist
-  const { data: assignments, error: assErr } = await supabase
-    .from('shift_assignments')
-    .select(`
-      id, 
-      date, 
-      personnel_id,
-      status, 
-      is_confirmed,
-      attendance_status,
-      attendance_updated_by,
-      attendance_updated_at,
-      personnel(*), 
-      shift:shifts(id, name, start_time, end_time), 
-      area:areas(id, name, whatsapp_group_id), 
-      position:positions(id, name, whatsapp_group_id)
-    `)
-    .eq('date', targetDate)
-    .neq('status', 'cancelled');
+  try {
+    const { data: assignments, error: assErr } = await supabase
+      .from('shift_assignments')
+      .select(`
+        *,
+        personnel:personnel!shift_assignments_personnel_id_fkey(*), 
+        shift:shifts!shift_assignments_shift_id_fkey(id, name, start_time, end_time), 
+        area:areas!shift_assignments_area_id_fkey(id, name, whatsapp_group_id), 
+        position:positions!shift_assignments_position_id_fkey(id, name, whatsapp_group_id)
+      `)
+      .eq('date', targetDate)
+      .neq('status', 'cancelled');
 
-  if (assErr) {
-    console.error('DATABASE ERROR:', assErr.message, assErr.details, assErr.hint);
-    return { assignments: [], transport: [], date: targetDate, error: assErr.message };
+    if (assErr) throw assErr;
+
+    const { data: transport } = await supabase
+      .from('transport_requests')
+      .select('*, personnel:personnel(*)')
+      .eq('date', targetDate);
+
+    return {
+      assignments: assignments || [],
+      transport: transport || [],
+      shifts: (await supabase.from('shifts').select('id, name, start_time, end_time').order('name')).data || [],
+      date: targetDate
+    };
+  } catch (error: any) {
+    console.error('CRITICAL DB ERROR:', error);
+    return { 
+      assignments: [], 
+      transport: [], 
+      date: targetDate, 
+      error: error.message || 'Error desconocido de base de datos' 
+    };
   }
-
-  const { data: transport } = await supabase
-    .from('transport_requests')
-    .select('*, personnel:personnel(*)')
-    .eq('date', targetDate);
-
-  return {
-    assignments: assignments || [],
-    transport: transport || [],
-    shifts: (await supabase.from('shifts').select('id, name, start_time, end_time').order('name')).data || [],
-    date: targetDate
-  };
 }
 
 export async function updateAssignmentShift(assignmentId: string, newShiftId: string) {

@@ -109,8 +109,8 @@ export default function TransportClient({ initialData }: { initialData: any }) {
     const empresaCount = transportPersonnel.filter((p: any) => p.transport_data.transport_type === 'REQUERIDO' || p.transport_data.transport_type === 'Empresa').length;
     const propioCount = transportPersonnel.filter((p: any) => p.transport_data.transport_type === 'PROPIO' || p.transport_data.transport_type === 'Propio').length;
     const pendienteCount = transportPersonnel.filter((p: any) => p.transport_data.transport_type === 'PENDIENTE').length;
-    return { total: transportPersonnel.length, empresaCount, propioCount, pendienteCount };
-  }, [transportPersonnel]);
+    return { total: transportPersonnel.length, empresaCount, propioCount, pendienteCount, dbError: data.error };
+  }, [transportPersonnel, data.error]);
 
   const handleSetMobilization = (personnelId: string, type: 'Empresa' | 'Propio', assignmentId: any) => {
     const dbType = type === 'Empresa' ? 'REQUERIDO' : 'PROPIO';
@@ -265,6 +265,13 @@ export default function TransportClient({ initialData }: { initialData: any }) {
 
       {/* List */}
       <div className="p-4 space-y-4 max-w-lg mx-auto">
+        {stats.dbError && (
+          <div className="bg-red-50 border-2 border-red-100 p-4 rounded-2xl mb-4">
+            <p className="text-red-600 text-xs font-black uppercase mb-1">Error de Base de Datos:</p>
+            <p className="text-red-900 text-[10px] font-bold leading-tight">{stats.dbError}</p>
+          </div>
+        )}
+
         {sortedData.length > 0 ? (
           sortedData.map((p: any) => (
             <div key={p.id} className={`bg-white p-5 rounded-[2.5rem] border-2 shadow-sm space-y-5 transition-all relative
