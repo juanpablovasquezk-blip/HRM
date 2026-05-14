@@ -119,10 +119,10 @@ export async function getDailyPlanning(date?: string) {
       attendance_status,
       attendance_updated_by,
       attendance_updated_at,
-      personnel:personnel!shift_assignments_personnel_id_fkey(*), 
-      shift:shifts!shift_assignments_shift_id_fkey(id, name, start_time, end_time), 
-      area:areas!shift_assignments_area_id_fkey(id, name, whatsapp_group_id), 
-      position:positions!shift_assignments_position_id_fkey(id, name, whatsapp_group_id)
+      personnel(*), 
+      shift:shifts(id, name, start_time, end_time), 
+      area:areas(id, name, whatsapp_group_id), 
+      position:positions(id, name, whatsapp_group_id)
     `)
     .eq('date', targetDate)
     .neq('status', 'cancelled');
