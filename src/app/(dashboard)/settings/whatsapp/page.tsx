@@ -31,6 +31,10 @@ export default function WhatsAppSettings() {
         
         if (!result.success) throw new Error(result.error);
 
+        if (result.is_fallback) {
+          toast.warning('Cargado desde respaldo (error de cache en base de datos)');
+        }
+
         const data = result.data || {};
         const newSettings = { ...settings };
         
