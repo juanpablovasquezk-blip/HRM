@@ -237,31 +237,34 @@ export async function updateTransportMobilization(personnelId: string, date: str
   const supabase = await createAdminClient();
   
   // 1. Get personnel and assignment data
-  const { data: asg, error: fetchErr } = await supabase
-    .from('shift_assignments')
-    .select(`
-      *,
-      area:areas!shift_assignments_area_id_fkey(name),
-      position:positions!shift_assignments_position_id_fkey(name, whatsapp_group_id),
-      shift:shifts!shift_assignments_shift_id_fkey(id, name, start_time, end_time),
-      personnel:personnel!shift_assignments_personnel_id_fkey(address, first_name, last_name_father, phone, role)
-    `)
-    .eq('id', assignmentId)
-    .single();
+  // 1. MANUAL BRUTE FORCE FETCH (No joins to avoid crashes)
+  const { data: asg, error: asgErr } = await supabase.from('shift_assignments').select('*').eq('id', assignmentId).single();
+  
+  let personnel = null;
+  let shiftData = null;
+  let posData = null;
+  let areaData = null;
 
-  if (fetchErr) {
-    console.error('FETCH ERROR:', fetchErr);
-  }
-
-  let personnel = asg?.personnel as any;
-  let areaName = (asg?.area as any)?.name?.toUpperCase() || '';
-
-  if (!asg) {
-    console.warn(`ASG MISSING for ID ${assignmentId}. Fetching personnel ${personnelId} fallback.`);
+  if (asg) {
+    const [pRes, sRes, poRes, aRes] = await Promise.all([
+      supabase.from('personnel').select('*').eq('id', asg.personnel_id).single(),
+      supabase.from('shifts').select('*').eq('id', asg.shift_id).single(),
+      supabase.from('positions').select('*').eq('id', asg.position_id).single(),
+      supabase.from('areas').select('*').eq('id', asg.area_id).single()
+    ]);
+    personnel = pRes.data;
+    shiftData = sRes.data;
+    posData = poRes.data;
+    areaData = aRes.data;
+  } else {
+    // Fallback if assignment not found
     const { data: pFallback } = await supabase.from('personnel').select('*').eq('id', personnelId).single();
     personnel = pFallback;
   }
 
+  if (!personnel) return { success: false, error: 'No se encontró el trabajador' };
+
+  let areaName = (areaData as any)?.name?.toUpperCase() || '';
   const addressObj = personnel?.address;
   
   // Robust Address Parsing
@@ -331,9 +334,8 @@ export async function updateTransportMobilization(personnelId: string, date: str
       const pData = personnel;
       debugInfo = `Persona: ${pData?.first_name || 'No encontrada'} | ASG_ID: ${assignmentId}`;
 
-      const sData = asg?.shift as any;
-      let aData = asg?.area as any;
-      let posObj = asg?.position as any;
+      const sData = shiftData as any;
+      let posObj = posData as any;
 
       // FALLBACK: If join failed, fetch area and position manually
       if (!aData && (asg as any)?.area_id) {
