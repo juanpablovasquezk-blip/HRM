@@ -188,21 +188,27 @@ export async function generateTransportRequests(date: string) {
     const area = (ass as any).area;
     const areaName = (area?.name || '').toUpperCase();
 
-    // Robust Address Parsing for Origin
+    // Robust and Ultra-Safe Address Parsing for Origin
     let homeAddress = null;
-    const addr = personnel.address;
-    if (typeof addr === 'string') {
-      homeAddress = addr.replace(/[\r\n]+/g, ' ').trim();
-    } else if (typeof addr === 'object' && addr !== null) {
-      const parts = [
-        (addr.street || '').replace(/[\r\n]+/g, ' ').trim(),
-        (addr.city || '').replace(/[\r\n]+/g, ' ').trim(),
-        (addr.commune || '').replace(/[\r\n]+/g, ' ').trim()
-      ].filter(Boolean);
-      homeAddress = parts.length > 0 ? parts.join(', ') : (addr.full_address || JSON.stringify(addr));
+    try {
+      const addr = personnel.address;
+      if (typeof addr === 'string') {
+        homeAddress = addr.replace(/[\r\n]+/g, ' ').trim();
+      } else if (typeof addr === 'object' && addr !== null && !Array.isArray(addr)) {
+        const a = addr as any;
+        const parts = [
+          String(a.street || '').replace(/[\r\n]+/g, ' ').trim(),
+          String(a.city || '').replace(/[\r\n]+/g, ' ').trim(),
+          String(a.commune || '').replace(/[\r\n]+/g, ' ').trim()
+        ].filter(Boolean);
+        homeAddress = parts.length > 0 ? parts.join(', ') : (a.full_address || JSON.stringify(a));
+      }
+    } catch (e) {
+      console.error('Error parsing address for personnel:', personnel.id, e);
+      homeAddress = "DIRECCIÓN NO INFORMADA EN FICHA";
     }
       
-    if (!homeAddress) continue;
+    if (!homeAddress) homeAddress = "DIRECCIÓN NO INFORMADA EN FICHA";
 
     // Determine plant address based on area (SMART MAPPING)
     let plantAddress = "MINERQUIM PLANTA"; 
