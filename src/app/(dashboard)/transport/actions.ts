@@ -257,7 +257,7 @@ export async function generateTransportRequests(date: string) {
 export async function clearTransportRequests(date: string) {
   const supabaseAuth = await createClient();
   const { data: { user } } = await supabaseAuth.auth.getUser();
-  if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'].includes(user.user_metadata?.role)) {
+  if (!user || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'HR'].includes(user.user_metadata?.role)) {
     return { success: false, error: 'No autorizado' };
   }
 

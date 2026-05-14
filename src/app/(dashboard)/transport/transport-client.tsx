@@ -312,7 +312,7 @@ export default function TransportClient({
         toast.success('Transporte limpiado');
         router.refresh();
       } else {
-        toast.error('Error al limpiar');
+        toast.error('Error al limpiar: ' + (res.error || 'Error desconocido'));
       }
     }
   };
