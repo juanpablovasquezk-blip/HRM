@@ -192,9 +192,13 @@ export async function generateTransportRequests(date: string) {
     let homeAddress = null;
     const addr = personnel.address;
     if (typeof addr === 'string') {
-      homeAddress = addr;
+      homeAddress = addr.replace(/[\r\n]+/g, ' ').trim();
     } else if (typeof addr === 'object' && addr !== null) {
-      const parts = [addr.street, addr.city, addr.commune].filter(Boolean);
+      const parts = [
+        (addr.street || '').replace(/[\r\n]+/g, ' ').trim(),
+        (addr.city || '').replace(/[\r\n]+/g, ' ').trim(),
+        (addr.commune || '').replace(/[\r\n]+/g, ' ').trim()
+      ].filter(Boolean);
       homeAddress = parts.length > 0 ? parts.join(', ') : (addr.full_address || JSON.stringify(addr));
     }
       
