@@ -12,13 +12,21 @@ export async function getUserRole() {
     // Fallback for workers logged in via cookies
     const { cookies } = await import('next/headers');
     const cookieStore = await cookies();
-    const workerId = cookieStore.get('worker_id')?.value;
+    let userId = cookieStore.get('worker_id')?.value;
+
+    if (!userId) {
+      const { data: { user } } = await adminSupabase.auth.getUser();
+      if (user?.email) {
+        const { data: personnel } = await adminSupabase.from('personnel').select('id').eq('email', user.email.trim().toLowerCase()).single();
+        if (personnel) userId = personnel.id;
+      }
+    }
     
-    if (workerId) {
+    if (userId) {
       const { data: p } = await adminSupabase
         .from('personnel')
         .select('main_position')
-        .eq('id', workerId)
+        .eq('id', userId)
         .single();
       
       const posId = p?.main_position;
@@ -28,7 +36,7 @@ export async function getUserRole() {
       if (posId === ASSISTANT_UUID) return 'ASSISTANT';
       if (posId === SUPERVISOR_UUID) return 'SUPERVISOR';
 
-      // Fallback: check names if UUID check fails or for new roles
+      // Fallback: check names
       const { data: posData } = await adminSupabase.from('positions').select('name').eq('id', posId).single();
       const posName = (posData?.name || '').toUpperCase();
       if (posName.includes('ASISTENTE') || posName.includes('ASSISTANT')) return 'ASSISTANT';
