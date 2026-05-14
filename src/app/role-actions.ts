@@ -61,7 +61,14 @@ export async function getUserRole() {
     dbUser = emailUser;
   }
 
-  return dbUser?.role || user.user_metadata?.role || 'USER';
+  let finalRole = dbUser?.role || user.user_metadata?.role || 'USER';
+  
+  // Emergency override for Marcela (Management access)
+  if (user.email?.toUpperCase().includes('MARCELA')) {
+    finalRole = 'ASSISTANT';
+  }
+
+  return finalRole;
 }
 
 export async function syncUserMetadata() {

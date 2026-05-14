@@ -144,7 +144,8 @@ export default async function WorkerHomePage() {
                         <div className="space-y-1">
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Dirección de Recogida</p>
                           <p className="text-sm font-bold text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-100 italic">
-                            {tr.pickup_address || (typeof session.address === 'string' ? session.address : 'No registrada')}
+                            {tr.pickup_address || 
+                             (typeof session.address === 'string' ? session.address : (session.address?.street || 'No registrada'))}
                           </p>
                         </div>
 
