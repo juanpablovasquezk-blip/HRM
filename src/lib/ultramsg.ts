@@ -123,3 +123,87 @@ export async function sendWhatsAppMessage(to: string, message: string, existingS
     };
   }
 }
+
+export async function sendWhatsAppMedia(to: string, mediaUrl: string, caption?: string, existingSettings?: any) {
+  const dbSettings = existingSettings || await getSystemSettings();
+  
+  let instanceId: string | undefined = dbSettings.ultramsg_instance_id;
+  let token: string | undefined = dbSettings.ultramsg_token;
+  let source = 'DATABASE';
+
+  if (!instanceId || !token) {
+    instanceId = process.env.ULTRAMSG_INSTANCE_ID;
+    token = process.env.ULTRAMSG_TOKEN;
+    source = 'ENVIRONMENT';
+  }
+
+  if (instanceId && !instanceId.startsWith('instance')) {
+    instanceId = `instance${instanceId}`;
+  }
+
+  if (!instanceId || !token) {
+    console.error('UltraMsg credentials not found in DB or Environment');
+    return { 
+      success: false, 
+      error: 'Configuración faltante'
+    };
+  }
+
+  const isVideo = mediaUrl.toLowerCase().endsWith('.mp4');
+  const isImage = mediaUrl.toLowerCase().match(/\.(jpg|jpeg|png|gif)$/i);
+  const endpoint = isVideo ? 'messages/video' : isImage ? 'messages/image' : 'messages/document';
+
+  const url = `https://api.ultramsg.com/${instanceId}/${endpoint}`;
+
+  const controller = new AbortController();
+  // Uploading video can take longer, increase timeout to 30s
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    console.log(`[ULTRAMSG] Sending Media to ${to} via ${endpoint}...`);
+    
+    const params: Record<string, string> = {
+      token: token,
+      to: to
+    };
+
+    if (isVideo) {
+      params.video = mediaUrl;
+    } else if (isImage) {
+      params.image = mediaUrl;
+    } else {
+      params.document = mediaUrl;
+    }
+
+    if (caption) {
+      params.caption = caption;
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams(params),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      const errText = await response.text();
+      return { success: false, error: `HTTP ${response.status}: ${errText}` };
+    }
+
+    const data = await response.json();
+    if (data.sent === 'true' || data.sent === true || data.id) {
+      return { success: true, data };
+    } else {
+      return { success: false, error: data.error || data.message || 'API Error' };
+    }
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    const errorMsg = error.name === 'AbortError' ? 'Timeout' : error.message;
+    return { success: false, error: `Exception: ${errorMsg}` };
+  }
+}

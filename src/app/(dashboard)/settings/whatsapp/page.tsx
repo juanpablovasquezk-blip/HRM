@@ -8,7 +8,8 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { MessageSquare, Save, ShieldCheck, Key, Hash, Send, Users } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { saveWhatsAppSettings, getWhatsAppSettings } from './actions';
+import { getWhatsAppSettings, saveWhatsAppSettings } from './actions';
+import { MassMediaModal } from '@/components/personnel/mass-media-modal';
 
 export default function WhatsAppSettings() {
   const [loading, setLoading] = useState(true);
@@ -84,18 +85,21 @@ export default function WhatsAppSettings() {
           </h1>
           <p className="text-slate-500 text-sm">Configura la segmentación por grupos de operación</p>
         </div>
-        <Button 
-          onClick={handleSave} 
-          disabled={saving}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl px-6"
-        >
-          {saving ? 'Guardando...' : (
-            <>
-              <Save className="h-4 w-4 mr-2" />
-              Guardar Cambios
-            </>
-          )}
-        </Button>
+        <div className="flex gap-3">
+          <MassMediaModal />
+          <Button 
+            onClick={handleSave} 
+            disabled={saving}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl px-6"
+          >
+            {saving ? 'Guardando...' : (
+              <>
+                <Save className="h-4 w-4 mr-2" />
+                Guardar
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-6">
