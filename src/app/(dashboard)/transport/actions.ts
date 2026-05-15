@@ -132,7 +132,11 @@ export async function sendTransportNotification(requestId: string, isTimePending
     const isFedex = posName.includes('FEDEX') || areaName.includes('FEDEX');
 
     if (isTimePending && isFedex) {
-      body = `SR. ${name}\nTURNO ${dateStr}: ATENTO A LA HORA DE INGRESO PARA MAÑANA QUE SERA INFORMADA\nLLEGA POR SUS PROPIOS MEDIOS`;
+      if (tr.transport_type === 'PROPIO') {
+        body = `SR. ${name}\nTURNO ${dateStr}: ATENTO A LA HORA DE INGRESO PARA MAÑANA QUE SERA INFORMADA\nLLEGA POR SUS PROPIOS MEDIOS`;
+      } else {
+        body = `SR. ${name}\nTURNO ${dateStr}: ATENTO A LA HORA DE INGRESO PARA MAÑANA QUE SERA INFORMADA\nEL TRANSPORTE SE COORDINARÁ UNA VEZ CONFIRMADO EL HORARIO`;
+      }
     } else {
       if (tr.transport_type === 'PROPIO') {
         body = `SR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nLLEGA POR SUS PROPIOS MEDIOS`;
