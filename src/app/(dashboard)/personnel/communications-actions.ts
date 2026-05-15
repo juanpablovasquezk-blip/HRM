@@ -98,7 +98,16 @@ export async function sendFilteredMassMessage(
 
       let result;
       if (mediaUrl && mediaUrl.trim() !== '') {
-        result = await sendWhatsAppMedia(phone, mediaUrl.trim(), personalizedMessage);
+        if (personalizedMessage.length > 1000) {
+          // Send media without caption to avoid WhatsApp's 1024 char limit
+          result = await sendWhatsAppMedia(phone, mediaUrl.trim(), '');
+          if (result.success) {
+             await new Promise(resolve => setTimeout(resolve, 500));
+             result = await sendWhatsAppMessage(phone, personalizedMessage);
+          }
+        } else {
+          result = await sendWhatsAppMedia(phone, mediaUrl.trim(), personalizedMessage);
+        }
       } else {
         result = await sendWhatsAppMessage(phone, personalizedMessage);
       }
