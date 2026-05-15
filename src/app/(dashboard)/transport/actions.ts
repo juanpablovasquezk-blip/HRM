@@ -128,10 +128,7 @@ export async function sendTransportNotification(requestId: string, isTimePending
     const phone = pData.phone;
 
     let body = '';
-    
     const warning = `ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA`;
-    let body = '';
-    
     const isFedex = posName.includes('FEDEX') || areaName.includes('FEDEX');
 
     if (isTimePending && isFedex) {
@@ -144,7 +141,6 @@ export async function sendTransportNotification(requestId: string, isTimePending
       }
     }
 
-    const warning = `ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA`;
     const message = `${body}\n\n${warning}`;
 
     // 5. Determine Group
