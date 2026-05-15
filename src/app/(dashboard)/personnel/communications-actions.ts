@@ -75,6 +75,7 @@ export async function sendFilteredMassMessage(
 
     let successCount = 0;
     let failCount = 0;
+    let failedDetails: string[] = [];
 
     // Send messages in sequence to avoid rate limits
     for (const person of validRecipients) {
@@ -106,6 +107,7 @@ export async function sendFilteredMassMessage(
         successCount++;
       } else {
         failCount++;
+        failedDetails.push(`${person.first_name} ${person.last_name_father || ''}: ${result.error}`);
         console.error(`Failed to send to ${phone}:`, result.error);
       }
       
@@ -117,6 +119,7 @@ export async function sendFilteredMassMessage(
       success: true, 
       sent: successCount, 
       failed: failCount,
+      errors: failedDetails,
       total: validRecipients.length 
     };
   } catch (error: any) {

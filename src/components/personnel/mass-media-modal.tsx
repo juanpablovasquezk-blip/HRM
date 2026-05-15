@@ -57,7 +57,8 @@ export function MassMediaModal() {
       if (result.success) {
         toast.success(`Mensaje enviado con éxito a ${result.sent} de ${result.total} trabajadores.`);
         if (result.failed && result.failed > 0) {
-          toast.warning(`Falló el envío para ${result.failed} trabajadores.`);
+          const errorDetails = result.errors ? result.errors.join(' | ') : '';
+          toast.error(`Falló el envío para ${result.failed} trabajadores. Detalles: ${errorDetails}`, { duration: 10000 });
         }
         setOpen(false);
       } else {
