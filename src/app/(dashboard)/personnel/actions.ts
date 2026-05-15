@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import type { Personnel } from '@/types/database';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function listPersonnel(
   search?: string,
@@ -163,12 +164,32 @@ export async function updatePersonnel(
     },
   };
 
+  // Check previous state for user ban logic
+  const { data: previousPerson } = await supabase.from('personnel').select('user_id, is_active').eq('id', id).single();
+
   const { error } = await supabase
     .from('personnel')
     .update(updateData)
     .eq('id', id);
 
   if (error) return { success: false, error: error.message };
+
+  const adminClient = createAdminClient();
+
+  // Handle banning/unbanning user if active status changed
+  if (previousPerson?.user_id && previousPerson.is_active !== updateData.is_active) {
+    try {
+      if (!updateData.is_active) {
+        // Ban user for 10 years
+        await adminClient.auth.admin.updateUserById(previousPerson.user_id, { ban_duration: '87600h' });
+      } else {
+        // Lift the ban
+        await adminClient.auth.admin.updateUserById(previousPerson.user_id, { ban_duration: 'none' });
+      }
+    } catch (banError) {
+      console.error('Error updating ban status:', banError);
+    }
+  }
 
   // Handle system access if requested and not already enabled
   const enableRequested = formData.get('enable_access') === 'true';
@@ -204,6 +225,18 @@ export async function deletePersonnel(
     .eq('id', id);
 
   if (error) return { success: false, error: error.message };
+
+  // 1. Get user_id if exists
+  const { data: person } = await supabase.from('personnel').select('user_id').eq('id', id).single();
+  
+  if (person?.user_id) {
+    try {
+      const adminClient = createAdminClient();
+      await adminClient.auth.admin.updateUserById(person.user_id, { ban_duration: '87600h' });
+    } catch (err) {
+      console.error('Error banning user during deletion:', err);
+    }
+  }
 
   revalidatePath('/personnel');
   return { success: true, error: null };
@@ -282,7 +315,6 @@ export async function updateDocumentStatus(
   // but revalidatePath with a layout or the whole folder works.
   return { success: true, error: null };
 }
-import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function enablePersonnelAccess(
   personnelId: string,

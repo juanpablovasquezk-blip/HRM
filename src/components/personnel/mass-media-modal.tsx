@@ -6,10 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
-import { Megaphone, Send, Video, AlertCircle, Loader2 } from 'lucide-react';
+import { Megaphone, Send, Video, AlertCircle, Loader2, User } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { sendFilteredMassMessage } from '@/app/(dashboard)/personnel/communications-actions';
+import { listPersonnel } from '@/app/(dashboard)/personnel/actions';
 import { toast } from 'sonner';
+import { Checkbox } from '@/components/ui/checkbox';
+import type { Personnel } from '@/types/database';
 
 export function MassMediaModal() {
   const [open, setOpen] = useState(false);
@@ -26,6 +29,10 @@ export function MassMediaModal() {
   const [message, setMessage] = useState('');
   const [mediaUrl, setMediaUrl] = useState('https://pvcjaxqcgiqlhjxkpbuk.supabase.co/storage/v1/object/public/media/Guia_App.mp4');
   
+  const [personnelList, setPersonnelList] = useState<Personnel[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isFetchingPersonnel, setIsFetchingPersonnel] = useState(false);
+  
   useEffect(() => {
     if (!open) return;
     async function loadOptions() {
@@ -40,19 +47,53 @@ export function MassMediaModal() {
     loadOptions();
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    async function fetchPersonnel() {
+      setIsFetchingPersonnel(true);
+      const { data, error } = await listPersonnel(
+        undefined, 
+        filters.company_id || undefined, 
+        filters.position_id || undefined, 
+        filters.status === 'active'
+      );
+      if (data) {
+        setPersonnelList(data);
+        setSelectedIds(new Set(data.map(p => p.id)));
+      }
+      setIsFetchingPersonnel(false);
+    }
+    fetchPersonnel();
+  }, [filters, open]);
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === personnelList.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(personnelList.map(p => p.id)));
+    }
+  };
+
+  const togglePerson = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
   const handleSend = async () => {
     if (!message.trim() && !mediaUrl.trim()) {
       toast.error('Debes incluir al menos un mensaje de texto o un enlace multimedia.');
       return;
     }
 
-    if (!confirm('¿Estás seguro de enviar este comunicado masivo? Esta acción no se puede deshacer.')) {
+    if (!confirm(`¿Estás seguro de enviar este comunicado masivo a ${selectedIds.size} trabajadores? Esta acción no se puede deshacer.`)) {
       return;
     }
 
     setLoading(true);
     try {
-      const result = await sendFilteredMassMessage(message, mediaUrl, filters);
+      const result = await sendFilteredMassMessage(message, mediaUrl, filters, Array.from(selectedIds));
       
       if (result.success) {
         toast.success(`Mensaje enviado con éxito a ${result.sent} de ${result.total} trabajadores.`);
@@ -139,7 +180,60 @@ export function MassMediaModal() {
               </div>
             </div>
           </div>
+          {/* Selección de Personal */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                <User className="h-4 w-4 text-emerald-500" />
+                2. Seleccionar Destinatarios ({selectedIds.size})
+              </Label>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={toggleSelectAll}
+                className="text-[10px] uppercase font-bold text-slate-500 hover:text-orange-600"
+              >
+                {selectedIds.size === personnelList.length ? 'Deseleccionar Todos' : 'Seleccionar Todos'}
+              </Button>
+            </div>
 
+            <div className="border border-slate-100 rounded-2xl overflow-hidden bg-white max-h-[200px] overflow-y-auto">
+              {isFetchingPersonnel ? (
+                <div className="p-8 text-center flex flex-col items-center gap-2">
+                  <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
+                  <span className="text-xs text-slate-400">Cargando personal...</span>
+                </div>
+              ) : personnelList.length > 0 ? (
+                <div className="divide-y divide-slate-50">
+                  {personnelList.map(person => (
+                    <div 
+                      key={person.id} 
+                      className={`flex items-center gap-3 p-3 hover:bg-slate-50 transition-colors cursor-pointer ${!selectedIds.has(person.id) ? 'opacity-60' : ''}`}
+                      onClick={() => togglePerson(person.id)}
+                    >
+                      <Checkbox 
+                        checked={selectedIds.has(person.id)}
+                        onCheckedChange={() => togglePerson(person.id)}
+                        className="rounded-md border-slate-300 data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500"
+                      />
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-slate-700 uppercase">
+                          {person.first_name} {person.last_name_father}
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {person.phone || 'Sin teléfono'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 text-center text-xs text-slate-400 italic">
+                  No hay trabajadores que coincidan con los filtros.
+                </div>
+              )}
+            </div>
+          </div>
           {/* Contenido */}
           <div className="space-y-4">
             <div className="space-y-2">
@@ -174,11 +268,11 @@ export function MassMediaModal() {
           </Button>
           <Button 
             onClick={handleSend} 
-            disabled={loading || (!message && !mediaUrl)}
+            disabled={loading || (!message && !mediaUrl) || selectedIds.size === 0}
             className="rounded-xl bg-orange-600 hover:bg-orange-700 text-white"
           >
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            {loading ? 'Enviando...' : 'Enviar Comunicado'}
+            {loading ? 'Enviando...' : `Enviar a ${selectedIds.size} seleccionados`}
           </Button>
         </DialogFooter>
       </DialogContent>

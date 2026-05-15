@@ -8,7 +8,8 @@ import { getUserRole } from '@/app/role-actions';
 export async function sendFilteredMassMessage(
   message: string, 
   mediaUrl: string | undefined, 
-  filters: { search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'all' }
+  filters: { search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'all' },
+  selectedIds?: string[]
 ) {
   try {
     const role = await getUserRole();
@@ -36,27 +37,31 @@ export async function sendFilteredMassMessage(
       }
     }
 
-    let query = supabase.from('personnel').select('phone, first_name, last_name_father, rut, email');
+    let query = supabase.from('personnel').select('id, phone, first_name, last_name_father, rut, email');
 
-    const status = filters.status || 'active';
-    if (status === 'active') {
-      query = query.eq('is_active', true);
-    } else if (status === 'inactive') {
-      query = query.eq('is_active', false);
-    }
+    if (selectedIds && selectedIds.length > 0) {
+      query = query.in('id', selectedIds);
+    } else {
+      const status = filters.status || 'active';
+      if (status === 'active') {
+        query = query.eq('is_active', true);
+      } else if (status === 'inactive') {
+        query = query.eq('is_active', false);
+      }
 
-    if (positionIds.length > 0) {
-      query = query.in('main_position', positionIds);
-    }
-    
-    if (filters.company_id) {
-      query = query.eq('company_id', filters.company_id);
-    }
+      if (positionIds.length > 0) {
+        query = query.in('main_position', positionIds);
+      }
+      
+      if (filters.company_id) {
+        query = query.eq('company_id', filters.company_id);
+      }
 
-    if (filters.search) {
-      query = query.or(
-        `first_name.ilike.%${filters.search}%,last_name_father.ilike.%${filters.search}%,rut.ilike.%${filters.search}%`
-      );
+      if (filters.search) {
+        query = query.or(
+          `first_name.ilike.%${filters.search}%,last_name_father.ilike.%${filters.search}%,rut.ilike.%${filters.search}%`
+        );
+      }
     }
     
     const { data: personnel, error } = await query;
