@@ -87,7 +87,7 @@ export function MassMediaModal() {
           </DialogTitle>
           <DialogDescription>
             Envía un mensaje de WhatsApp (con video o imagen) a los trabajadores filtrados. 
-            Puedes usar <code className="bg-slate-100 px-1 rounded text-orange-600">{`{nombre}`}</code> y <code className="bg-slate-100 px-1 rounded text-orange-600">{`{apellido}`}</code> en el mensaje para personalizarlo.
+            Puedes usar <code className="bg-slate-100 px-1 rounded text-orange-600">{`{nombre}`}</code>, <code className="bg-slate-100 px-1 rounded text-orange-600">{`{apellido}`}</code>, <code className="bg-slate-100 px-1 rounded text-orange-600">{`{email}`}</code> y <code className="bg-slate-100 px-1 rounded text-orange-600">{`{password}`}</code> en el mensaje para personalizarlo.
           </DialogDescription>
         </DialogHeader>
 

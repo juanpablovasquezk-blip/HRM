@@ -70,7 +70,7 @@ export async function updateTransportRequest(id: string, updates: any) {
   }
 }
 
-export async function sendTransportNotification(requestId: string) {
+export async function sendTransportNotification(requestId: string, isTimePending: boolean = false) {
   try {
     const role = await getAuthorizedRole();
     if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
@@ -127,10 +127,14 @@ export async function sendTransportNotification(requestId: string) {
     const warning = `*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
     let message = '';
     
-    if (tr.transport_type === 'PROPIO') {
-      message = `${warning}\n\nSR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nLLEGA POR SUS PROPIOS MEDIOS`;
+    if (isTimePending && areaName.includes('FEDEX')) {
+      message = `${warning}\n\nSR. ${name}\nTURNO ${dateStr}: ATENTO A LA HORA DE INGRESO PARA MAÑANA QUE SERA INFORMADA\nLLEGA POR SUS PROPIOS MEDIOS`;
     } else {
-      message = `${warning}\n\nSR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nRESERVA NRO: ${tr.reservation_number || 'PENDIENTE'}\nHORA DE RECOGIDA: ${tr.pickup_time?.substring(0,5) || '--:--'}\nDESDE: ${tr.pickup_address || '---'}\nHASTA: ${tr.destination_address || '---'}`;
+      if (tr.transport_type === 'PROPIO') {
+        message = `${warning}\n\nSR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nLLEGA POR SUS PROPIOS MEDIOS`;
+      } else {
+        message = `${warning}\n\nSR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nRESERVA NRO: ${tr.reservation_number || 'PENDIENTE'}\nHORA DE RECOGIDA: ${tr.pickup_time?.substring(0,5) || '--:--'}\nDESDE: ${tr.pickup_address || '---'}\nHASTA: ${tr.destination_address || '---'}`;
+      }
     }
 
     // 5. Determine Group
@@ -187,8 +191,18 @@ export async function sendTransportNotification(requestId: string) {
 
     // 7. Send to both in parallel using cached settings
     const sendPromises = [];
-    if (groupId) sendPromises.push(sendWhatsAppMessage(groupId, message, dbSettings));
-    if (phone) sendPromises.push(sendWhatsAppMessage(phone.trim().replace(/\D/g, ''), individualMessage, dbSettings));
+    
+    // User requested: "Solo que le envie el mensaje a la persona, pero no al grupo" when NOT pending
+    // If it IS pending, we send to both? Let's assume if it's the confirmed time (not pending) for Fedex, only send individual.
+    const isFedexConfirmed = !isTimePending && areaName.includes('FEDEX');
+    
+    if (groupId && !isFedexConfirmed) {
+      sendPromises.push(sendWhatsAppMessage(groupId, message, dbSettings));
+    }
+    
+    if (phone) {
+      sendPromises.push(sendWhatsAppMessage(phone.trim().replace(/\D/g, ''), individualMessage, dbSettings));
+    }
 
     const results = await Promise.all(sendPromises);
     const failed = results.find(r => !r.success);
@@ -203,6 +217,59 @@ export async function sendTransportNotification(requestId: string) {
   } catch (error: any) {
     console.error('Error sending WhatsApp notification:', error);
     return { success: false, error: error.message || 'Error desconocido en el servidor' };
+  }
+}
+
+export async function getAvailableShifts(date: string) {
+  try {
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from('shifts')
+      .select('id, name, start_time, end_time')
+      .order('start_time');
+      
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function updateAssignmentShift(assignmentId: string, newShiftId: string) {
+  try {
+    const role = await getAuthorizedRole();
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
+      throw new Error('No autorizado');
+    }
+
+    const supabase = createAdminClient();
+    
+    // Validate shift exists
+    const { data: shift, error: shiftErr } = await supabase
+      .from('shifts')
+      .select('id')
+      .eq('id', newShiftId)
+      .single();
+      
+    if (shiftErr || !shift) throw new Error('El turno seleccionado no existe');
+
+    const { error } = await supabase
+      .from('shift_assignments')
+      .update({
+        shift_id: newShiftId,
+        is_manual: true,
+        override_reason: 'Cambio de turno desde Transporte'
+      })
+      .eq('id', assignmentId);
+
+    if (error) throw error;
+
+    revalidatePath('/transport');
+    revalidatePath('/shifts/roster');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error updateAssignmentShift:', error);
+    return { success: false, error: error.message };
   }
 }
 

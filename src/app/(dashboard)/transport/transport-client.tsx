@@ -20,7 +20,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import type { TransportRequestWithDetails, Company, TransportType, TransportStatus } from '@/types/database';
-import { updateTransportRequest, generateTransportRequests, clearTransportRequests, sendTransportNotification } from './actions';
+import { updateTransportRequest, generateTransportRequests, clearTransportRequests, sendTransportNotification, getAvailableShifts, updateAssignmentShift } from './actions';
 import { Button } from '@/components/ui/button';
 import { Loader2, RefreshCw, Trash2, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -30,9 +30,11 @@ interface RequestCardProps {
   onUpdate: (id: string, updates: any) => Promise<void>;
   onCopyToClipboard: (text: string, id: string) => void;
   copiedId: string | null;
+  availableShifts: any[];
+  onUpdateShift: (assignmentId: string, newShiftId: string) => Promise<void>;
 }
 
-const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: RequestCardProps) => {
+const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId, availableShifts, onUpdateShift }: RequestCardProps) => {
   const [localData, setLocalData] = useState({
     reservation_number: req.reservation_number || '',
     pickup_time: req.pickup_time ? req.pickup_time.substring(0, 5) : '',
@@ -40,6 +42,9 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: 
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isNotifying, setIsNotifying] = useState(false);
+  const [isTimePending, setIsTimePending] = useState(true);
+  const [selectedShiftId, setSelectedShiftId] = useState(req.assignment?.shift_id || '');
+  const [isUpdatingShift, setIsUpdatingShift] = useState(false);
 
   // Sync local data if req changes (e.g. from parent state update)
   useEffect(() => {
@@ -48,7 +53,8 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: 
       pickup_time: req.pickup_time ? req.pickup_time.substring(0, 5) : '',
       observations: req.observations || ''
     });
-  }, [req.reservation_number, req.pickup_time, req.observations]);
+    setSelectedShiftId(req.assignment?.shift_id || '');
+  }, [req.reservation_number, req.pickup_time, req.observations, req.assignment?.shift_id]);
 
   const hasChanges = 
     localData.reservation_number !== (req.reservation_number || '') ||
@@ -63,7 +69,7 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: 
 
   const handleNotify = async () => {
     setIsNotifying(true);
-    const res = await sendTransportNotification(req.id);
+    const res = await sendTransportNotification(req.id, isTimePending);
     if (res.success) {
       toast.success('WhatsApp enviado correctamente');
     } else {
@@ -72,13 +78,22 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: 
     setIsNotifying(false);
   };
 
+  const handleShiftUpdate = async () => {
+    if (!selectedShiftId || selectedShiftId === req.assignment?.shift_id || !req.assignment_id) return;
+    setIsUpdatingShift(true);
+    await onUpdateShift(req.assignment_id, selectedShiftId);
+    setIsUpdatingShift(false);
+  };
+
   const isDataComplete = 
+    (req.transport_type === 'PROPIO') || (
     req.reservation_number && 
     req.pickup_time && 
     req.pickup_address && 
-    req.destination_address;
+    req.destination_address);
 
-  const showNotifyButton = req.transport_type === 'REQUERIDO' || req.transport_type === 'EMPRESA';
+  const showNotifyButton = req.transport_type === 'REQUERIDO' || req.transport_type === 'EMPRESA' || req.transport_type === 'PROPIO';
+  const isFedex = (req.assignment?.area?.name || '').toUpperCase().includes('FEDEX');
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-all">
@@ -92,9 +107,33 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: 
             <h3 className="font-bold text-slate-900 uppercase text-sm">
               {req.personnel?.first_name} {req.personnel?.last_name_father}
             </h3>
-            <p className="text-[10px] text-slate-500 font-mono uppercase">
-              Turno: {req.assignment?.shift?.start_time.substring(0,5)} - {req.assignment?.shift?.end_time.substring(0,5)} | {req.assignment?.area?.name}
-            </p>
+            {isFedex && req.type === 'ENTRADA' ? (
+              <div className="flex items-center gap-1 mt-1">
+                <select 
+                  className="text-[10px] font-mono border-slate-200 rounded p-0.5 focus:ring-indigo-500 bg-slate-100"
+                  value={selectedShiftId}
+                  onChange={(e) => setSelectedShiftId(e.target.value)}
+                >
+                  {availableShifts.map((s: any) => (
+                    <option key={s.id} value={s.id}>{s.start_time.substring(0,5)} - {s.end_time.substring(0,5)}</option>
+                  ))}
+                </select>
+                {selectedShiftId !== req.assignment?.shift_id && (
+                  <button 
+                    onClick={handleShiftUpdate}
+                    disabled={isUpdatingShift}
+                    className="text-[9px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold hover:bg-indigo-200"
+                  >
+                    {isUpdatingShift ? '...' : 'Guardar'}
+                  </button>
+                )}
+                <span className="text-[10px] text-slate-500 font-mono uppercase ml-1">| {req.assignment?.area?.name}</span>
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-500 font-mono uppercase mt-0.5">
+                Turno: {req.assignment?.shift?.start_time.substring(0,5)} - {req.assignment?.shift?.end_time.substring(0,5)} | {req.assignment?.area?.name}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -168,36 +207,37 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: 
         </div>
 
         {/* Admin Inputs */}
-        {(req.transport_type === 'REQUERIDO' || req.transport_type === 'EMPRESA') && (
+        {showNotifyButton && (
           <div className="bg-indigo-50/50 p-3 rounded-lg border border-indigo-100 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-indigo-700 uppercase flex items-center gap-1">
-                  <Hash className="w-3 h-3" /> Nro Reserva
-                </label>
-                <input 
-                  type="text" 
-                  value={localData.reservation_number}
-                  onChange={(e) => setLocalData({ ...localData, reservation_number: e.target.value })}
-                  className="w-full text-xs p-2 rounded border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="Ingresar reserva..."
-                />
+            {req.transport_type !== 'PROPIO' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-indigo-700 uppercase flex items-center gap-1">
+                    <Hash className="w-3 h-3" /> Nro Reserva
+                  </label>
+                  <input 
+                    type="text" 
+                    value={localData.reservation_number}
+                    onChange={(e) => setLocalData({ ...localData, reservation_number: e.target.value })}
+                    className="w-full text-xs p-2 rounded border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="Ingresar reserva..."
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-indigo-700 uppercase flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> Hora Recogida
+                  </label>
+                  <input 
+                    type="time" 
+                    value={localData.pickup_time}
+                    onChange={(e) => setLocalData({ ...localData, pickup_time: e.target.value })}
+                    className="w-full text-xs p-2 rounded border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-indigo-700 uppercase flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> Hora Recogida
-                </label>
-                <input 
-                  type="time" 
-                  value={localData.pickup_time}
-                  onChange={(e) => setLocalData({ ...localData, pickup_time: e.target.value })}
-                  className="w-full text-xs p-2 rounded border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500"
-                />
-              </div>
-            </div>
+            )}
             
-            <div className="grid grid-cols-1 gap-2">
-              {hasChanges ? (
+              {hasChanges && req.transport_type !== 'PROPIO' ? (
                 <button 
                   onClick={saveChanges}
                   disabled={isSaving}
@@ -206,16 +246,28 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId }: 
                   {isSaving ? 'Guardando...' : 'Guardar Cambios de Reserva'}
                 </button>
               ) : (
-                <button 
-                  onClick={handleNotify}
-                  disabled={!isDataComplete || isNotifying}
-                  className={`w-full py-2 flex items-center justify-center gap-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 disabled:opacity-30 disabled:grayscale ${isDataComplete ? 'bg-emerald-600 text-white shadow-emerald-200 hover:bg-emerald-700' : 'bg-slate-200 text-slate-500 shadow-none cursor-not-allowed'}`}
-                >
-                  {isNotifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-                  {isDataComplete ? 'Enviar Notificación WhatsApp' : 'Datos Incompletos para Notificar'}
-                </button>
+                <div className="flex flex-col gap-2">
+                  {isFedex && (
+                    <label className="flex items-center gap-2 text-[10px] font-bold text-indigo-800 bg-indigo-100 p-2 rounded cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={isTimePending}
+                        onChange={(e) => setIsTimePending(e.target.checked)}
+                        className="rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      Hora de ingreso por confirmar
+                    </label>
+                  )}
+                  <button 
+                    onClick={handleNotify}
+                    disabled={!isDataComplete || isNotifying}
+                    className={`w-full py-2 flex items-center justify-center gap-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 disabled:opacity-30 disabled:grayscale ${isDataComplete ? 'bg-emerald-600 text-white shadow-emerald-200 hover:bg-emerald-700' : 'bg-slate-200 text-slate-500 shadow-none cursor-not-allowed'}`}
+                  >
+                    {isNotifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                    {isDataComplete ? 'Enviar Notificación WhatsApp' : 'Datos Incompletos para Notificar'}
+                  </button>
+                </div>
               )}
-            </div>
           </div>
         )}
 
@@ -270,6 +322,17 @@ export default function TransportClient({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [requests, setRequests] = useState<TransportRequestWithDetails[]>(initialRequests);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [availableShifts, setAvailableShifts] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function loadShifts() {
+      const res = await getAvailableShifts(selectedDate);
+      if (res.success && res.data) {
+        setAvailableShifts(res.data);
+      }
+    }
+    loadShifts();
+  }, [selectedDate]);
 
   // Persistence: Redirect if no date in URL
   useEffect(() => {
@@ -339,6 +402,16 @@ export default function TransportClient({
     }
   };
 
+  const handleShiftUpdate = async (assignmentId: string, newShiftId: string) => {
+    const res = await updateAssignmentShift(assignmentId, newShiftId);
+    if (res.success) {
+      toast.success('Turno actualizado');
+      router.refresh();
+    } else {
+      toast.error('Error al actualizar turno: ' + res.error);
+    }
+  };
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -347,7 +420,7 @@ export default function TransportClient({
   };
 
   const activeRequests = requests.filter(r => 
-    r.status === 'ABIERTO' && r.transport_type !== 'PROPIO'
+    r.status === 'ABIERTO'
   );
 
   const entries = activeRequests.filter(r => r.type === 'ENTRADA');
@@ -416,6 +489,8 @@ export default function TransportClient({
                 onUpdate={handleUpdate} 
                 onCopyToClipboard={copyToClipboard}
                 copiedId={copiedId}
+                availableShifts={availableShifts}
+                onUpdateShift={handleShiftUpdate}
               />
             )) : (
               <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 bg-white/50">
@@ -441,6 +516,8 @@ export default function TransportClient({
                 onUpdate={handleUpdate} 
                 onCopyToClipboard={copyToClipboard}
                 copiedId={copiedId}
+                availableShifts={availableShifts}
+                onUpdateShift={handleShiftUpdate}
               />
             )) : (
               <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 bg-white/50">

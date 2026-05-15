@@ -36,7 +36,7 @@ export async function sendFilteredMassMessage(
       }
     }
 
-    let query = supabase.from('personnel').select('phone, first_name, last_name_father');
+    let query = supabase.from('personnel').select('phone, first_name, last_name_father, rut, email');
 
     const status = filters.status || 'active';
     if (status === 'active') {
@@ -86,10 +86,14 @@ export async function sendFilteredMassMessage(
         phone = `${phone}@c.us`;
       }
 
+      const cleanRut = person.rut ? person.rut.replace(/[.-]/g, '').toUpperCase() : '';
+
       // We can customize the message per person
       const personalizedMessage = message
           .replace(/{nombre}/g, person.first_name)
-          .replace(/{apellido}/g, person.last_name_father || '');
+          .replace(/{apellido}/g, person.last_name_father || '')
+          .replace(/{email}/g, person.email || 'SIN_CORREO')
+          .replace(/{password}/g, cleanRut);
 
       let result;
       if (mediaUrl && mediaUrl.trim() !== '') {
