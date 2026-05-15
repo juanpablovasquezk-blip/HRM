@@ -79,7 +79,7 @@ export function MassMediaModal() {
         </Button>
       } />
       
-      <DialogContent className="sm:max-w-[600px] rounded-3xl border-slate-200">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto rounded-3xl border-slate-200">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-xl font-black text-slate-800">
             <Megaphone className="h-6 w-6 text-orange-500" />
