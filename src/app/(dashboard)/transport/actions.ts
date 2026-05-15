@@ -105,15 +105,18 @@ export async function sendTransportNotification(requestId: string, isTimePending
 
     let shiftStart = '00:00';
     let areaName = '';
+    let posName = '';
 
     if (asg) {
-      const [sDataRes, aDataRes] = await Promise.all([
+      const [sDataRes, aDataRes, pDataRes] = await Promise.all([
         supabase.from('shifts').select('start_time').eq('id', asg.shift_id).single(),
-        supabase.from('areas').select('name').eq('id', asg.area_id).single()
+        supabase.from('areas').select('name').eq('id', asg.area_id).single(),
+        supabase.from('positions').select('name').eq('id', asg.position_id).single()
       ]);
       
       shiftStart = sDataRes.data?.start_time?.substring(0, 5) || '00:00';
       areaName = (aDataRes.data?.name || '').toUpperCase();
+      posName = (pDataRes.data?.name || '').toUpperCase();
     }
 
     // 4. Exclude Supervisors
@@ -126,7 +129,12 @@ export async function sendTransportNotification(requestId: string, isTimePending
 
     let body = '';
     
-    if (isTimePending && areaName.includes('FEDEX')) {
+    const warning = `ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA`;
+    let body = '';
+    
+    const isFedex = posName.includes('FEDEX') || areaName.includes('FEDEX');
+
+    if (isTimePending && isFedex) {
       body = `SR. ${name}\nTURNO ${dateStr}: ATENTO A LA HORA DE INGRESO PARA MAÑANA QUE SERA INFORMADA\nLLEGA POR SUS PROPIOS MEDIOS`;
     } else {
       if (tr.transport_type === 'PROPIO') {
@@ -196,7 +204,7 @@ export async function sendTransportNotification(requestId: string, isTimePending
     
     // User requested: "Solo que le envie el mensaje a la persona, pero no al grupo" when NOT pending
     // If it IS pending, we send to both? Let's assume if it's the confirmed time (not pending) for Fedex, only send individual.
-    const isFedexConfirmed = !isTimePending && areaName.includes('FEDEX');
+    const isFedexConfirmed = !isTimePending && isFedex;
     
     if (groupId && !isFedexConfirmed) {
       sendPromises.push(sendWhatsAppMessage(groupId, message, dbSettings));

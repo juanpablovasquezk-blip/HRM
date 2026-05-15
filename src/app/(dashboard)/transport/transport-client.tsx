@@ -93,7 +93,10 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId, av
     req.destination_address);
 
   const showNotifyButton = req.transport_type === 'REQUERIDO' || req.transport_type === 'EMPRESA' || req.transport_type === 'PROPIO';
-  const isFedex = (req.assignment?.area?.name || '').toUpperCase().includes('FEDEX');
+  
+  const areaName = (req.assignment?.area?.name || '').toUpperCase();
+  const posName = (req.assignment?.position?.name || '').toUpperCase();
+  const isFedex = posName.includes('FEDEX') || areaName.includes('FEDEX');
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-all">
@@ -414,7 +417,12 @@ export default function TransportClient({
   };
 
   const handleBulkFedexShiftUpdate = async (newShiftId: string) => {
-    const fedexEntries = entries.filter(r => (r.assignment?.area?.name || '').toUpperCase().includes('FEDEX'));
+    const fedexEntries = entries.filter(r => {
+      const areaName = (r.assignment?.area?.name || '').toUpperCase();
+      const posName = (r.assignment?.position?.name || '').toUpperCase();
+      return posName.includes('FEDEX') || areaName.includes('FEDEX');
+    });
+    
     if (fedexEntries.length === 0) {
       toast.error('No hay entradas de Fedex para actualizar');
       return;
@@ -451,7 +459,8 @@ export default function TransportClient({
     // Si es movilización propia, solo mostrar si es de Fedex (para coordinar horario)
     if (r.transport_type === 'PROPIO') {
       const areaName = (r.assignment?.area?.name || '').toUpperCase();
-      return areaName.includes('FEDEX');
+      const posName = (r.assignment?.position?.name || '').toUpperCase();
+      return posName.includes('FEDEX') || areaName.includes('FEDEX');
     }
     
     return true;
@@ -515,7 +524,11 @@ export default function TransportClient({
              <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Entradas (A la Empresa)</h2>
              <Badge variant="outline" className="ml-auto bg-blue-50 text-blue-700 border-blue-100">{entries.length}</Badge>
              
-             {entries.some(r => (r.assignment?.area?.name || '').toUpperCase().includes('FEDEX')) && (
+             {entries.some(r => {
+               const areaName = (r.assignment?.area?.name || '').toUpperCase();
+               const posName = (r.assignment?.position?.name || '').toUpperCase();
+               return posName.includes('FEDEX') || areaName.includes('FEDEX');
+             }) && (
                <div className="ml-4 flex items-center gap-2 border-l pl-4 border-slate-200">
                  <select 
                    className="text-[10px] font-bold border-slate-200 rounded p-1 bg-indigo-50 text-indigo-700"
