@@ -107,7 +107,8 @@ export async function sendFilteredMassMessage(
         successCount++;
       } else {
         failCount++;
-        failedDetails.push(`${person.first_name} ${person.last_name_father || ''}: ${result.error}`);
+        const errorMsg = typeof result.error === 'object' ? JSON.stringify(result.error) : result.error;
+        failedDetails.push(`${person.first_name} ${person.last_name_father || ''}: ${errorMsg}`);
         console.error(`Failed to send to ${phone}:`, result.error);
       }
       
