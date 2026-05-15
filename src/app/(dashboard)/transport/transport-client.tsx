@@ -323,6 +323,7 @@ export default function TransportClient({
   const [requests, setRequests] = useState<TransportRequestWithDetails[]>(initialRequests);
   const [isSyncing, setIsSyncing] = useState(false);
   const [availableShifts, setAvailableShifts] = useState<any[]>([]);
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
 
   useEffect(() => {
     async function loadShifts() {
@@ -412,6 +413,31 @@ export default function TransportClient({
     }
   };
 
+  const handleBulkFedexShiftUpdate = async (newShiftId: string) => {
+    const fedexEntries = entries.filter(r => (r.assignment?.area?.name || '').toUpperCase().includes('FEDEX'));
+    if (fedexEntries.length === 0) {
+      toast.error('No hay entradas de Fedex para actualizar');
+      return;
+    }
+
+    if (!confirm(`¿Actualizar el horario de ${fedexEntries.length} personas de Fedex al turno seleccionado?`)) return;
+
+    setIsBulkUpdating(true);
+    let successCount = 0;
+    
+    // Process in sequence to avoid DB locks and ensure clean updates
+    for (const req of fedexEntries) {
+      if (req.assignment_id) {
+        const res = await updateAssignmentShift(req.assignment_id, newShiftId);
+        if (res.success) successCount++;
+      }
+    }
+
+    setIsBulkUpdating(false);
+    toast.success(`Se actualizaron ${successCount} turnos correctamente`);
+    router.refresh();
+  };
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -419,9 +445,17 @@ export default function TransportClient({
     toast.success('Dirección copiada');
   };
 
-  const activeRequests = requests.filter(r => 
-    r.status === 'ABIERTO'
-  );
+  const activeRequests = requests.filter(r => {
+    if (r.status !== 'ABIERTO') return false;
+    
+    // Si es movilización propia, solo mostrar si es de Fedex (para coordinar horario)
+    if (r.transport_type === 'PROPIO') {
+      const areaName = (r.assignment?.area?.name || '').toUpperCase();
+      return areaName.includes('FEDEX');
+    }
+    
+    return true;
+  });
 
   const entries = activeRequests.filter(r => r.type === 'ENTRADA');
   const exits = activeRequests.filter(r => r.type === 'SALIDA');
@@ -480,6 +514,23 @@ export default function TransportClient({
              <div className="w-1.5 h-6 bg-blue-600 rounded-full" />
              <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Entradas (A la Empresa)</h2>
              <Badge variant="outline" className="ml-auto bg-blue-50 text-blue-700 border-blue-100">{entries.length}</Badge>
+             
+             {entries.some(r => (r.assignment?.area?.name || '').toUpperCase().includes('FEDEX')) && (
+               <div className="ml-4 flex items-center gap-2 border-l pl-4 border-slate-200">
+                 <select 
+                   className="text-[10px] font-bold border-slate-200 rounded p-1 bg-indigo-50 text-indigo-700"
+                   onChange={(e) => e.target.value && handleBulkFedexShiftUpdate(e.target.value)}
+                   disabled={isBulkUpdating}
+                   defaultValue=""
+                 >
+                   <option value="" disabled>CAMBIO MASIVO FEDEX...</option>
+                   {availableShifts.map((s: any) => (
+                     <option key={s.id} value={s.id}>{s.start_time.substring(0,5)} - {s.end_time.substring(0,5)}</option>
+                   ))}
+                 </select>
+                 {isBulkUpdating && <Loader2 className="w-3 h-3 animate-spin text-indigo-500" />}
+               </div>
+             )}
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
             {entries.length > 0 ? entries.map(req => (
