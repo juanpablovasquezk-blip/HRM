@@ -124,18 +124,20 @@ export async function sendTransportNotification(requestId: string, isTimePending
     const dateStr = format(parseISO(tr.date), 'dd-MM-yyyy');
     const phone = pData.phone;
 
-    const warning = `*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
-    let message = '';
+    let body = '';
     
     if (isTimePending && areaName.includes('FEDEX')) {
-      message = `${warning}\n\nSR. ${name}\nTURNO ${dateStr}: ATENTO A LA HORA DE INGRESO PARA MAÑANA QUE SERA INFORMADA\nLLEGA POR SUS PROPIOS MEDIOS`;
+      body = `SR. ${name}\nTURNO ${dateStr}: ATENTO A LA HORA DE INGRESO PARA MAÑANA QUE SERA INFORMADA\nLLEGA POR SUS PROPIOS MEDIOS`;
     } else {
       if (tr.transport_type === 'PROPIO') {
-        message = `${warning}\n\nSR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nLLEGA POR SUS PROPIOS MEDIOS`;
+        body = `SR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nLLEGA POR SUS PROPIOS MEDIOS`;
       } else {
-        message = `${warning}\n\nSR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nRESERVA NRO: ${tr.reservation_number || 'PENDIENTE'}\nHORA DE RECOGIDA: ${tr.pickup_time?.substring(0,5) || '--:--'}\nDESDE: ${tr.pickup_address || '---'}\nHASTA: ${tr.destination_address || '---'}`;
+        body = `SR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nRESERVA NRO: ${tr.reservation_number || 'PENDIENTE'}\nHORA DE RECOGIDA: ${tr.pickup_time?.substring(0,5) || '--:--'}\nDESDE: ${tr.pickup_address || '---'}\nHASTA: ${tr.destination_address || '---'}`;
       }
     }
+
+    const warning = `ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA`;
+    const message = `${body}\n\n${warning}`;
 
     // 5. Determine Group
     const dbSettings = await getSystemSettings();
@@ -187,7 +189,7 @@ export async function sendTransportNotification(requestId: string, isTimePending
       console.error('Error finding supervisor:', e);
     }
 
-    const individualMessage = `${message}\n\nSi tiene problemas con su recogida, contactarse con Transvip al (2) 2677 3000. Si no lo pasan a buscar, contactese con el supervisor *${supervisorName}* a las 04:00.`;
+    const individualMessage = `${body}\n\nSi tiene problemas con su recogida, contactarse con Transvip al (2) 2677 3000. Si no lo pasan a buscar, contactese con el supervisor *${supervisorName}* a las 04:00.\n\n${warning}`;
 
     // 7. Send to both in parallel using cached settings
     const sendPromises = [];
