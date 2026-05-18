@@ -148,8 +148,8 @@ export async function updateAssignmentShift(assignmentId: string, newShiftId: st
   const session = await getSupervisorSession();
   if (!session) return { success: false, error: 'No session' };
 
-  const supabase = await createClient();
-  const userName = `${session.first_name} ${session.last_name}`;
+  const supabase = await createAdminClient();
+  const userName = `${session.first_name} ${session.last_name_father}`;
 
   const { error } = await supabase
     .from('shift_assignments')
@@ -172,8 +172,8 @@ export async function updateAttendance(assignmentId: string, status: 'present' |
   const session = await getSupervisorSession();
   if (!session) return { success: false, error: 'No session' };
 
-  const supabase = await createClient();
-  const userName = `${session.first_name} ${session.last_name}`;
+  const supabase = await createAdminClient();
+  const userName = `${session.first_name} ${session.last_name_father}`;
 
   const { error } = await supabase
     .from('shift_assignments')
@@ -212,12 +212,12 @@ export async function updateTransportObservation(personnelId: string, date: stri
   const session = await getSupervisorSession();
   if (!session) return { success: false };
 
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
   const { error } = await supabase
     .from('transport_requests')
     .update({ 
       observations,
-      updated_by_name: `${session.first_name} ${session.last_name}`
+      updated_by_name: `${session.first_name} ${session.last_name_father}`
     })
     .eq('personnel_id', personnelId)
     .eq('date', date);
@@ -307,7 +307,7 @@ export async function updateTransportMobilization(personnelId: string, date: str
     status: 'ABIERTO',
     pickup_address: homeAddress,
     destination_address: destinationAddress,
-    updated_by_name: `${session.first_name} ${session.last_name}`
+    updated_by_name: `${session.first_name} ${session.last_name_father}`
   };
 
   let dbError;
@@ -482,7 +482,7 @@ export async function updateTransportType(requestId: string, type: 'PROPIO' | 'E
   if (!session) return { success: false, error: 'No session' };
 
   const supabase = await createAdminClient();
-  const userName = `${session.first_name} ${session.last_name}`;
+  const userName = `${session.first_name} ${session.last_name_father}`;
 
   const { error } = await supabase
     .from('transport_requests')
