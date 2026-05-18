@@ -115,7 +115,7 @@ export default function AttendanceClient({ initialData }: { initialData: any }) 
           )
         }));
       } else {
-        toast.error("Error al actualizar");
+        toast.error(res.error || "Error al actualizar");
       }
     });
   };
@@ -136,7 +136,7 @@ export default function AttendanceClient({ initialData }: { initialData: any }) 
           )
         }));
       } else {
-        toast.error("Error al cambiar horario");
+        toast.error(res.error || "Error al cambiar horario");
       }
     });
   };
