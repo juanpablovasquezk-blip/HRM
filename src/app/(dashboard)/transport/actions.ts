@@ -202,11 +202,10 @@ export async function sendTransportNotification(requestId: string, isTimePending
     // 7. Send to both in parallel using cached settings
     const sendPromises = [];
     
-    // User requested: "Solo que le envie el mensaje a la persona, pero no al grupo" when NOT pending
-    // If it IS pending, we send to both? Let's assume if it's the confirmed time (not pending) for Fedex, only send individual.
-    const isFedexConfirmed = !isTimePending && isFedex;
+    // Send to group only if it's pending, or if it is confirmed but NOT Fedex own transport ('PROPIO')
+    const isFedexOwnTransportConfirmed = !isTimePending && isFedex && tr.transport_type === 'PROPIO';
     
-    if (groupId && !isFedexConfirmed) {
+    if (groupId && !isFedexOwnTransportConfirmed) {
       sendPromises.push(sendWhatsAppMessage(groupId, message, dbSettings));
     }
     
