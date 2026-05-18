@@ -156,8 +156,8 @@ export async function updateAssignmentShift(assignmentId: string, newShiftId: st
     .update({
       shift_id: newShiftId,
       is_manual: true, // Mark as manual since a supervisor changed it
-      override_by: userName,
-      override_reason: 'Cambio de horario solicitado por bodega'
+      override_by: null,
+      override_reason: `Cambio de horario solicitado por bodega (Por: ${userName})`
     })
     .eq('id', assignmentId);
 
