@@ -142,7 +142,7 @@ create table shift_requirements (
   position_id uuid not null references positions(id) on delete cascade,
   required_count int not null default 1 check (required_count > 0),
   created_at timestamptz default now(),
-  unique(date, shift_id, area_id, position_id)
+  unique(date, shift_id, area_id, position_id, is_extra)
 );
 
 create index idx_requirements_date on shift_requirements(date);
