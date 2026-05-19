@@ -2,14 +2,17 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import HistoricalRecordsClient from './historical-records-client';
 import { getFormMetadata, getHistoricalData } from './actions';
+import { getUserRole } from '@/app/role-actions';
 
 export default async function HistoricalRecordsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   
-  // Double check user role
-  const role = user?.user_metadata?.role;
-  if (role !== 'ADMIN') {
+  // Double check user role using the robust getUserRole helper
+  const role = await getUserRole();
+  const isMarcela = user?.email?.toUpperCase().includes('MARCELA');
+  
+  if (role !== 'ADMIN' && role !== 'HR' && !isMarcela) {
     redirect('/dashboard');
   }
 
