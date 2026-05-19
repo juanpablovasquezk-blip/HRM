@@ -136,10 +136,10 @@ export async function getWorkerTomorrowData() {
           const hasRequest = finalTodayTransport.some(t => t.assignment_id === asg.id || (t.date === todayStr && t.type === 'ENTRADA'));
           if (!hasRequest) {
             const shift = asg.shift;
-            if (shift) {
+            if (shift && shift.requires_transport === true) {
               const isSupervisor = (asg.position?.name || '').toUpperCase().includes('SUPERVISOR');
               let transportType = 'PENDIENTE';
-              if (shift.requires_transport === false || isSupervisor) {
+              if (isSupervisor) {
                 transportType = 'PROPIO';
               }
               
@@ -197,10 +197,10 @@ export async function getWorkerTomorrowData() {
     const hasRequest = finalTransport.some(t => t.assignment_id === asg.id || (t.date === tomorrowStr && t.type === 'ENTRADA'));
     if (!hasRequest) {
       const shift = asg.shift;
-      if (shift) {
+      if (shift && shift.requires_transport === true) {
         const isSupervisor = (asg.position?.name || '').toUpperCase().includes('SUPERVISOR');
         let transportType = 'PENDIENTE';
-        if (shift.requires_transport === false || isSupervisor) {
+        if (isSupervisor) {
           transportType = 'PROPIO';
         }
         
@@ -347,7 +347,7 @@ export async function getWorkerTransportHistory(from?: string, to?: string) {
       transportType = tr.transport_type || 'PENDIENTE';
     } else {
       const isSupervisor = (asg.position?.name || '').toUpperCase().includes('SUPERVISOR');
-      if (shift.requires_transport === false || isSupervisor) {
+      if (shift.requires_transport === true && isSupervisor) {
         transportType = 'PROPIO';
       }
     }
