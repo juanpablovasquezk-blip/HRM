@@ -1,7 +1,7 @@
 'use client';
 
 import { Card, CardContent } from '@/components/ui/card';
-import { Settings as SettingsIcon, Building, Users, Shield, Bell, FileText } from 'lucide-react';
+import { Settings as SettingsIcon, Building, Users, Shield, Bell, FileText, History } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
@@ -19,6 +19,7 @@ export default function SettingsPage() {
     { icon: Shield, title: 'Seguridad', desc: 'Políticas de contraseña, gestión de sesiones y registros de auditoría' },
     { icon: Bell, title: 'Notificaciones', desc: 'Configurar integración con WhatsApp y preferencias de alertas', href: '/settings/whatsapp' },
     { icon: SettingsIcon, title: 'Reglas de Programación', desc: 'Ventana de congelación, horas máximas, períodos de descanso y restricciones' },
+    { icon: History, title: 'Ingreso Histórico', desc: 'Registrar turnos extras y transportes propios de periodos anteriores al inicio de la app', href: '/settings/historical-records' },
   ];
 
   return (

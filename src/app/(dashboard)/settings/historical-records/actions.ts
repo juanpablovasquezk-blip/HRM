@@ -1,0 +1,213 @@
+'use server';
+
+import { createClient } from '@/lib/supabase/server';
+import { revalidatePath } from 'next/cache';
+
+export async function getFormMetadata() {
+  const supabase = await createClient();
+
+  const [personnelRes, shiftsRes, areasRes, positionsRes] = await Promise.all([
+    supabase
+      .from('personnel')
+      .select('id, first_name, last_name_father, last_name_mother')
+      .is('termination_date', null)
+      .order('first_name'),
+    supabase
+      .from('shifts')
+      .select('id, name, start_time, end_time')
+      .order('name'),
+    supabase
+      .from('areas')
+      .select('id, name')
+      .order('name'),
+    supabase
+      .from('positions')
+      .select('id, name')
+      .order('name')
+  ]);
+
+  if (personnelRes.error) return { error: personnelRes.error.message };
+  if (shiftsRes.error) return { error: shiftsRes.error.message };
+  if (areasRes.error) return { error: areasRes.error.message };
+  if (positionsRes.error) return { error: positionsRes.error.message };
+
+  return {
+    data: {
+      personnel: personnelRes.data,
+      shifts: shiftsRes.data,
+      areas: areasRes.data,
+      positions: positionsRes.data
+    }
+  };
+}
+
+export async function getHistoricalData() {
+  const supabase = await createClient();
+
+  // Fetch extra shifts
+  const { data: extraShifts, error: shiftsError } = await supabase
+    .from('shift_assignments')
+    .select(`
+      id,
+      date,
+      is_extra,
+      personnel:personnel!shift_assignments_personnel_id_fkey(id, first_name, last_name_father),
+      shift:shifts!shift_assignments_shift_id_fkey(id, name, start_time, end_time),
+      area:areas(id, name),
+      position:positions(id, name)
+    `)
+    .eq('is_extra', true)
+    .order('date', { ascending: false })
+    .limit(100);
+
+  // Fetch own transports
+  const { data: ownTransports, error: transportsError } = await supabase
+    .from('transport_requests')
+    .select(`
+      id,
+      date,
+      transport_type,
+      personnel:personnel!transport_requests_personnel_id_fkey(id, first_name, last_name_father)
+    `)
+    .eq('transport_type', 'PROPIO')
+    .order('date', { ascending: false })
+    .limit(100);
+
+  if (shiftsError) {
+    console.error('Error fetching extra shifts:', shiftsError);
+    return { error: shiftsError.message };
+  }
+  if (transportsError) {
+    console.error('Error fetching own transports:', transportsError);
+    return { error: transportsError.message };
+  }
+
+  return {
+    data: {
+      extraShifts: extraShifts || [],
+      ownTransports: ownTransports || []
+    }
+  };
+}
+
+export async function createHistoricalExtraShift(payload: {
+  personnelId: string;
+  date: string;
+  shiftId: string;
+  areaId: string;
+  positionId: string;
+}) {
+  const supabase = await createClient();
+
+  // Check if there is already an assignment for this personnel on this date
+  const { data: existing } = await supabase
+    .from('shift_assignments')
+    .select('id')
+    .eq('personnel_id', payload.personnelId)
+    .eq('date', payload.date)
+    .maybeSingle();
+
+  if (existing) {
+    return { error: 'El empleado ya tiene una asignación de turno registrada para esta fecha.' };
+  }
+
+  const { data, error } = await supabase
+    .from('shift_assignments')
+    .insert({
+      personnel_id: payload.personnelId,
+      date: payload.date,
+      shift_id: payload.shiftId,
+      area_id: payload.areaId,
+      position_id: payload.positionId,
+      is_extra: true,
+      is_manual: true,
+      is_confirmed: true,
+      is_published: true,
+      is_validated: true
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating historical shift:', error);
+    return { error: error.message };
+  }
+
+  revalidatePath('/reports/transport');
+  return { data };
+}
+
+export async function createHistoricalOwnTransport(payload: {
+  personnelId: string;
+  date: string;
+}) {
+  const supabase = await createClient();
+
+  // Check if there is already an own transport for this personnel on this date
+  const { data: existing } = await supabase
+    .from('transport_requests')
+    .select('id')
+    .eq('personnel_id', payload.personnelId)
+    .eq('date', payload.date)
+    .eq('transport_type', 'PROPIO')
+    .maybeSingle();
+
+  if (existing) {
+    return { error: 'El empleado ya tiene un registro de transporte propio para esta fecha.' };
+  }
+
+  // Look up if there's a shift assignment for this person on this date to link it
+  const { data: assignment } = await supabase
+    .from('shift_assignments')
+    .select('id')
+    .eq('personnel_id', payload.personnelId)
+    .eq('date', payload.date)
+    .maybeSingle();
+
+  const { data, error } = await supabase
+    .from('transport_requests')
+    .insert({
+      personnel_id: payload.personnelId,
+      date: payload.date,
+      transport_type: 'PROPIO',
+      status: 'ABIERTO',
+      assignment_id: assignment?.id || null
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating historical transport:', error);
+    return { error: error.message };
+  }
+
+  revalidatePath('/reports/transport');
+  return { data };
+}
+
+export async function deleteHistoricalRecord(type: 'shift' | 'transport', id: string) {
+  const supabase = await createClient();
+
+  let error;
+  if (type === 'shift') {
+    const res = await supabase
+      .from('shift_assignments')
+      .delete()
+      .eq('id', id);
+    error = res.error;
+  } else {
+    const res = await supabase
+      .from('transport_requests')
+      .delete()
+      .eq('id', id);
+    error = res.error;
+  }
+
+  if (error) {
+    console.error(`Error deleting historical ${type}:`, error);
+    return { error: error.message };
+  }
+
+  revalidatePath('/reports/transport');
+  return { success: true };
+}
