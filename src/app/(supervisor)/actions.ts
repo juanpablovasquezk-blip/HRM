@@ -179,7 +179,7 @@ export async function updateAttendance(assignmentId: string, status: 'present' |
     .from('shift_assignments')
     .update({
       attendance_status: status,
-      attendance_updated_by: userName,
+      attendance_updated_by: session.id,
       attendance_updated_at: new Date().toISOString()
     })
     .eq('id', assignmentId);

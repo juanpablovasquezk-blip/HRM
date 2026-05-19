@@ -22,7 +22,7 @@ export async function GET() {
     const { data: updateRes, error: updateErr } = await supabase
       .from('shift_assignments')
       .update({
-        attendance_updated_by: 'TEST_STRING_FROM_SERVER'
+        attendance_updated_by: assignment.personnel_id
       })
       .eq('id', assignment.id)
       .select();
