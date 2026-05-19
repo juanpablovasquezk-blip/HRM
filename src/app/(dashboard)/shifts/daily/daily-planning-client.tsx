@@ -33,7 +33,7 @@ import type {
 } from '@/types/database';
 import { deleteAssignment, deleteRequirement } from '../actions';
 import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, resetDailyPlan, updateAssignmentShift } from './actions';
-import { RotateCcw, Mail, Copy } from 'lucide-react';
+import { RotateCcw, Mail, Copy, Camera } from 'lucide-react';
 
 interface Props {
   initialAssignments: ShiftAssignmentWithDetails[];
@@ -324,6 +324,49 @@ export default function DailyPlanningClient({
     toast.success('Texto para correo copiado al portapapeles');
   };
 
+  const handleCopyScreenshot = async () => {
+    if (!reportRef.current) return;
+    const toastId = toast.loading("Generando captura de la planificación...");
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        windowWidth: 800, // Force a desktop-like viewport width so it renders nicely even on mobile screens
+        ignoreElements: (element) => {
+          return element.classList.contains('no-print');
+        }
+      });
+      
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          toast.error("No se pudo generar la imagen.", { id: toastId });
+          return;
+        }
+        
+        try {
+          const data = [new ClipboardItem({ 'image/png': blob })];
+          await navigator.clipboard.write(data);
+          toast.success("¡Captura copiada al portapapeles! Puedes pegarla directamente.", { id: toastId });
+        } catch (clipErr) {
+          console.error("Clipboard copy failed, offering fallback download:", clipErr);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `planificacion_${selectedDate}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+          toast.success("Captura generada y descargada (copiar al portapapeles no soportado en este navegador).", { id: toastId });
+        }
+      }, 'image/png');
+    } catch (err) {
+      console.error(err);
+      toast.error("Error al generar la captura.", { id: toastId });
+    }
+  };
+
   const handleAddExtra = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
@@ -459,13 +502,22 @@ export default function DailyPlanningClient({
           )}
 
           {isConfirmed && (
-            <button 
-              onClick={handleCopyEmailText} 
-              className="flex flex-col items-center justify-center gap-1 w-28 h-16 bg-orange-100 text-orange-700 rounded-xl hover:bg-orange-200 transition-all font-bold uppercase tracking-tight text-[9px] shadow-sm text-center leading-tight whitespace-normal p-2"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copiar para Correo</span>
-            </button>
+            <>
+              <button 
+                onClick={handleCopyEmailText} 
+                className="flex flex-col items-center justify-center gap-1 w-28 h-16 bg-orange-100 text-orange-700 rounded-xl hover:bg-orange-200 transition-all font-bold uppercase tracking-tight text-[9px] shadow-sm text-center leading-tight whitespace-normal p-2"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copiar para Correo</span>
+              </button>
+              <button 
+                onClick={handleCopyScreenshot} 
+                className="flex flex-col items-center justify-center gap-1 w-28 h-16 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all font-bold uppercase tracking-tight text-[9px] shadow-sm text-center leading-tight whitespace-normal p-2"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Copiar Captura</span>
+              </button>
+            </>
           )}
 
           <button 
