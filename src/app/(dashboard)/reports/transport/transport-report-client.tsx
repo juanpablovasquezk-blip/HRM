@@ -43,15 +43,16 @@ export default function TransportReportClient({ companies }: Props) {
   }, []);
 
   const exportMobilesExcel = () => {
-    const mobiles = data.filter(r => r.transport_type === 'REQUERIDO');
+    const mobiles = data.filter(r => r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE');
     const wsData = mobiles.map(r => ({
       'Fecha': r.date,
       'Nombre': `${r.personnel?.first_name} ${r.personnel?.last_name_father}`,
       'Dirección Origen': r.pickup_address,
       'Dirección Destino': r.destination_address,
-      'Hora Recogida': r.pickup_time || 'N/A',
-      'Reserva': r.reservation_number || 'N/A',
-      'Observaciones': r.observations || ''
+      'Hora Recogida': r.pickup_time || 'PENDIENTE',
+      'Reserva': r.reservation_number || 'PENDIENTE',
+      'Observaciones': r.observations || '',
+      'Estado': r.transport_type === 'PENDIENTE' ? 'Pendiente de Reserva' : 'Confirmado'
     }));
 
     const ws = XLSX.utils.json_to_sheet(wsData);
@@ -148,17 +149,25 @@ export default function TransportReportClient({ companies }: Props) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {data.filter(r => r.transport_type === 'REQUERIDO').map(r => (
+                {data.filter(r => r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE').map(r => (
                   <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-4 py-3 text-slate-500">{r.date}</td>
                     <td className="px-4 py-3 font-bold text-slate-700 uppercase">{r.personnel?.first_name} {r.personnel?.last_name_father}</td>
                     <td className="px-4 py-3 text-indigo-600 font-mono font-bold">{r.pickup_time || '--:--'}</td>
-                    <td className="px-4 py-3 text-slate-400">{r.reservation_number || '-'}</td>
+                    <td className="px-4 py-3">
+                      {r.transport_type === 'PENDIENTE' ? (
+                        <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-bold uppercase">
+                          Pendiente
+                        </span>
+                      ) : (
+                        <span className="text-slate-700 font-mono font-semibold">{r.reservation_number || '-'}</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {data.filter(r => r.transport_type === 'REQUERIDO').length === 0 && (
+            {data.filter(r => r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE').length === 0 && (
               <div className="p-8 text-center text-slate-400 italic">No hay datos para este período</div>
             )}
           </div>

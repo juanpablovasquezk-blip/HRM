@@ -24,23 +24,81 @@ export async function getTransportReportData(filters: {
       )
     `);
 
+  // Parse and format dates resiliently to handle YYYY-MM-DD, DD-MM-YYYY, etc.
+  let startFormatted = filters.startDate;
+  let endFormatted = filters.endDate;
+
   if (filters.startDate) {
-    query = query.gte('date', filters.startDate);
+    try {
+      // First try standard JS parsing (which handles YYYY-MM-DD well)
+      let d = new Date(filters.startDate + 'T00:00:00');
+      if (isNaN(d.getTime())) {
+        // Try parsing DD-MM-YYYY
+        const parts = filters.startDate.split('-');
+        if (parts.length === 3) {
+          const day = parseInt(parts[0], 10);
+          const month = parseInt(parts[1], 10) - 1;
+          const year = parseInt(parts[2], 10);
+          const tempDate = new Date(year, month, day);
+          if (!isNaN(tempDate.getTime())) {
+            d = tempDate;
+          }
+        }
+      }
+      if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        startFormatted = `${year}-${month}-${day}`;
+      }
+    } catch (e) {
+      console.error('Error parsing startDate:', e);
+    }
   }
+
   if (filters.endDate) {
-    query = query.lte('date', filters.endDate);
+    try {
+      let d = new Date(filters.endDate + 'T00:00:00');
+      if (isNaN(d.getTime())) {
+        // Try parsing DD-MM-YYYY
+        const parts = filters.endDate.split('-');
+        if (parts.length === 3) {
+          const day = parseInt(parts[0], 10);
+          const month = parseInt(parts[1], 10) - 1;
+          const year = parseInt(parts[2], 10);
+          const tempDate = new Date(year, month, day);
+          if (!isNaN(tempDate.getTime())) {
+            d = tempDate;
+          }
+        }
+      }
+      if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        endFormatted = `${year}-${month}-${day}`;
+      }
+    } catch (e) {
+      console.error('Error parsing endDate:', e);
+    }
+  }
+
+  if (startFormatted) {
+    query = query.gte('date', startFormatted);
+  }
+  if (endFormatted) {
+    query = query.lte('date', endFormatted);
   }
   if (filters.companyId) {
-    // This assumes personnel is linked to company
-    // We might need to filter by personnel.company_id
-    // But Supabase JS client doesn't support filtering on joined tables easily without .filter() or complex syntax
-    // Better to fetch all and filter in JS if the dataset is small, or use a better query.
-    // For now, let's fetch and filter if companyId is provided.
+    // Handled in post-processing
   }
 
   const { data, error } = await query.order('date', { ascending: false });
 
-  if (error) return { error: error.message };
+  if (error) {
+    console.error('getTransportReportData DB Error:', error);
+    return { error: error.message };
+  }
 
   let results = data as TransportRequestWithDetails[];
 
