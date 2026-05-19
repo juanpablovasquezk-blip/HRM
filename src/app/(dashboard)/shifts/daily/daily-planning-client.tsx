@@ -328,7 +328,7 @@ export default function DailyPlanningClient({
     if (!reportRef.current) return;
     const toastId = toast.loading("Generando captura de la planificación...");
     try {
-      const html2canvas = (await import('html2canvas')).default;
+      const html2canvas = (await import('html2canvas-pro')).default;
       const canvas = await html2canvas(reportRef.current, {
         scale: 2,
         useCORS: true,
@@ -361,9 +361,9 @@ export default function DailyPlanningClient({
           toast.success("Captura generada y descargada (copiar al portapapeles no soportado en este navegador).", { id: toastId });
         }
       }, 'image/png');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error("Error al generar la captura.", { id: toastId });
+      toast.error(`Error al generar la captura: ${err.message || String(err)}`, { id: toastId });
     }
   };
 
