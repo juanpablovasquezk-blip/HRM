@@ -43,7 +43,7 @@ export default function TransportReportClient({ companies }: Props) {
   }, []);
 
   const exportMobilesExcel = () => {
-    const mobiles = data.filter(r => r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE');
+    const mobiles = data.filter(r => r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE' || r.transport_type === 'EMPRESA');
     const wsData = mobiles.map(r => ({
       'Fecha': r.date,
       'Nombre': `${r.personnel?.first_name} ${r.personnel?.last_name_father}`,
@@ -52,7 +52,7 @@ export default function TransportReportClient({ companies }: Props) {
       'Hora Recogida': r.pickup_time || 'PENDIENTE',
       'Reserva': r.reservation_number || 'PENDIENTE',
       'Observaciones': r.observations || '',
-      'Estado': r.transport_type === 'PENDIENTE' ? 'Pendiente de Reserva' : 'Confirmado'
+      'Estado': r.transport_type === 'PENDIENTE' ? 'Pendiente de Reserva' : r.transport_type === 'EMPRESA' ? 'Móvil Empresa' : 'Confirmado'
     }));
 
     const ws = XLSX.utils.json_to_sheet(wsData);
@@ -149,7 +149,7 @@ export default function TransportReportClient({ companies }: Props) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {data.filter(r => r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE').map(r => (
+                 {data.filter(r => r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE' || r.transport_type === 'EMPRESA').map(r => (
                   <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-4 py-3 text-slate-500">{r.date}</td>
                     <td className="px-4 py-3 font-bold text-slate-700 uppercase">{r.personnel?.first_name} {r.personnel?.last_name_father}</td>
@@ -159,6 +159,10 @@ export default function TransportReportClient({ companies }: Props) {
                         <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-bold uppercase">
                           Pendiente
                         </span>
+                      ) : r.transport_type === 'EMPRESA' ? (
+                        <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-bold uppercase">
+                          Móvil Empresa
+                        </span>
                       ) : (
                         <span className="text-slate-700 font-mono font-semibold">{r.reservation_number || '-'}</span>
                       )}
@@ -167,7 +171,7 @@ export default function TransportReportClient({ companies }: Props) {
                 ))}
               </tbody>
             </table>
-            {data.filter(r => r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE').length === 0 && (
+            {data.filter(r => r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE' || r.transport_type === 'EMPRESA').length === 0 && (
               <div className="p-8 text-center text-slate-400 italic">No hay datos para este período</div>
             )}
           </div>

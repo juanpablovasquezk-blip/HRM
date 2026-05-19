@@ -147,6 +147,7 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId, av
           >
             <option value="PENDIENTE">PENDIENTE</option>
             <option value="REQUERIDO">REQUIERE TRANSPORTE</option>
+            <option value="EMPRESA">MÓVIL EMPRESA</option>
             <option value="PROPIO">MOVILIZACIÓN PROPIA</option>
           </select>
         </div>
