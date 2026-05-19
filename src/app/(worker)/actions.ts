@@ -90,7 +90,7 @@ export async function getWorkerTomorrowData() {
   const [todayAssignmentsRes, todayTransportRes, tomorrowAssignmentsRes, tomorrowTransportRes] = await Promise.all([
     supabase
       .from('shift_assignments')
-      .select('*, shift:shifts!shift_assignments_shift_id_fkey(*)')
+      .select('*, shift:shifts!shift_assignments_shift_id_fkey(*), position:positions(*)')
       .eq('personnel_id', session.id)
       .eq('date', todayStr)
       .neq('status', 'cancelled'),
@@ -130,12 +130,42 @@ export async function getWorkerTomorrowData() {
       const oneHourAfterStart = new Date(shiftStartToday.getTime() + 60 * 60 * 1000);
       
       if (chileTime < oneHourAfterStart) {
+        // Synthesize transport for today if missing
+        const finalTodayTransport = [...todayTransport];
+        for (const asg of todayAssignments) {
+          const hasRequest = finalTodayTransport.some(t => t.assignment_id === asg.id || (t.date === todayStr && t.type === 'ENTRADA'));
+          if (!hasRequest) {
+            const shift = asg.shift;
+            if (shift) {
+              const isSupervisor = (asg.position?.name || '').toUpperCase().includes('SUPERVISOR');
+              let transportType = 'PENDIENTE';
+              if (shift.requires_transport === false || isSupervisor) {
+                transportType = 'PROPIO';
+              }
+              
+              finalTodayTransport.push({
+                id: `synth_${asg.id}`,
+                assignment_id: asg.id,
+                personnel_id: session.id,
+                date: todayStr,
+                type: 'ENTRADA',
+                transport_type: transportType,
+                reservation_number: null,
+                pickup_time: null,
+                status: 'ABIERTO',
+                pickup_address: null,
+                destination_address: null
+              });
+            }
+          }
+        }
+
         // Still show TODAY
         return {
           personnel: session,
           date: todayStr,
           assignments: todayAssignments,
-          transport: todayTransport
+          transport: finalTodayTransport
         };
       }
     }
@@ -161,11 +191,41 @@ export async function getWorkerTomorrowData() {
     }
   }
 
+  // Synthesize transport for tomorrow if missing
+  const finalTransport = [...transport];
+  for (const asg of assignments) {
+    const hasRequest = finalTransport.some(t => t.assignment_id === asg.id || (t.date === tomorrowStr && t.type === 'ENTRADA'));
+    if (!hasRequest) {
+      const shift = asg.shift;
+      if (shift) {
+        const isSupervisor = (asg.position?.name || '').toUpperCase().includes('SUPERVISOR');
+        let transportType = 'PENDIENTE';
+        if (shift.requires_transport === false || isSupervisor) {
+          transportType = 'PROPIO';
+        }
+        
+        finalTransport.push({
+          id: `synth_${asg.id}`,
+          assignment_id: asg.id,
+          personnel_id: session.id,
+          date: tomorrowStr,
+          type: 'ENTRADA',
+          transport_type: transportType,
+          reservation_number: null,
+          pickup_time: null,
+          status: 'ABIERTO',
+          pickup_address: null,
+          destination_address: null
+        });
+      }
+    }
+  }
+
   return {
     personnel: session,
     date: tomorrowStr,
     assignments: assignments,
-    transport: transport
+    transport: finalTransport
   };
 }
 
@@ -227,19 +287,82 @@ export async function getWorkerTransportHistory(from?: string, to?: string) {
 
   const supabase = await createClient();
   
-  let query = supabase
-    .from('transport_requests')
-    .select('*, shift_assignment:shift_assignments(*, shift:shifts!shift_assignments_shift_id_fkey(*))')
+  // 1. Fetch all confirmed shift assignments in the date range
+  let asgQuery = supabase
+    .from('shift_assignments')
+    .select('*, shift:shifts!shift_assignments_shift_id_fkey(*), position:positions(*)')
     .eq('personnel_id', session.id)
-    .eq('transport_type', 'PROPIO')
+    .eq('is_confirmed', true)
+    .neq('status', 'cancelled')
     .order('date', { ascending: false });
 
-  if (from) query = query.gte('date', from);
-  if (to) query = query.lte('date', to);
+  if (from) asgQuery = asgQuery.gte('date', from);
+  if (to) asgQuery = asgQuery.lte('date', to);
 
-  const { data } = await query;
+  const { data: assignments, error: asgErr } = await asgQuery;
+  if (asgErr) {
+    console.error('Error fetching assignments for history:', asgErr);
+    return [];
+  }
 
-  return data || [];
+  // 2. Fetch all transport requests in the date range
+  let reqQuery = supabase
+    .from('transport_requests')
+    .select('*')
+    .eq('personnel_id', session.id);
+
+  if (from) reqQuery = reqQuery.gte('date', from);
+  if (to) reqQuery = reqQuery.lte('date', to);
+
+  const { data: requests, error: reqErr } = await reqQuery;
+  if (reqErr) {
+    console.error('Error fetching transport requests for history:', reqErr);
+  }
+
+  const reqMap = new Map<string, any>();
+  if (requests) {
+    for (const r of requests) {
+      if (r.assignment_id) {
+        reqMap.set(String(r.assignment_id), r);
+      } else {
+        reqMap.set(`${r.date}_${r.type}`, r);
+      }
+    }
+  }
+
+  // 3. Build history items
+  const history: any[] = [];
+
+  for (const asg of (assignments || [])) {
+    const shift = asg.shift;
+    if (!shift) continue;
+
+    // Check if there is an ENTRADA transport request for this assignment
+    const tr = reqMap.get(String(asg.id)) || reqMap.get(`${asg.date}_ENTRADA`);
+    
+    let transportType = 'PENDIENTE';
+    let trRecord = tr || null;
+
+    if (tr) {
+      transportType = tr.transport_type || 'PENDIENTE';
+    } else {
+      const isSupervisor = (asg.position?.name || '').toUpperCase().includes('SUPERVISOR');
+      if (shift.requires_transport === false || isSupervisor) {
+        transportType = 'PROPIO';
+      }
+    }
+
+    if (transportType === 'PROPIO') {
+      history.push({
+        id: trRecord?.id || `synth_${asg.id}`,
+        date: asg.date,
+        transport_type: 'PROPIO',
+        shift_assignment: asg
+      });
+    }
+  }
+
+  return history;
 }
 
 export async function getActiveDocumentDefinitions() {

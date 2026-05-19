@@ -318,6 +318,7 @@ export async function generateTransportRequests(date: string) {
         *,
         personnel:personnel(*),
         area:areas(*),
+        position:positions(*),
         shift:shifts!shift_assignments_shift_id_fkey(*)
       `)
       .eq('date', date)
@@ -377,6 +378,9 @@ export async function generateTransportRequests(date: string) {
       else if (areaName.includes('BODEGA') || areaName.includes('DHL') || areaName.includes('FEDEX')) plantAddress = "Osvaldo Croquevielle 2207, Pudahuel";
       else if (areaName.includes('AEROPUERTO')) plantAddress = "Armando Cortinez Oriente 1704";
 
+      const isSupervisor = ((ass as any).position?.name || '').toUpperCase().includes('SUPERVISOR');
+      const defaultTransportType = isSupervisor ? 'PROPIO' : 'PENDIENTE';
+
       // ENTRADA
       if (isWithinWindow(shift.start_time)) {
         newRequests.push({
@@ -385,7 +389,7 @@ export async function generateTransportRequests(date: string) {
           date: ass.date,
           type: 'ENTRADA',
           status: 'ABIERTO',
-          transport_type: 'PENDIENTE',
+          transport_type: defaultTransportType,
           pickup_address: homeAddress,
           destination_address: plantAddress
         });
@@ -399,7 +403,7 @@ export async function generateTransportRequests(date: string) {
           date: ass.date,
           type: 'SALIDA',
           status: 'ABIERTO',
-          transport_type: 'PENDIENTE',
+          transport_type: defaultTransportType,
           pickup_address: plantAddress,
           destination_address: homeAddress
         });
