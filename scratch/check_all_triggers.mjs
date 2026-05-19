@@ -8,15 +8,19 @@ const supabase = createClient(
 );
 
 async function run() {
-  // Let's query information_schema or run a RPC if we can.
-  // Wait, we don't have exec_sql, but we can query standard catalog tables if we can run a select on them?
-  // Let's check if pg_catalog or information_schema tables are accessible via postgrest.
-  // Postgrest by default does not expose pg_catalog unless explicitly configured.
-  // Let's test if we can select from `pg_trigger` or `information_schema.triggers`.
-  const { data: trig, error: trigErr } = await supabase.from('pg_trigger').select('*').limit(1);
-  console.log('pg_trigger access:', trig, trigErr?.message);
+  console.log('Querying pg_trigger table:');
   
-  const { data: trig2, error: trigErr2 } = await supabase.from('information_schema.triggers').select('*').limit(1);
-  console.log('information_schema.triggers access:', trig2, trigErr2?.message);
+  // Since we cannot run raw SQL directly without an RPC, let's see if we can query pg_catalog views via supabase.rpc
+  // Let's check if there is an RPC like 'get_triggers' or similar
+  const { data, error } = await supabase.rpc('check_database_triggers');
+  
+  if (error) {
+    console.log('check_database_triggers RPC does not exist. Error:', error.message);
+    
+    // Let's create an RPC to inspect triggers!
+    // Wait, we don't have direct SQL interface, but we can search the codebase for other SQL migrations or files.
+  } else {
+    console.log('Triggers found:', data);
+  }
 }
 run();
