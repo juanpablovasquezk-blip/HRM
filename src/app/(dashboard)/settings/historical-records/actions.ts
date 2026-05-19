@@ -82,10 +82,27 @@ export async function getHistoricalData() {
     return { error: transportsError.message };
   }
 
+  const formattedShifts = (extraShifts || []).map((s: any) => ({
+    id: s.id,
+    date: s.date,
+    is_extra: s.is_extra,
+    personnel: Array.isArray(s.personnel) ? s.personnel[0] : s.personnel,
+    shift: Array.isArray(s.shift) ? s.shift[0] : s.shift,
+    area: Array.isArray(s.area) ? s.area[0] : s.area,
+    position: Array.isArray(s.position) ? s.position[0] : s.position
+  }));
+
+  const formattedTransports = (ownTransports || []).map((t: any) => ({
+    id: t.id,
+    date: t.date,
+    transport_type: t.transport_type,
+    personnel: Array.isArray(t.personnel) ? t.personnel[0] : t.personnel
+  }));
+
   return {
     data: {
-      extraShifts: extraShifts || [],
-      ownTransports: ownTransports || []
+      extraShifts: formattedShifts,
+      ownTransports: formattedTransports
     }
   };
 }
