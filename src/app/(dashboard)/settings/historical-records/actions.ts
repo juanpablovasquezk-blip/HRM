@@ -116,122 +116,155 @@ export async function createHistoricalExtraShift(payload: {
   observations?: string;
   forceOverride?: boolean;
 }) {
-  const supabase = await createClient();
+  try {
+    const supabase = await createClient();
 
-  // Check if there is already an assignment for this personnel on this date
-  const { data: existing } = await supabase
-    .from('shift_assignments')
-    .select('id, shifts(name)')
-    .eq('personnel_id', payload.personnelId)
-    .eq('date', payload.date)
-    .maybeSingle();
+    // Check if there is already an assignment for this personnel on this date
+    const { data: existingList, error: checkError } = await supabase
+      .from('shift_assignments')
+      .select('id, shifts(name)')
+      .eq('personnel_id', payload.personnelId)
+      .eq('date', payload.date)
+      .limit(1);
 
-  if (existing && !payload.forceOverride) {
-    // Return a conflict warning instead of blocking error
-    return {
-      conflict: true,
-      conflictMessage: 'El empleado ya tiene una asignación de turno para esta fecha. ¿Deseas registrar el turno extra de todas formas?'
-    };
+    if (checkError) {
+      console.error('Error checking existing shift assignment:', checkError);
+      return { error: `Error al verificar turnos existentes: ${checkError.message}` };
+    }
+
+    const existing = existingList && existingList.length > 0 ? existingList[0] : null;
+
+    if (existing && !payload.forceOverride) {
+      // Return a conflict warning instead of blocking error
+      return {
+        conflict: true,
+        conflictMessage: 'El empleado ya tiene una asignación de turno para esta fecha. ¿Deseas registrar el turno extra de todas formas?'
+      };
+    }
+
+    const { data, error } = await supabase
+      .from('shift_assignments')
+      .insert({
+        personnel_id: payload.personnelId,
+        date: payload.date,
+        shift_id: payload.shiftId,
+        area_id: payload.areaId,
+        position_id: payload.positionId,
+        is_extra: true,
+        is_manual: true,
+        is_confirmed: true,
+        is_published: true,
+        is_validated: true,
+        override_reason: payload.observations || null
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating historical shift in DB:', error);
+      return { error: error.message };
+    }
+
+    revalidatePath('/reports/transport');
+    return { data };
+  } catch (error: any) {
+    console.error('Unhandled error in createHistoricalExtraShift:', error);
+    return { error: error?.message || 'Ocurrió un error inesperado al guardar el turno extra.' };
   }
-
-  const { data, error } = await supabase
-    .from('shift_assignments')
-    .insert({
-      personnel_id: payload.personnelId,
-      date: payload.date,
-      shift_id: payload.shiftId,
-      area_id: payload.areaId,
-      position_id: payload.positionId,
-      is_extra: true,
-      is_manual: true,
-      is_confirmed: true,
-      is_published: true,
-      is_validated: true,
-      override_reason: payload.observations || null
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating historical shift:', error);
-    return { error: error.message };
-  }
-
-  revalidatePath('/reports/transport');
-  return { data };
 }
 
 export async function createHistoricalOwnTransport(payload: {
   personnelId: string;
   date: string;
 }) {
-  const supabase = await createClient();
+  try {
+    const supabase = await createClient();
 
-  // Check if there is already an own transport for this personnel on this date
-  const { data: existing } = await supabase
-    .from('transport_requests')
-    .select('id')
-    .eq('personnel_id', payload.personnelId)
-    .eq('date', payload.date)
-    .eq('transport_type', 'PROPIO')
-    .maybeSingle();
+    // Check if there is already an own transport for this personnel on this date
+    const { data: existingList, error: checkError } = await supabase
+      .from('transport_requests')
+      .select('id')
+      .eq('personnel_id', payload.personnelId)
+      .eq('date', payload.date)
+      .eq('transport_type', 'PROPIO')
+      .limit(1);
 
-  if (existing) {
-    return { error: 'El empleado ya tiene un registro de transporte propio para esta fecha.' };
+    if (checkError) {
+      console.error('Error checking existing transport:', checkError);
+      return { error: `Error al verificar transporte existente: ${checkError.message}` };
+    }
+
+    if (existingList && existingList.length > 0) {
+      return { error: 'El empleado ya tiene un registro de transporte propio para esta fecha.' };
+    }
+
+    // Look up if there's a shift assignment for this person on this date to link it
+    const { data: assignments, error: assignmentError } = await supabase
+      .from('shift_assignments')
+      .select('id')
+      .eq('personnel_id', payload.personnelId)
+      .eq('date', payload.date)
+      .limit(1);
+
+    if (assignmentError) {
+      console.error('Error looking up shift assignment:', assignmentError);
+    }
+
+    const assignmentId = assignments && assignments.length > 0 ? assignments[0].id : null;
+
+    const { data, error } = await supabase
+      .from('transport_requests')
+      .insert({
+        personnel_id: payload.personnelId,
+        date: payload.date,
+        transport_type: 'PROPIO',
+        status: 'ABIERTO',
+        assignment_id: assignmentId
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating historical transport in DB:', error);
+      return { error: error.message };
+    }
+
+    revalidatePath('/reports/transport');
+    return { data };
+  } catch (error: any) {
+    console.error('Unhandled error in createHistoricalOwnTransport:', error);
+    return { error: error?.message || 'Ocurrió un error inesperado al guardar el transporte propio.' };
   }
-
-  // Look up if there's a shift assignment for this person on this date to link it
-  const { data: assignment } = await supabase
-    .from('shift_assignments')
-    .select('id')
-    .eq('personnel_id', payload.personnelId)
-    .eq('date', payload.date)
-    .maybeSingle();
-
-  const { data, error } = await supabase
-    .from('transport_requests')
-    .insert({
-      personnel_id: payload.personnelId,
-      date: payload.date,
-      transport_type: 'PROPIO',
-      status: 'ABIERTO',
-      assignment_id: assignment?.id || null
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating historical transport:', error);
-    return { error: error.message };
-  }
-
-  revalidatePath('/reports/transport');
-  return { data };
 }
 
 export async function deleteHistoricalRecord(type: 'shift' | 'transport', id: string) {
-  const supabase = await createClient();
+  try {
+    const supabase = await createClient();
 
-  let error;
-  if (type === 'shift') {
-    const res = await supabase
-      .from('shift_assignments')
-      .delete()
-      .eq('id', id);
-    error = res.error;
-  } else {
-    const res = await supabase
-      .from('transport_requests')
-      .delete()
-      .eq('id', id);
-    error = res.error;
+    let error;
+    if (type === 'shift') {
+      const res = await supabase
+        .from('shift_assignments')
+        .delete()
+        .eq('id', id);
+      error = res.error;
+    } else {
+      const res = await supabase
+        .from('transport_requests')
+        .delete()
+        .eq('id', id);
+      error = res.error;
+    }
+
+    if (error) {
+      console.error(`Error deleting historical ${type}:`, error);
+      return { error: error.message };
+    }
+
+    revalidatePath('/reports/transport');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Unhandled error in deleteHistoricalRecord:', error);
+    return { error: error?.message || 'Ocurrió un error inesperado al eliminar el registro.' };
   }
-
-  if (error) {
-    console.error(`Error deleting historical ${type}:`, error);
-    return { error: error.message };
-  }
-
-  revalidatePath('/reports/transport');
-  return { success: true };
 }
