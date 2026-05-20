@@ -113,19 +113,25 @@ export async function createHistoricalExtraShift(payload: {
   shiftId: string;
   areaId: string;
   positionId: string;
+  observations?: string;
+  forceOverride?: boolean;
 }) {
   const supabase = await createClient();
 
   // Check if there is already an assignment for this personnel on this date
   const { data: existing } = await supabase
     .from('shift_assignments')
-    .select('id')
+    .select('id, shifts(name)')
     .eq('personnel_id', payload.personnelId)
     .eq('date', payload.date)
     .maybeSingle();
 
-  if (existing) {
-    return { error: 'El empleado ya tiene una asignación de turno registrada para esta fecha.' };
+  if (existing && !payload.forceOverride) {
+    // Return a conflict warning instead of blocking error
+    return {
+      conflict: true,
+      conflictMessage: 'El empleado ya tiene una asignación de turno para esta fecha. ¿Deseas registrar el turno extra de todas formas?'
+    };
   }
 
   const { data, error } = await supabase
@@ -140,7 +146,8 @@ export async function createHistoricalExtraShift(payload: {
       is_manual: true,
       is_confirmed: true,
       is_published: true,
-      is_validated: true
+      is_validated: true,
+      override_reason: payload.observations || null
     })
     .select()
     .single();

@@ -52,6 +52,7 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
   const [activeTab, setActiveTab] = useState<'shifts' | 'transport'>('shifts');
   const [history, setHistory] = useState(initialHistory);
   const [saving, setSaving] = useState(false);
+  const [shiftConflict, setShiftConflict] = useState<string | null>(null);
 
   // Extra Shift Form State
   const [shiftForm, setShiftForm] = useState({
@@ -59,7 +60,8 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
     date: '',
     shiftId: '',
     areaId: '',
-    positionId: ''
+    positionId: '',
+    observations: ''
   });
 
   // Own Transport Form State
@@ -75,7 +77,7 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
     }
   };
 
-  const handleSaveShift = async (e: React.FormEvent) => {
+  const handleSaveShift = async (e: React.FormEvent, forceOverride = false) => {
     e.preventDefault();
     if (!shiftForm.personnelId || !shiftForm.date || !shiftForm.shiftId || !shiftForm.areaId || !shiftForm.positionId) {
       toast.error('Todos los campos son obligatorios.');
@@ -83,19 +85,27 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
     }
 
     setSaving(true);
-    const res = await createHistoricalExtraShift(shiftForm);
+    const res = await createHistoricalExtraShift({ ...shiftForm, forceOverride });
     setSaving(false);
 
-    if (res.error) {
+    if ('conflict' in res && res.conflict) {
+      // Show inline conflict warning instead of blocking
+      setShiftConflict(res.conflictMessage ?? 'Conflicto detectado.');
+      return;
+    }
+
+    if ('error' in res && res.error) {
       toast.error(res.error);
     } else {
       toast.success('Turno extra histórico registrado con éxito.');
+      setShiftConflict(null);
       setShiftForm({
         personnelId: '',
         date: '',
         shiftId: '',
         areaId: '',
-        positionId: ''
+        positionId: '',
+        observations: ''
       });
       refreshHistory();
     }
@@ -179,7 +189,7 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
                 </label>
                 <select
                   value={shiftForm.personnelId}
-                  onChange={(e) => setShiftForm({ ...shiftForm, personnelId: e.target.value })}
+                  onChange={(e) => { setShiftForm({ ...shiftForm, personnelId: e.target.value }); setShiftConflict(null); }}
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm"
                   required
                 >
@@ -199,7 +209,7 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
                 <input
                   type="date"
                   value={shiftForm.date}
-                  onChange={(e) => setShiftForm({ ...shiftForm, date: e.target.value })}
+                  onChange={(e) => { setShiftForm({ ...shiftForm, date: e.target.value }); setShiftConflict(null); }}
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm"
                   required
                 />
@@ -260,14 +270,56 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
                 </select>
               </div>
 
-              <button
-                type="submit"
-                disabled={saving}
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-sm uppercase tracking-wider transition-colors disabled:opacity-50"
-              >
-                <Save className="w-4 h-4" />
-                {saving ? 'Guardando...' : 'Guardar Turno Extra'}
-              </button>
+              {/* Observations field */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase flex items-center gap-1">
+                  <FileText className="w-3 h-3" /> Observaciones (opcional)
+                </label>
+                <textarea
+                  value={shiftForm.observations}
+                  onChange={(e) => setShiftForm({ ...shiftForm, observations: e.target.value })}
+                  placeholder="Motivo del turno extra, contexto adicional..."
+                  rows={2}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Conflict warning banner */}
+              {shiftConflict && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3 space-y-2">
+                  <p className="text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                    ⚠️ {shiftConflict}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={(e: any) => handleSaveShift(e, true)}
+                      disabled={saving}
+                      className="flex-1 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-xs uppercase tracking-wider transition-colors disabled:opacity-50"
+                    >
+                      {saving ? 'Guardando...' : 'Sí, registrar de todas formas'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShiftConflict(null)}
+                      className="px-3 py-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg font-bold text-xs uppercase tracking-wider transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!shiftConflict && (
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-sm uppercase tracking-wider transition-colors disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  {saving ? 'Guardando...' : 'Guardar Turno Extra'}
+                </button>
+              )}
             </form>
           ) : (
             <form onSubmit={handleSaveTransport} className="space-y-4">
