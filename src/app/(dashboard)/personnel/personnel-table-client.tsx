@@ -1,19 +1,16 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import { 
-  Plus, 
   Users as UsersIcon, 
   FileSpreadsheet, 
   Edit, 
   ShieldCheck, 
   FileText, 
   Settings2,
-  Download,
   Check,
-  CheckCircle2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,14 +22,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 
 interface Personnel {
@@ -78,6 +67,22 @@ export default function PersonnelTableClient({
   shiftMap,
   canEdit
 }: PersonnelTableClientProps) {
+  const [showColumnPanel, setShowColumnPanel] = useState(false);
+  const columnPanelRef = useRef<HTMLDivElement>(null);
+
+  // Close panel when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (columnPanelRef.current && !columnPanelRef.current.contains(e.target as Node)) {
+        setShowColumnPanel(false);
+      }
+    };
+    if (showColumnPanel) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showColumnPanel]);
+
   // Define available columns
   const columns: ColumnConfig[] = [
     { id: 'fullName', label: 'Nombre Completo', defaultVisible: true },
@@ -213,48 +218,56 @@ export default function PersonnelTableClient({
         </div>
         
         <div className="flex items-center gap-2 self-stretch sm:self-auto">
-          {/* Column Selector Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-background text-slate-600 hover:bg-slate-50 hover:text-orange-600 dark:border-slate-800 dark:text-slate-400 h-9 px-3 gap-1.5 text-xs font-semibold cursor-pointer outline-none">
+          {/* Column Selector - Custom inline panel (no portal) */}
+          <div className="relative" ref={columnPanelRef}>
+            <button
+              onClick={() => setShowColumnPanel(v => !v)}
+              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-background text-slate-600 hover:bg-slate-50 hover:text-orange-600 dark:border-slate-800 dark:text-slate-400 h-9 px-3 gap-1.5 text-xs font-semibold cursor-pointer outline-none transition-colors"
+            >
               <Settings2 className="h-4 w-4" />
               Columnas
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 p-1">
-              <DropdownMenuLabel className="text-xs uppercase font-bold text-slate-400">Ver Columnas</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <div className="max-h-64 overflow-y-auto">
-                {columns.map(c => (
-                  <DropdownMenuCheckboxItem
-                    key={c.id}
-                    checked={visibleColumns[c.id]}
-                    onCheckedChange={() => toggleColumn(c.id)}
-                    className="text-xs cursor-pointer"
+            </button>
+
+            {showColumnPanel && (
+              <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-lg border border-slate-200 bg-white dark:bg-slate-900 dark:border-slate-700 shadow-lg overflow-hidden">
+                <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Ver Columnas</span>
+                </div>
+                <div className="max-h-64 overflow-y-auto py-1">
+                  {columns.map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => toggleColumn(c.id)}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      <span className={`flex h-4 w-4 items-center justify-center rounded border ${
+                        visibleColumns[c.id]
+                          ? 'bg-orange-500 border-orange-500 text-white'
+                          : 'border-slate-300 dark:border-slate-600'
+                      }`}>
+                        {visibleColumns[c.id] && <Check className="h-3 w-3" />}
+                      </span>
+                      <span className="text-slate-700 dark:text-slate-300">{c.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between px-2 py-1.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                  <button
+                    onClick={selectAll}
+                    className="text-[10px] h-7 px-2 font-bold text-slate-600 hover:text-orange-600 rounded transition-colors"
                   >
-                    {c.label}
-                  </DropdownMenuCheckboxItem>
-                ))}
+                    Todas
+                  </button>
+                  <button
+                    onClick={resetDefault}
+                    className="text-[10px] h-7 px-2 font-bold text-slate-400 hover:text-slate-600 rounded transition-colors"
+                  >
+                    Predeterminado
+                  </button>
+                </div>
               </div>
-              <DropdownMenuSeparator />
-              <div className="flex items-center justify-between p-1">
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={selectAll} 
-                  className="text-[10px] h-7 px-2 font-bold"
-                >
-                  Todas
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={resetDefault} 
-                  className="text-[10px] h-7 px-2 font-bold text-slate-500"
-                >
-                  Predeterminado
-                </Button>
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            )}
+          </div>
 
           {/* Export to Excel Button */}
           <Button
