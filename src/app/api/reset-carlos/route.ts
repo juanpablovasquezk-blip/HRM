@@ -9,39 +9,53 @@ export async function GET() {
     const adminClient = createAdminClient();
     const supabase = await createClient();
 
-    // 1. Find Carlos Tobar's user_id in the database to be absolutely sure
+    // 1. Get personnel record
     const { data: personnel, error: personnelError } = await supabase
       .from('personnel')
-      .select('user_id, rut')
+      .select('user_id, rut, first_name, last_name_father, is_active')
       .eq('email', 'ctobar@minerquim.cl')
       .maybeSingle();
 
     if (personnelError) {
-      throw new Error(`Error buscando personal: ${personnelError.message}`);
+      throw new Error(`Error personnel: ${personnelError.message}`);
     }
     if (!personnel) {
-      throw new Error('No se encontró a Carlos Tobar en la tabla de personal.');
-    }
-    if (!personnel.user_id) {
-      throw new Error('Carlos Tobar no tiene un usuario de autenticación vinculado.');
+      throw new Error('No se encontró a Carlos Tobar en personnel.');
     }
 
-    const cleanRut = personnel.rut.replace(/[.-]/g, '').toUpperCase(); // '102730836'
+    const cleanRut = personnel.rut.replace(/[.-]/g, '').toUpperCase();
 
-    // 2. Update password in Supabase Auth on production
-    const { data: authData, error: authError } = await adminClient.auth.admin.updateUserById(
-      personnel.user_id,
-      { password: cleanRut }
+    // 2. Get auth user details via admin API
+    const { data: { user: authUser }, error: authError } = await adminClient.auth.admin.getUserById(
+      personnel.user_id || '8df2d2a6-e267-4430-b14a-b591cc2cb991'
     );
 
     if (authError) {
-      throw new Error(`Error en Supabase Auth: ${authError.message}`);
+      throw new Error(`Error Auth GetUser: ${authError.message}`);
+    }
+    if (!authUser) {
+      throw new Error('No se encontró el usuario en Supabase Auth.');
     }
 
     return NextResponse.json({
       success: true,
-      message: `Contraseña para ctobar@minerquim.cl restablecida con éxito al RUT limpio: ${cleanRut}`,
-      userId: personnel.user_id
+      personnelRecord: {
+        first_name: personnel.first_name,
+        last_name_father: personnel.last_name_father,
+        rut: personnel.rut,
+        cleanRut: cleanRut,
+        is_active: personnel.is_active,
+        user_id: personnel.user_id
+      },
+      authUser: {
+        id: authUser.id,
+        email: authUser.email,
+        email_confirmed_at: authUser.email_confirmed_at,
+        last_sign_in_at: authUser.last_sign_in_at,
+        banned_until: authUser.banned_until,
+        user_metadata: authUser.user_metadata,
+        app_metadata: authUser.app_metadata
+      }
     });
   } catch (err: any) {
     return NextResponse.json({
