@@ -2,22 +2,11 @@ import Link from 'next/link';
 export const dynamic = 'force-dynamic';
 import { createClient } from '@/lib/supabase/server';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Plus, Users as UsersIcon, FileSpreadsheet, Edit, AlertTriangle, CheckCircle2, Clock, ClipboardCheck, ShieldCheck, FileText } from 'lucide-react';
+import { Plus, FileSpreadsheet } from 'lucide-react';
 import { PersonnelFilters } from './personnel-filters';
-import { differenceInDays, parseISO } from 'date-fns';
 import { hasPermission } from '@/lib/auth/roles';
-import { Role } from '@/types/database';
+import PersonnelTableClient from './personnel-table-client';
 
 export default async function PersonnelPage({
   searchParams,
@@ -137,134 +126,15 @@ export default async function PersonnelPage({
           />
         </CardHeader>
         <CardContent className="p-0">
-          {personnel && personnel.length > 0 ? (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>RUT</TableHead>
-                    <TableHead>Cargo</TableHead>
-                    <TableHead>Empresa</TableHead>
-                    <TableHead>Planificación</TableHead>
-                    <TableHead>Preferencias</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {personnel.map((p) => {
-                    const person = p as {
-                      id: string;
-                      first_name: string;
-                      last_name_father: string;
-                      last_name_mother: string;
-                      rut: string;
-                      main_position: string;
-                      phone: string | null;
-                      prefers_night: boolean;
-                      avoids_night: boolean;
-                      company: { name: string } | null;
-                      rotation_pattern: string | null;
-                      fixed_shift_id: string | null;
-                      user_id: string | null;
-                      documents: Array<{ definition_id: string; expiration_date: string | null; status: string }>;
-                    };
-
-                    // Compliance Calculation (Simplified until tables are fixed)
-                    const complianceStatus: 'critical' | 'warning' | 'review' | 'ok' = 'ok';
-                    const uploadedIds: string[] = [];
-
-                    return (
-                    <TableRow key={person.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <TableCell>
-                        <div className="flex flex-col gap-0.5">
-                          <Link
-                            href={`/personnel/${person.id}`}
-                            className="font-medium text-orange-600 hover:text-orange-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1.5"
-                          >
-                            {person.first_name} {person.last_name_father} {person.last_name_mother}
-                            {person.user_id && (
-                              <ShieldCheck className="h-3.5 w-3.5 text-blue-500 fill-blue-50" />
-                            )}
-                          </Link>
-                          <div className="flex gap-1">
-                            {/* Status messages hidden during debug */}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {person.rut}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className="font-normal">
-                          {positionMap[person.main_position] || person.main_position}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {person.company?.name || '—'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-1">
-                          <Badge variant="outline" className="w-fit text-[10px] font-semibold bg-orange-50/50 text-orange-700 border-orange-200">
-                            {person.rotation_pattern === '5x2' ? '5x2 Rotativo' : 
-                             person.rotation_pattern === '7x7' ? '7x7 Canes' : 
-                             person.rotation_pattern === '4x4_noche' ? '4x4 Noche' : 
-                             person.rotation_pattern || 'Estándar'}
-                          </Badge>
-                          {person.fixed_shift_id && (
-                            <div className="text-[10px] text-slate-500 italic">
-                              Turno: {shiftMap[person.fixed_shift_id] || 'Fijo'}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          {person.prefers_night && (
-                            <Badge className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 text-[10px]">
-                              Noche
-                            </Badge>
-                          )}
-                          {person.avoids_night && (
-                            <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 text-[10px]">
-                              No Noche
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {canEdit ? (
-                          <Link href={`/personnel/${person.id}/edit`}>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
-                               <Edit className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                        ) : (
-                          <Link href={`/personnel/${person.id}`}>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
-                               <FileText className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-800 mb-4">
-                <UsersIcon className="h-7 w-7 text-muted-foreground" />
-              </div>
-              <p className="text-muted-foreground text-sm">
-                No se encontró personal. Comienza agregando a tu primer trabajador.
-              </p>
-            </div>
-          )}
+          <PersonnelTableClient 
+            personnel={personnel as any} 
+            positionMap={positionMap} 
+            shiftMap={shiftMap}
+            canEdit={canEdit}
+          />
         </CardContent>
       </Card>
     </div>
   );
 }
+
