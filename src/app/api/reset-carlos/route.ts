@@ -9,53 +9,48 @@ export async function GET() {
     const adminClient = createAdminClient();
     const supabase = await createClient();
 
-    // 1. Get personnel record
-    const { data: personnel, error: personnelError } = await supabase
-      .from('personnel')
-      .select('user_id, rut, first_name, last_name_father, is_active')
-      .eq('email', 'ctobar@minerquim.cl')
-      .maybeSingle();
+    const userId = '8df2d2a6-e267-4430-b14a-b591cc2cb991'; // Carlos Tobar's auth user ID
+    const correctEmail = 'ctobar@minerquim.cl';
+    const cleanRut = '102730836';
 
-    if (personnelError) {
-      throw new Error(`Error personnel: ${personnelError.message}`);
-    }
-    if (!personnel) {
-      throw new Error('No se encontró a Carlos Tobar en personnel.');
-    }
+    console.log(`Correcting email to ${correctEmail} and password to ${cleanRut} for user ${userId}...`);
 
-    const cleanRut = personnel.rut.replace(/[.-]/g, '').toUpperCase();
-
-    // 2. Get auth user details via admin API
-    const { data: { user: authUser }, error: authError } = await adminClient.auth.admin.getUserById(
-      personnel.user_id || '8df2d2a6-e267-4430-b14a-b591cc2cb991'
+    // 1. Update email and password in Supabase Auth using admin client
+    const { data: authUser, error: authError } = await adminClient.auth.admin.updateUserById(
+      userId,
+      { 
+        email: correctEmail,
+        password: cleanRut,
+        email_confirm: true // Ensure email is marked as confirmed
+      }
     );
 
     if (authError) {
-      throw new Error(`Error Auth GetUser: ${authError.message}`);
+      throw new Error(`Error en Supabase Auth al actualizar: ${authError.message}`);
     }
-    if (!authUser) {
-      throw new Error('No se encontró el usuario en Supabase Auth.');
-    }
+
+    // 2. Double check and update public.users just in case
+    const { error: profileError } = await supabase
+      .from('users')
+      .update({ email: correctEmail })
+      .eq('id', userId);
+
+    // 3. Double check and update personnel just in case
+    const { error: personnelError } = await supabase
+      .from('personnel')
+      .update({ email: correctEmail })
+      .eq('user_id', userId);
 
     return NextResponse.json({
       success: true,
-      personnelRecord: {
-        first_name: personnel.first_name,
-        last_name_father: personnel.last_name_father,
-        rut: personnel.rut,
-        cleanRut: cleanRut,
-        is_active: personnel.is_active,
-        user_id: personnel.user_id
+      message: `El correo de Carlos Tobar en Supabase Auth ha sido corregido a: ${correctEmail} y su contraseña restablecida al RUT: ${cleanRut}`,
+      updatedUser: {
+        id: authUser.user?.id,
+        email: authUser.user?.email,
+        email_confirmed_at: authUser.user?.email_confirmed_at
       },
-      authUser: {
-        id: authUser.id,
-        email: authUser.email,
-        email_confirmed_at: authUser.email_confirmed_at,
-        last_sign_in_at: authUser.last_sign_in_at,
-        banned_until: authUser.banned_until,
-        user_metadata: authUser.user_metadata,
-        app_metadata: authUser.app_metadata
-      }
+      profileError: profileError ? profileError.message : null,
+      personnelError: personnelError ? personnelError.message : null
     });
   } catch (err: any) {
     return NextResponse.json({
