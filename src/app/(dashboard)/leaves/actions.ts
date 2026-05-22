@@ -1,23 +1,62 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { partialRecalculate } from '@/lib/scheduler';
 
 export async function requestLeave(formData: FormData) {
   const supabase = await createClient();
 
+  const personnelId = formData.get('personnel_id') as string;
+  const type = formData.get('type') as string;
+  const startDate = formData.get('start_date') as string;
+  const endDate = formData.get('end_date') as string;
+  const reason = (formData.get('reason') as string) || null;
+  const status = (formData.get('status') as string) || 'pending';
+
   const { error } = await supabase.from('leaves').insert({
-    personnel_id: formData.get('personnel_id') as string,
-    type: formData.get('type') as string,
-    start_date: formData.get('start_date') as string,
-    end_date: formData.get('end_date') as string,
-    reason: (formData.get('reason') as string) || null,
-    status: (formData.get('status') as string) || 'pending',
+    personnel_id: personnelId,
+    type,
+    start_date: startDate,
+    end_date: endDate,
+    reason,
+    status,
   });
 
   if (error) return { success: false, error: error.message };
+
+  if (status === 'approved') {
+    const supabaseAdmin = createAdminClient();
+    // Delete conflicting shift assignments
+    const { error: asgErr } = await supabaseAdmin
+      .from('shift_assignments')
+      .delete()
+      .eq('personnel_id', personnelId)
+      .gte('date', startDate)
+      .lte('date', endDate);
+
+    if (asgErr) {
+      console.error('[LEAVE-APPROVAL] Error deleting shift assignments:', asgErr);
+    }
+
+    // Delete conflicting transport requests
+    const { error: trErr } = await supabaseAdmin
+      .from('transport_requests')
+      .delete()
+      .eq('personnel_id', personnelId)
+      .gte('date', startDate)
+      .lte('date', endDate);
+
+    if (trErr) {
+      console.error('[LEAVE-APPROVAL] Error deleting transport requests:', trErr);
+    }
+  }
+
   revalidatePath('/leaves');
+  revalidatePath('/shifts/assignments');
+  revalidatePath('/shifts/roster');
+  revalidatePath('/dashboard');
   return { success: true, error: null };
 }
 
@@ -44,6 +83,31 @@ export async function approveLeave(leaveId: string) {
 
   if (error) return { success: false, error: error.message };
 
+  const supabaseAdmin = createAdminClient();
+  // Delete conflicting shift assignments
+  const { error: asgErr } = await supabaseAdmin
+    .from('shift_assignments')
+    .delete()
+    .eq('personnel_id', leave.personnel_id)
+    .gte('date', leave.start_date)
+    .lte('date', leave.end_date);
+
+  if (asgErr) {
+    console.error('[LEAVE-APPROVAL] Error deleting shift assignments:', asgErr);
+  }
+
+  // Delete conflicting transport requests
+  const { error: trErr } = await supabaseAdmin
+    .from('transport_requests')
+    .delete()
+    .eq('personnel_id', leave.personnel_id)
+    .gte('date', leave.start_date)
+    .lte('date', leave.end_date);
+
+  if (trErr) {
+    console.error('[LEAVE-APPROVAL] Error deleting transport requests:', trErr);
+  }
+
   // Trigger partial recalculation for sick leave
   if (leave.type === 'sick') {
     try {
@@ -60,6 +124,7 @@ export async function approveLeave(leaveId: string) {
 
   revalidatePath('/leaves');
   revalidatePath('/shifts/assignments');
+  revalidatePath('/shifts/roster');
   revalidatePath('/dashboard');
   return { success: true, error: null };
 }
@@ -75,12 +140,46 @@ export async function updateLeave(id: string, formData: FormData) {
     status: (formData.get('status') as string) || 'pending',
   };
 
+  // Get current leave details to know the personnel_id before update
+  const { data: oldLeave } = await supabase
+    .from('leaves')
+    .select('personnel_id')
+    .eq('id', id)
+    .single();
+
   const { error } = await supabase
     .from('leaves')
     .update(updateData)
     .eq('id', id);
 
   if (error) return { success: false, error: error.message };
+
+  if (updateData.status === 'approved' && oldLeave) {
+    const supabaseAdmin = createAdminClient();
+    // Delete conflicting shift assignments
+    const { error: asgErr } = await supabaseAdmin
+      .from('shift_assignments')
+      .delete()
+      .eq('personnel_id', oldLeave.personnel_id)
+      .gte('date', updateData.start_date)
+      .lte('date', updateData.end_date);
+
+    if (asgErr) {
+      console.error('[LEAVE-UPDATE] Error deleting shift assignments:', asgErr);
+    }
+
+    // Delete conflicting transport requests
+    const { error: trErr } = await supabaseAdmin
+      .from('transport_requests')
+      .delete()
+      .eq('personnel_id', oldLeave.personnel_id)
+      .gte('date', updateData.start_date)
+      .lte('date', updateData.end_date);
+
+    if (trErr) {
+      console.error('[LEAVE-UPDATE] Error deleting transport requests:', trErr);
+    }
+  }
 
   if (updateData.type === 'sick' && updateData.status === 'approved') {
     try {
@@ -100,6 +199,7 @@ export async function updateLeave(id: string, formData: FormData) {
   }
 
   revalidatePath('/leaves');
+  revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
   revalidatePath('/dashboard');
   return { success: true, error: null };
