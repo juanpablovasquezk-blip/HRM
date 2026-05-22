@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { parseISO, format, addDays, subDays } from 'date-fns';
 import type { ShiftAssignmentWithDetails, PersonnelWithDetails, ShiftRequirementWithDetails, Position, Shift } from '@/types/database';
 import { generateTransportRequests } from '../../transport/actions';
+import { validatePersonnelAvailabilityForDates } from '../actions';
 
 export async function updateAssignmentShift(assignmentId: string, shiftId: string) {
   const supabase = await createClient();
@@ -86,7 +87,10 @@ export async function getAvailableForExtra(date: string, positionId: string) {
     ...(busyLeaves || []).map(l => l.personnel_id)
   ]);
 
-  const available = (personnel || []).filter(p => !busyIds.has(p.id));
+  const available = (personnel || []).filter(p => {
+    if (p.termination_date && date > p.termination_date) return false;
+    return !busyIds.has(p.id);
+  });
 
   // 3. FATIGUE CHECK: For each available person, check adjacent days
   const yesterday = format(subDays(parseISO(date), 1), 'yyyy-MM-dd');
@@ -192,6 +196,12 @@ export async function assignExtraPersonnel(
   personnelId: string
 ) {
   const supabase = await createClient();
+
+  // Validate personnel availability
+  const validation = await validatePersonnelAvailabilityForDates(personnelId, [date]);
+  if (!validation.success) {
+    return { success: false, error: validation.error };
+  }
 
   const { error } = await supabase.from('shift_assignments').insert({
     date,

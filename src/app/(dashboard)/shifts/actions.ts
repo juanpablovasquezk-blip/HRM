@@ -355,6 +355,69 @@ export async function listAssignments(startDate: string, endDate: string, areaId
   return { data: data || [], error: error?.message || null };
 }
 
+export async function validatePersonnelAvailabilityForDates(
+  personnelId: string,
+  dates: string[]
+): Promise<{ success: boolean; error: string | null }> {
+  const supabase = await createClient();
+
+  const { data: personnel, error: pErr } = await supabase
+    .from('personnel')
+    .select('first_name, last_name_father, is_active, termination_date')
+    .eq('id', personnelId)
+    .single();
+
+  if (pErr || !personnel) {
+    return { success: false, error: 'Trabajador no encontrado' };
+  }
+
+  const fullName = `${personnel.first_name} ${personnel.last_name_father}`;
+
+  if (!personnel.is_active) {
+    return { 
+      success: false, 
+      error: `El trabajador ${fullName} está inactivo y no puede ser asignado.` 
+    };
+  }
+
+  if (personnel.termination_date) {
+    for (const date of dates) {
+      if (date > personnel.termination_date) {
+        return { 
+          success: false, 
+          error: `El trabajador ${fullName} está de baja desde el ${personnel.termination_date} y no puede ser asignado el ${date}.` 
+        };
+      }
+    }
+  }
+
+  const { data: leaves, error: lErr } = await supabase
+    .from('leaves')
+    .select('start_date, end_date, type')
+    .eq('personnel_id', personnelId)
+    .eq('status', 'approved');
+
+  if (lErr) {
+    return { success: false, error: 'Error al consultar licencias/vacaciones' };
+  }
+
+  if (leaves && leaves.length > 0) {
+    for (const date of dates) {
+      for (const leave of leaves) {
+        if (date >= leave.start_date && date <= leave.end_date) {
+          const leaveTypeLabel = leave.type === 'sick' ? 'licencia médica' : 'vacaciones';
+          return {
+            success: false,
+            error: `El trabajador ${fullName} tiene ${leaveTypeLabel} aprobada del ${leave.start_date} al ${leave.end_date} y no puede ser asignado el ${date}.`
+          };
+        }
+      }
+    }
+  }
+
+  return { success: true, error: null };
+}
+
 export async function createManualAssignment(formData: FormData) {
   const supabase = await createClient();
   const personnelId = formData.get('personnel_id') as string;
@@ -365,6 +428,12 @@ export async function createManualAssignment(formData: FormData) {
 
   // Support multiple dates if comma separated (from multi-selection)
   const dates = dateInput.includes(',') ? dateInput.split(',') : [dateInput];
+
+  // Validate personnel availability
+  const validation = await validatePersonnelAvailabilityForDates(personnelId, dates);
+  if (!validation.success) {
+    return { success: false, error: validation.error };
+  }
 
   const inserts = dates.map(date => ({
     personnel_id: personnelId,
@@ -460,6 +529,12 @@ export async function moveAssignment(assignmentId: string, newDate: string, reas
     .single();
 
   if (!current) return { success: false, error: 'Turno no encontrado' };
+
+  // Validate personnel availability for the new date
+  const validation = await validatePersonnelAvailabilityForDates(current.personnel_id, [newDate]);
+  if (!validation.success) {
+    return { success: false, error: validation.error };
+  }
 
   // Update
   const { error } = await supabase

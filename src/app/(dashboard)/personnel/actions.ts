@@ -5,6 +5,17 @@ import { revalidatePath } from 'next/cache';
 import type { Personnel } from '@/types/database';
 import { createAdminClient } from '@/lib/supabase/admin';
 
+function safeRevalidatePath(path: string) {
+  try {
+    revalidatePath(path);
+  } catch (error: any) {
+    if (error && error.message && error.message.includes('static generation store')) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function listPersonnel(
   search?: string,
   companyId?: string,
@@ -99,7 +110,6 @@ export async function createPersonnel(
     hire_date: (formData.get('hire_date') as string) || null,
     termination_date: (formData.get('termination_date') as string) || null,
     has_special_contract: formData.get('has_special_contract') === 'true',
-    requires_transport: formData.get('requires_transport') === 'true',
     is_active: formData.get('is_active') === 'true',
     address: {
       street: (formData.get('address_street') as string) || '',
@@ -124,7 +134,7 @@ export async function createPersonnel(
     await enablePersonnelAccess(person.id, personnelData.email, role);
   }
 
-  revalidatePath('/personnel');
+  safeRevalidatePath('/personnel');
   return { success: true, error: null };
 }
 
@@ -155,7 +165,6 @@ export async function updatePersonnel(
     hire_date: (formData.get('hire_date') as string) || null,
     termination_date: (formData.get('termination_date') as string) || null,
     has_special_contract: formData.get('has_special_contract') === 'true',
-    requires_transport: formData.get('requires_transport') === 'true',
     is_active: formData.get('is_active') === 'true',
     address: {
       street: (formData.get('address_street') as string) || '',
@@ -208,8 +217,35 @@ export async function updatePersonnel(
     }
   }
 
-  revalidatePath('/personnel');
-  revalidatePath(`/personnel/${id}`);
+  // Clean up shift assignments and transport requests if deactivated or terminated
+  if (!updateData.is_active || updateData.termination_date) {
+    try {
+      const adminClient = createAdminClient();
+      let deleteQuery = adminClient.from('shift_assignments').delete().eq('personnel_id', id);
+      let transportQuery = adminClient.from('transport_requests').delete().eq('personnel_id', id);
+
+      if (!updateData.is_active) {
+        // Deactivated: delete starting from today (local time YYYY-MM-DD)
+        const todayStr = new Date().toLocaleDateString('sv');
+        deleteQuery = deleteQuery.gte('date', todayStr);
+        transportQuery = transportQuery.gte('date', todayStr);
+      } else if (updateData.termination_date) {
+        // Terminated: delete starting strictly after termination date
+        deleteQuery = deleteQuery.gt('date', updateData.termination_date);
+        transportQuery = transportQuery.gt('date', updateData.termination_date);
+      }
+
+      await Promise.all([deleteQuery, transportQuery]);
+    } catch (cleanError) {
+      console.error('[PERSONNEL-UPDATE] Error cleaning up assignments/transport:', cleanError);
+    }
+  }
+
+  safeRevalidatePath('/personnel');
+  safeRevalidatePath(`/personnel/${id}`);
+  safeRevalidatePath('/shifts/assignments');
+  safeRevalidatePath('/shifts/roster');
+  safeRevalidatePath('/dashboard');
   return { success: true, error: null };
 }
 
@@ -226,6 +262,18 @@ export async function deletePersonnel(
 
   if (error) return { success: false, error: error.message };
 
+  // Clean up future shift assignments and transport requests starting from today
+  try {
+    const adminClient = createAdminClient();
+    const todayStr = new Date().toLocaleDateString('sv');
+    await Promise.all([
+      adminClient.from('shift_assignments').delete().eq('personnel_id', id).gte('date', todayStr),
+      adminClient.from('transport_requests').delete().eq('personnel_id', id).gte('date', todayStr)
+    ]);
+  } catch (cleanError) {
+    console.error('[PERSONNEL-DELETE] Error cleaning up assignments/transport:', cleanError);
+  }
+
   // 1. Get user_id if exists
   const { data: person } = await supabase.from('personnel').select('user_id').eq('id', id).single();
   
@@ -238,7 +286,10 @@ export async function deletePersonnel(
     }
   }
 
-  revalidatePath('/personnel');
+  safeRevalidatePath('/personnel');
+  safeRevalidatePath('/shifts/assignments');
+  safeRevalidatePath('/shifts/roster');
+  safeRevalidatePath('/dashboard');
   return { success: true, error: null };
 }
 
@@ -288,7 +339,7 @@ export async function bulkImportPersonnel(
 
   if (error) return { imported: 0, error: error.message };
 
-  revalidatePath('/personnel');
+  safeRevalidatePath('/personnel');
   return { imported: personnelToInsert.length, error: null };
 }
 
@@ -310,7 +361,7 @@ export async function updateDocumentStatus(
 
   if (error) return { success: false, error: error.message };
 
-  revalidatePath('/personnel');
+  safeRevalidatePath('/personnel');
   // We don't have the personnel ID here easily to revalidate specific path, 
   // but revalidatePath with a layout or the whole folder works.
   return { success: true, error: null };
@@ -376,8 +427,8 @@ export async function enablePersonnelAccess(
       console.warn('Warning: Profile record not created, but Auth user exists:', profileError.message);
     }
 
-    revalidatePath('/personnel');
-    revalidatePath(`/personnel/${personnelId}`);
+    safeRevalidatePath('/personnel');
+    safeRevalidatePath(`/personnel/${personnelId}`);
     return { success: true, error: null };
   } catch (error: any) {
     console.error('Error enabling access:', error);

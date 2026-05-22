@@ -70,7 +70,7 @@ export async function generateSchedule(
   const { data: rawRequirements } = await reqQuery;
   dbLogs.push(`[DEBUG] Requerimientos cargados: ${rawRequirements?.length || 0}`);
 
-  const { data: personnelRaw } = await supabase.from('personnel').select('*');
+  const { data: personnelRaw } = await supabase.from('personnel').select('*').eq('is_active', true);
   const { data: positions } = await supabase.from('positions').select('*');
   
   // 1. Intentar por ID exacto
