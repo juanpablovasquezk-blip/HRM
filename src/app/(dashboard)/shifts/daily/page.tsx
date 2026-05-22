@@ -1,10 +1,10 @@
-'use server';
-
 import { createClient } from '@/lib/supabase/server';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import DailyPlanningClient from './daily-planning-client';
 import { getDailyOperationalData } from './actions';
+
+export const dynamic = 'force-dynamic';
 
 export default async function DailyPlanningPage(props: {
   searchParams: Promise<{ date?: string }>;

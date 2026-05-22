@@ -3,6 +3,8 @@ import { getTransportRequests } from './actions';
 import TransportClient from './transport-client';
 import { createClient } from '@/lib/supabase/server';
 
+export const dynamic = 'force-dynamic';
+
 export default async function TransportPage(props: {
   searchParams: Promise<{ date?: string }>;
 }) {

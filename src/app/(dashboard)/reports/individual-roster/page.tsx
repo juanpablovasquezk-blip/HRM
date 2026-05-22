@@ -2,6 +2,8 @@ import { listPersonnel } from '@/app/(dashboard)/personnel/actions';
 import { IndividualRosterClient } from '@/app/(dashboard)/reports/individual-roster/individual-roster-client';
 import { createClient } from '@/lib/supabase/server';
 
+export const dynamic = 'force-dynamic';
+
 export default async function IndividualRosterPage() {
   const supabase = await createClient();
   const [{ data: personnel }, { data: areas }, { data: positions }] = await Promise.all([

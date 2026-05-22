@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import TransportReportClient from './transport-report-client';
 
+export const dynamic = 'force-dynamic';
+
 export default async function TransportReportPage() {
   const supabase = await createClient();
   

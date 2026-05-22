@@ -15,6 +15,8 @@ import { CalendarDays, Lock, Hand, Snowflake, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AssignmentsPage() {
   const supabase = await createClient();
 

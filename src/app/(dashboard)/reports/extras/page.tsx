@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+export const dynamic = 'force-dynamic';
 import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
