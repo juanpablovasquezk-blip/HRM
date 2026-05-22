@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { parseISO, format, addDays, subDays } from 'date-fns';
 import type { ShiftAssignmentWithDetails, PersonnelWithDetails, ShiftRequirementWithDetails, Position, Shift } from '@/types/database';
@@ -8,7 +9,7 @@ import { generateTransportRequests } from '../../transport/actions';
 import { validatePersonnelAvailabilityForDates } from '../actions';
 
 export async function updateAssignmentShift(assignmentId: string, shiftId: string) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { error } = await supabase
     .from('shift_assignments')
     .update({ 
@@ -143,7 +144,7 @@ export async function getAvailableForExtra(date: string, positionId: string) {
  * Add an extra requirement for a specific day
  */
 export async function addExtraRequirement(formData: FormData) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   
   const date = formData.get('date') as string;
   const shiftId = formData.get('shift_id') as string;
@@ -195,7 +196,7 @@ export async function assignExtraPersonnel(
   positionId: string,
   personnelId: string
 ) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   // Validate personnel availability
   const validation = await validatePersonnelAvailabilityForDates(personnelId, [date]);
@@ -224,7 +225,7 @@ export async function assignExtraPersonnel(
  * Confirm the daily plan (sets is_confirmed = true for all assignments of that day)
  */
 export async function confirmDailyPlan(date: string) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { error } = await supabase
     .from('shift_assignments')
@@ -243,7 +244,7 @@ export async function confirmDailyPlan(date: string) {
  * Cancel an assignment (mark as cancelled instead of deleting)
  */
 export async function cancelAssignment(id: string) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { error } = await supabase
     .from('shift_assignments')
     .update({ status: 'cancelled' })
@@ -255,7 +256,7 @@ export async function cancelAssignment(id: string) {
 }
 
 export async function resetDailyPlan(date: string) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   // 1. Remove all extra assignments for this day
   await supabase
@@ -290,7 +291,7 @@ export async function resetDailyPlan(date: string) {
 }
 
 export async function confirmPlan(date: string) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   
   // Mark all active assignments for this day as confirmed
   const { error } = await supabase

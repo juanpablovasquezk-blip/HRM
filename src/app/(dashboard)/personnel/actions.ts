@@ -118,6 +118,11 @@ export async function createPersonnel(
     },
   };
 
+  const todayStr = new Date().toLocaleDateString('sv');
+  if (personnelData.termination_date && personnelData.termination_date <= todayStr) {
+    personnelData.is_active = false;
+  }
+
   const { data: person, error: insertError } = await supabase.from('personnel').insert(personnelData).select('id').single();
   if (insertError) return { success: false, error: insertError.message };
 
@@ -173,6 +178,11 @@ export async function updatePersonnel(
     },
   };
 
+  const todayStr = new Date().toLocaleDateString('sv');
+  if (updateData.termination_date && updateData.termination_date <= todayStr) {
+    updateData.is_active = false;
+  }
+
   // Check previous state for user ban logic
   const { data: previousPerson } = await supabase.from('personnel').select('user_id, is_active').eq('id', id).single();
 
@@ -221,21 +231,21 @@ export async function updatePersonnel(
   if (!updateData.is_active || updateData.termination_date) {
     try {
       const adminClient = createAdminClient();
-      let deleteQuery = adminClient.from('shift_assignments').delete().eq('personnel_id', id);
+      let shiftQuery = adminClient.from('shift_assignments').update({ status: 'cancelled' }).eq('personnel_id', id);
       let transportQuery = adminClient.from('transport_requests').delete().eq('personnel_id', id);
 
       if (!updateData.is_active) {
-        // Deactivated: delete starting from today (local time YYYY-MM-DD)
+        // Deactivated: cancel starting from today (local time YYYY-MM-DD)
         const todayStr = new Date().toLocaleDateString('sv');
-        deleteQuery = deleteQuery.gte('date', todayStr);
+        shiftQuery = shiftQuery.gte('date', todayStr);
         transportQuery = transportQuery.gte('date', todayStr);
       } else if (updateData.termination_date) {
-        // Terminated: delete starting strictly after termination date
-        deleteQuery = deleteQuery.gt('date', updateData.termination_date);
+        // Terminated: cancel starting strictly after termination date
+        shiftQuery = shiftQuery.gt('date', updateData.termination_date);
         transportQuery = transportQuery.gt('date', updateData.termination_date);
       }
 
-      await Promise.all([deleteQuery, transportQuery]);
+      await Promise.all([shiftQuery, transportQuery]);
     } catch (cleanError) {
       console.error('[PERSONNEL-UPDATE] Error cleaning up assignments/transport:', cleanError);
     }
@@ -267,7 +277,7 @@ export async function deletePersonnel(
     const adminClient = createAdminClient();
     const todayStr = new Date().toLocaleDateString('sv');
     await Promise.all([
-      adminClient.from('shift_assignments').delete().eq('personnel_id', id).gte('date', todayStr),
+      adminClient.from('shift_assignments').update({ status: 'cancelled' }).eq('personnel_id', id).gte('date', todayStr),
       adminClient.from('transport_requests').delete().eq('personnel_id', id).gte('date', todayStr)
     ]);
   } catch (cleanError) {

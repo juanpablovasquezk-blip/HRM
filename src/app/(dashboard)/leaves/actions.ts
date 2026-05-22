@@ -6,7 +6,7 @@ import { revalidatePath } from 'next/cache';
 import { partialRecalculate } from '@/lib/scheduler';
 
 export async function requestLeave(formData: FormData) {
-  const supabase = await createClient();
+  const supabaseAdmin = createAdminClient();
 
   const personnelId = formData.get('personnel_id') as string;
   const type = formData.get('type') as string;
@@ -15,7 +15,7 @@ export async function requestLeave(formData: FormData) {
   const reason = (formData.get('reason') as string) || null;
   const status = (formData.get('status') as string) || 'pending';
 
-  const { error } = await supabase.from('leaves').insert({
+  const { error } = await supabaseAdmin.from('leaves').insert({
     personnel_id: personnelId,
     type,
     start_date: startDate,
@@ -28,16 +28,16 @@ export async function requestLeave(formData: FormData) {
 
   if (status === 'approved') {
     const supabaseAdmin = createAdminClient();
-    // Delete conflicting shift assignments
+    // Update conflicting shift assignments to cancelled
     const { error: asgErr } = await supabaseAdmin
       .from('shift_assignments')
-      .delete()
+      .update({ status: 'cancelled' })
       .eq('personnel_id', personnelId)
       .gte('date', startDate)
       .lte('date', endDate);
 
     if (asgErr) {
-      console.error('[LEAVE-APPROVAL] Error deleting shift assignments:', asgErr);
+      console.error('[LEAVE-APPROVAL] Error cancelling shift assignments:', asgErr);
     }
 
     // Delete conflicting transport requests
@@ -64,7 +64,9 @@ export async function approveLeave(leaveId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { data: leave, error: fetchError } = await supabase
+  const supabaseAdmin = createAdminClient();
+
+  const { data: leave, error: fetchError } = await supabaseAdmin
     .from('leaves')
     .select('*')
     .eq('id', leaveId)
@@ -72,7 +74,7 @@ export async function approveLeave(leaveId: string) {
 
   if (fetchError || !leave) return { success: false, error: 'Leave not found' };
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from('leaves')
     .update({
       status: 'approved',
@@ -83,17 +85,16 @@ export async function approveLeave(leaveId: string) {
 
   if (error) return { success: false, error: error.message };
 
-  const supabaseAdmin = createAdminClient();
-  // Delete conflicting shift assignments
+  // Update conflicting shift assignments to cancelled
   const { error: asgErr } = await supabaseAdmin
     .from('shift_assignments')
-    .delete()
+    .update({ status: 'cancelled' })
     .eq('personnel_id', leave.personnel_id)
     .gte('date', leave.start_date)
     .lte('date', leave.end_date);
 
   if (asgErr) {
-    console.error('[LEAVE-APPROVAL] Error deleting shift assignments:', asgErr);
+    console.error('[LEAVE-APPROVAL] Error cancelling shift assignments:', asgErr);
   }
 
   // Delete conflicting transport requests
@@ -130,7 +131,7 @@ export async function approveLeave(leaveId: string) {
 }
 
 export async function updateLeave(id: string, formData: FormData) {
-  const supabase = await createClient();
+  const supabaseAdmin = createAdminClient();
 
   const updateData = {
     type: formData.get('type') as string,
@@ -141,13 +142,13 @@ export async function updateLeave(id: string, formData: FormData) {
   };
 
   // Get current leave details to know the personnel_id before update
-  const { data: oldLeave } = await supabase
+  const { data: oldLeave } = await supabaseAdmin
     .from('leaves')
     .select('personnel_id')
     .eq('id', id)
     .single();
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from('leaves')
     .update(updateData)
     .eq('id', id);
@@ -155,17 +156,16 @@ export async function updateLeave(id: string, formData: FormData) {
   if (error) return { success: false, error: error.message };
 
   if (updateData.status === 'approved' && oldLeave) {
-    const supabaseAdmin = createAdminClient();
-    // Delete conflicting shift assignments
+    // Update conflicting shift assignments to cancelled
     const { error: asgErr } = await supabaseAdmin
       .from('shift_assignments')
-      .delete()
+      .update({ status: 'cancelled' })
       .eq('personnel_id', oldLeave.personnel_id)
       .gte('date', updateData.start_date)
       .lte('date', updateData.end_date);
 
     if (asgErr) {
-      console.error('[LEAVE-UPDATE] Error deleting shift assignments:', asgErr);
+      console.error('[LEAVE-UPDATE] Error cancelling shift assignments:', asgErr);
     }
 
     // Delete conflicting transport requests
@@ -184,7 +184,7 @@ export async function updateLeave(id: string, formData: FormData) {
   if (updateData.type === 'sick' && updateData.status === 'approved') {
     try {
       // Re-trigger recalculation
-      const { data: leave } = await supabase.from('leaves').select('personnel_id').eq('id', id).single();
+      const { data: leave } = await supabaseAdmin.from('leaves').select('personnel_id').eq('id', id).single();
       if (leave) {
         await partialRecalculate({
           date_range: [updateData.start_date, updateData.end_date],
@@ -209,7 +209,9 @@ export async function rejectLeave(leaveId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { error } = await supabase
+  const supabaseAdmin = createAdminClient();
+
+  const { error } = await supabaseAdmin
     .from('leaves')
     .update({
       status: 'rejected',
@@ -224,8 +226,8 @@ export async function rejectLeave(leaveId: string) {
 }
 
 export async function deleteLeave(id: string) {
-  const supabase = await createClient();
-  const { error } = await supabase.from('leaves').delete().eq('id', id);
+  const supabaseAdmin = createAdminClient();
+  const { error } = await supabaseAdmin.from('leaves').delete().eq('id', id);
   if (error) return { success: false, error: error.message };
   revalidatePath('/leaves');
   revalidatePath('/dashboard');
