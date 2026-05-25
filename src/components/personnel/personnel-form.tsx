@@ -58,6 +58,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
       fixed_shift_id: personnel?.fixed_shift_id || '',
       hire_date: personnel?.hire_date || '',
       termination_date: personnel?.termination_date || '',
+      company_id: personnel?.company_id || '',
     };
   });
 
@@ -175,19 +176,17 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
           <CardTitle className="text-base">Cargo y Empresa</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {!isEditing && (
-            <div className="space-y-2">
-              <Label htmlFor="company_id">Empresa *</Label>
-              <select id="company_id" name="company_id" required
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                defaultValue="">
-                <option value="">Seleccionar empresa</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div className="space-y-2">
+            <Label htmlFor="company_id">Empresa *</Label>
+            <select id="company_id" name="company_id" required
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              defaultValue={initialValues.company_id}>
+              <option value="">Seleccionar empresa</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
 
           <div className="space-y-2">
             <Label htmlFor="main_position">Cargo Principal</Label>

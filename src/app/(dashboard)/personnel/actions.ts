@@ -153,6 +153,7 @@ export async function updatePersonnel(
   const driverLicenses = formData.get('driver_licenses') as string;
 
   const updateData = {
+    company_id: formData.get('company_id') as string,
     first_name: formData.get('first_name') as string,
     last_name_father: formData.get('last_name_father') as string,
     last_name_mother: (formData.get('last_name_mother') as string) || '',
