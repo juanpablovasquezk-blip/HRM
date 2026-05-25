@@ -279,6 +279,38 @@ export async function resetDailyPlan(date: string) {
     .eq('date', date)
     .eq('is_extra', false);
 
+  // 3.1. Re-cancel assignments for personnel on approved leave today
+  const { data: leaves } = await supabase
+    .from('leaves')
+    .select('personnel_id')
+    .eq('status', 'approved')
+    .lte('start_date', date)
+    .gte('end_date', date);
+
+  if (leaves && leaves.length > 0) {
+    const leavePersonnelIds = leaves.map(l => l.personnel_id);
+    await supabase
+      .from('shift_assignments')
+      .update({ status: 'cancelled' })
+      .eq('date', date)
+      .in('personnel_id', leavePersonnelIds);
+  }
+
+  // 3.2. Re-cancel assignments for personnel deactivated or terminated today or prior
+  const { data: inactivePersonnel } = await supabase
+    .from('personnel')
+    .select('id')
+    .or(`is_active.eq.false,termination_date.lte.${date}`);
+
+  if (inactivePersonnel && inactivePersonnel.length > 0) {
+    const inactivePersonnelIds = inactivePersonnel.map(p => p.id);
+    await supabase
+      .from('shift_assignments')
+      .update({ status: 'cancelled' })
+      .eq('date', date)
+      .in('personnel_id', inactivePersonnelIds);
+  }
+
   // 4. Delete transport requests for this day to allow regeneration
   await supabase
     .from('transport_requests')

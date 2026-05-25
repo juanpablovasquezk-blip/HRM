@@ -336,6 +336,7 @@ export async function materializeTemplates(startDate: string, endDate: string) {
 
   revalidatePath('/shifts/dotacion');
   revalidatePath('/shifts/requirements');
+  revalidatePath('/shifts/daily');
   return { success: true, error: null, count: inserts.length };
 }
 
@@ -483,6 +484,7 @@ export async function createManualAssignment(formData: FormData) {
   
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
   return { success: true, error: null };
 }
 
@@ -494,6 +496,7 @@ export async function validateAssignments(assignmentIds: string[]) {
     .update({ is_validated: true })
     .in('id', assignmentIds);
   revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
   return { success: !error, error: error?.message };
 }
 
@@ -515,6 +518,7 @@ export async function publishAssignments(input: string | string[], endDate?: str
   const { error } = await query;
   revalidatePath('/shifts/roster');
   revalidatePath('/dashboard');
+  revalidatePath('/shifts/daily');
   return { success: !error, error: error?.message };
 }
 
@@ -562,6 +566,7 @@ export async function moveAssignment(assignmentId: string, newDate: string, reas
   }
 
   revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
   return { success: true };
 }
 export async function deleteAssignment(id: string) {
@@ -570,6 +575,7 @@ export async function deleteAssignment(id: string) {
   if (error) return { success: false, error: error.message };
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
   return { success: true, error: null };
 }
 
@@ -588,6 +594,7 @@ export async function bulkDeleteManualAssignments(personnelId: string, dates: st
 
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
   return { success: true, error: null };
 }
 
@@ -603,6 +610,7 @@ export async function bulkDeleteAssignmentsByIds(ids: string[]) {
   
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
   return { success: true };
 }
 // ─── Scheduling Engine Actions ────────────────────────────────────────────────
@@ -693,6 +701,7 @@ export async function runScheduler(startDate: string, endDate: string, areaId?: 
 
     revalidatePath('/shifts/assignments');
     revalidatePath('/shifts/roster');
+    revalidatePath('/shifts/daily');
     
     // Diagnóstico extra para ver qué pasó en el servidor
     console.log(`[Scheduler] Terminado. Cobertura: ${result.coverage}%, Turnos: ${result.count}`);
@@ -724,6 +733,7 @@ export async function runPartialRecalc(input: RecalculationInput) {
     const result = await partialRecalculate(input);
     revalidatePath('/shifts/assignments');
     revalidatePath('/dashboard');
+    revalidatePath('/shifts/daily');
     
     // Diagnóstico extra para ver qué pasó
     console.log(`[Partial Recalc] Terminado. Cobertura: ${result.coverage}%, Turnos: ${result.count}`);
@@ -795,6 +805,7 @@ export async function clearAutoAssignments(
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
   revalidatePath('/dashboard');
+  revalidatePath('/shifts/daily');
   
   return { success: true, error: null };
 }

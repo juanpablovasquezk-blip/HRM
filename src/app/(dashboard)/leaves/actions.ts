@@ -56,6 +56,7 @@ export async function requestLeave(formData: FormData) {
   revalidatePath('/leaves');
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
   revalidatePath('/dashboard');
   return { success: true, error: null };
 }
@@ -126,6 +127,7 @@ export async function approveLeave(leaveId: string) {
   revalidatePath('/leaves');
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
   revalidatePath('/dashboard');
   return { success: true, error: null };
 }
@@ -201,6 +203,7 @@ export async function updateLeave(id: string, formData: FormData) {
   revalidatePath('/leaves');
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
   revalidatePath('/dashboard');
   return { success: true, error: null };
 }
@@ -222,6 +225,7 @@ export async function rejectLeave(leaveId: string) {
 
   if (error) return { success: false, error: error.message };
   revalidatePath('/leaves');
+  revalidatePath('/shifts/daily');
   return { success: true, error: null };
 }
 
@@ -232,6 +236,7 @@ export async function deleteLeave(id: string) {
   revalidatePath('/leaves');
   revalidatePath('/dashboard');
   revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
   return { success: true, error: null };
 }
 

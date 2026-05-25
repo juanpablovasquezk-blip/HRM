@@ -140,6 +140,7 @@ export async function createPersonnel(
   }
 
   safeRevalidatePath('/personnel');
+  safeRevalidatePath('/shifts/daily');
   return { success: true, error: null };
 }
 
@@ -256,6 +257,7 @@ export async function updatePersonnel(
   safeRevalidatePath(`/personnel/${id}`);
   safeRevalidatePath('/shifts/assignments');
   safeRevalidatePath('/shifts/roster');
+  safeRevalidatePath('/shifts/daily');
   safeRevalidatePath('/dashboard');
   return { success: true, error: null };
 }
@@ -300,6 +302,7 @@ export async function deletePersonnel(
   safeRevalidatePath('/personnel');
   safeRevalidatePath('/shifts/assignments');
   safeRevalidatePath('/shifts/roster');
+  safeRevalidatePath('/shifts/daily');
   safeRevalidatePath('/dashboard');
   return { success: true, error: null };
 }
