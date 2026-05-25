@@ -443,6 +443,7 @@ export async function createManualAssignment(formData: FormData) {
     position_id: positionId,
     status: 'scheduled',
     is_manual: true,
+    is_extra: false,
   }));
 
   // Clean existing manual assignments on these dates for this person to avoid duplicates
@@ -450,7 +451,7 @@ export async function createManualAssignment(formData: FormData) {
   const { error } = await supabase
     .from('shift_assignments')
     .upsert(inserts, { 
-      onConflict: 'personnel_id,date,shift_id',
+      onConflict: 'personnel_id,date,shift_id,is_extra',
       ignoreDuplicates: false 
     });
 

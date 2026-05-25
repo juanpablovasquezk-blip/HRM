@@ -122,7 +122,7 @@ export async function createHistoricalExtraShift(payload: {
     // Check if there is already an assignment for this personnel on this date
     const { data: existingList, error: checkError } = await supabase
       .from('shift_assignments')
-      .select('id, shift_id')
+      .select('id, shift_id, is_extra')
       .eq('personnel_id', payload.personnelId)
       .eq('date', payload.date);
 
@@ -132,27 +132,30 @@ export async function createHistoricalExtraShift(payload: {
     }
 
     const existingAny = existingList && existingList.length > 0;
-    const existingSameShift = existingList?.find(item => item.shift_id === payload.shiftId);
+    
+    // Find if there's an assignment for the EXACT same shift_id AND is_extra = true
+    const existingSameExtraShift = existingList?.find(
+      item => item.shift_id === payload.shiftId && item.is_extra === true
+    );
 
     if (existingAny && !payload.forceOverride) {
       // Return a conflict warning instead of blocking error
-      const msg = existingSameShift
-        ? 'El empleado ya tiene asignado exactamente ese turno para esta fecha. ¿Deseas sobreescribirlo/actualizarlo como turno extra?'
-        : 'El empleado ya tiene otra asignación de turno para esta fecha. ¿Deseas registrar este turno extra de todas formas?';
+      const msg = existingSameExtraShift
+        ? 'El empleado ya tiene asignado exactamente ese turno extra para esta fecha. ¿Deseas sobreescribirlo/actualizarlo?'
+        : 'El empleado ya tiene otra asignación de turno (regular o extra) para esta fecha. ¿Deseas registrar este turno extra de todas formas?';
       return {
         conflict: true,
         conflictMessage: msg
       };
     }
 
-    if (existingSameShift) {
-      // Update existing assignment for the same shift to avoid duplicate key violation
+    if (existingSameExtraShift) {
+      // Update existing assignment for the same shift and is_extra = true to avoid duplicate key violation
       const { data, error } = await supabase
         .from('shift_assignments')
         .update({
           area_id: payload.areaId,
           position_id: payload.positionId,
-          is_extra: true,
           is_manual: true,
           is_confirmed: true,
           is_published: true,
@@ -160,7 +163,7 @@ export async function createHistoricalExtraShift(payload: {
           status: 'confirmed',
           override_reason: payload.observations || null
         })
-        .eq('id', existingSameShift.id)
+        .eq('id', existingSameExtraShift.id)
         .select()
         .single();
 
@@ -172,7 +175,7 @@ export async function createHistoricalExtraShift(payload: {
       revalidatePath('/reports/transport');
       return { data };
     } else {
-      // Insert a new assignment (either no assignment existed, or it's for a different shift_id)
+      // Insert a new assignment (either no assignment existed, or it's for a different shift_id, or the existing one was not an extra shift)
       const { data, error } = await supabase
         .from('shift_assignments')
         .insert({

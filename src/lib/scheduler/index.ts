@@ -382,12 +382,13 @@ export async function generateSchedule(
       is_published: shouldValidate,
       frozen_by_rule: false,
       original_shift_id: a.shift_id,
+      is_extra: a.is_extra ?? false,
     }));
 
-    // DE-DUPLICATE: Ensure we don't try to insert the same person/date/shift twice
+    // DE-DUPLICATE: Ensure we don't try to insert the same person/date/shift/is_extra twice
     const seen = new Set<string>();
     const toInsert = toInsertRaw.filter(a => {
-      const key = `${a.personnel_id}-${a.date}-${a.shift_id}`;
+      const key = `${a.personnel_id}-${a.date}-${a.shift_id}-${a.is_extra}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -405,7 +406,7 @@ export async function generateSchedule(
             const { error: insErr } = await supabaseAdmin
               .from('shift_assignments')
               .upsert(chunk, { 
-                onConflict: 'personnel_id,date,shift_id',
+                onConflict: 'personnel_id,date,shift_id,is_extra',
                 ignoreDuplicates: false 
               });
             if (insErr) throw insErr;
