@@ -58,7 +58,7 @@ export async function getHistoricalData() {
     `)
     .eq('is_extra', true)
     .order('date', { ascending: false })
-    .limit(100);
+    .limit(1000);
 
   // Fetch own transports
   const { data: ownTransports, error: transportsError } = await supabase
@@ -71,7 +71,7 @@ export async function getHistoricalData() {
     `)
     .eq('transport_type', 'PROPIO')
     .order('date', { ascending: false })
-    .limit(100);
+    .limit(1000);
 
   if (shiftsError) {
     console.error('Error fetching extra shifts:', shiftsError);
@@ -173,6 +173,8 @@ export async function createHistoricalExtraShift(payload: {
       }
 
       revalidatePath('/reports/transport');
+      revalidatePath('/settings/historical-records');
+      revalidatePath('/shifts/daily');
       return { data };
     } else {
       // Insert a new assignment (either no assignment existed, or it's for a different shift_id, or the existing one was not an extra shift)
@@ -201,6 +203,8 @@ export async function createHistoricalExtraShift(payload: {
       }
 
       revalidatePath('/reports/transport');
+      revalidatePath('/settings/historical-records');
+      revalidatePath('/shifts/daily');
       return { data };
     }
   } catch (error: any) {
@@ -267,6 +271,8 @@ export async function createHistoricalOwnTransport(payload: {
     }
 
     revalidatePath('/reports/transport');
+    revalidatePath('/settings/historical-records');
+    revalidatePath('/shifts/daily');
     return { data };
   } catch (error: any) {
     console.error('Unhandled error in createHistoricalOwnTransport:', error);
@@ -299,6 +305,8 @@ export async function deleteHistoricalRecord(type: 'shift' | 'transport', id: st
     }
 
     revalidatePath('/reports/transport');
+    revalidatePath('/settings/historical-records');
+    revalidatePath('/shifts/daily');
     return { success: true };
   } catch (error: any) {
     console.error('Unhandled error in deleteHistoricalRecord:', error);
