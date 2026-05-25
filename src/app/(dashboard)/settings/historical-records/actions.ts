@@ -253,6 +253,7 @@ export async function createHistoricalOwnTransport(payload: {
       .insert({
         personnel_id: payload.personnelId,
         date: payload.date,
+        type: 'ENTRADA',
         transport_type: 'PROPIO',
         status: 'ABIERTO',
         assignment_id: assignmentId
