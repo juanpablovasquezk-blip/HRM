@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import HistoricalRecordsClient from './historical-records-client';
+import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { getFormMetadata, getHistoricalData } from './actions';
 import { getUserRole } from '@/app/role-actions';
 
@@ -16,9 +17,13 @@ export default async function HistoricalRecordsPage() {
     redirect('/dashboard');
   }
 
-  // Fetch initial form data
+  // Fetch initial form data for the current month by default
+  const now = new Date();
+  const startStr = format(startOfMonth(now), 'yyyy-MM-dd');
+  const endStr = format(endOfMonth(now), 'yyyy-MM-dd');
+
   const metaRes = await getFormMetadata();
-  const historyRes = await getHistoricalData();
+  const historyRes = await getHistoricalData(startStr, endStr);
 
   if (metaRes.error) {
     throw new Error(`Error loading form metadata: ${metaRes.error}`);

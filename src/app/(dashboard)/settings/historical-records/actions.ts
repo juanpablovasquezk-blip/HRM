@@ -41,11 +41,11 @@ export async function getFormMetadata() {
   };
 }
 
-export async function getHistoricalData() {
+export async function getHistoricalData(startDate?: string, endDate?: string) {
   const supabase = await createClient();
 
-  // Fetch extra shifts
-  const { data: extraShifts, error: shiftsError } = await supabase
+  // Build extra shifts query
+  let extraShiftsQuery = supabase
     .from('shift_assignments')
     .select(`
       id,
@@ -56,12 +56,17 @@ export async function getHistoricalData() {
       area:areas(id, name),
       position:positions(id, name)
     `)
-    .eq('is_extra', true)
-    .order('date', { ascending: false })
-    .limit(1000);
+    .eq('is_extra', true);
 
-  // Fetch own transports
-  const { data: ownTransports, error: transportsError } = await supabase
+  if (startDate) {
+    extraShiftsQuery = extraShiftsQuery.gte('date', startDate);
+  }
+  if (endDate) {
+    extraShiftsQuery = extraShiftsQuery.lte('date', endDate);
+  }
+
+  // Build own transports query
+  let ownTransportsQuery = supabase
     .from('transport_requests')
     .select(`
       id,
@@ -69,9 +74,24 @@ export async function getHistoricalData() {
       transport_type,
       personnel:personnel!transport_requests_personnel_id_fkey(id, first_name, last_name_father)
     `)
-    .eq('transport_type', 'PROPIO')
-    .order('date', { ascending: false })
-    .limit(1000);
+    .eq('transport_type', 'PROPIO');
+
+  if (startDate) {
+    ownTransportsQuery = ownTransportsQuery.gte('date', startDate);
+  }
+  if (endDate) {
+    ownTransportsQuery = ownTransportsQuery.lte('date', endDate);
+  }
+
+  const [shiftsRes, transportsRes] = await Promise.all([
+    extraShiftsQuery.order('date', { ascending: false }).limit(1000),
+    ownTransportsQuery.order('date', { ascending: false }).limit(1000)
+  ]);
+
+  const extraShifts = shiftsRes.data;
+  const shiftsError = shiftsRes.error;
+  const ownTransports = transportsRes.data;
+  const transportsError = transportsRes.error;
 
   if (shiftsError) {
     console.error('Error fetching extra shifts:', shiftsError);

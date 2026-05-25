@@ -151,10 +151,57 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
     date: ''
   });
 
-  const refreshHistory = async () => {
-    const res = await getHistoricalData();
+  // Filter Query States
+  const [filterType, setFilterType] = useState<'month' | 'range'>('month');
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+  });
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
+  const [queryLoading, setQueryLoading] = useState(false);
+
+  const getStartAndEndOfMonth = (yearMonth: string) => {
+    const [year, month] = yearMonth.split('-').map(Number);
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 0);
+    
+    const formatDate = (d: Date) => {
+      const yStr = d.getFullYear();
+      const mStr = String(d.getMonth() + 1).padStart(2, '0');
+      const dStr = String(d.getDate()).padStart(2, '0');
+      return `${yStr}-${mStr}-${dStr}`;
+    };
+    return {
+      start: formatDate(start),
+      end: formatDate(end)
+    };
+  };
+
+  const refreshHistory = async (customStart?: string, customEnd?: string) => {
+    setQueryLoading(true);
+    let startStr = customStart;
+    let endStr = customEnd;
+
+    if (!startStr && !endStr) {
+      if (filterType === 'month') {
+        const bounds = getStartAndEndOfMonth(selectedMonth);
+        startStr = bounds.start;
+        endStr = bounds.end;
+      } else {
+        startStr = rangeStart || undefined;
+        endStr = rangeEnd || undefined;
+      }
+    }
+
+    const res = await getHistoricalData(startStr, endStr);
+    setQueryLoading(false);
     if (res.data) {
       setHistory(res.data);
+    } else if (res.error) {
+      toast.error(res.error);
     }
   };
 
@@ -450,10 +497,106 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
 
         {/* LIST SIDE */}
         <div className="lg:col-span-7 bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-          <h2 className="text-md font-bold text-slate-900 dark:text-white uppercase tracking-tight flex items-center gap-2">
-            <History className="w-4 h-4 text-emerald-600" />
-            Historial de Registros
-          </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <h2 className="text-md font-bold text-slate-900 dark:text-white uppercase tracking-tight flex items-center gap-2">
+              <History className="w-4 h-4 text-emerald-600" />
+              Historial de Registros
+            </h2>
+            {queryLoading && (
+              <span className="text-xs text-slate-400 flex items-center gap-1.5 font-semibold">
+                <span className="animate-spin rounded-full h-3 w-3 border-2 border-indigo-600 border-t-transparent"></span>
+                Actualizando...
+              </span>
+            )}
+          </div>
+
+          {/* QUERY FILTERS */}
+          <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Filtrar consulta en pantalla</span>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setFilterType('month')}
+                  className={`px-3 py-1 text-[10px] font-bold rounded-lg uppercase tracking-wider transition-all ${
+                    filterType === 'month'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-slate-200 dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-300 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  Por Mes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterType('range')}
+                  className={`px-3 py-1 text-[10px] font-bold rounded-lg uppercase tracking-wider transition-all ${
+                    filterType === 'range'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-slate-200 dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-300 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  Rango
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3 text-xs">
+              {filterType === 'month' ? (
+                <div className="flex-1 min-w-[140px] space-y-1">
+                  <label className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+                    Seleccionar Mes
+                  </label>
+                  <input
+                    type="month"
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-sm font-medium focus:outline-none focus:ring-1.5 focus:ring-indigo-500"
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="flex-1 min-w-[110px] space-y-1">
+                    <label className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+                      Desde
+                    </label>
+                    <input
+                      type="date"
+                      value={rangeStart}
+                      onChange={(e) => setRangeStart(e.target.value)}
+                      className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-sm font-mono focus:outline-none focus:ring-1.5 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[110px] space-y-1">
+                    <label className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+                      Hasta
+                    </label>
+                    <input
+                      type="date"
+                      value={rangeEnd}
+                      onChange={(e) => setRangeEnd(e.target.value)}
+                      className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-sm font-mono focus:outline-none focus:ring-1.5 focus:ring-indigo-500"
+                    />
+                  </div>
+                </>
+              )}
+
+              <button
+                type="button"
+                onClick={() => refreshHistory()}
+                disabled={queryLoading}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs uppercase tracking-wider transition-colors disabled:opacity-50 h-[38px] flex items-center justify-center min-w-[100px]"
+              >
+                {queryLoading ? (
+                  <span className="flex items-center gap-1">
+                    <span className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></span>
+                    Cargando
+                  </span>
+                ) : (
+                  'Consultar'
+                )}
+              </button>
+            </div>
+          </div>
 
           {activeTab === 'shifts' ? (
             <div className="overflow-x-auto rounded-lg border border-slate-100 dark:border-slate-800">
