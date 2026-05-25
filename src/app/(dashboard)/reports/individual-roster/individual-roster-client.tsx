@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -24,7 +24,7 @@ import {
   addDays,
 } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Printer, Download, Search, Loader2 } from 'lucide-react';
+import { Printer, Download, Search, Loader2, Camera } from 'lucide-react';
 import { getIndividualRoster } from './actions';
 import { toast } from 'sonner';
 
@@ -41,6 +41,51 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [data, setData] = useState<any>(null);
   const [isPending, startTransition] = useTransition();
+  const rosterRef = useRef<HTMLDivElement>(null);
+
+  const handleCopyScreenshot = async () => {
+    if (!rosterRef.current) return;
+    const toastId = toast.loading("Generando captura del roster...");
+    try {
+      const html2canvas = (await import('html2canvas-pro')).default;
+      const canvas = await html2canvas(rosterRef.current, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        windowWidth: 1024,
+        ignoreElements: (element) => {
+          return element.classList.contains('no-print');
+        }
+      });
+      
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          toast.error("No se pudo generar la imagen.", { id: toastId });
+          return;
+        }
+        
+        try {
+          const dataItem = [new ClipboardItem({ 'image/png': blob })];
+          await navigator.clipboard.write(dataItem);
+          toast.success("¡Captura copiada al portapapeles! Puedes pegarla directamente.", { id: toastId });
+        } catch (clipErr) {
+          console.error("Clipboard copy failed, offering fallback download:", clipErr);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          const namePart = `${data?.personnel?.first_name || 'roster'}_${data?.personnel?.last_name_father || ''}`;
+          a.download = `roster_individual_${namePart.replace(/\s+/g, '_')}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+          toast.success("Captura generada y descargada (copiar al portapapeles no soportado en este navegador).", { id: toastId });
+        }
+      }, 'image/png');
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Error al generar la captura.", { id: toastId });
+    }
+  };
 
   // Create a map for quick position -> area lookup
   const positionAreaMap = Object.fromEntries(positions.map(p => [p.id, p.area_id]));
@@ -162,9 +207,14 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                 Generar
               </Button>
               {data && (
-                <Button variant="outline" size="icon" onClick={handlePrint} className="h-9 w-9 border-slate-200 shrink-0">
-                  <Printer className="h-4 w-4" />
-                </Button>
+                <>
+                  <Button variant="outline" size="icon" onClick={handlePrint} title="Imprimir" className="h-9 w-9 border-slate-200 shrink-0">
+                    <Printer className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" size="icon" onClick={handleCopyScreenshot} title="Copiar Captura" className="h-9 w-9 border-slate-200 shrink-0 text-slate-600 hover:text-slate-900">
+                    <Camera className="h-4 w-4" />
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -173,7 +223,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
 
       {/* Roster View */}
       {data && (
-        <div className="bg-white p-8 border rounded-lg shadow-sm print:shadow-none print:border-none print:p-0">
+        <div ref={rosterRef} className="bg-white p-8 border rounded-lg shadow-sm print:shadow-none print:border-none print:p-0">
           {/* Header */}
           <div className="grid grid-cols-3 border-2 border-black mb-6 text-center font-bold uppercase text-sm">
             <div className="border-r-2 border-black py-2 bg-slate-50">MES: {format(parseISO(startDate), 'MMMM yy', { locale: es })}</div>
