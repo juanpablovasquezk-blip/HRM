@@ -48,11 +48,92 @@ interface Props {
   };
 }
 
+const SortIndicator = ({ active, direction }: { active: boolean; direction: 'asc' | 'desc' }) => {
+  if (!active) return <span className="ml-1.5 text-slate-300 dark:text-slate-700 select-none text-[10px]">↕</span>;
+  return <span className="ml-1.5 text-indigo-600 dark:text-indigo-400 font-bold select-none text-[10px]">{direction === 'asc' ? '▲' : '▼'}</span>;
+};
+
 export default function HistoricalRecordsClient({ metadata, initialHistory }: Props) {
   const [activeTab, setActiveTab] = useState<'shifts' | 'transport'>('shifts');
   const [history, setHistory] = useState(initialHistory);
   const [saving, setSaving] = useState(false);
   const [shiftConflict, setShiftConflict] = useState<string | null>(null);
+
+  // Sorting State
+  const [shiftsSortField, setShiftsSortField] = useState<'date' | 'employee' | 'shift' | 'area'>('date');
+  const [shiftsSortDir, setShiftsSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const [transportsSortField, setTransportsSortField] = useState<'date' | 'employee' | 'type'>('date');
+  const [transportsSortDir, setTransportsSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const handleShiftsSort = (field: 'date' | 'employee' | 'shift' | 'area') => {
+    if (shiftsSortField === field) {
+      setShiftsSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setShiftsSortField(field);
+      setShiftsSortDir('asc');
+    }
+  };
+
+  const handleTransportsSort = (field: 'date' | 'employee' | 'type') => {
+    if (transportsSortField === field) {
+      setTransportsSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setTransportsSortField(field);
+      setTransportsSortDir('asc');
+    }
+  };
+
+  const getSortedShifts = () => {
+    const items = [...history.extraShifts];
+    items.sort((a, b) => {
+      let aVal = '';
+      let bVal = '';
+
+      if (shiftsSortField === 'date') {
+        aVal = a.date;
+        bVal = b.date;
+      } else if (shiftsSortField === 'employee') {
+        aVal = `${a.personnel?.first_name || ''} ${a.personnel?.last_name_father || ''}`.trim().toLowerCase();
+        bVal = `${b.personnel?.first_name || ''} ${b.personnel?.last_name_father || ''}`.trim().toLowerCase();
+      } else if (shiftsSortField === 'shift') {
+        aVal = (a.shift?.name || '').toLowerCase();
+        bVal = (b.shift?.name || '').toLowerCase();
+      } else if (shiftsSortField === 'area') {
+        aVal = `${a.area?.name || ''} - ${a.position?.name || ''}`.trim().toLowerCase();
+        bVal = `${b.area?.name || ''} - ${b.position?.name || ''}`.trim().toLowerCase();
+      }
+
+      if (aVal < bVal) return shiftsSortDir === 'asc' ? -1 : 1;
+      if (aVal > bVal) return shiftsSortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return items;
+  };
+
+  const getSortedTransports = () => {
+    const items = [...history.ownTransports];
+    items.sort((a, b) => {
+      let aVal = '';
+      let bVal = '';
+
+      if (transportsSortField === 'date') {
+        aVal = a.date;
+        bVal = b.date;
+      } else if (transportsSortField === 'employee') {
+        aVal = `${a.personnel?.first_name || ''} ${a.personnel?.last_name_father || ''}`.trim().toLowerCase();
+        bVal = `${b.personnel?.first_name || ''} ${b.personnel?.last_name_father || ''}`.trim().toLowerCase();
+      } else if (transportsSortField === 'type') {
+        aVal = (a.transport_type || '').toLowerCase();
+        bVal = (b.transport_type || '').toLowerCase();
+      }
+
+      if (aVal < bVal) return transportsSortDir === 'asc' ? -1 : 1;
+      if (aVal > bVal) return transportsSortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return items;
+  };
 
   // Extra Shift Form State
   const [shiftForm, setShiftForm] = useState({
@@ -379,15 +460,47 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-150 dark:border-slate-800">
                   <tr>
-                    <th className="px-4 py-3">Fecha</th>
-                    <th className="px-4 py-3">Empleado</th>
-                    <th className="px-4 py-3">Turno</th>
-                    <th className="px-4 py-3">Área / Cargo</th>
+                    <th 
+                      className="px-4 py-3 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                      onClick={() => handleShiftsSort('date')}
+                    >
+                      <div className="flex items-center">
+                        Fecha
+                        <SortIndicator active={shiftsSortField === 'date'} direction={shiftsSortDir} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-4 py-3 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                      onClick={() => handleShiftsSort('employee')}
+                    >
+                      <div className="flex items-center">
+                        Empleado
+                        <SortIndicator active={shiftsSortField === 'employee'} direction={shiftsSortDir} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-4 py-3 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                      onClick={() => handleShiftsSort('shift')}
+                    >
+                      <div className="flex items-center">
+                        Turno
+                        <SortIndicator active={shiftsSortField === 'shift'} direction={shiftsSortDir} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-4 py-3 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                      onClick={() => handleShiftsSort('area')}
+                    >
+                      <div className="flex items-center">
+                        Área / Cargo
+                        <SortIndicator active={shiftsSortField === 'area'} direction={shiftsSortDir} />
+                      </div>
+                    </th>
                     <th className="px-4 py-3 text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {history.extraShifts.map((s) => (
+                  {getSortedShifts().map((s) => (
                     <tr key={s.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors">
                       <td className="px-4 py-3 text-slate-500 font-mono">{s.date}</td>
                       <td className="px-4 py-3 font-bold text-slate-700 dark:text-slate-350 uppercase">
@@ -424,14 +537,38 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-950 text-slate-400 uppercase font-black border-b border-slate-150 dark:border-slate-800">
                   <tr>
-                    <th className="px-4 py-3">Fecha</th>
-                    <th className="px-4 py-3">Empleado</th>
-                    <th className="px-4 py-3">Tipo</th>
+                    <th 
+                      className="px-4 py-3 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                      onClick={() => handleTransportsSort('date')}
+                    >
+                      <div className="flex items-center">
+                        Fecha
+                        <SortIndicator active={transportsSortField === 'date'} direction={transportsSortDir} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-4 py-3 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                      onClick={() => handleTransportsSort('employee')}
+                    >
+                      <div className="flex items-center">
+                        Empleado
+                        <SortIndicator active={transportsSortField === 'employee'} direction={transportsSortDir} />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-4 py-3 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                      onClick={() => handleTransportsSort('type')}
+                    >
+                      <div className="flex items-center">
+                        Tipo
+                        <SortIndicator active={transportsSortField === 'type'} direction={transportsSortDir} />
+                      </div>
+                    </th>
                     <th className="px-4 py-3 text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {history.ownTransports.map((t) => (
+                  {getSortedTransports().map((t) => (
                     <tr key={t.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors">
                       <td className="px-4 py-3 text-slate-500 font-mono">{t.date}</td>
                       <td className="px-4 py-3 font-bold text-slate-700 dark:text-slate-350 uppercase">
