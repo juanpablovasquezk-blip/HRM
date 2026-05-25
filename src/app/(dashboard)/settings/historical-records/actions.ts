@@ -122,51 +122,84 @@ export async function createHistoricalExtraShift(payload: {
     // Check if there is already an assignment for this personnel on this date
     const { data: existingList, error: checkError } = await supabase
       .from('shift_assignments')
-      .select('id, shifts(name)')
+      .select('id, shift_id')
       .eq('personnel_id', payload.personnelId)
-      .eq('date', payload.date)
-      .limit(1);
+      .eq('date', payload.date);
 
     if (checkError) {
       console.error('Error checking existing shift assignment:', checkError);
       return { error: `Error al verificar turnos existentes: ${checkError.message}` };
     }
 
-    const existing = existingList && existingList.length > 0 ? existingList[0] : null;
+    const existingAny = existingList && existingList.length > 0;
+    const existingSameShift = existingList?.find(item => item.shift_id === payload.shiftId);
 
-    if (existing && !payload.forceOverride) {
+    if (existingAny && !payload.forceOverride) {
       // Return a conflict warning instead of blocking error
+      const msg = existingSameShift
+        ? 'El empleado ya tiene asignado exactamente ese turno para esta fecha. ¿Deseas sobreescribirlo/actualizarlo como turno extra?'
+        : 'El empleado ya tiene otra asignación de turno para esta fecha. ¿Deseas registrar este turno extra de todas formas?';
       return {
         conflict: true,
-        conflictMessage: 'El empleado ya tiene una asignación de turno para esta fecha. ¿Deseas registrar el turno extra de todas formas?'
+        conflictMessage: msg
       };
     }
 
-    const { data, error } = await supabase
-      .from('shift_assignments')
-      .insert({
-        personnel_id: payload.personnelId,
-        date: payload.date,
-        shift_id: payload.shiftId,
-        area_id: payload.areaId,
-        position_id: payload.positionId,
-        is_extra: true,
-        is_manual: true,
-        is_confirmed: true,
-        is_published: true,
-        is_validated: true,
-        override_reason: payload.observations || null
-      })
-      .select()
-      .single();
+    if (existingSameShift) {
+      // Update existing assignment for the same shift to avoid duplicate key violation
+      const { data, error } = await supabase
+        .from('shift_assignments')
+        .update({
+          area_id: payload.areaId,
+          position_id: payload.positionId,
+          is_extra: true,
+          is_manual: true,
+          is_confirmed: true,
+          is_published: true,
+          is_validated: true,
+          status: 'confirmed',
+          override_reason: payload.observations || null
+        })
+        .eq('id', existingSameShift.id)
+        .select()
+        .single();
 
-    if (error) {
-      console.error('Error creating historical shift in DB:', error);
-      return { error: error.message };
+      if (error) {
+        console.error('Error updating historical shift in DB:', error);
+        return { error: error.message };
+      }
+
+      revalidatePath('/reports/transport');
+      return { data };
+    } else {
+      // Insert a new assignment (either no assignment existed, or it's for a different shift_id)
+      const { data, error } = await supabase
+        .from('shift_assignments')
+        .insert({
+          personnel_id: payload.personnelId,
+          date: payload.date,
+          shift_id: payload.shiftId,
+          area_id: payload.areaId,
+          position_id: payload.positionId,
+          is_extra: true,
+          is_manual: true,
+          is_confirmed: true,
+          is_published: true,
+          is_validated: true,
+          status: 'confirmed',
+          override_reason: payload.observations || null
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating historical shift in DB:', error);
+        return { error: error.message };
+      }
+
+      revalidatePath('/reports/transport');
+      return { data };
     }
-
-    revalidatePath('/reports/transport');
-    return { data };
   } catch (error: any) {
     console.error('Unhandled error in createHistoricalExtraShift:', error);
     return { error: error?.message || 'Ocurrió un error inesperado al guardar el turno extra.' };
