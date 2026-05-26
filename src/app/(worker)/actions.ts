@@ -287,14 +287,49 @@ export async function getWorkerTransportHistory(from?: string, to?: string) {
 
   const supabase = await createClient();
   
-  // 1. Fetch all confirmed shift assignments in the date range
+  // 1. Fetch all transport requests of type PROPIO in the date range
+  let reqQuery = supabase
+    .from('transport_requests')
+    .select(`
+      *,
+      assignment:shift_assignments!transport_requests_assignment_id_fkey(
+        *,
+        shift:shifts!shift_assignments_shift_id_fkey(*)
+      )
+    `)
+    .eq('personnel_id', session.id)
+    .eq('transport_type', 'PROPIO');
+
+  if (from) reqQuery = reqQuery.gte('date', from);
+  if (to) reqQuery = reqQuery.lte('date', to);
+
+  const { data: dbRequests, error: reqErr } = await reqQuery;
+  if (reqErr) {
+    console.error('Error fetching transport requests for history:', reqErr);
+  }
+
+  const history: any[] = [];
+  const datesWithDbRequest = new Set<string>();
+
+  if (dbRequests) {
+    for (const r of dbRequests) {
+      history.push({
+        id: r.id,
+        date: r.date,
+        transport_type: 'PROPIO',
+        shift_assignment: r.assignment || null
+      });
+      datesWithDbRequest.add(r.date);
+    }
+  }
+
+  // 2. Fetch shift assignments to synthesize PROPIO for supervisors who don't have a DB record
   let asgQuery = supabase
     .from('shift_assignments')
     .select('*, shift:shifts!shift_assignments_shift_id_fkey(*), position:positions(*)')
     .eq('personnel_id', session.id)
     .eq('is_confirmed', true)
-    .neq('status', 'cancelled')
-    .order('date', { ascending: false });
+    .neq('status', 'cancelled');
 
   if (from) asgQuery = asgQuery.gte('date', from);
   if (to) asgQuery = asgQuery.lte('date', to);
@@ -302,65 +337,30 @@ export async function getWorkerTransportHistory(from?: string, to?: string) {
   const { data: assignments, error: asgErr } = await asgQuery;
   if (asgErr) {
     console.error('Error fetching assignments for history:', asgErr);
-    return [];
   }
 
-  // 2. Fetch all transport requests in the date range
-  let reqQuery = supabase
-    .from('transport_requests')
-    .select('*')
-    .eq('personnel_id', session.id);
+  if (assignments) {
+    for (const asg of assignments) {
+      // If we already have a DB request for this date, do not synthesize
+      if (datesWithDbRequest.has(asg.date)) continue;
 
-  if (from) reqQuery = reqQuery.gte('date', from);
-  if (to) reqQuery = reqQuery.lte('date', to);
+      const shift = asg.shift;
+      if (!shift || shift.requires_transport === false) continue;
 
-  const { data: requests, error: reqErr } = await reqQuery;
-  if (reqErr) {
-    console.error('Error fetching transport requests for history:', reqErr);
-  }
-
-  const reqMap = new Map<string, any>();
-  if (requests) {
-    for (const r of requests) {
-      if (r.assignment_id) {
-        reqMap.set(String(r.assignment_id), r);
-      } else {
-        reqMap.set(`${r.date}_${r.type}`, r);
-      }
-    }
-  }
-
-  // 3. Build history items
-  const history: any[] = [];
-
-  for (const asg of (assignments || [])) {
-    const shift = asg.shift;
-    if (!shift) continue;
-
-    // Check if there is an ENTRADA transport request for this assignment
-    const tr = reqMap.get(String(asg.id)) || reqMap.get(`${asg.date}_ENTRADA`);
-    
-    let transportType = 'PENDIENTE';
-    let trRecord = tr || null;
-
-    if (tr) {
-      transportType = tr.transport_type || 'PENDIENTE';
-    } else {
       const isSupervisor = (asg.position?.name || '').toUpperCase().includes('SUPERVISOR');
-      if (shift.requires_transport === true && isSupervisor) {
-        transportType = 'PROPIO';
+      if (isSupervisor) {
+        history.push({
+          id: `synth_${asg.id}`,
+          date: asg.date,
+          transport_type: 'PROPIO',
+          shift_assignment: asg
+        });
       }
     }
-
-    if (transportType === 'PROPIO') {
-      history.push({
-        id: trRecord?.id || `synth_${asg.id}`,
-        date: asg.date,
-        transport_type: 'PROPIO',
-        shift_assignment: asg
-      });
-    }
   }
+
+  // Sort by date descending
+  history.sort((a, b) => b.date.localeCompare(a.date));
 
   return history;
 }
