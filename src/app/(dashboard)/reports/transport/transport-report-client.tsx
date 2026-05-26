@@ -47,6 +47,7 @@ export default function TransportReportClient({ companies }: Props) {
     const wsData = mobiles.map(r => ({
       'Fecha': r.date,
       'Nombre': `${r.personnel?.first_name} ${r.personnel?.last_name_father}`,
+      'Empresa': r.personnel?.company?.name || 'N/A',
       'Dirección Origen': r.pickup_address,
       'Dirección Destino': r.destination_address,
       'Hora Recogida': r.pickup_time || 'PENDIENTE',
@@ -66,6 +67,7 @@ export default function TransportReportClient({ companies }: Props) {
     const wsData = own.map(r => ({
       'Fecha': r.date,
       'Nombre': `${r.personnel?.first_name} ${r.personnel?.last_name_father}`,
+      'Empresa': r.personnel?.company?.name || 'N/A',
       'Hora de Entrada': r.assignment?.shift?.start_time || 'N/A'
     }));
 

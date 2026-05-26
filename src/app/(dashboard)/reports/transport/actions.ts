@@ -69,7 +69,10 @@ export async function getTransportReportData(filters: {
     .from('transport_requests')
     .select(`
       *, 
-      personnel:personnel!transport_requests_personnel_id_fkey(*), 
+      personnel:personnel!transport_requests_personnel_id_fkey(
+        *,
+        company:companies!personnel_company_id_fkey(name)
+      ), 
       assignment:shift_assignments!transport_requests_assignment_id_fkey(
         *, 
         shift:shifts!shift_assignments_shift_id_fkey(*), 

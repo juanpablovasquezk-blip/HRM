@@ -196,7 +196,7 @@ export interface TransportRequest {
 }
 
 export interface TransportRequestWithDetails extends TransportRequest {
-  personnel?: Personnel;
+  personnel?: PersonnelWithDetails;
   assignment?: ShiftAssignmentWithDetails;
 }
 

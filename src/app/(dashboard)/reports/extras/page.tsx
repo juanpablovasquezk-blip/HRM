@@ -31,7 +31,12 @@ export default async function ExtraShiftsReportPage({ searchParams }: Props) {
       date,
       status,
       is_extra,
-      personnel:personnel_id (first_name, last_name_father, company_id),
+      personnel:personnel_id (
+        first_name, 
+        last_name_father, 
+        company_id,
+        company:companies!personnel_company_id_fkey(name)
+      ),
       area:area_id (name),
       position:position_id (name),
       shift:shift_id (name, start_time, end_time)
@@ -82,7 +87,13 @@ export default async function ExtraShiftsReportPage({ searchParams }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-2 no-print">
-          <ExtraReportFilters from={from} to={to} companies={companies || []} companyId={companyId} />
+          <ExtraReportFilters 
+            from={from} 
+            to={to} 
+            companies={companies || []} 
+            companyId={companyId} 
+            assignments={assignments || []} 
+          />
         </div>
       </div>
 
