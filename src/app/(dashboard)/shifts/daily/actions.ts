@@ -46,8 +46,17 @@ export async function getDailyOperationalData(date: string) {
     return { error: 'Error al cargar datos operativos' };
   }
 
+  const activeAssignments = (assignments || []).filter(a => {
+    const p = a.personnel as any;
+    if (!p) return false;
+    if (p.termination_date && date > p.termination_date) return false;
+    const todayStr = new Date().toLocaleDateString('sv');
+    if (!p.is_active && date >= todayStr) return false;
+    return true;
+  }) as ShiftAssignmentWithDetails[];
+
   return {
-    assignments: (assignments || []) as ShiftAssignmentWithDetails[],
+    assignments: activeAssignments,
     requirements: (requirements || []) as ShiftRequirementWithDetails[],
   };
 }

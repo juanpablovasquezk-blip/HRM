@@ -236,15 +236,15 @@ export async function updatePersonnel(
       let shiftQuery = adminClient.from('shift_assignments').update({ status: 'cancelled' }).eq('personnel_id', id);
       let transportQuery = adminClient.from('transport_requests').delete().eq('personnel_id', id);
 
-      if (!updateData.is_active) {
+      if (updateData.termination_date) {
+        // Terminated: cancel starting strictly after termination date
+        shiftQuery = shiftQuery.gt('date', updateData.termination_date);
+        transportQuery = transportQuery.gt('date', updateData.termination_date);
+      } else if (!updateData.is_active) {
         // Deactivated: cancel starting from today (local time YYYY-MM-DD)
         const todayStr = new Date().toLocaleDateString('sv');
         shiftQuery = shiftQuery.gte('date', todayStr);
         transportQuery = transportQuery.gte('date', todayStr);
-      } else if (updateData.termination_date) {
-        // Terminated: cancel starting strictly after termination date
-        shiftQuery = shiftQuery.gt('date', updateData.termination_date);
-        transportQuery = transportQuery.gt('date', updateData.termination_date);
       }
 
       await Promise.all([shiftQuery, transportQuery]);
