@@ -47,7 +47,7 @@ export default function ExtraReportFilters({ from, to, companies, companyId, ass
   return (
     <div className="flex items-center gap-3">
       {/* COMPANY FILTER */}
-      <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200 shadow-sm pr-3">
+      <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200 shadow-sm pr-3 flex-shrink-0">
         <div className="px-2">
           <Building2 className="w-4 h-4 text-slate-400" />
         </div>
@@ -63,14 +63,14 @@ export default function ExtraReportFilters({ from, to, companies, companyId, ass
         </select>
       </div>
 
-      <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
+      <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200 shadow-sm flex-shrink-0">
         <div className="flex items-center gap-2 px-2 py-1">
           <label className="text-[10px] font-bold text-slate-400 uppercase">Desde</label>
           <input 
             type="date" 
             value={from} 
             onChange={(e) => handleFilterChange('from', e.target.value)}
-            className="text-sm font-medium text-slate-700 bg-transparent border-none focus:ring-0 p-0"
+            className="text-sm font-medium text-slate-700 bg-transparent border-none focus:ring-0 p-0 cursor-pointer w-[120px]"
           />
         </div>
         <div className="w-px h-6 bg-slate-100" />
@@ -80,7 +80,7 @@ export default function ExtraReportFilters({ from, to, companies, companyId, ass
             type="date" 
             value={to} 
             onChange={(e) => handleFilterChange('to', e.target.value)}
-            className="text-sm font-medium text-slate-700 bg-transparent border-none focus:ring-0 p-0"
+            className="text-sm font-medium text-slate-700 bg-transparent border-none focus:ring-0 p-0 cursor-pointer w-[120px]"
           />
         </div>
         <div className="px-2">
