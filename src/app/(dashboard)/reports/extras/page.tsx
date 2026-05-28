@@ -7,14 +7,15 @@ import { Star, Calendar as CalendarIcon, Download, ChevronRight } from 'lucide-r
 import ExtraReportFilters from './extra-report-filters';
 
 interface Props {
-  searchParams: {
+  searchParams: Promise<{
     from?: string;
     to?: string;
     company_id?: string;
-  };
+  }>;
 }
 
-export default async function ExtraShiftsReportPage({ searchParams }: Props) {
+export default async function ExtraShiftsReportPage(props: Props) {
+  const searchParams = await props.searchParams;
   const supabase = await createClient();
   
   const from = searchParams.from || format(startOfMonth(new Date()), 'yyyy-MM-dd');
