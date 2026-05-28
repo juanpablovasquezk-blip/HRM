@@ -318,7 +318,8 @@ export async function materializeTemplates(startDate: string, endDate: string) {
             position_id: template.position_id,
             shift_id: template.shift_id,
             required_count: template.required_count,
-            date: dateStr
+            date: dateStr,
+            is_extra: false
           });
         }
       }
@@ -329,7 +330,7 @@ export async function materializeTemplates(startDate: string, endDate: string) {
 
   if (inserts.length > 0) {
     const { error: iError } = await supabase.from('shift_requirements').upsert(inserts, {
-       onConflict: 'area_id,position_id,shift_id,date'
+       onConflict: 'area_id,position_id,shift_id,date,is_extra'
     });
     if (iError) return { success: false, error: iError.message };
   }
