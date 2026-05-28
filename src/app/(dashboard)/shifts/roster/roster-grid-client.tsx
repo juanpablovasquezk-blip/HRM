@@ -1541,6 +1541,7 @@ export function RosterGridClient({
                   handleCellClick={handleCellClick}
                   handleDragOver={handleDragOver}
                   handleDrop={handleDrop}
+                  handleDragStart={handleDragStart}
                 />
               ))}
             </tbody>
@@ -2278,7 +2279,8 @@ const PersonnelRow = memo(({
   handleToggleRow, 
   handleCellClick, 
   handleDragOver, 
-  handleDrop 
+  handleDrop,
+  handleDragStart
 }: any) => {
   return (
     <tr key={person.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors border-b border-slate-100 dark:border-slate-800">
@@ -2423,8 +2425,10 @@ const PersonnelRow = memo(({
                 </Badge>
               ) : shift ? (
                 <div 
+                  draggable={!isBlocked && assignment?.status !== 'cancelled'}
+                  onDragStart={(e) => handleDragStart(e, assignment)}
                   className={cn(
-                    "flex flex-col items-center justify-center rounded-lg p-1 border shadow-sm transition-all",
+                    "flex flex-col items-center justify-center rounded-lg p-1 border shadow-sm transition-all cursor-grab active:cursor-grabbing",
                     assignment?.status === 'confirmed' || assignment?.is_confirmed
                       ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700" 
                       : "bg-blue-500/10 border-blue-500/30 text-blue-700",
