@@ -137,7 +137,7 @@ export async function sendRosterWhatsApp(
     }
 
     const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const message = `Su rol está disponible en la plataforma\n\nAcceda aquí: ${platformUrl}`;
+    const message = `Su rol está disponible en la plataforma\n\nAcceda aquí: ${platformUrl}\n\n*Este es un mensaje automático. No lo responda. Si tiene alguna duda comuníquese con su supervisor.*`;
 
     const res = await sendWhatsAppMedia(cleanPhone, signedData.signedUrl, message);
 
