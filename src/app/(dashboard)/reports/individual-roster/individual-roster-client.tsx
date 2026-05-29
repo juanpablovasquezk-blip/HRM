@@ -6,12 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import {
   format,
   parseISO,
@@ -24,9 +25,10 @@ import {
   addDays,
 } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Printer, Download, Search, Loader2, Camera } from 'lucide-react';
-import { getIndividualRoster } from './actions';
+import { Printer, Download, Search, Loader2, Camera, MessageSquare, Check, Users } from 'lucide-react';
+import { getIndividualRoster, sendRosterWhatsApp } from './actions';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 interface IndividualRosterClientProps {
   personnelList: any[];
@@ -42,6 +44,13 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
   const [data, setData] = useState<any>(null);
   const [isPending, startTransition] = useTransition();
   const rosterRef = useRef<HTMLDivElement>(null);
+
+  // Bulk WhatsApp Sending State
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkAreaId, setBulkAreaId] = useState<string>('all');
+  const [selectedWorkers, setSelectedWorkers] = useState<string[]>([]);
+  const [isSendingBulk, setIsSendingBulk] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number; status: string } | null>(null);
 
   const handleCopyScreenshot = async () => {
     if (!rosterRef.current) return;
@@ -97,6 +106,119 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
     return areaId === selectedAreaId;
   });
 
+  // Filter workers inside bulk modal based on bulkAreaId
+  const bulkFilteredPersonnel = personnelList.filter(p => {
+    if (bulkAreaId === 'all') return true;
+    const areaId = positionAreaMap[p.main_position];
+    return areaId === bulkAreaId;
+  });
+
+  const toggleWorkerSelection = (id: string) => {
+    setSelectedWorkers(prev => 
+      prev.includes(id) ? prev.filter(wId => wId !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllBulk = (checked: boolean) => {
+    if (checked) {
+      setSelectedWorkers(bulkFilteredPersonnel.map(p => p.id));
+    } else {
+      setSelectedWorkers([]);
+    }
+  };
+
+  const runBulkSend = async () => {
+    if (selectedWorkers.length === 0) {
+      toast.error('Selecciona al menos un trabajador');
+      return;
+    }
+
+    setIsSendingBulk(true);
+    setBulkProgress({ current: 0, total: selectedWorkers.length, status: 'Iniciando proceso...' });
+
+    // Store the original state so we can restore it at the end
+    const originalSelectedId = selectedId;
+    const originalData = data;
+
+    try {
+      const html2canvas = (await import('html2canvas-pro')).default;
+
+      for (let i = 0; i < selectedWorkers.length; i++) {
+        const workerId = selectedWorkers[i];
+        const worker = personnelList.find(p => p.id === workerId);
+        const workerName = worker ? `${worker.first_name} ${worker.last_name_father}` : 'Trabajador';
+
+        setBulkProgress({
+          current: i + 1,
+          total: selectedWorkers.length,
+          status: `Cargando datos de ${workerName}...`
+        });
+
+        // 1. Fetch roster data for this worker
+        const result = await getIndividualRoster(workerId, startDate, endDate);
+        if (result.error) {
+          console.error(`Error loading data for ${workerName}:`, result.error);
+          continue;
+        }
+
+        // 2. Render roster locally (this updates the data prop in React, which re-renders the container)
+        setData(result);
+        setSelectedId(workerId);
+
+        // 3. Wait for DOM to update and render completely
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // 4. Capture screenshot
+        if (!rosterRef.current) {
+          console.error('Roster reference container is missing');
+          continue;
+        }
+
+        setBulkProgress({
+          current: i + 1,
+          total: selectedWorkers.length,
+          status: `Generando captura de pantalla para ${workerName}...`
+        });
+
+        const canvas = await html2canvas(rosterRef.current, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: '#ffffff',
+          windowWidth: 1024,
+          ignoreElements: (element) => element.classList.contains('no-print')
+        });
+
+        const base64Image = canvas.toDataURL('image/png');
+
+        // 5. Send via server action
+        setBulkProgress({
+          current: i + 1,
+          total: selectedWorkers.length,
+          status: `Enviando WhatsApp a ${workerName}...`
+        });
+
+        const sendRes = await sendRosterWhatsApp(workerId, base64Image, startDate, endDate);
+        if (!sendRes.success) {
+          toast.error(`Error con ${workerName}: ${sendRes.error}`);
+        }
+      }
+
+      toast.success('Envío masivo finalizado');
+      setIsBulkModalOpen(false);
+      setSelectedWorkers([]);
+      setBulkProgress(null);
+    } catch (err: any) {
+      console.error('Error in bulk send loop:', err);
+      toast.error('Ocurrió un error durante el envío masivo');
+    } finally {
+      setIsSendingBulk(false);
+      // Restore original selection
+      setSelectedId(originalSelectedId);
+      setData(originalData);
+    }
+  };
+
   const handleFetch = () => {
     if (!selectedId) {
       toast.error('Selecciona un trabajador');
@@ -116,6 +238,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
   const handlePrint = () => {
     window.print();
   };
+
 
   // Helper to group days by week (Monday to Sunday)
   const getWeeks = () => {
@@ -157,38 +280,37 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 items-end">
             <div className="space-y-2 min-w-0">
               <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Área (Opcional)</Label>
-              <Select value={selectedAreaId} onValueChange={(val) => {
-                setSelectedAreaId(val || 'all');
-                setSelectedId(''); 
-              }}>
-                <SelectTrigger className="h-9 border-slate-200 text-xs w-full overflow-hidden">
-                  <SelectValue placeholder="Todas las áreas" className="truncate" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas las áreas</SelectItem>
-                  {areas && areas.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <select
+                value={selectedAreaId}
+                onChange={(e) => {
+                  setSelectedAreaId(e.target.value || 'all');
+                  setSelectedId('');
+                }}
+                className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-xs shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 border-slate-200 text-slate-700 cursor-pointer"
+              >
+                <option value="all">Todas las áreas</option>
+                {areas && areas.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-2 min-w-0">
               <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Trabajador</Label>
-              <Select value={selectedId} onValueChange={(val) => setSelectedId(val || '')}>
-                <SelectTrigger className="h-9 border-slate-200 text-xs w-full overflow-hidden">
-                  <SelectValue placeholder={filteredPersonnel.length > 0 ? "Seleccionar..." : "No hay personal"} className="truncate" />
-                </SelectTrigger>
-                <SelectContent>
-                  {filteredPersonnel.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.first_name} {p.last_name_father}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <select
+                value={selectedId}
+                onChange={(e) => setSelectedId(e.target.value || '')}
+                className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-xs shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 border-slate-200 text-slate-700 cursor-pointer"
+              >
+                <option value="">{filteredPersonnel.length > 0 ? "Seleccionar..." : "No hay personal"}</option>
+                {filteredPersonnel.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.first_name} {p.last_name_father}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-2">
@@ -206,12 +328,26 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                 {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
                 Generar
               </Button>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  setBulkAreaId(selectedAreaId);
+                  setSelectedWorkers([]);
+                  setIsBulkModalOpen(true);
+                }}
+                className="h-9 border-slate-200 text-xs px-3 text-slate-700 hover:bg-slate-50 gap-1.5 bg-white shrink-0"
+                title="Envío Masivo WhatsApp"
+              >
+                <MessageSquare className="h-4 w-4 text-emerald-500" />
+                Masivo
+              </Button>
               {data && (
                 <>
-                  <Button variant="outline" size="icon" onClick={handlePrint} title="Imprimir" className="h-9 w-9 border-slate-200 shrink-0">
+                  <Button variant="outline" size="icon" onClick={handlePrint} title="Imprimir" className="h-9 w-9 border-slate-200 shrink-0 bg-white">
                     <Printer className="h-4 w-4" />
                   </Button>
-                  <Button variant="outline" size="icon" onClick={handleCopyScreenshot} title="Copiar Captura" className="h-9 w-9 border-slate-200 shrink-0 text-slate-600 hover:text-slate-900">
+                  <Button variant="outline" size="icon" onClick={handleCopyScreenshot} title="Copiar Captura" className="h-9 w-9 border-slate-200 shrink-0 text-slate-600 hover:text-slate-900 bg-white">
                     <Camera className="h-4 w-4" />
                   </Button>
                 </>
@@ -341,6 +477,149 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
           </div>
         </div>
       )}
+
+      {/* Bulk WhatsApp Dialog */}
+      <Dialog open={isBulkModalOpen} onOpenChange={(open) => !isSendingBulk && setIsBulkModalOpen(open)}>
+        <DialogContent className="sm:max-w-[480px]" showCloseButton={!isSendingBulk}>
+          <DialogHeader>
+            <DialogTitle>Envío Masivo de Roster por WhatsApp</DialogTitle>
+            <DialogDescription>
+              Seleccione el área y los trabajadores a los que desea enviar sus roles por WhatsApp. El sistema capturará cada roster individual y lo enviará automáticamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 my-2">
+            <div className="space-y-2">
+              <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Filtrar por Área</Label>
+              <select
+                value={bulkAreaId}
+                onChange={(e) => {
+                  const areaId = e.target.value || 'all';
+                  setBulkAreaId(areaId);
+                  // Reset selected workers when changing area
+                  setSelectedWorkers([]);
+                }}
+                disabled={isSendingBulk}
+                className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-xs shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 border-slate-200 text-slate-700 cursor-pointer"
+              >
+                <option value="all">Todas las áreas</option>
+                {areas && areas.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Trabajadores</Label>
+                {bulkFilteredPersonnel.length > 0 && !isSendingBulk && (
+                  <label className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={selectedWorkers.length === bulkFilteredPersonnel.length && bulkFilteredPersonnel.length > 0}
+                      onChange={(e) => handleSelectAllBulk(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5"
+                    />
+                    <span>Seleccionar Todos</span>
+                  </label>
+                )}
+              </div>
+
+              <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-md p-3 space-y-2 bg-slate-50/50">
+                {bulkFilteredPersonnel.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-4">No hay trabajadores registrados en esta área.</p>
+                ) : (
+                  bulkFilteredPersonnel.map((p) => {
+                    const isSelected = selectedWorkers.includes(p.id);
+                    const positionName = positions.find(pos => pos.id === p.main_position)?.name || 'Sin cargo';
+                    return (
+                      <label
+                        key={p.id}
+                        className={cn(
+                          "flex items-center justify-between p-2 rounded-md border transition-all cursor-pointer text-xs select-none",
+                          isSelected 
+                            ? "bg-emerald-50/40 border-emerald-200 text-emerald-950" 
+                            : "bg-white border-slate-100 hover:border-slate-200 text-slate-700",
+                          isSendingBulk && "opacity-60 cursor-not-allowed"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => !isSendingBulk && toggleWorkerSelection(p.id)}
+                            disabled={isSendingBulk}
+                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5"
+                          />
+                          <div>
+                            <p className="font-medium">{p.first_name} {p.last_name_father}</p>
+                            <p className="text-[10px] text-slate-400">{positionName}</p>
+                          </div>
+                        </div>
+                        {p.phone ? (
+                          <span className="text-[10px] text-slate-500 font-mono">{p.phone}</span>
+                        ) : (
+                          <span className="text-[10px] text-red-500 font-medium bg-red-50 px-1.5 py-0.5 rounded">Sin Teléfono</span>
+                        )}
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Progress indicator */}
+            {isSendingBulk && bulkProgress && (
+              <div className="space-y-2 border-t pt-3 mt-3">
+                <div className="flex justify-between text-xs font-semibold text-slate-700">
+                  <span>Progreso de envío</span>
+                  <span>{bulkProgress.current} / {bulkProgress.total}</span>
+                </div>
+                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-emerald-500 h-full transition-all duration-300"
+                    style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500 italic animate-pulse flex items-center gap-1.5">
+                  <Loader2 className="h-3 w-3 animate-spin text-emerald-600" />
+                  {bulkProgress.status}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={isSendingBulk}
+              onClick={() => setIsBulkModalOpen(false)}
+              className="text-xs h-9"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={runBulkSend}
+              disabled={isSendingBulk || selectedWorkers.length === 0}
+              className="text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+            >
+              {isSendingBulk ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                <>
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  Enviar ({selectedWorkers.length} seleccionados)
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Global CSS for Print */}
       <style jsx global>{`

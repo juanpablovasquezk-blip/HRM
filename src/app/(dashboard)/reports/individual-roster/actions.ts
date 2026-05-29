@@ -3,6 +3,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { startOfDay, endOfDay, eachDayOfInterval, format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { sendWhatsAppMedia } from '@/lib/ultramsg';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export async function getIndividualRoster(personnelId: string, startDate: string, endDate: string) {
   const supabase = await createClient();
@@ -56,4 +58,103 @@ export async function getIndividualRoster(personnelId: string, startDate: string
     startDate,
     endDate
   };
+}
+
+export async function sendRosterWhatsApp(
+  personnelId: string,
+  base64Image: string,
+  startDate: string,
+  endDate: string
+) {
+  try {
+    const adminClient = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // 1. Fetch Personnel Info (to get name and phone)
+    const { data: personnel, error: pErr } = await adminClient
+      .from('personnel')
+      .select('first_name, last_name_father, phone')
+      .eq('id', personnelId)
+      .single();
+
+    if (pErr || !personnel) {
+      return { success: false, error: 'Trabajador no encontrado' };
+    }
+
+    if (!personnel.phone) {
+      return { success: false, error: `El trabajador ${personnel.first_name} ${personnel.last_name_father} no tiene un teléfono registrado.` };
+    }
+
+    // 2. Clean base64 header and convert to Buffer
+    const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // 3. Upload file to documents bucket under roster_shares/
+    const fileName = `roster_shares/roster_${personnelId}_${Date.now()}.png`;
+
+    const { error: uploadError } = await adminClient.storage
+      .from('documents')
+      .upload(fileName, buffer, {
+        contentType: 'image/png',
+        upsert: true
+      });
+
+    if (uploadError) {
+      return { success: false, error: `Error de subida a Storage: ${uploadError.message}` };
+    }
+
+    // 4. Create a signed URL for public access with 1 hour expiration
+    const { data: signedData, error: signError } = await adminClient.storage
+      .from('documents')
+      .createSignedUrl(fileName, 3600);
+
+    if (signError || !signedData?.signedUrl) {
+      // Clean up file if signing failed
+      await adminClient.storage.from('documents').remove([fileName]);
+      return { success: false, error: `Error al generar URL firmada: ${signError?.message || 'URL vacía'}` };
+    }
+
+    // 5. Send message via WhatsApp
+    const phone = personnel.phone;
+    let cleanPhone = phone.replace(/[^\d+]/g, '');
+    if (!cleanPhone.startsWith('+') && cleanPhone.startsWith('56')) {
+      cleanPhone = '+' + cleanPhone;
+    }
+
+    const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const message = `Su rol está disponible en la plataforma\n\nAcceda aquí: ${platformUrl}`;
+
+    const res = await sendWhatsAppMedia(cleanPhone, signedData.signedUrl, message);
+
+    // 6. Delete file from storage asynchronously after 2 minutes
+    setTimeout(async () => {
+      try {
+        const cleanupClient = createSupabaseClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!
+        );
+        const { error: delError } = await cleanupClient.storage
+          .from('documents')
+          .remove([fileName]);
+        if (delError) {
+          console.error(`[ULTRAMSG-CLEANUP] Failed to delete temporary file ${fileName}:`, delError.message);
+        } else {
+          console.log(`[ULTRAMSG-CLEANUP] Successfully deleted temporary file: ${fileName}`);
+        }
+      } catch (e) {
+        console.error(`[ULTRAMSG-CLEANUP] Exception deleting temporary file ${fileName}:`, e);
+      }
+    }, 120000);
+
+    if (!res.success) {
+      return { success: false, error: `Error de WhatsApp: ${res.error}` };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('[sendRosterWhatsApp] Error:', error);
+    return { success: false, error: error.message || 'Error interno del servidor' };
+  }
 }
