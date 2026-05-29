@@ -127,9 +127,19 @@ export async function getDailyPlanning(date?: string) {
       .select('*, personnel:personnel(*)')
       .eq('date', targetDate);
 
+    // Filter out transport requests for inactive or terminated personnel
+    const filteredTransport = (transport || []).filter(t => {
+      const p = t.personnel;
+      if (!p) return false;
+      if (p.termination_date && targetDate > p.termination_date) return false;
+      const todayStr = new Date().toLocaleDateString('sv');
+      if (!p.is_active && targetDate >= todayStr) return false;
+      return true;
+    });
+
     return {
       assignments: assignments || [],
-      transport: transport || [],
+      transport: filteredTransport,
       shifts: (await supabase.from('shifts').select('id, name, start_time, end_time').order('name')).data || [],
       date: targetDate
     };

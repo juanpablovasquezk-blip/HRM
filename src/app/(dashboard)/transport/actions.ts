@@ -299,7 +299,18 @@ export async function getTransportRequests(date: string) {
     .eq('date', date);
     
   if (error) return { data: null, error: error.message };
-  return { data, error: null };
+
+  // Filter out transport requests for inactive or terminated personnel
+  const filteredData = (data || []).filter(r => {
+    const p = r.personnel;
+    if (!p) return false;
+    if (p.termination_date && date > p.termination_date) return false;
+    const todayStr = new Date().toLocaleDateString('sv');
+    if (!p.is_active && date >= todayStr) return false;
+    return true;
+  });
+
+  return { data: filteredData, error: null };
 }
 
 export async function generateTransportRequests(date: string) {
@@ -328,6 +339,18 @@ export async function generateTransportRequests(date: string) {
     if (assErr) throw assErr;
     if (!assignments || assignments.length === 0) return { success: true, message: 'No hay asignaciones confirmadas.' };
 
+    // Filter out assignments for inactive or terminated personnel
+    const activeAssignments = assignments.filter(ass => {
+      const p = ass.personnel;
+      if (!p) return false;
+      if (p.termination_date && date > p.termination_date) return false;
+      const todayStr = new Date().toLocaleDateString('sv');
+      if (!p.is_active && date >= todayStr) return false;
+      return true;
+    });
+
+    if (activeAssignments.length === 0) return { success: true, message: 'No hay asignaciones de personal activo.' };
+
     // 2. Get existing requests to avoid duplicates
     const { data: existingReqs } = await supabase
       .from('transport_requests')
@@ -345,7 +368,7 @@ export async function generateTransportRequests(date: string) {
 
     const newRequests: any[] = [];
 
-    for (const ass of assignments) {
+    for (const ass of activeAssignments) {
       if (existingIds.has(ass.id)) continue;
       if (!ass.personnel || !ass.shift) continue;
       if (ass.shift.requires_transport === false) continue;
