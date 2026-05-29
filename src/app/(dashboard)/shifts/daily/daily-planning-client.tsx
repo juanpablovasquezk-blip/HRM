@@ -828,8 +828,26 @@ export default function DailyPlanningClient({
                  <div className="grid grid-cols-2 gap-4">
                     {Array.from({ length: left }).map((_, i) => (
                       <select key={i} className="w-full p-2 bg-white rounded border border-indigo-200 text-xs font-bold uppercase" onFocus={() => loadAvailable(req.position_id)} onChange={(e) => handleAssignExtra(req.position_id, req.shift_id, req.area_id, e.target.value)} defaultValue="">
-                         <option value="" disabled>Seleccionar libre...</option>
-                         {loadingAvailable === req.position_id ? <option>Cargando...</option> : (availablePersonnel[req.position_id] || []).map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name_father} {p.fatigue_warnings.length > 0 ? `(⚠️)` : ''}</option>)}
+                        <option value="" disabled>Seleccionar libre...</option>
+                        {loadingAvailable === req.position_id ? (
+                          <option>Cargando...</option>
+                        ) : (
+                          (availablePersonnel[req.position_id] || []).map(p => {
+                            const displayName = `${p.first_name} ${p.last_name_father}${
+                              p.already_assigned ? ` (EN TURNO: ${p.current_shift_name})` : ''
+                            }${p.fatigue_warnings.length > 0 ? ' (⚠️)' : ''}`;
+
+                            return (
+                              <option 
+                                key={p.id} 
+                                value={p.id}
+                                style={p.already_assigned ? { color: '#d97706', fontWeight: 'bold' } : undefined}
+                              >
+                                {displayName}
+                              </option>
+                            );
+                          })
+                        )}
                       </select>
                     ))}
                  </div>

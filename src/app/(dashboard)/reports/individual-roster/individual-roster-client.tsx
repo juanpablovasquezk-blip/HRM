@@ -51,6 +51,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
   const [selectedWorkers, setSelectedWorkers] = useState<string[]>([]);
   const [isSendingBulk, setIsSendingBulk] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number; status: string } | null>(null);
+  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
 
   const handleCopyScreenshot = async () => {
     if (!rosterRef.current) return;
@@ -134,11 +135,13 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
     }
 
     setIsSendingBulk(true);
+    setBulkErrors([]);
     setBulkProgress({ current: 0, total: selectedWorkers.length, status: 'Iniciando proceso...' });
 
     // Store the original state so we can restore it at the end
     const originalSelectedId = selectedId;
     const originalData = data;
+    const errorsList: string[] = [];
 
     try {
       const html2canvas = (await import('html2canvas-pro')).default;
@@ -158,6 +161,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
         const result = await getIndividualRoster(workerId, startDate, endDate);
         if (result.error) {
           console.error(`Error loading data for ${workerName}:`, result.error);
+          errorsList.push(`${workerName}: ${result.error}`);
           continue;
         }
 
@@ -171,6 +175,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
         // 4. Capture screenshot
         if (!rosterRef.current) {
           console.error('Roster reference container is missing');
+          errorsList.push(`${workerName}: Contenedor del Roster no disponible en el DOM`);
           continue;
         }
 
@@ -180,37 +185,48 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
           status: `Generando captura de pantalla para ${workerName}...`
         });
 
-        const canvas = await html2canvas(rosterRef.current, {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: '#ffffff',
-          windowWidth: 1024,
-          ignoreElements: (element) => element.classList.contains('no-print')
-        });
+        try {
+          const canvas = await html2canvas(rosterRef.current, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: '#ffffff',
+            windowWidth: 1024,
+            ignoreElements: (element) => element.classList.contains('no-print')
+          });
 
-        const base64Image = canvas.toDataURL('image/png');
+          const base64Image = canvas.toDataURL('image/png');
 
-        // 5. Send via server action
-        setBulkProgress({
-          current: i + 1,
-          total: selectedWorkers.length,
-          status: `Enviando WhatsApp a ${workerName}...`
-        });
+          // 5. Send via server action
+          setBulkProgress({
+            current: i + 1,
+            total: selectedWorkers.length,
+            status: `Enviando WhatsApp a ${workerName}...`
+          });
 
-        const sendRes = await sendRosterWhatsApp(workerId, base64Image, startDate, endDate);
-        if (!sendRes.success) {
-          toast.error(`Error con ${workerName}: ${sendRes.error}`);
+          const sendRes = await sendRosterWhatsApp(workerId, base64Image, startDate, endDate);
+          if (!sendRes.success) {
+            console.error(`Error sending WhatsApp for ${workerName}:`, sendRes.error);
+            errorsList.push(`${workerName}: ${sendRes.error}`);
+          }
+        } catch (captureErr: any) {
+          console.error(`Error capturing or sending for ${workerName}:`, captureErr);
+          errorsList.push(`${workerName}: Error de captura: ${captureErr.message || String(captureErr)}`);
         }
       }
 
-      toast.success('Envío masivo finalizado');
-      setIsBulkModalOpen(false);
-      setSelectedWorkers([]);
-      setBulkProgress(null);
+      if (errorsList.length > 0) {
+        setBulkErrors(errorsList);
+        toast.error('El envío masivo finalizó con algunos errores. Revisa la lista en el modal.');
+      } else {
+        toast.success('Envío masivo finalizado con éxito');
+        setIsBulkModalOpen(false);
+        setSelectedWorkers([]);
+        setBulkProgress(null);
+      }
     } catch (err: any) {
       console.error('Error in bulk send loop:', err);
-      toast.error('Ocurrió un error durante el envío masivo');
+      toast.error('Ocurrió un error inesperado durante el envío masivo');
     } finally {
       setIsSendingBulk(false);
       // Restore original selection
@@ -479,7 +495,15 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
       )}
 
       {/* Bulk WhatsApp Dialog */}
-      <Dialog open={isBulkModalOpen} onOpenChange={(open) => !isSendingBulk && setIsBulkModalOpen(open)}>
+      <Dialog 
+        open={isBulkModalOpen} 
+        onOpenChange={(open) => {
+          if (!isSendingBulk) {
+            setIsBulkModalOpen(open);
+            if (!open) setBulkErrors([]);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-[480px]" showCloseButton={!isSendingBulk}>
           <DialogHeader>
             <DialogTitle>Envío Masivo de Roster por WhatsApp</DialogTitle>
@@ -570,6 +594,18 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
               </div>
             </div>
 
+            {/* Bulk Errors Warning */}
+            {bulkErrors.length > 0 && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-md text-xs text-red-800 space-y-1.5 max-h-40 overflow-y-auto">
+                <p className="font-bold">Errores durante el envío:</p>
+                <ul className="list-disc list-inside space-y-1">
+                  {bulkErrors.map((err, idx) => (
+                    <li key={idx}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Progress indicator */}
             {isSendingBulk && bulkProgress && (
               <div className="space-y-2 border-t pt-3 mt-3">
@@ -595,7 +631,10 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
             <Button
               variant="outline"
               disabled={isSendingBulk}
-              onClick={() => setIsBulkModalOpen(false)}
+              onClick={() => {
+                setIsBulkModalOpen(false);
+                setBulkErrors([]);
+              }}
               className="text-xs h-9"
             >
               Cancelar

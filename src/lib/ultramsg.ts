@@ -149,8 +149,8 @@ export async function sendWhatsAppMedia(to: string, mediaUrl: string, caption?: 
     };
   }
 
-  const isVideo = mediaUrl.toLowerCase().endsWith('.mp4');
-  const isImage = mediaUrl.toLowerCase().match(/\.(jpg|jpeg|png|gif)$/i);
+  const isVideo = mediaUrl.toLowerCase().match(/\.mp4(\?|$)/i);
+  const isImage = mediaUrl.toLowerCase().match(/\.(jpg|jpeg|png|gif)(\?|$)/i);
   const endpoint = isVideo ? 'messages/video' : isImage ? 'messages/image' : 'messages/document';
 
   const url = `https://api.ultramsg.com/${instanceId}/${endpoint}`;

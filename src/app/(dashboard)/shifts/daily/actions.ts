@@ -77,11 +77,11 @@ export async function getAvailableForExtra(date: string, positionId: string) {
 
   if (pErr) return { error: pErr.message };
 
-  // 2. Get all assignments and leaves for this day to filter out busy people
+  // 2. Get all assignments and leaves for this day
   // IMPORTANT: Filter out 'cancelled' assignments as they don't block the person
   const { data: busyAssignments } = await supabase
     .from('shift_assignments')
-    .select('personnel_id')
+    .select('personnel_id, shift:shifts!shift_assignments_shift_id_fkey(name)')
     .eq('date', date)
     .neq('status', 'cancelled');
 
@@ -92,14 +92,23 @@ export async function getAvailableForExtra(date: string, positionId: string) {
     .gte('end_date', date)
     .eq('status', 'approved');
 
-  const busyIds = new Set([
-    ...(busyAssignments || []).map(a => a.personnel_id),
-    ...(busyLeaves || []).map(l => l.personnel_id)
-  ]);
+  const leaveIds = new Set((busyLeaves || []).map(l => l.personnel_id));
+  
+  // Create a map to store current assignments for this day
+  const assignmentMap = new Map<string, string>();
+  if (busyAssignments) {
+    busyAssignments.forEach(a => {
+      const shiftData: any = Array.isArray(a.shift) ? a.shift[0] : a.shift;
+      if (shiftData?.name) {
+        assignmentMap.set(a.personnel_id, shiftData.name);
+      }
+    });
+  }
 
+  // We exclude personnel on approved leave, but NOT those who are just assigned to a shift
   const available = (personnel || []).filter(p => {
     if (p.termination_date && date > p.termination_date) return false;
-    return !busyIds.has(p.id);
+    return !leaveIds.has(p.id);
   });
 
   // 3. FATIGUE CHECK: For each available person, check adjacent days
@@ -140,9 +149,13 @@ export async function getAvailableForExtra(date: string, positionId: string) {
        }
     }
 
+    const currentShiftName = assignmentMap.get(p.id) || null;
+
     return {
       ...p,
-      fatigue_warnings: warnings
+      fatigue_warnings: warnings,
+      already_assigned: currentShiftName !== null,
+      current_shift_name: currentShiftName
     };
   });
 
