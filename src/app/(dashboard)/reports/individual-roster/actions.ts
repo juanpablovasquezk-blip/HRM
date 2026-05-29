@@ -91,11 +91,24 @@ export async function sendRosterWhatsApp(
     const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(base64Data, 'base64');
 
-    // 3. Upload file to documents bucket under roster_shares/
+    // 2b. Find which bucket exists: 'media' or 'documents'
+    const { data: buckets } = await adminClient.storage.listBuckets();
+    const bucketNames = (buckets || []).map(b => b.name);
+    const bucketName = bucketNames.includes('media') 
+      ? 'media' 
+      : bucketNames.includes('documents') 
+        ? 'documents' 
+        : null;
+
+    if (!bucketName) {
+      return { success: false, error: 'No se encontró un bucket de almacenamiento válido (se requiere "media" o "documents" en Supabase)' };
+    }
+
+    // 3. Upload file to selected bucket under roster_shares/
     const fileName = `roster_shares/roster_${personnelId}_${Date.now()}.png`;
 
     const { error: uploadError } = await adminClient.storage
-      .from('documents')
+      .from(bucketName)
       .upload(fileName, buffer, {
         contentType: 'image/png',
         upsert: true
@@ -107,12 +120,12 @@ export async function sendRosterWhatsApp(
 
     // 4. Create a signed URL for public access with 1 hour expiration
     const { data: signedData, error: signError } = await adminClient.storage
-      .from('documents')
+      .from(bucketName)
       .createSignedUrl(fileName, 3600);
 
     if (signError || !signedData?.signedUrl) {
       // Clean up file if signing failed
-      await adminClient.storage.from('documents').remove([fileName]);
+      await adminClient.storage.from(bucketName).remove([fileName]);
       return { success: false, error: `Error al generar URL firmada: ${signError?.message || 'URL vacía'}` };
     }
 
@@ -136,15 +149,15 @@ export async function sendRosterWhatsApp(
           process.env.SUPABASE_SERVICE_ROLE_KEY!
         );
         const { error: delError } = await cleanupClient.storage
-          .from('documents')
+          .from(bucketName)
           .remove([fileName]);
         if (delError) {
-          console.error(`[ULTRAMSG-CLEANUP] Failed to delete temporary file ${fileName}:`, delError.message);
+          console.error(`[ULTRAMSG-CLEANUP] Failed to delete temporary file ${fileName} from ${bucketName}:`, delError.message);
         } else {
-          console.log(`[ULTRAMSG-CLEANUP] Successfully deleted temporary file: ${fileName}`);
+          console.log(`[ULTRAMSG-CLEANUP] Successfully deleted temporary file ${fileName} from ${bucketName}`);
         }
       } catch (e) {
-        console.error(`[ULTRAMSG-CLEANUP] Exception deleting temporary file ${fileName}:`, e);
+        console.error(`[ULTRAMSG-CLEANUP] Exception deleting temporary file ${fileName} from ${bucketName}:`, e);
       }
     }, 120000);
 
