@@ -61,11 +61,32 @@ export async function getDailyOperationalData(date: string) {
   };
 }
 
+function getShiftInterval(dateStr: string, startTime: string, endTime: string): { start: Date; end: Date } | null {
+  if (!dateStr || !startTime || !endTime) return null;
+  const cleanStart = startTime.trim();
+  const cleanEnd = endTime.trim();
+  try {
+    const start = new Date(`${dateStr}T${cleanStart}`);
+    let end = new Date(`${dateStr}T${cleanEnd}`);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return null;
+    }
+    if (end <= start) {
+      const parsedDate = parseISO(dateStr);
+      const nextDayStr = format(addDays(parsedDate, 1), 'yyyy-MM-dd');
+      end = new Date(`${nextDayStr}T${cleanEnd}`);
+    }
+    return { start, end };
+  } catch (e) {
+    return null;
+  }
+}
+
 /**
  * Find personnel available for an extra shift on a specific date
  * Filters out those who already have a shift or are on leave.
  */
-export async function getAvailableForExtra(date: string, positionId: string) {
+export async function getAvailableForExtra(date: string, positionId: string, extraShiftId?: string) {
   const supabase = await createClient();
 
   // 1. Get all personnel qualified for this position
@@ -77,14 +98,18 @@ export async function getAvailableForExtra(date: string, positionId: string) {
 
   if (pErr) return { error: pErr.message };
 
-  // 2. Get all assignments and leaves for this day
-  // IMPORTANT: Filter out 'cancelled' assignments as they don't block the person
-  const { data: busyAssignments } = await supabase
-    .from('shift_assignments')
-    .select('personnel_id, shift:shifts!shift_assignments_shift_id_fkey(name)')
-    .eq('date', date)
-    .neq('status', 'cancelled');
+  // Get details of the extra shift if ID is provided
+  let extraShift: any = null;
+  if (extraShiftId) {
+    const { data: esData } = await supabase
+      .from('shifts')
+      .select('id, name, start_time, end_time')
+      .eq('id', extraShiftId)
+      .single();
+    extraShift = esData;
+  }
 
+  // 2. Get all assignments and leaves for this day
   const { data: busyLeaves } = await supabase
     .from('leaves')
     .select('personnel_id')
@@ -93,41 +118,50 @@ export async function getAvailableForExtra(date: string, positionId: string) {
     .eq('status', 'approved');
 
   const leaveIds = new Set((busyLeaves || []).map(l => l.personnel_id));
-  
-  // Create a map to store current assignments for this day
-  const assignmentMap = new Map<string, string>();
-  if (busyAssignments) {
-    busyAssignments.forEach(a => {
-      const shiftData: any = Array.isArray(a.shift) ? a.shift[0] : a.shift;
-      if (shiftData?.name) {
-        assignmentMap.set(a.personnel_id, shiftData.name);
-      }
-    });
-  }
 
-  // We exclude personnel on approved leave, but NOT those who are just assigned to a shift
+  // Exclude personnel on approved leave
   const available = (personnel || []).filter(p => {
     if (p.termination_date && date > p.termination_date) return false;
     return !leaveIds.has(p.id);
   });
 
-  // 3. FATIGUE CHECK: For each available person, check adjacent days
+  if (available.length === 0) return { data: [] };
+
   const yesterday = format(subDays(parseISO(date), 1), 'yyyy-MM-dd');
   const tomorrow = format(addDays(parseISO(date), 1), 'yyyy-MM-dd');
 
-  const { data: adjacentShifts } = await supabase
+  // 3. Get all assignments for the 3-day window for the available personnel
+  const { data: allAssignments } = await supabase
     .from('shift_assignments')
-    .select('personnel_id, date, shift:shifts(start_time, end_time)')
+    .select('personnel_id, date, shift:shifts(id, name, start_time, end_time)')
     .in('personnel_id', available.map(p => p.id))
-    .in('date', [yesterday, tomorrow]);
+    .in('date', [yesterday, date, tomorrow])
+    .neq('status', 'cancelled');
+
+  // Create a map to store current assignments for this day
+  const assignmentMap = new Map<string, string>();
+  if (allAssignments) {
+    allAssignments.forEach(a => {
+      if (a.date === date) {
+        const shiftData: any = Array.isArray(a.shift) ? a.shift[0] : a.shift;
+        if (shiftData?.name) {
+          assignmentMap.set(a.personnel_id, shiftData.name);
+        }
+      }
+    });
+  }
 
   const results = available.map(p => {
     const warnings: string[] = [];
+    let isOverlapping = false;
+    let overlappingShiftName: string | null = null;
     
-    // Check if worked yesterday night
-    const yestShift = adjacentShifts?.find(s => s.personnel_id === p.id && s.date === yesterday);
+    // Find all assignments for this person in the 3-day window
+    const pAssignments = allAssignments?.filter(s => s.personnel_id === p.id) || [];
+    
+    // Check if worked yesterday night (fatigue check)
+    const yestShift = pAssignments.find(s => s.date === yesterday);
     if (yestShift && yestShift.shift) {
-       // Handle cases where Supabase returns shift as an array due to explicit join
        const shiftData: any = Array.isArray(yestShift.shift) ? yestShift.shift[0] : yestShift.shift;
        if (shiftData?.start_time) {
          const startHour = parseInt(shiftData.start_time.split(':')[0], 10);
@@ -137,8 +171,8 @@ export async function getAvailableForExtra(date: string, positionId: string) {
        }
     }
 
-    // Check if works tomorrow morning
-    const tomShift = adjacentShifts?.find(s => s.personnel_id === p.id && s.date === tomorrow);
+    // Check if works tomorrow morning (fatigue check)
+    const tomShift = pAssignments.find(s => s.date === tomorrow);
     if (tomShift && tomShift.shift) {
        const shiftData: any = Array.isArray(tomShift.shift) ? tomShift.shift[0] : tomShift.shift;
        if (shiftData?.start_time) {
@@ -149,13 +183,31 @@ export async function getAvailableForExtra(date: string, positionId: string) {
        }
     }
 
+    // Check physical overlap with the target extra shift (if extraShift is provided)
+    if (extraShift && extraShift.start_time && extraShift.end_time) {
+      for (const ass of pAssignments) {
+        const assShift: any = Array.isArray(ass.shift) ? ass.shift[0] : ass.shift;
+        if (assShift && assShift.start_time && assShift.end_time) {
+          const int1 = getShiftInterval(ass.date, assShift.start_time, assShift.end_time);
+          const int2 = getShiftInterval(date, extraShift.start_time, extraShift.end_time);
+          if (int1 && int2 && int1.start < int2.end && int2.start < int1.end) {
+            isOverlapping = true;
+            overlappingShiftName = assShift.name;
+            break;
+          }
+        }
+      }
+    }
+
     const currentShiftName = assignmentMap.get(p.id) || null;
+    const finalAlreadyAssigned = currentShiftName !== null || isOverlapping;
+    const finalShiftName = currentShiftName || (overlappingShiftName ? `${overlappingShiftName} (Traslape)` : null);
 
     return {
       ...p,
       fatigue_warnings: warnings,
-      already_assigned: currentShiftName !== null,
-      current_shift_name: currentShiftName
+      already_assigned: finalAlreadyAssigned,
+      current_shift_name: finalShiftName
     };
   });
 

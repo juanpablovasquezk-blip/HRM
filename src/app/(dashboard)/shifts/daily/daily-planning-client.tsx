@@ -380,9 +380,9 @@ export default function DailyPlanningClient({
     }
   };
 
-  const loadAvailable = async (positionId: string) => {
+  const loadAvailable = async (positionId: string, shiftId?: string) => {
     setLoadingAvailable(positionId);
-    const res = await getAvailableForExtra(selectedDate, positionId);
+    const res = await getAvailableForExtra(selectedDate, positionId, shiftId);
     if (res.data) setAvailablePersonnel(prev => ({ ...prev, [positionId]: res.data || [] }));
     setLoadingAvailable(null);
   };
@@ -827,7 +827,7 @@ export default function DailyPlanningClient({
                {!readOnly && (
                  <div className="grid grid-cols-2 gap-4">
                     {Array.from({ length: left }).map((_, i) => (
-                      <select key={i} className="w-full p-2 bg-white rounded border border-indigo-200 text-xs font-bold uppercase" onFocus={() => loadAvailable(req.position_id)} onChange={(e) => handleAssignExtra(req.position_id, req.shift_id, req.area_id, e.target.value)} defaultValue="">
+                      <select key={i} className="w-full p-2 bg-white rounded border border-indigo-200 text-xs font-bold uppercase" onFocus={() => loadAvailable(req.position_id, req.shift_id)} onChange={(e) => handleAssignExtra(req.position_id, req.shift_id, req.area_id, e.target.value)} defaultValue="">
                         <option value="" disabled>Seleccionar libre...</option>
                         {loadingAvailable === req.position_id ? (
                           <option>Cargando...</option>
