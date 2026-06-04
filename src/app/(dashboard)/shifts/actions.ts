@@ -5,6 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { generateSchedule, partialRecalculate } from '@/lib/scheduler';
 import type { RecalculationInput } from '@/lib/scheduler/types';
 import { parseISO, format, endOfWeek, startOfWeek, isAfter, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns';
+import { sendWhatsAppMessage } from '@/lib/ultramsg';
+import { es as esLocale } from 'date-fns/locale';
+
 
 // ─── Auth Helpers ─────────────────────────────────────────────────────────────
 
@@ -505,6 +508,27 @@ export async function publishAssignments(input: string | string[], endDate?: str
   if (!await isAdmin()) return { success: false, error: 'No autorizado' };
   const supabase = await createClient();
   
+  // 1. Fetch assignments that are about to be published (were not published before)
+  let selectQuery = supabase
+    .from('shift_assignments')
+    .select('id, date, personnel_id, shift_id, area_id, position_id')
+    .eq('is_published', false);
+
+  if (Array.isArray(input)) {
+    selectQuery = selectQuery.in('id', input);
+  } else if (typeof input === 'string' && endDate) {
+    selectQuery = selectQuery.gte('date', input).lte('date', endDate);
+    if (areaId) selectQuery = selectQuery.eq('area_id', areaId);
+  } else {
+    return { success: false, error: 'Parámetros inválidos' };
+  }
+
+  const { data: assignmentsToPublish, error: selectError } = await selectQuery;
+  if (selectError) {
+    console.error('[publishAssignments] Error fetching assignments to publish:', selectError.message);
+  }
+
+  // 2. Perform the update
   let query = supabase.from('shift_assignments').update({ is_published: true });
   
   if (Array.isArray(input)) {
@@ -512,15 +536,139 @@ export async function publishAssignments(input: string | string[], endDate?: str
   } else if (typeof input === 'string' && endDate) {
     query = query.gte('date', input).lte('date', endDate);
     if (areaId) query = query.eq('area_id', areaId);
-  } else {
-    return { success: false, error: 'Parámetros inválidos' };
   }
 
   const { error } = await query;
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  // 3. Trigger WhatsApp notifications for actual shift changes
+  if (assignmentsToPublish && assignmentsToPublish.length > 0) {
+    // Run notification logic in background to not block user UI response
+    (async () => {
+      try {
+        const assignmentIds = assignmentsToPublish.map(a => a.id);
+        
+        // Fetch all audit logs for these assignments (ordered by newest first)
+        const { data: auditLogs, error: auditError } = await supabase
+          .from('roster_audit_logs')
+          .select('*')
+          .in('assignment_id', assignmentIds)
+          .order('created_at', { ascending: false });
+
+        if (auditError) {
+          console.error('[publishAssignments] Error fetching audit logs:', auditError.message);
+          return;
+        }
+
+        // Map latest audit log for each assignment
+        const latestAuditMap = new Map<string, any>();
+        if (auditLogs) {
+          for (const log of auditLogs) {
+            if (!latestAuditMap.has(log.assignment_id)) {
+              latestAuditMap.set(log.assignment_id, log);
+            }
+          }
+        }
+
+        // We only care about assignments that have a corresponding audit log (actual change of shift)
+        const changedAssignments = assignmentsToPublish.filter(a => latestAuditMap.has(a.id));
+
+        if (changedAssignments.length > 0) {
+          // Batch fetch required data to avoid N+1 query problems
+          const personnelIds = [...new Set(changedAssignments.map(a => a.personnel_id))];
+          const shiftIds = [...new Set([
+            ...changedAssignments.map(a => a.shift_id),
+            ...changedAssignments.map(a => latestAuditMap.get(a.id)?.previous_shift_id).filter(Boolean)
+          ])];
+          const areaIds = [...new Set(changedAssignments.map(a => a.area_id).filter(Boolean))];
+          const positionIds = [...new Set(changedAssignments.map(a => a.position_id).filter(Boolean))];
+
+          const [
+            { data: personnelList },
+            { data: shiftsList },
+            { data: areasList },
+            { data: positionsList }
+          ] = await Promise.all([
+            supabase.from('personnel').select('id, first_name, last_name_father, phone').in('id', personnelIds),
+            supabase.from('shifts').select('id, name, start_time, end_time').in('id', shiftIds),
+            supabase.from('areas').select('id, name').in('id', areaIds),
+            supabase.from('positions').select('id, name').in('id', positionIds)
+          ]);
+
+          const personnelMap = new Map(personnelList?.map(p => [p.id, p]));
+          const shiftsMap = new Map(shiftsList?.map(s => [s.id, s]));
+          const areasMap = new Map(areasList?.map(a => [a.id, a]));
+          const positionsMap = new Map(positionsList?.map(p => [p.id, p]));
+
+          const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hrm-roster-manager.vercel.app';
+
+          // Send notifications via WhatsApp
+          await Promise.allSettled(changedAssignments.map(async (ass) => {
+            try {
+              const log = latestAuditMap.get(ass.id);
+              if (!log) return;
+
+              const person = personnelMap.get(ass.personnel_id);
+              if (!person || !person.phone) return;
+
+              const newShift = shiftsMap.get(ass.shift_id);
+              if (!newShift) return;
+
+              // Format phone correctly
+              let phone = person.phone.replace(/[^\d+]/g, '');
+              if (!phone.startsWith('+') && phone.startsWith('56')) {
+                phone = '+' + phone;
+              }
+
+              const oldShift = log.previous_shift_id ? shiftsMap.get(log.previous_shift_id) : null;
+              const oldShiftStr = oldShift 
+                ? `${oldShift.name} (${oldShift.start_time.slice(0, 5)} - ${oldShift.end_time.slice(0, 5)})`
+                : 'Libre / Sin Turno';
+
+              const areaName = ass.area_id ? (areasMap.get(ass.area_id)?.name || 'No especificada') : 'No especificada';
+              const positionName = ass.position_id ? (positionsMap.get(ass.position_id)?.name || 'No especificada') : 'No especificada';
+
+              // Format date: e.g. "Viernes, 05 de Junio"
+              let formattedDate = ass.date;
+              try {
+                const parsed = parseISO(ass.date);
+                const rawFormat = format(parsed, "EEEE, dd 'de' MMMM", { locale: esLocale });
+                formattedDate = rawFormat.charAt(0).toUpperCase() + rawFormat.slice(1);
+              } catch (e) {
+                // Fallback to raw date
+              }
+
+              const workerName = `${person.first_name} ${person.last_name_father}`;
+              
+              const message = `🔄 *Notificación de Cambio de Turno*\n\n` +
+                `Hola *${workerName}*,\n` +
+                `Se ha registrado una modificación en tu programación de turnos:\n\n` +
+                `📅 *Fecha:* ${formattedDate}\n\n` +
+                `* *Turno Anterior:* ${oldShiftStr}\n` +
+                `* *Nuevo Turno:* *${newShift.name}* (*${newShift.start_time.slice(0, 5)}* - *${newShift.end_time.slice(0, 5)}*)\n` +
+                `📍 *Área:* ${areaName}\n` +
+                `💼 *Función:* ${positionName}\n\n` +
+                `Por favor, planifica tu jornada considerando esta actualización. Puedes revisar tu planilla completa en la plataforma: ${platformUrl}\n\n` +
+                `*Este es un mensaje automático. No lo responda. Si tiene alguna duda comuníquese con su supervisor.*`;
+
+              await sendWhatsAppMessage(phone, message);
+            } catch (err) {
+              console.error(`[publishAssignments] Error notifying worker for assignment ${ass.id}:`, err);
+            }
+          }));
+        }
+      } catch (err) {
+        console.error('[publishAssignments] Background notification process failed:', err);
+      }
+    })();
+  }
+
   revalidatePath('/shifts/roster');
   revalidatePath('/dashboard');
   revalidatePath('/shifts/daily');
-  return { success: !error, error: error?.message };
+  return { success: true };
 }
 
 export async function moveAssignment(assignmentId: string, newDate: string, reason?: string) {
