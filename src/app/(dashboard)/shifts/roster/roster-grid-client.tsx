@@ -46,7 +46,8 @@ import {
   FileText,
   Cake,
   MapPin,
-  EyeOff
+  EyeOff,
+  Send
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -72,7 +73,8 @@ import {
   bulkDeleteManualAssignments,
   validateAssignments,
   publishAssignments,
-  moveAssignment
+  moveAssignment,
+  sendTodayChangeNotifications
 } from '@/app/(dashboard)/shifts/actions';
 import { 
   DropdownMenu, 
@@ -212,6 +214,9 @@ export function RosterGridClient({
     includePublished: false,
   });
 
+  // One-shot: tracks whether today's manual notifications have been sent this session
+  const [isTodayNotifSent, setIsTodayNotifSent] = useState(false);
+  const [isSendingTodayNotif, setIsSendingTodayNotif] = useState(false);
 
   // Local state for the dialog selects
   const [dialogPositionId, setDialogPositionId] = useState<string>('');
@@ -1142,6 +1147,38 @@ export function RosterGridClient({
     });
   };
 
+  const handleSendTodayNotifications = async () => {
+    if (isTodayNotifSent || isSendingTodayNotif) return;
+    if (!confirm('¿Enviar notificaciones WhatsApp a todos los trabajadores con cambios de turno realizados HOY?')) return;
+    setIsSendingTodayNotif(true);
+    try {
+      const res = await sendTodayChangeNotifications() as any;
+      if (res.success) {
+        setIsTodayNotifSent(true);
+        if (res.notifiedWorkers && res.notifiedWorkers.length > 0) {
+          toast.success(
+            <div>
+              <p className="font-bold">✅ Notificaciones enviadas</p>
+              <p className="text-xs text-slate-500 mt-1">
+                WhatsApp enviado a: <strong>{res.notifiedWorkers.join(', ')}</strong>
+              </p>
+            </div>,
+            { duration: 8000 }
+          );
+        } else {
+          toast.info(`No se encontraron cambios manuales publicados hoy (de ${res.total ?? 0} asignaciones revisadas).`);
+          setIsTodayNotifSent(true);
+        }
+      } else {
+        toast.error(res.error || 'Error al enviar notificaciones');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Error inesperado');
+    } finally {
+      setIsSendingTodayNotif(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full space-y-4">
       {/* Filters Bar */}
@@ -1422,6 +1459,23 @@ export function RosterGridClient({
                   <Sparkles className="h-3.5 w-3.5 mr-1 text-emerald-600" />
                   Publicar
                 </Button>
+                {/* One-shot button: send today's change notifications retroactively */}
+                {!isTodayNotifSent && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs ml-1 font-semibold shadow-sm animate-pulse"
+                    onClick={handleSendTodayNotifications}
+                    disabled={isSendingTodayNotif}
+                    title="Reenviar notificaciones WhatsApp de cambios realizados hoy (uso único)"
+                  >
+                    {isSendingTodayNotif
+                      ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      : <Send className="h-3.5 w-3.5 mr-1 text-amber-600" />
+                    }
+                    {isSendingTodayNotif ? 'Enviando...' : 'Notificar Hoy'}
+                  </Button>
+                )}
             </div>
 
             <Button 

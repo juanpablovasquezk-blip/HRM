@@ -765,7 +765,130 @@ export async function publishAssignments(input: string | string[], endDate?: str
   return { success: true, notifiedWorkers };
 }
 
+// ─── One-shot: reenviar notificaciones de cambios de hoy ──────────────────────
+// Úsalo cuando los cambios se publicaron antes de que el fix de audit_log
+// estuviera activo y los trabajadores nunca recibieron WhatsApp.
+export async function sendTodayChangeNotifications() {
+  if (!await isAdmin()) return { success: false, error: 'No autorizado', notifiedWorkers: [] };
+  const supabase = await createClient();
+
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayStart = `${todayStr}T00:00:00`;
+
+  // 1. Fetch all published manual assignments updated today
+  const { data: changedAssignments, error: aErr } = await supabase
+    .from('shift_assignments')
+    .select('id, date, personnel_id, shift_id, area_id, position_id, updated_at')
+    .eq('is_published', true)
+    .eq('is_manual', true)
+    .eq('is_extra', false)
+    .gte('updated_at', todayStart);
+
+  if (aErr) return { success: false, error: aErr.message, notifiedWorkers: [] };
+  if (!changedAssignments || changedAssignments.length === 0) {
+    return { success: true, notifiedWorkers: [], total: 0 };
+  }
+
+  const personnelIds = [...new Set(changedAssignments.map((a: any) => a.personnel_id))];
+  const dates = [...new Set(changedAssignments.map((a: any) => a.date))];
+
+  // 2. Try to get audit logs (to show previous shift in the message)
+  const { data: auditLogs } = await supabase
+    .from('roster_audit_logs')
+    .select('*')
+    .in('personnel_id', personnelIds)
+    .in('date', dates)
+    .order('created_at', { ascending: false });
+
+  const latestAuditMap = new Map<string, any>();
+  if (auditLogs) {
+    for (const log of auditLogs) {
+      const key = `${log.personnel_id}_${log.date}`;
+      if (!latestAuditMap.has(key)) latestAuditMap.set(key, log);
+    }
+  }
+
+  // 3. Batch-fetch reference data
+  const allShiftIds = [...new Set([
+    ...changedAssignments.map((a: any) => a.shift_id),
+    ...Array.from(latestAuditMap.values()).map((l: any) => l.previous_shift_id).filter(Boolean)
+  ])];
+  const areaIds = [...new Set(changedAssignments.map((a: any) => a.area_id).filter(Boolean))];
+  const positionIds = [...new Set(changedAssignments.map((a: any) => a.position_id).filter(Boolean))];
+
+  const [
+    { data: personnelList },
+    { data: shiftsList },
+    { data: areasList },
+    { data: positionsList }
+  ] = await Promise.all([
+    supabase.from('personnel').select('id, first_name, last_name_father, phone').in('id', personnelIds),
+    supabase.from('shifts').select('id, name, start_time, end_time').in('id', allShiftIds),
+    supabase.from('areas').select('id, name').in('id', areaIds),
+    supabase.from('positions').select('id, name').in('id', positionIds)
+  ]);
+
+  const personnelMap = new Map(personnelList?.map((p: any) => [p.id, p]));
+  const shiftsMap = new Map(shiftsList?.map((s: any) => [s.id, s]));
+  const areasMap = new Map(areasList?.map((a: any) => [a.id, a]));
+  const positionsMap = new Map(positionsList?.map((p: any) => [p.id, p]));
+  const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hrm-roster-manager.vercel.app';
+
+  // 4. Send WhatsApp notifications in parallel
+  const notifiedWorkers: string[] = [];
+
+  const results = await Promise.allSettled(changedAssignments.map(async (ass: any) => {
+    const person = personnelMap.get(ass.personnel_id);
+    if (!person || !(person as any).phone) return;
+
+    const newShift = shiftsMap.get(ass.shift_id);
+    if (!newShift) return;
+
+    let phone = (person as any).phone.replace(/[^\d+]/g, '');
+    if (!phone.startsWith('+') && phone.startsWith('56')) phone = '+' + phone;
+
+    const areaName = ass.area_id ? ((areasMap.get(ass.area_id) as any)?.name || 'No especificada') : 'No especificada';
+    const positionName = ass.position_id ? ((positionsMap.get(ass.position_id) as any)?.name || 'No especificada') : 'No especificada';
+
+    let formattedDate = ass.date;
+    try {
+      const parsed = parseISO(ass.date);
+      const rawFmt = format(parsed, "EEEE, dd 'de' MMMM", { locale: esLocale });
+      formattedDate = rawFmt.charAt(0).toUpperCase() + rawFmt.slice(1);
+    } catch (e) {}
+
+    const workerName = `${(person as any).first_name} ${(person as any).last_name_father}`;
+    const log = latestAuditMap.get(`${ass.personnel_id}_${ass.date}`);
+    const oldShift = (log as any)?.previous_shift_id ? shiftsMap.get((log as any).previous_shift_id) : null;
+    const oldShiftStr = oldShift
+      ? `${(oldShift as any).name} (${(oldShift as any).start_time.slice(0, 5)} - ${(oldShift as any).end_time.slice(0, 5)})`
+      : 'Sin turno previo registrado';
+
+    const message = `🔄 *Notificación de Cambio de Turno*\n\n` +
+      `Hola *${workerName}*,\n` +
+      `Se ha registrado una modificación en tu programación de turnos:\n\n` +
+      `📅 *Fecha:* ${formattedDate}\n\n` +
+      `* *Turno Anterior:* ${oldShiftStr}\n` +
+      `* *Nuevo Turno:* *${(newShift as any).name}* (*${(newShift as any).start_time.slice(0, 5)}* - *${(newShift as any).end_time.slice(0, 5)}*)\n` +
+      `📍 *Área:* ${areaName}\n` +
+      `💼 *Función:* ${positionName}\n\n` +
+      `Por favor, planifica tu jornada considerando esta actualización. Puedes revisar tu planilla completa en la plataforma: ${platformUrl}\n\n` +
+      `*Este es un mensaje automático. No lo responda. Si tiene alguna duda comuníquese con su supervisor.*`;
+
+    const res = await sendWhatsAppMessage(phone, message);
+    if (res.success) return workerName;
+    throw new Error((res as any).error || 'UltraMsg failed');
+  }));
+
+  results.forEach(r => {
+    if (r.status === 'fulfilled' && r.value) notifiedWorkers.push(r.value as string);
+  });
+
+  return { success: true, notifiedWorkers, total: changedAssignments.length };
+}
+
 export async function unpublishAssignments(assignmentIds: string[]) {
+
   if (!await isAdmin()) return { success: false, error: 'No autorizado' };
   const supabase = await createClient();
   const { error } = await supabase
