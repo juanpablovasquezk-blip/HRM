@@ -511,15 +511,20 @@ export async function createManualAssignment(formData: FormData) {
       // Always log when the shift actually changes so that publishAssignments
       // can detect the change and send WhatsApp notifications regardless of
       // whether the assignment was previously validated or published.
-      await supabase.from('roster_audit_logs').insert({
-        assignment_id: existing.id,
-        personnel_id: personnelId,
-        date: date,
-        previous_shift_id: existing.shift_id,
-        new_shift_id: shiftId,
-        reason: (formData.get('reason') as string) || 'Cambio manual',
-        changed_by: userId
-      });
+      // Non-fatal: if roster_audit_logs table doesn't exist yet, we continue.
+      try {
+        await supabase.from('roster_audit_logs').insert({
+          assignment_id: existing.id,
+          personnel_id: personnelId,
+          date: date,
+          previous_shift_id: existing.shift_id,
+          new_shift_id: shiftId,
+          reason: (formData.get('reason') as string) || 'Cambio manual',
+          changed_by: userId
+        });
+      } catch (auditErr) {
+        console.warn('[createManualAssignment] Could not insert audit log (table may not exist yet):', auditErr);
+      }
 
       // Update the existing assignment record
       const { error: updateError } = await supabase
@@ -558,15 +563,20 @@ export async function createManualAssignment(formData: FormData) {
 
       // Always log the insertion (Libre → new shift) so publishAssignments
       // can detect new assignments and send WhatsApp notifications.
-      await supabase.from('roster_audit_logs').insert({
-        assignment_id: newAsg.id,
-        personnel_id: personnelId,
-        date: date,
-        previous_shift_id: null,
-        new_shift_id: shiftId,
-        reason: (formData.get('reason') as string) || 'Asignación manual',
-        changed_by: userId
-      });
+      // Non-fatal: if roster_audit_logs table doesn't exist yet, we continue.
+      try {
+        await supabase.from('roster_audit_logs').insert({
+          assignment_id: newAsg.id,
+          personnel_id: personnelId,
+          date: date,
+          previous_shift_id: null,
+          new_shift_id: shiftId,
+          reason: (formData.get('reason') as string) || 'Asignación manual',
+          changed_by: userId
+        });
+      } catch (auditErr) {
+        console.warn('[createManualAssignment] Could not insert audit log (table may not exist yet):', auditErr);
+      }
     }
   }
 
@@ -778,13 +788,13 @@ export async function sendTodayChangeNotifications() {
   const todayStart = `${todayStr}T00:00:00`;
 
   // 1a. Audit logs creados HOY → fuente principal de cambios
-  const { data: todayLogs, error: logErr } = await supabase
+  // Non-fatal: if the table doesn’t exist yet, skip to fallback.
+  const { data: todayLogs } = await supabase
     .from('roster_audit_logs')
     .select('*')
     .gte('created_at', todayStart)
     .order('created_at', { ascending: false });
-
-  if (logErr) return { success: false, error: logErr.message, notifiedWorkers: [] };
+  // (errors silently ignored — fallback covers missing table)
 
   // Build a de-duplicated map: only the latest log per personnel+date
   const latestAuditMap = new Map<string, any>();
@@ -969,15 +979,20 @@ export async function moveAssignment(assignmentId: string, newDate: string, reas
 
   // Always audit date movements so publishAssignments can detect the change
   // and send WhatsApp notifications even if not previously validated.
-  await supabase.from('roster_audit_logs').insert({
-    assignment_id: assignmentId,
-    personnel_id: current.personnel_id,
-    date: newDate,
-    previous_shift_id: current.shift_id,
-    new_shift_id: current.shift_id, // Same shift, different date
-    reason: reason || 'Movimiento Drag & Drop',
-    changed_by: userId
-  });
+  // Non-fatal: if roster_audit_logs table doesn't exist yet, we continue.
+  try {
+    await supabase.from('roster_audit_logs').insert({
+      assignment_id: assignmentId,
+      personnel_id: current.personnel_id,
+      date: newDate,
+      previous_shift_id: current.shift_id,
+      new_shift_id: current.shift_id, // Same shift, different date
+      reason: reason || 'Movimiento Drag & Drop',
+      changed_by: userId
+    });
+  } catch (auditErr) {
+    console.warn('[moveAssignment] Could not insert audit log (table may not exist yet):', auditErr);
+  }
 
   // If already published, notify the worker immediately of the date movement
   if (current.is_published && current.personnel?.phone) {
