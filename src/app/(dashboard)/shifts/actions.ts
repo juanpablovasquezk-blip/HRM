@@ -654,27 +654,49 @@ export async function publishAssignments(input: string | string[], endDate?: str
         .order('created_at', { ascending: false });
 
       if (auditError) {
-        console.error('[publishAssignments] Error fetching audit logs:', auditError.message);
-      } else {
-        // Map latest audit log for each personnel + date combination
-        const latestAuditMap = new Map<string, any>();
-        if (auditLogs) {
-          for (const log of auditLogs) {
-            const key = `${log.personnel_id}_${log.date}`;
-            if (!latestAuditMap.has(key)) {
-              latestAuditMap.set(key, log);
-            }
+        console.warn('[publishAssignments] roster_audit_logs unavailable:', auditError.message);
+      }
+
+      // Map latest audit log for each personnel + date combination
+      const latestAuditMap = new Map<string, any>();
+      if (auditLogs) {
+        for (const log of auditLogs) {
+          const key = `${log.personnel_id}_${log.date}`;
+          if (!latestAuditMap.has(key)) {
+            latestAuditMap.set(key, log);
           }
         }
+      }
 
-        // We only care about assignments that have a corresponding audit log (actual change of shift)
-        const changedAssignments = assignmentsToPublish.filter(a => {
+      // Decide which assignments to notify:
+      // PRIMARY:  assignments with a matching audit log (shows old → new shift)
+      // FALLBACK: if no audit logs available (table missing), notify all is_manual=true
+      let changedAssignments: typeof assignmentsToPublish;
+
+      if (latestAuditMap.size > 0) {
+        // Primary path: only assignments that actually changed shift
+        changedAssignments = assignmentsToPublish.filter(a => {
           const key = `${a.personnel_id}_${a.date}`;
           const log = latestAuditMap.get(key);
           return log && log.previous_shift_id !== a.shift_id;
         });
+      } else {
+        // Fallback path: audit logs table empty or missing → notify all manual assignments
+        const { data: manualFlags } = await supabase
+          .from('shift_assignments')
+          .select('id, is_manual')
+          .in('id', assignmentsToPublish.map(a => a.id));
 
+        const manualSet = new Set(
+          (manualFlags || []).filter((r: any) => r.is_manual).map((r: any) => r.id)
+        );
+        changedAssignments = assignmentsToPublish.filter(a => manualSet.has(a.id));
         if (changedAssignments.length > 0) {
+          console.log(`[publishAssignments] Fallback: notifying ${changedAssignments.length} manual assignments (audit_logs unavailable).`);
+        }
+      }
+
+      if (changedAssignments.length > 0) {
           // Batch fetch required data to avoid N+1 query problems
           const batchPersonnelIds = [...new Set(changedAssignments.map(a => a.personnel_id))];
           const shiftIds = [...new Set([
@@ -706,7 +728,6 @@ export async function publishAssignments(input: string | string[], endDate?: str
           // Send notifications via WhatsApp in parallel and collect successful outcomes
           const results = await Promise.allSettled(changedAssignments.map(async (ass) => {
             const log = latestAuditMap.get(`${ass.personnel_id}_${ass.date}`);
-            if (!log) return;
 
             const person = personnelMap.get(ass.personnel_id);
             if (!person || !person.phone) return;
@@ -720,7 +741,7 @@ export async function publishAssignments(input: string | string[], endDate?: str
               phone = '+' + phone;
             }
 
-            const oldShift = log.previous_shift_id ? shiftsMap.get(log.previous_shift_id) : null;
+            const oldShift = log?.previous_shift_id ? shiftsMap.get(log.previous_shift_id) : null;
             const oldShiftStr = oldShift 
               ? `${oldShift.name} (${oldShift.start_time.slice(0, 5)} - ${oldShift.end_time.slice(0, 5)})`
               : 'Libre / Sin Turno';
@@ -763,11 +784,11 @@ export async function publishAssignments(input: string | string[], endDate?: str
             }
           });
         }
-      }
     } catch (err) {
       console.error('[publishAssignments] Notification process failed:', err);
     }
   }
+
 
   revalidatePath('/shifts/roster');
   revalidatePath('/dashboard');
