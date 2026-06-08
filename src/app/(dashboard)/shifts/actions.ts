@@ -440,38 +440,44 @@ export async function createManualAssignment(formData: FormData) {
     return { success: false, error: validation.error };
   }
 
-  const inserts = dates.map(date => ({
-    personnel_id: personnelId,
-    shift_id: shiftId,
-    date: date,
-    area_id: areaId,
-    position_id: positionId,
-    status: 'scheduled',
-    is_manual: true,
-    is_extra: false,
-  }));
-
-  // Clean existing manual assignments on these dates for this person to avoid duplicates
-  // and ensure we are updating to the new selection
-  const { error } = await supabase
-    .from('shift_assignments')
-    .upsert(inserts, { 
-      onConflict: 'personnel_id,date,shift_id,is_extra',
-      ignoreDuplicates: false 
-    });
-
-  if (error) return { success: false, error: error.message };
-
-  // AUDIT LOGGING: If these dates were already validated or published, log the changes
+  // Get current user ID for audit logging
   const userId = await getCurrentUserId();
+
+  // Fetch existing assignments for these dates (excluding extra shifts) to compare and update
+  const { data: existingAssignments, error: fetchError } = await supabase
+    .from('shift_assignments')
+    .select('id, date, shift_id, is_validated, is_published')
+    .eq('personnel_id', personnelId)
+    .in('date', dates)
+    .eq('is_extra', false);
+
+  if (fetchError) return { success: false, error: fetchError.message };
+
+  // Group existing assignments by date (handling any duplicates to self-heal)
+  const existingByDate = new Map<string, any[]>();
+  if (existingAssignments) {
+    for (const asg of existingAssignments) {
+      const list = existingByDate.get(asg.date) || [];
+      list.push(asg);
+      existingByDate.set(asg.date, list);
+    }
+  }
+
   for (const date of dates) {
-    // Check if there's an original AI proposal to compare against
-    const { data: prev } = await supabase
-      .from('shift_assignments')
-      .select('id, shift_id, original_shift_id, is_validated, is_published')
-      .eq('personnel_id', personnelId)
-      .eq('date', date)
-      .maybeSingle();
+    const list = existingByDate.get(date) || [];
+    let existing = list[0] || null;
+
+    // Self-heal duplicates: if multiple assignments exist for this date, keep the first and delete the rest
+    if (list.length > 1) {
+      const duplicateIds = list.slice(1).map(a => a.id);
+      const { error: delError } = await supabase
+        .from('shift_assignments')
+        .delete()
+        .in('id', duplicateIds);
+      if (delError) {
+        console.error('[createManualAssignment] Error deleting duplicates:', delError.message);
+      }
+    }
 
     // Heuristic: Check if the roster for this date has already been published for others
     const { data: publishedOnDate } = await supabase
@@ -482,22 +488,87 @@ export async function createManualAssignment(formData: FormData) {
       .limit(1);
     
     const isRosterPublished = (publishedOnDate && publishedOnDate.length > 0) || false;
-    const prevValidated = prev?.is_validated || false;
-    const prevPublished = prev?.is_published || false;
 
-    if (prevValidated || prevPublished || isRosterPublished) {
-      await supabase.from('roster_audit_logs').insert({
-        assignment_id: prev?.id || null,
-        personnel_id: personnelId,
-        date: date,
-        previous_shift_id: prev?.shift_id || null, // null represents Libre
-        new_shift_id: shiftId,
-        reason: (formData.get('reason') as string) || 'Cambio manual post-validación',
-        changed_by: userId
-      });
+    if (existing) {
+      // If the shift is not changing, we can skip or just update area/position without logging
+      if (existing.shift_id === shiftId) {
+        const { error: updateError } = await supabase
+          .from('shift_assignments')
+          .update({
+            area_id: areaId,
+            position_id: positionId,
+            status: 'scheduled',
+            is_manual: true
+          })
+          .eq('id', existing.id);
+        if (updateError) return { success: false, error: updateError.message };
+        continue;
+      }
+
+      // Log audit trail BEFORE updating the assignment
+      const prevValidated = existing.is_validated || false;
+      const prevPublished = existing.is_published || false;
+
+      if (prevValidated || prevPublished || isRosterPublished) {
+        await supabase.from('roster_audit_logs').insert({
+          assignment_id: existing.id,
+          personnel_id: personnelId,
+          date: date,
+          previous_shift_id: existing.shift_id,
+          new_shift_id: shiftId,
+          reason: (formData.get('reason') as string) || 'Cambio manual post-validación',
+          changed_by: userId
+        });
+      }
+
+      // Update the existing assignment record
+      const { error: updateError } = await supabase
+        .from('shift_assignments')
+        .update({
+          shift_id: shiftId,
+          area_id: areaId,
+          position_id: positionId,
+          status: 'scheduled',
+          is_manual: true
+        })
+        .eq('id', existing.id);
+
+      if (updateError) return { success: false, error: updateError.message };
+
+    } else {
+      // If no existing assignment on this date, insert a new record
+      const { data: newAsg, error: insertError } = await supabase
+        .from('shift_assignments')
+        .insert({
+          personnel_id: personnelId,
+          shift_id: shiftId,
+          date: date,
+          area_id: areaId,
+          position_id: positionId,
+          status: 'scheduled',
+          is_manual: true,
+          is_extra: false
+        })
+        .select()
+        .single();
+
+      if (insertError) return { success: false, error: insertError.message };
+
+      // Log the change from Libre (null) to the new shift if the roster is published
+      if (isRosterPublished) {
+        await supabase.from('roster_audit_logs').insert({
+          assignment_id: newAsg.id,
+          personnel_id: personnelId,
+          date: date,
+          previous_shift_id: null,
+          new_shift_id: shiftId,
+          reason: (formData.get('reason') as string) || 'Cambio manual post-validación',
+          changed_by: userId
+        });
+      }
     }
   }
-  
+
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
   revalidatePath('/shifts/daily');
@@ -560,13 +631,15 @@ export async function publishAssignments(input: string | string[], endDate?: str
     // Run notification logic in background to not block user UI response
     (async () => {
       try {
-        const assignmentIds = assignmentsToPublish.map(a => a.id);
+        const personnelIds = [...new Set(assignmentsToPublish.map(a => a.personnel_id))];
+        const dates = [...new Set(assignmentsToPublish.map(a => a.date))];
         
-        // Fetch all audit logs for these assignments (ordered by newest first)
+        // Fetch all audit logs for these personnel and dates (ordered by newest first)
         const { data: auditLogs, error: auditError } = await supabase
           .from('roster_audit_logs')
           .select('*')
-          .in('assignment_id', assignmentIds)
+          .in('personnel_id', personnelIds)
+          .in('date', dates)
           .order('created_at', { ascending: false });
 
         if (auditError) {
@@ -574,25 +647,30 @@ export async function publishAssignments(input: string | string[], endDate?: str
           return;
         }
 
-        // Map latest audit log for each assignment
+        // Map latest audit log for each personnel + date combination
         const latestAuditMap = new Map<string, any>();
         if (auditLogs) {
           for (const log of auditLogs) {
-            if (!latestAuditMap.has(log.assignment_id)) {
-              latestAuditMap.set(log.assignment_id, log);
+            const key = `${log.personnel_id}_${log.date}`;
+            if (!latestAuditMap.has(key)) {
+              latestAuditMap.set(key, log);
             }
           }
         }
 
         // We only care about assignments that have a corresponding audit log (actual change of shift)
-        const changedAssignments = assignmentsToPublish.filter(a => latestAuditMap.has(a.id));
+        const changedAssignments = assignmentsToPublish.filter(a => {
+          const key = `${a.personnel_id}_${a.date}`;
+          const log = latestAuditMap.get(key);
+          return log && log.previous_shift_id !== a.shift_id;
+        });
 
         if (changedAssignments.length > 0) {
           // Batch fetch required data to avoid N+1 query problems
-          const personnelIds = [...new Set(changedAssignments.map(a => a.personnel_id))];
+          const batchPersonnelIds = [...new Set(changedAssignments.map(a => a.personnel_id))];
           const shiftIds = [...new Set([
             ...changedAssignments.map(a => a.shift_id),
-            ...changedAssignments.map(a => latestAuditMap.get(a.id)?.previous_shift_id).filter(Boolean)
+            ...changedAssignments.map(a => latestAuditMap.get(`${a.personnel_id}_${a.date}`)?.previous_shift_id).filter(Boolean)
           ])];
           const areaIds = [...new Set(changedAssignments.map(a => a.area_id).filter(Boolean))];
           const positionIds = [...new Set(changedAssignments.map(a => a.position_id).filter(Boolean))];
@@ -603,7 +681,7 @@ export async function publishAssignments(input: string | string[], endDate?: str
             { data: areasList },
             { data: positionsList }
           ] = await Promise.all([
-            supabase.from('personnel').select('id, first_name, last_name_father, phone').in('id', personnelIds),
+            supabase.from('personnel').select('id, first_name, last_name_father, phone').in('id', batchPersonnelIds),
             supabase.from('shifts').select('id, name, start_time, end_time').in('id', shiftIds),
             supabase.from('areas').select('id, name').in('id', areaIds),
             supabase.from('positions').select('id, name').in('id', positionIds)
@@ -619,7 +697,7 @@ export async function publishAssignments(input: string | string[], endDate?: str
           // Send notifications via WhatsApp
           await Promise.allSettled(changedAssignments.map(async (ass) => {
             try {
-              const log = latestAuditMap.get(ass.id);
+              const log = latestAuditMap.get(`${ass.personnel_id}_${ass.date}`);
               if (!log) return;
 
               const person = personnelMap.get(ass.personnel_id);
