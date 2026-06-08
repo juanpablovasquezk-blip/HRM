@@ -326,13 +326,17 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
   // Count manually changed assignments for the legend
   const manualChangesCount = data?.assignments?.filter((a: any) => a.is_manual).length ?? 0;
 
-  // Helper: a day is a "post-publish change" if there's a published assignment
-  // AND a leave that overlaps that day (leave submitted after shift was published)
-  const isPostPublishLeave = (day: Date) => {
-    if (!data) return false;
+  // Helper: a leave is a "post-publish change" if the leave was created AFTER
+  // the roster period started AND the day has a published assignment.
+  // This is a reliable proxy: if the vacation was pre-existing, it would have
+  // been entered before the start of the month / period.
+  const isPostPublishLeave = (day: Date, leave: any) => {
+    if (!leave || !data) return false;
     const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
     if (!asg?.is_published) return false;
-    return data.leaves.some((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
+    // Leave was created after the roster period started → post-publish
+    if (!leave.created_at) return false;
+    return parseISO(leave.created_at) > parseISO(startDate);
   };
 
   return (
@@ -495,12 +499,12 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
                         const isManual = asg?.is_manual && !leave;
-                        const isPostLeave = isPostPublishLeave(day);
+                        const isPostLeave = isPostPublishLeave(day, leave);
                         const isChanged = isManual || isPostLeave;
 
                         // Label: VAC for vacation, LIC for other leaves, shift name, or LIBRE
                         let content: string;
-                        if (leave) content = leave.type === 'VACATION' ? 'VAC' : 'LIC';
+                        if (leave) content = leave.type === 'vacation' ? 'VAC' : 'LIC';
                         else if (asg) content = asg.shift?.name || 'OT';
                         else content = 'LIBRE';
 
@@ -513,7 +517,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                             )}
                             title={
                               isManual ? "Turno modificado manualmente"
-                              : isPostLeave ? "Solicitud de ausencia sobre turno publicado"
+                              : isPostLeave ? "Solicitud de ausencia registrada después de publicar el rol"
                               : undefined
                             }
                           >
@@ -532,11 +536,11 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
                         const isManual = asg?.is_manual && !leave;
-                        const isPostLeave = isPostPublishLeave(day);
+                        const isPostLeave = isPostPublishLeave(day, leave);
                         const isChanged = isManual || isPostLeave;
 
                         let content = '';
-                        if (leave) content = leave.type === 'VACATION' ? 'VACACIONES' : 'LICENCIA';
+                        if (leave) content = leave.type === 'vacation' ? 'VACACIONES' : 'LICENCIA';
                         else if (asg) {
                           const areaName = asg.area?.name || '';
                           const posName = asg.position?.name || '';
@@ -569,7 +573,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
                         const isManual = asg?.is_manual && !leave;
-                        const isPostLeave = isPostPublishLeave(day);
+                        const isPostLeave = isPostPublishLeave(day, leave);
                         const isChanged = isManual || isPostLeave;
                         return (
                           <td
@@ -579,7 +583,6 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                               isChanged && "bg-amber-50 text-amber-900 print:bg-amber-50"
                             )}
                           >
-                            {/* Empty when leave covers this day */}
                             {!leave && (asg?.shift?.start_time?.slice(0, 5) || '')}
                           </td>
                         );
@@ -592,7 +595,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
                         const isManual = asg?.is_manual && !leave;
-                        const isPostLeave = isPostPublishLeave(day);
+                        const isPostLeave = isPostPublishLeave(day, leave);
                         const isChanged = isManual || isPostLeave;
                         return (
                           <td
@@ -602,7 +605,6 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                               isChanged && "bg-amber-50 text-amber-900 print:bg-amber-50"
                             )}
                           >
-                            {/* Empty when leave covers this day */}
                             {!leave && (asg?.shift?.end_time?.slice(0, 5) || '')}
                           </td>
                         );
