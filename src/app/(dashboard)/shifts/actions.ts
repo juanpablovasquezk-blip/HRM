@@ -498,7 +498,9 @@ export async function createManualAssignment(formData: FormData) {
             area_id: areaId,
             position_id: positionId,
             status: 'scheduled',
-            is_manual: true
+            is_manual: true,
+            is_validated: false,
+            is_published: false
           })
           .eq('id', existing.id);
         if (updateError) return { success: false, error: updateError.message };
@@ -529,7 +531,9 @@ export async function createManualAssignment(formData: FormData) {
           area_id: areaId,
           position_id: positionId,
           status: 'scheduled',
-          is_manual: true
+          is_manual: true,
+          is_validated: false,
+          is_published: false
         })
         .eq('id', existing.id);
 
