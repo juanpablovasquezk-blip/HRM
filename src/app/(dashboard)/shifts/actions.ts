@@ -768,6 +768,8 @@ export async function publishAssignments(input: string | string[], endDate?: str
 // ─── One-shot: reenviar notificaciones de cambios de hoy ──────────────────────
 // Úsalo cuando los cambios se publicaron antes de que el fix de audit_log
 // estuviera activo y los trabajadores nunca recibieron WhatsApp.
+// Estrategia: usa roster_audit_logs.created_at >= hoy como fuente principal.
+// Fallback: asignaciones manuales publicadas para fechas desde hoy sin audit log.
 export async function sendTodayChangeNotifications() {
   if (!await isAdmin()) return { success: false, error: 'No autorizado', notifiedWorkers: [] };
   const supabase = await createClient();
@@ -775,46 +777,77 @@ export async function sendTodayChangeNotifications() {
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const todayStart = `${todayStr}T00:00:00`;
 
-  // 1. Fetch all published manual assignments updated today
-  const { data: changedAssignments, error: aErr } = await supabase
-    .from('shift_assignments')
-    .select('id, date, personnel_id, shift_id, area_id, position_id, updated_at')
-    .eq('is_published', true)
-    .eq('is_manual', true)
-    .eq('is_extra', false)
-    .gte('updated_at', todayStart);
-
-  if (aErr) return { success: false, error: aErr.message, notifiedWorkers: [] };
-  if (!changedAssignments || changedAssignments.length === 0) {
-    return { success: true, notifiedWorkers: [], total: 0 };
-  }
-
-  const personnelIds = [...new Set(changedAssignments.map((a: any) => a.personnel_id))];
-  const dates = [...new Set(changedAssignments.map((a: any) => a.date))];
-
-  // 2. Try to get audit logs (to show previous shift in the message)
-  const { data: auditLogs } = await supabase
+  // 1a. Audit logs creados HOY → fuente principal de cambios
+  const { data: todayLogs, error: logErr } = await supabase
     .from('roster_audit_logs')
     .select('*')
-    .in('personnel_id', personnelIds)
-    .in('date', dates)
+    .gte('created_at', todayStart)
     .order('created_at', { ascending: false });
 
+  if (logErr) return { success: false, error: logErr.message, notifiedWorkers: [] };
+
+  // Build a de-duplicated map: only the latest log per personnel+date
   const latestAuditMap = new Map<string, any>();
-  if (auditLogs) {
-    for (const log of auditLogs) {
+  if (todayLogs) {
+    for (const log of todayLogs) {
       const key = `${log.personnel_id}_${log.date}`;
-      if (!latestAuditMap.has(key)) latestAuditMap.set(key, log);
+      if (!latestAuditMap.has(key)) {
+        latestAuditMap.set(key, log);
+      }
     }
   }
 
-  // 3. Batch-fetch reference data
+  // 1b. Fallback: published manual assignments for dates >= today that have no audit log
+  const { data: manualAssignments } = await supabase
+    .from('shift_assignments')
+    .select('id, date, personnel_id, shift_id, area_id, position_id')
+    .eq('is_published', true)
+    .eq('is_manual', true)
+    .eq('is_extra', false)
+    .gte('date', todayStr);
+
+  // Merge: include fallback assignments that don't already have an audit log entry from today
+  const fallbackAssignments = (manualAssignments || []).filter((a: any) => {
+    const key = `${a.personnel_id}_${a.date}`;
+    return !latestAuditMap.has(key);
+  });
+
+  // Build the unified list of assignments to notify
+  // From audit logs: fetch corresponding current assignment
+  const logAssignmentIds = Array.from(latestAuditMap.values()).map((l: any) => l.assignment_id).filter(Boolean);
+  const { data: logAssignments } = logAssignmentIds.length > 0
+    ? await supabase
+        .from('shift_assignments')
+        .select('id, date, personnel_id, shift_id, area_id, position_id')
+        .in('id', logAssignmentIds)
+    : { data: [] };
+
+  const changedAssignments: any[] = [
+    ...(logAssignments || []),
+    ...fallbackAssignments,
+  ];
+
+  // De-duplicate by personnel_id + date
+  const seen = new Set<string>();
+  const uniqueAssignments = changedAssignments.filter((a: any) => {
+    const key = `${a.personnel_id}_${a.date}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (uniqueAssignments.length === 0) {
+    return { success: true, notifiedWorkers: [], total: 0 };
+  }
+
+  // 2. Batch-fetch reference data
+  const personnelIds = [...new Set(uniqueAssignments.map((a: any) => a.personnel_id))];
   const allShiftIds = [...new Set([
-    ...changedAssignments.map((a: any) => a.shift_id),
+    ...uniqueAssignments.map((a: any) => a.shift_id),
     ...Array.from(latestAuditMap.values()).map((l: any) => l.previous_shift_id).filter(Boolean)
   ])];
-  const areaIds = [...new Set(changedAssignments.map((a: any) => a.area_id).filter(Boolean))];
-  const positionIds = [...new Set(changedAssignments.map((a: any) => a.position_id).filter(Boolean))];
+  const areaIds = [...new Set(uniqueAssignments.map((a: any) => a.area_id).filter(Boolean))];
+  const positionIds = [...new Set(uniqueAssignments.map((a: any) => a.position_id).filter(Boolean))];
 
   const [
     { data: personnelList },
@@ -834,10 +867,10 @@ export async function sendTodayChangeNotifications() {
   const positionsMap = new Map(positionsList?.map((p: any) => [p.id, p]));
   const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hrm-roster-manager.vercel.app';
 
-  // 4. Send WhatsApp notifications in parallel
+  // 3. Send WhatsApp notifications in parallel
   const notifiedWorkers: string[] = [];
 
-  const results = await Promise.allSettled(changedAssignments.map(async (ass: any) => {
+  const results = await Promise.allSettled(uniqueAssignments.map(async (ass: any) => {
     const person = personnelMap.get(ass.personnel_id);
     if (!person || !(person as any).phone) return;
 
@@ -884,7 +917,7 @@ export async function sendTodayChangeNotifications() {
     if (r.status === 'fulfilled' && r.value) notifiedWorkers.push(r.value as string);
   });
 
-  return { success: true, notifiedWorkers, total: changedAssignments.length };
+  return { success: true, notifiedWorkers, total: uniqueAssignments.length };
 }
 
 export async function unpublishAssignments(assignmentIds: string[]) {

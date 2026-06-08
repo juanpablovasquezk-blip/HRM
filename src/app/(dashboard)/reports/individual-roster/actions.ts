@@ -35,7 +35,7 @@ export async function getIndividualRoster(personnelId: string, startDate: string
   // 2. Fetch Assignments (Scheduled shifts)
   const { data: assignments, error: aErr } = await supabase
     .from('shift_assignments')
-    .select('*, shift:shifts!shift_assignments_shift_id_fkey(*), area:areas(name), position:positions(name)')
+    .select('*, shift:shifts!shift_assignments_shift_id_fkey(*), area:areas(name), position:positions(name), is_manual')
     .eq('personnel_id', personnelId)
     .gte('date', startDate)
     .lte('date', endDate)

@@ -25,7 +25,7 @@ import {
   addDays,
 } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Printer, Download, Search, Loader2, Camera, MessageSquare, Check, Users } from 'lucide-react';
+import { Printer, Download, Search, Loader2, Camera, MessageSquare, Check, Users, Send } from 'lucide-react';
 import { getIndividualRoster, sendRosterWhatsApp } from './actions';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -44,6 +44,9 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
   const [data, setData] = useState<any>(null);
   const [isPending, startTransition] = useTransition();
   const rosterRef = useRef<HTMLDivElement>(null);
+
+  // Individual WhatsApp send state
+  const [isSendingIndividual, setIsSendingIndividual] = useState(false);
 
   // Bulk WhatsApp Sending State
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
@@ -94,6 +97,41 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
     } catch (err: any) {
       console.error(err);
       toast.error("Error al generar la captura.", { id: toastId });
+    }
+  };
+
+  // ── Individual WhatsApp send ──────────────────────────────────────────────────
+  const handleSendIndividualWhatsApp = async () => {
+    if (!data || !rosterRef.current) return;
+    const workerName = `${data.personnel.first_name} ${data.personnel.last_name_father}`;
+    if (!confirm(`¿Enviar el roster de ${workerName} por WhatsApp?`)) return;
+
+    setIsSendingIndividual(true);
+    const toastId = toast.loading(`Generando captura para ${workerName}...`);
+    try {
+      const html2canvas = (await import('html2canvas-pro')).default;
+      const canvas = await html2canvas(rosterRef.current, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        windowWidth: 1024,
+        ignoreElements: (el) => el.classList.contains('no-print'),
+      });
+
+      const base64Image = canvas.toDataURL('image/png');
+      toast.loading(`Enviando WhatsApp a ${workerName}...`, { id: toastId });
+
+      const res = await sendRosterWhatsApp(selectedId, base64Image, startDate, endDate);
+      if (res.success) {
+        toast.success(`✅ Roster enviado por WhatsApp a ${workerName}`, { id: toastId, duration: 5000 });
+      } else {
+        toast.error(res.error || 'Error al enviar', { id: toastId });
+      }
+    } catch (err: any) {
+      toast.error(`Error: ${err?.message || 'Error inesperado'}`, { id: toastId });
+    } finally {
+      setIsSendingIndividual(false);
     }
   };
 
@@ -265,12 +303,9 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
       end: parseISO(endDate)
     });
 
-    // To match the screenshot (Mon-Sun), we find the Monday of the first day
-    // even if it's outside the range, to complete the first row.
     const weeks = [];
     let currentWeek: Date[] = [];
     
-    // We start from the Monday of the week containing startDate
     let iterDate = startOfWeek(allDays[0], { weekStartsOn: 1 });
     const lastDay = endOfWeek(allDays[allDays.length - 1], { weekStartsOn: 1 });
 
@@ -287,6 +322,9 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
   };
 
   const weeks = getWeeks();
+
+  // Count manually changed assignments for the legend
+  const manualChangesCount = data?.assignments?.filter((a: any) => a.is_manual).length ?? 0;
 
   return (
     <div className="space-y-6">
@@ -344,6 +382,8 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                 {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
                 Generar
               </Button>
+
+              {/* Masivo — disabled while an individual roster is loaded */}
               <Button 
                 variant="outline" 
                 size="sm"
@@ -352,14 +392,31 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                   setSelectedWorkers([]);
                   setIsBulkModalOpen(true);
                 }}
-                className="h-9 border-slate-200 text-xs px-3 text-slate-700 hover:bg-slate-50 gap-1.5 bg-white shrink-0"
-                title="Envío Masivo WhatsApp"
+                disabled={!!data}
+                className="h-9 border-slate-200 text-xs px-3 text-slate-700 hover:bg-slate-50 gap-1.5 bg-white shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                title={data ? "Cierra el roster individual antes de usar el envío masivo" : "Envío Masivo WhatsApp"}
               >
-                <MessageSquare className="h-4 w-4 text-emerald-500" />
+                <Users className="h-4 w-4 text-emerald-500" />
                 Masivo
               </Button>
+
               {data && (
                 <>
+                  {/* Individual WhatsApp button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSendIndividualWhatsApp}
+                    disabled={isSendingIndividual}
+                    title={`Enviar roster de ${data.personnel.first_name} por WhatsApp`}
+                    className="h-9 border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-xs px-3 shrink-0 gap-1.5 font-semibold"
+                  >
+                    {isSendingIndividual
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <MessageSquare className="h-4 w-4" />
+                    }
+                    {isSendingIndividual ? 'Enviando...' : 'WhatsApp'}
+                  </Button>
                   <Button variant="outline" size="icon" onClick={handlePrint} title="Imprimir" className="h-9 w-9 border-slate-200 shrink-0 bg-white">
                     <Printer className="h-4 w-4" />
                   </Button>
@@ -370,6 +427,16 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
               )}
             </div>
           </div>
+
+          {/* Legend: manual changes */}
+          {data && manualChangesCount > 0 && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5 w-fit">
+              <span className="inline-block w-3 h-3 rounded-sm bg-amber-400 border border-amber-500 shrink-0" />
+              <span>
+                <strong>{manualChangesCount}</strong> {manualChangesCount === 1 ? 'turno modificado manualmente' : 'turnos modificados manualmente'} (resaltados en ámbar)
+              </span>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -414,14 +481,25 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                       {week.map((day, dIdx) => {
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
+                        const isManual = asg?.is_manual && !leave;
                         
                         let content = '-';
                         if (leave) content = 'L';
                         else if (asg) content = asg.shift?.name || 'OT';
-                        else content = 'L'; // Libre if no assignment and in range? 
+                        else content = 'L';
                         
                         return (
-                          <td key={dIdx} className="border border-black p-1 text-center font-bold">
+                          <td
+                            key={dIdx}
+                            className={cn(
+                              "border border-black p-1 text-center font-bold",
+                              isManual && "bg-amber-100 text-amber-900 print:bg-amber-100"
+                            )}
+                            title={isManual ? "Turno modificado manualmente" : undefined}
+                          >
+                            {isManual && (
+                              <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 mr-0.5 align-middle -mt-0.5" />
+                            )}
                             {content}
                           </td>
                         );
@@ -433,6 +511,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                       {week.map((day, dIdx) => {
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
+                        const isManual = asg?.is_manual && !leave;
                         
                         let content = '';
                         if (leave) content = leave.type === 'VACATION' ? 'VACACIONES' : 'LICENCIA';
@@ -441,7 +520,6 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                           const posName = asg.position?.name || '';
                           
                           if (areaName.toLowerCase().includes('bodega')) {
-                            // Clean up "Operador Fedex" -> "FEDEX"
                             content = posName.replace(/operador\s+/gi, '').toUpperCase();
                           } else {
                             content = areaName.toUpperCase();
@@ -451,7 +529,13 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         }
                         
                         return (
-                          <td key={dIdx} className="border border-black p-1 text-center text-[9px] uppercase">
+                          <td
+                            key={dIdx}
+                            className={cn(
+                              "border border-black p-1 text-center text-[9px] uppercase",
+                              isManual && "bg-amber-50 text-amber-900 print:bg-amber-50"
+                            )}
+                          >
                             {content}
                           </td>
                         );
@@ -462,8 +546,15 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                       <td className="border border-black p-1 font-bold bg-slate-50">INICIO</td>
                       {week.map((day, dIdx) => {
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
+                        const isManual = asg?.is_manual;
                         return (
-                          <td key={dIdx} className="border border-black p-1 text-center font-mono">
+                          <td
+                            key={dIdx}
+                            className={cn(
+                              "border border-black p-1 text-center font-mono",
+                              isManual && "bg-amber-50 text-amber-900 print:bg-amber-50"
+                            )}
+                          >
                             {asg?.shift?.start_time?.slice(0, 5) || ''}
                           </td>
                         );
@@ -474,8 +565,15 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                       <td className="border border-black p-1 font-bold bg-slate-50">FIN</td>
                       {week.map((day, dIdx) => {
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
+                        const isManual = asg?.is_manual;
                         return (
-                          <td key={dIdx} className="border border-black p-1 text-center font-mono">
+                          <td
+                            key={dIdx}
+                            className={cn(
+                              "border border-black p-1 text-center font-mono",
+                              isManual && "bg-amber-50 text-amber-900 print:bg-amber-50"
+                            )}
+                          >
                             {asg?.shift?.end_time?.slice(0, 5) || ''}
                           </td>
                         );
@@ -486,6 +584,14 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
               </div>
             ))}
           </div>
+
+          {/* Legend in print */}
+          {manualChangesCount > 0 && (
+            <div className="mt-4 hidden print:flex items-center gap-2 text-[9px] text-amber-800">
+              <span className="inline-block w-3 h-3 bg-amber-200 border border-amber-400" />
+              Turno modificado manualmente
+            </div>
+          )}
 
           {/* Footer Print Info */}
           <div className="mt-8 text-[9px] text-slate-400 hidden print:block border-t pt-2">
@@ -520,7 +626,6 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                 onChange={(e) => {
                   const areaId = e.target.value || 'all';
                   setBulkAreaId(areaId);
-                  // Reset selected workers when changing area
                   setSelectedWorkers([]);
                 }}
                 disabled={isSendingBulk}
