@@ -592,7 +592,7 @@ export async function validateAssignments(assignmentIds: string[]) {
 }
 
 export async function publishAssignments(input: string | string[], endDate?: string, areaId?: string) {
-  if (!await isAdmin()) return { success: false, error: 'No autorizado' };
+  if (!await isAdmin()) return { success: false, error: 'No authorized' };
   const supabase = await createClient();
   
   // 1. Fetch assignments that are about to be published (were not published before)
@@ -631,26 +631,24 @@ export async function publishAssignments(input: string | string[], endDate?: str
   }
 
   // 3. Trigger WhatsApp notifications for actual shift changes
+  const notifiedWorkers: string[] = [];
+
   if (assignmentsToPublish && assignmentsToPublish.length > 0) {
-    // Run notification logic in background to not block user UI response
-    (async () => {
-      try {
-        const personnelIds = [...new Set(assignmentsToPublish.map(a => a.personnel_id))];
-        const dates = [...new Set(assignmentsToPublish.map(a => a.date))];
-        
-        // Fetch all audit logs for these personnel and dates (ordered by newest first)
-        const { data: auditLogs, error: auditError } = await supabase
-          .from('roster_audit_logs')
-          .select('*')
-          .in('personnel_id', personnelIds)
-          .in('date', dates)
-          .order('created_at', { ascending: false });
+    try {
+      const personnelIds = [...new Set(assignmentsToPublish.map(a => a.personnel_id))];
+      const dates = [...new Set(assignmentsToPublish.map(a => a.date))];
+      
+      // Fetch all audit logs for these personnel and dates (ordered by newest first)
+      const { data: auditLogs, error: auditError } = await supabase
+        .from('roster_audit_logs')
+        .select('*')
+        .in('personnel_id', personnelIds)
+        .in('date', dates)
+        .order('created_at', { ascending: false });
 
-        if (auditError) {
-          console.error('[publishAssignments] Error fetching audit logs:', auditError.message);
-          return;
-        }
-
+      if (auditError) {
+        console.error('[publishAssignments] Error fetching audit logs:', auditError.message);
+      } else {
         // Map latest audit log for each personnel + date combination
         const latestAuditMap = new Map<string, any>();
         if (auditLogs) {
@@ -698,71 +696,76 @@ export async function publishAssignments(input: string | string[], endDate?: str
 
           const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hrm-roster-manager.vercel.app';
 
-          // Send notifications via WhatsApp
-          await Promise.allSettled(changedAssignments.map(async (ass) => {
+          // Send notifications via WhatsApp in parallel and collect successful outcomes
+          const results = await Promise.allSettled(changedAssignments.map(async (ass) => {
+            const log = latestAuditMap.get(`${ass.personnel_id}_${ass.date}`);
+            if (!log) return;
+
+            const person = personnelMap.get(ass.personnel_id);
+            if (!person || !person.phone) return;
+
+            const newShift = shiftsMap.get(ass.shift_id);
+            if (!newShift) return;
+
+            // Format phone correctly
+            let phone = person.phone.replace(/[^\d+]/g, '');
+            if (!phone.startsWith('+') && phone.startsWith('56')) {
+              phone = '+' + phone;
+            }
+
+            const oldShift = log.previous_shift_id ? shiftsMap.get(log.previous_shift_id) : null;
+            const oldShiftStr = oldShift 
+              ? `${oldShift.name} (${oldShift.start_time.slice(0, 5)} - ${oldShift.end_time.slice(0, 5)})`
+              : 'Libre / Sin Turno';
+
+            const areaName = ass.area_id ? (areasMap.get(ass.area_id)?.name || 'No especificada') : 'No especificada';
+            const positionName = ass.position_id ? (positionsMap.get(ass.position_id)?.name || 'No especificada') : 'No especificada';
+
+            // Format date: e.g. "Viernes, 05 de Junio"
+            let formattedDate = ass.date;
             try {
-              const log = latestAuditMap.get(`${ass.personnel_id}_${ass.date}`);
-              if (!log) return;
+              const parsed = parseISO(ass.date);
+              const rawFormat = format(parsed, "EEEE, dd 'de' MMMM", { locale: esLocale });
+              formattedDate = rawFormat.charAt(0).toUpperCase() + rawFormat.slice(1);
+            } catch (e) {}
 
-              const person = personnelMap.get(ass.personnel_id);
-              if (!person || !person.phone) return;
+            const workerName = `${person.first_name} ${person.last_name_father}`;
+            
+            const message = `🔄 *Notificación de Cambio de Turno*\n\n` +
+              `Hola *${workerName}*,\n` +
+              `Se ha registrado una modificación en tu programación de turnos:\n\n` +
+              `📅 *Fecha:* ${formattedDate}\n\n` +
+              `* *Turno Anterior:* ${oldShiftStr}\n` +
+              `* *Nuevo Turno:* *${newShift.name}* (*${newShift.start_time.slice(0, 5)}* - *${newShift.end_time.slice(0, 5)}*)\n` +
+              `📍 *Área:* ${areaName}\n` +
+              `💼 *Función:* ${positionName}\n\n` +
+              `Por favor, planifica tu jornada considerando esta actualización. Puedes revisar tu planilla completa en la plataforma: ${platformUrl}\n\n` +
+              `*Este es un mensaje automático. No lo responda. Si tiene alguna duda comuníquese con su supervisor.*`;
 
-              const newShift = shiftsMap.get(ass.shift_id);
-              if (!newShift) return;
-
-              // Format phone correctly
-              let phone = person.phone.replace(/[^\d+]/g, '');
-              if (!phone.startsWith('+') && phone.startsWith('56')) {
-                phone = '+' + phone;
-              }
-
-              const oldShift = log.previous_shift_id ? shiftsMap.get(log.previous_shift_id) : null;
-              const oldShiftStr = oldShift 
-                ? `${oldShift.name} (${oldShift.start_time.slice(0, 5)} - ${oldShift.end_time.slice(0, 5)})`
-                : 'Libre / Sin Turno';
-
-              const areaName = ass.area_id ? (areasMap.get(ass.area_id)?.name || 'No especificada') : 'No especificada';
-              const positionName = ass.position_id ? (positionsMap.get(ass.position_id)?.name || 'No especificada') : 'No especificada';
-
-              // Format date: e.g. "Viernes, 05 de Junio"
-              let formattedDate = ass.date;
-              try {
-                const parsed = parseISO(ass.date);
-                const rawFormat = format(parsed, "EEEE, dd 'de' MMMM", { locale: esLocale });
-                formattedDate = rawFormat.charAt(0).toUpperCase() + rawFormat.slice(1);
-              } catch (e) {
-                // Fallback to raw date
-              }
-
-              const workerName = `${person.first_name} ${person.last_name_father}`;
-              
-              const message = `🔄 *Notificación de Cambio de Turno*\n\n` +
-                `Hola *${workerName}*,\n` +
-                `Se ha registrado una modificación en tu programación de turnos:\n\n` +
-                `📅 *Fecha:* ${formattedDate}\n\n` +
-                `* *Turno Anterior:* ${oldShiftStr}\n` +
-                `* *Nuevo Turno:* *${newShift.name}* (*${newShift.start_time.slice(0, 5)}* - *${newShift.end_time.slice(0, 5)}*)\n` +
-                `📍 *Área:* ${areaName}\n` +
-                `💼 *Función:* ${positionName}\n\n` +
-                `Por favor, planifica tu jornada considerando esta actualización. Puedes revisar tu planilla completa en la plataforma: ${platformUrl}\n\n` +
-                `*Este es un mensaje automático. No lo responda. Si tiene alguna duda comuníquese con su supervisor.*`;
-
-              await sendWhatsAppMessage(phone, message);
-            } catch (err) {
-              console.error(`[publishAssignments] Error notifying worker for assignment ${ass.id}:`, err);
+            const res = await sendWhatsAppMessage(phone, message);
+            if (res.success) {
+              return `${person.first_name} ${person.last_name_father}`;
+            } else {
+              throw new Error(res.error || 'UltraMsg failed');
             }
           }));
+
+          results.forEach(r => {
+            if (r.status === 'fulfilled' && r.value) {
+              notifiedWorkers.push(r.value);
+            }
+          });
         }
-      } catch (err) {
-        console.error('[publishAssignments] Background notification process failed:', err);
       }
-    })();
+    } catch (err) {
+      console.error('[publishAssignments] Notification process failed:', err);
+    }
   }
 
   revalidatePath('/shifts/roster');
   revalidatePath('/dashboard');
   revalidatePath('/shifts/daily');
-  return { success: true };
+  return { success: true, notifiedWorkers };
 }
 
 export async function unpublishAssignments(assignmentIds: string[]) {

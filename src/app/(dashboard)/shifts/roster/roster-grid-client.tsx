@@ -1037,9 +1037,21 @@ export function RosterGridClient({
 
     startTransition(async () => {
       const { publishAssignments } = await import('@/app/(dashboard)/shifts/actions');
-      const res = await publishAssignments(idsToPublish);
+      const res = await publishAssignments(idsToPublish) as any;
       if (res.success) {
-        toast.success(`${idsToPublish.length} turnos publicados`);
+        if (res.notifiedWorkers && res.notifiedWorkers.length > 0) {
+          toast.success(
+            <div>
+              <p className="font-bold">{idsToPublish.length} turnos publicados</p>
+              <p className="text-xs text-slate-500 mt-1">
+                WhatsApp enviado a: <strong>{res.notifiedWorkers.join(', ')}</strong>
+              </p>
+            </div>,
+            { duration: 5000 }
+          );
+        } else {
+          toast.success(`${idsToPublish.length} turnos publicados (sin cambios para notificar)`);
+        }
         setSelectedCells([]);
         router.refresh();
       } else {
@@ -1068,9 +1080,21 @@ export function RosterGridClient({
 
     startTransition(async () => {
       const { publishAssignments } = await import('@/app/(dashboard)/shifts/actions');
-      const res = await publishAssignments(idsToPublish);
+      const res = await publishAssignments(idsToPublish) as any;
       if (res.success) {
-        toast.success(`${idsToPublish.length} turnos publicados con éxito`);
+        if (res.notifiedWorkers && res.notifiedWorkers.length > 0) {
+          toast.success(
+            <div>
+              <p className="font-bold">{idsToPublish.length} turnos publicados con éxito</p>
+              <p className="text-xs text-slate-500 mt-1">
+                WhatsApp enviado a: <strong>{res.notifiedWorkers.join(', ')}</strong>
+              </p>
+            </div>,
+            { duration: 5000 }
+          );
+        } else {
+          toast.success(`${idsToPublish.length} turnos publicados con éxito (sin cambios para notificar)`);
+        }
         window.location.reload();
       } else {
         toast.error(res.error || 'Error al publicar');
