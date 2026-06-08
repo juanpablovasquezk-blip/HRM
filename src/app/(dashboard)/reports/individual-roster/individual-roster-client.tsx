@@ -326,6 +326,15 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
   // Count manually changed assignments for the legend
   const manualChangesCount = data?.assignments?.filter((a: any) => a.is_manual).length ?? 0;
 
+  // Helper: a day is a "post-publish change" if there's a published assignment
+  // AND a leave that overlaps that day (leave submitted after shift was published)
+  const isPostPublishLeave = (day: Date) => {
+    if (!data) return false;
+    const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
+    if (!asg?.is_published) return false;
+    return data.leaves.some((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
+  };
+
   return (
     <div className="space-y-6">
       {/* Controls - Hidden during print */}
@@ -428,12 +437,16 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
             </div>
           </div>
 
-          {/* Legend: manual changes */}
-          {data && manualChangesCount > 0 && (
+          {/* Legend: manual changes or post-publish leaves */}
+          {data && (manualChangesCount > 0 || data.leaves?.some((l: any) =>
+            data.assignments?.some((a: any) => a.is_published &&
+              parseISO(a.date) >= parseISO(l.start_date) &&
+              parseISO(a.date) <= parseISO(l.end_date))
+          )) && (
             <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5 w-fit">
               <span className="inline-block w-3 h-3 rounded-sm bg-amber-400 border border-amber-500 shrink-0" />
               <span>
-                <strong>{manualChangesCount}</strong> {manualChangesCount === 1 ? 'turno modificado manualmente' : 'turnos modificados manualmente'} (resaltados en ámbar)
+                Días resaltados en ámbar: turno modificado manualmente o solicitud de ausencia sobre turno publicado
               </span>
             </div>
           )}
@@ -482,22 +495,29 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
                         const isManual = asg?.is_manual && !leave;
-                        
-                        let content = '-';
-                        if (leave) content = 'L';
+                        const isPostLeave = isPostPublishLeave(day);
+                        const isChanged = isManual || isPostLeave;
+
+                        // Label: VAC for vacation, LIC for other leaves, shift name, or LIBRE
+                        let content: string;
+                        if (leave) content = leave.type === 'VACATION' ? 'VAC' : 'LIC';
                         else if (asg) content = asg.shift?.name || 'OT';
-                        else content = 'L';
-                        
+                        else content = 'LIBRE';
+
                         return (
                           <td
                             key={dIdx}
                             className={cn(
                               "border border-black p-1 text-center font-bold",
-                              isManual && "bg-amber-100 text-amber-900 print:bg-amber-100"
+                              isChanged && "bg-amber-100 text-amber-900 print:bg-amber-100"
                             )}
-                            title={isManual ? "Turno modificado manualmente" : undefined}
+                            title={
+                              isManual ? "Turno modificado manualmente"
+                              : isPostLeave ? "Solicitud de ausencia sobre turno publicado"
+                              : undefined
+                            }
                           >
-                            {isManual && (
+                            {isChanged && (
                               <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 mr-0.5 align-middle -mt-0.5" />
                             )}
                             {content}
@@ -512,13 +532,14 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
                         const isManual = asg?.is_manual && !leave;
-                        
+                        const isPostLeave = isPostPublishLeave(day);
+                        const isChanged = isManual || isPostLeave;
+
                         let content = '';
                         if (leave) content = leave.type === 'VACATION' ? 'VACACIONES' : 'LICENCIA';
                         else if (asg) {
                           const areaName = asg.area?.name || '';
                           const posName = asg.position?.name || '';
-                          
                           if (areaName.toLowerCase().includes('bodega')) {
                             content = posName.replace(/operador\s+/gi, '').toUpperCase();
                           } else {
@@ -527,13 +548,13 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         } else {
                           content = 'LIBRE';
                         }
-                        
+
                         return (
                           <td
                             key={dIdx}
                             className={cn(
                               "border border-black p-1 text-center text-[9px] uppercase",
-                              isManual && "bg-amber-50 text-amber-900 print:bg-amber-50"
+                              isChanged && "bg-amber-50 text-amber-900 print:bg-amber-50"
                             )}
                           >
                             {content}
@@ -546,16 +567,20 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                       <td className="border border-black p-1 font-bold bg-slate-50">INICIO</td>
                       {week.map((day, dIdx) => {
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
-                        const isManual = asg?.is_manual;
+                        const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
+                        const isManual = asg?.is_manual && !leave;
+                        const isPostLeave = isPostPublishLeave(day);
+                        const isChanged = isManual || isPostLeave;
                         return (
                           <td
                             key={dIdx}
                             className={cn(
                               "border border-black p-1 text-center font-mono",
-                              isManual && "bg-amber-50 text-amber-900 print:bg-amber-50"
+                              isChanged && "bg-amber-50 text-amber-900 print:bg-amber-50"
                             )}
                           >
-                            {asg?.shift?.start_time?.slice(0, 5) || ''}
+                            {/* Empty when leave covers this day */}
+                            {!leave && (asg?.shift?.start_time?.slice(0, 5) || '')}
                           </td>
                         );
                       })}
@@ -565,16 +590,20 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                       <td className="border border-black p-1 font-bold bg-slate-50">FIN</td>
                       {week.map((day, dIdx) => {
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
-                        const isManual = asg?.is_manual;
+                        const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
+                        const isManual = asg?.is_manual && !leave;
+                        const isPostLeave = isPostPublishLeave(day);
+                        const isChanged = isManual || isPostLeave;
                         return (
                           <td
                             key={dIdx}
                             className={cn(
                               "border border-black p-1 text-center font-mono",
-                              isManual && "bg-amber-50 text-amber-900 print:bg-amber-50"
+                              isChanged && "bg-amber-50 text-amber-900 print:bg-amber-50"
                             )}
                           >
-                            {asg?.shift?.end_time?.slice(0, 5) || ''}
+                            {/* Empty when leave covers this day */}
+                            {!leave && (asg?.shift?.end_time?.slice(0, 5) || '')}
                           </td>
                         );
                       })}
@@ -586,12 +615,10 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
           </div>
 
           {/* Legend in print */}
-          {manualChangesCount > 0 && (
-            <div className="mt-4 hidden print:flex items-center gap-2 text-[9px] text-amber-800">
-              <span className="inline-block w-3 h-3 bg-amber-200 border border-amber-400" />
-              Turno modificado manualmente
-            </div>
-          )}
+          <div className="mt-4 hidden print:flex items-center gap-2 text-[9px] text-amber-800">
+            <span className="inline-block w-3 h-3 bg-amber-200 border border-amber-400 shrink-0" />
+            Modificación: turno cambiado manualmente o solicitud de ausencia sobre turno publicado
+          </div>
 
           {/* Footer Print Info */}
           <div className="mt-8 text-[9px] text-slate-400 hidden print:block border-t pt-2">

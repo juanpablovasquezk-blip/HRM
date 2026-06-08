@@ -46,10 +46,11 @@ export async function getIndividualRoster(personnelId: string, startDate: string
   // 3. Fetch Leaves/Absences
   const { data: leaves } = await supabase
     .from('leaves')
-    .select('*')
+    .select('*, created_at')
     .eq('personnel_id', personnelId)
     .lte('start_date', endDate)
     .gte('end_date', startDate);
+
 
   return {
     personnel,
