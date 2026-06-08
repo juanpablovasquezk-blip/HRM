@@ -462,23 +462,35 @@ export async function createManualAssignment(formData: FormData) {
 
   if (error) return { success: false, error: error.message };
 
-  // AUDIT LOGGING: If these dates were already validated, log the changes
+  // AUDIT LOGGING: If these dates were already validated or published, log the changes
   const userId = await getCurrentUserId();
   for (const date of dates) {
     // Check if there's an original AI proposal to compare against
     const { data: prev } = await supabase
       .from('shift_assignments')
-      .select('id, shift_id, original_shift_id, is_validated')
+      .select('id, shift_id, original_shift_id, is_validated, is_published')
       .eq('personnel_id', personnelId)
       .eq('date', date)
       .maybeSingle();
 
-    if (prev?.is_validated) {
+    // Heuristic: Check if the roster for this date has already been published for others
+    const { data: publishedOnDate } = await supabase
+      .from('shift_assignments')
+      .select('id')
+      .eq('date', date)
+      .eq('is_published', true)
+      .limit(1);
+    
+    const isRosterPublished = (publishedOnDate && publishedOnDate.length > 0) || false;
+    const prevValidated = prev?.is_validated || false;
+    const prevPublished = prev?.is_published || false;
+
+    if (prevValidated || prevPublished || isRosterPublished) {
       await supabase.from('roster_audit_logs').insert({
-        assignment_id: prev.id,
+        assignment_id: prev?.id || null,
         personnel_id: personnelId,
         date: date,
-        previous_shift_id: prev.shift_id,
+        previous_shift_id: prev?.shift_id || null, // null represents Libre
         new_shift_id: shiftId,
         reason: (formData.get('reason') as string) || 'Cambio manual post-validación',
         changed_by: userId
@@ -675,12 +687,12 @@ export async function moveAssignment(assignmentId: string, newDate: string, reas
   const supabase = await createClient();
   const userId = await getCurrentUserId();
 
-  // Fetch current state for audit
+  // Fetch current state for audit and notifications
   const { data: current } = await supabase
     .from('shift_assignments')
-    .select('*')
+    .select('*, personnel:personnel(first_name, last_name_father, phone), shift:shifts(name, start_time, end_time), area:areas(name), position:positions(name)')
     .eq('id', assignmentId)
-    .single();
+    .maybeSingle() as any;
 
   if (!current) return { success: false, error: 'Turno no encontrado' };
 
@@ -714,14 +726,113 @@ export async function moveAssignment(assignmentId: string, newDate: string, reas
     });
   }
 
+  // If already published, notify the worker immediately of the date movement
+  if (current.is_published && current.personnel?.phone) {
+    (async () => {
+      try {
+        const person = current.personnel;
+        let phone = person.phone.replace(/[^\d+]/g, '');
+        if (!phone.startsWith('+') && phone.startsWith('56')) {
+          phone = '+' + phone;
+        }
+
+        const shiftStr = `${current.shift.name} (${current.shift.start_time.slice(0, 5)} - ${current.shift.end_time.slice(0, 5)})`;
+        const areaName = current.area?.name || 'No especificada';
+        const positionName = current.position?.name || 'No especificada';
+
+        let formattedOldDate = current.date;
+        let formattedNewDate = newDate;
+        try {
+          const parsedOld = parseISO(current.date);
+          const rawOld = format(parsedOld, "EEEE, dd 'de' MMMM", { locale: esLocale });
+          formattedOldDate = rawOld.charAt(0).toUpperCase() + rawOld.slice(1);
+
+          const parsedNew = parseISO(newDate);
+          const rawNew = format(parsedNew, "EEEE, dd 'de' MMMM", { locale: esLocale });
+          formattedNewDate = rawNew.charAt(0).toUpperCase() + rawNew.slice(1);
+        } catch (e) {}
+
+        const workerName = `${person.first_name} ${person.last_name_father}`;
+        const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hrm-roster-manager.vercel.app';
+
+        const message = `🔄 *Notificación de Cambio de Turno*\n\n` +
+          `Hola *${workerName}*,\n` +
+          `Se ha registrado una modificación en tu programación de turnos:\n\n` +
+          `📅 Tu turno ha sido **trasladado de fecha**:\n\n` +
+          `* *Fecha Anterior:* ${formattedOldDate}\n` +
+          `* *Nueva Fecha:* *${formattedNewDate}*\n` +
+          `⏰ *Turno:* ${shiftStr}\n` +
+          `📍 *Área:* ${areaName}\n` +
+          `💼 *Función:* ${positionName}\n\n` +
+          `Por favor, planifica tu jornada considerando esta actualización. Puedes revisar tu planilla completa en la plataforma: ${platformUrl}\n\n` +
+          `*Este es un mensaje automático. No lo responda. Si tiene alguna duda comuníquese con su supervisor.*`;
+
+        await sendWhatsAppMessage(phone, message);
+      } catch (err) {
+        console.error('[moveAssignment] Failed to send WhatsApp notification:', err);
+      }
+    })();
+  }
+
   revalidatePath('/shifts/roster');
   revalidatePath('/shifts/daily');
   return { success: true };
 }
 export async function deleteAssignment(id: string) {
   const supabase = await createClient();
+
+  // 1. Fetch current assignment details before deleting
+  const { data: current } = await supabase
+    .from('shift_assignments')
+    .select('*, personnel:personnel(first_name, last_name_father, phone), shift:shifts(name, start_time, end_time), area:areas(name), position:positions(name)')
+    .eq('id', id)
+    .maybeSingle() as any;
+
   const { error } = await supabase.from('shift_assignments').delete().eq('id', id);
   if (error) return { success: false, error: error.message };
+
+  // 2. If it was published, notify the worker immediately of the change to Libre
+  if (current && current.is_published && current.personnel?.phone) {
+    (async () => {
+      try {
+        const person = current.personnel;
+        let phone = person.phone.replace(/[^\d+]/g, '');
+        if (!phone.startsWith('+') && phone.startsWith('56')) {
+          phone = '+' + phone;
+        }
+
+        const oldShiftStr = `${current.shift.name} (${current.shift.start_time.slice(0, 5)} - ${current.shift.end_time.slice(0, 5)})`;
+        const areaName = current.area?.name || 'No especificada';
+        const positionName = current.position?.name || 'No especificada';
+
+        let formattedDate = current.date;
+        try {
+          const parsed = parseISO(current.date);
+          const rawFormat = format(parsed, "EEEE, dd 'de' MMMM", { locale: esLocale });
+          formattedDate = rawFormat.charAt(0).toUpperCase() + rawFormat.slice(1);
+        } catch (e) {}
+
+        const workerName = `${person.first_name} ${person.last_name_father}`;
+        const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hrm-roster-manager.vercel.app';
+
+        const message = `🔄 *Notificación de Cambio de Turno*\n\n` +
+          `Hola *${workerName}*,\n` +
+          `Se ha registrado una modificación en tu programación de turnos:\n\n` +
+          `📅 *Fecha:* ${formattedDate}\n\n` +
+          `* *Turno Anterior:* ${oldShiftStr}\n` +
+          `* *Nuevo Turno:* *Libre / Sin Turno*\n` +
+          `📍 *Área:* ${areaName}\n` +
+          `💼 *Función:* ${positionName}\n\n` +
+          `Por favor, planifica tu jornada considerando esta actualización. Puedes revisar tu planilla completa en la plataforma: ${platformUrl}\n\n` +
+          `*Este es un mensaje automático. No lo responda. Si tiene alguna duda comuníquese con su supervisor.*`;
+
+        await sendWhatsAppMessage(phone, message);
+      } catch (err) {
+        console.error('[deleteAssignment] Failed to send WhatsApp notification:', err);
+      }
+    })();
+  }
+
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
   revalidatePath('/shifts/daily');
