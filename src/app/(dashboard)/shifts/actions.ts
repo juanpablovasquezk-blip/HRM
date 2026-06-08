@@ -683,6 +683,22 @@ export async function publishAssignments(input: string | string[], endDate?: str
   return { success: true };
 }
 
+export async function unpublishAssignments(assignmentIds: string[]) {
+  if (!await isAdmin()) return { success: false, error: 'No autorizado' };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from('shift_assignments')
+    .update({ 
+      is_published: false,
+      is_validated: false 
+    })
+    .in('id', assignmentIds);
+
+  revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
+  return { success: !error, error: error?.message };
+}
+
 export async function moveAssignment(assignmentId: string, newDate: string, reason?: string) {
   const supabase = await createClient();
   const userId = await getCurrentUserId();

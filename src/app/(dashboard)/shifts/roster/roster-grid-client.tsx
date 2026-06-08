@@ -45,7 +45,8 @@ import {
   Truck,
   FileText,
   Cake,
-  MapPin
+  MapPin,
+  EyeOff
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -991,6 +992,62 @@ export function RosterGridClient({
     });
   };
 
+  const handleUnpublishSelection = () => {
+    if (selectedCells.length === 0) {
+       toast.error('Selecciona turnos primero (clic en las celdas)');
+       return;
+    }
+
+    const idsToUnpublish = assignments
+      .filter(a => selectedCells.some(c => c.personId === a.personnel_id && c.dateStr === a.date) && a.is_published)
+      .map(a => a.id);
+
+    if (idsToUnpublish.length === 0) {
+      toast.info('No hay turnos publicados en la selección');
+      return;
+    }
+
+    startTransition(async () => {
+      const { unpublishAssignments } = await import('@/app/(dashboard)/shifts/actions');
+      const res = await unpublishAssignments(idsToUnpublish);
+      if (res.success) {
+        toast.success(`${idsToUnpublish.length} turnos despublicados`);
+        setSelectedCells([]);
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Error al despublicar');
+      }
+    });
+  };
+
+  const handlePublishSelection = () => {
+    if (selectedCells.length === 0) {
+       toast.error('Selecciona turnos primero (clic en las celdas)');
+       return;
+    }
+
+    const idsToPublish = assignments
+      .filter(a => selectedCells.some(c => c.personId === a.personnel_id && c.dateStr === a.date) && !a.is_published)
+      .map(a => a.id);
+
+    if (idsToPublish.length === 0) {
+      toast.info('No hay turnos pendientes por publicar en la selección');
+      return;
+    }
+
+    startTransition(async () => {
+      const { publishAssignments } = await import('@/app/(dashboard)/shifts/actions');
+      const res = await publishAssignments(idsToPublish);
+      if (res.success) {
+        toast.success(`${idsToPublish.length} turnos publicados`);
+        setSelectedCells([]);
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Error al publicar');
+      }
+    });
+  };
+
   const handlePublishRange = () => {
     const start = format(days[0], 'yyyy-MM-dd');
     const end = format(days[days.length - 1], 'yyyy-MM-dd');
@@ -1701,6 +1758,30 @@ export function RosterGridClient({
               >
                 <Trash2 className="h-4 w-4" />
                 Eliminar
+              </Button>
+              <Button 
+                variant="outline"
+                className="text-indigo-400 border-indigo-500/50 hover:bg-indigo-50/10 hover:text-indigo-300 gap-2"
+                onClick={handleValidateSelection}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Validar
+              </Button>
+              <Button 
+                variant="outline"
+                className="text-emerald-400 border-emerald-500/50 hover:bg-emerald-50/10 hover:text-emerald-300 gap-2"
+                onClick={handlePublishSelection}
+              >
+                <Sparkles className="h-4 w-4" />
+                Publicar
+              </Button>
+              <Button 
+                variant="outline"
+                className="text-slate-400 border-slate-500/50 hover:bg-slate-50/10 hover:text-slate-300 gap-2"
+                onClick={handleUnpublishSelection}
+              >
+                <EyeOff className="h-4 w-4" />
+                Despublicar
               </Button>
               <Button 
                 className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-8 shadow-[0_0_15px_rgba(249,115,22,0.4)]"
