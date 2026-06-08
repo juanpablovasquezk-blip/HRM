@@ -507,21 +507,19 @@ export async function createManualAssignment(formData: FormData) {
         continue;
       }
 
-      // Log audit trail BEFORE updating the assignment
-      const prevValidated = existing.is_validated || false;
-      const prevPublished = existing.is_published || false;
-
-      if (prevValidated || prevPublished || isRosterPublished) {
-        await supabase.from('roster_audit_logs').insert({
-          assignment_id: existing.id,
-          personnel_id: personnelId,
-          date: date,
-          previous_shift_id: existing.shift_id,
-          new_shift_id: shiftId,
-          reason: (formData.get('reason') as string) || 'Cambio manual post-validación',
-          changed_by: userId
-        });
-      }
+      // Log audit trail BEFORE updating the assignment.
+      // Always log when the shift actually changes so that publishAssignments
+      // can detect the change and send WhatsApp notifications regardless of
+      // whether the assignment was previously validated or published.
+      await supabase.from('roster_audit_logs').insert({
+        assignment_id: existing.id,
+        personnel_id: personnelId,
+        date: date,
+        previous_shift_id: existing.shift_id,
+        new_shift_id: shiftId,
+        reason: (formData.get('reason') as string) || 'Cambio manual',
+        changed_by: userId
+      });
 
       // Update the existing assignment record
       const { error: updateError } = await supabase
@@ -558,18 +556,17 @@ export async function createManualAssignment(formData: FormData) {
 
       if (insertError) return { success: false, error: insertError.message };
 
-      // Log the change from Libre (null) to the new shift if the roster is published
-      if (isRosterPublished) {
-        await supabase.from('roster_audit_logs').insert({
-          assignment_id: newAsg.id,
-          personnel_id: personnelId,
-          date: date,
-          previous_shift_id: null,
-          new_shift_id: shiftId,
-          reason: (formData.get('reason') as string) || 'Cambio manual post-validación',
-          changed_by: userId
-        });
-      }
+      // Always log the insertion (Libre → new shift) so publishAssignments
+      // can detect new assignments and send WhatsApp notifications.
+      await supabase.from('roster_audit_logs').insert({
+        assignment_id: newAsg.id,
+        personnel_id: personnelId,
+        date: date,
+        previous_shift_id: null,
+        new_shift_id: shiftId,
+        reason: (formData.get('reason') as string) || 'Asignación manual',
+        changed_by: userId
+      });
     }
   }
 
@@ -814,18 +811,17 @@ export async function moveAssignment(assignmentId: string, newDate: string, reas
 
   if (error) return { success: false, error: error.message };
 
-  // Audit if validated
-  if (current.is_validated) {
-    await supabase.from('roster_audit_logs').insert({
-      assignment_id: assignmentId,
-      personnel_id: current.personnel_id,
-      date: newDate,
-      previous_shift_id: current.shift_id,
-      new_shift_id: current.shift_id, // Same shift, different date
-      reason: reason || 'Movimiento Drag & Drop',
-      changed_by: userId
-    });
-  }
+  // Always audit date movements so publishAssignments can detect the change
+  // and send WhatsApp notifications even if not previously validated.
+  await supabase.from('roster_audit_logs').insert({
+    assignment_id: assignmentId,
+    personnel_id: current.personnel_id,
+    date: newDate,
+    previous_shift_id: current.shift_id,
+    new_shift_id: current.shift_id, // Same shift, different date
+    reason: reason || 'Movimiento Drag & Drop',
+    changed_by: userId
+  });
 
   // If already published, notify the worker immediately of the date movement
   if (current.is_published && current.personnel?.phone) {
