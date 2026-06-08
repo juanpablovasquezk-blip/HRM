@@ -74,7 +74,9 @@ import {
   validateAssignments,
   publishAssignments,
   moveAssignment,
-  sendTodayChangeNotifications
+  sendTodayChangeNotifications,
+  previewTodayChangeNotifications,
+
 } from '@/app/(dashboard)/shifts/actions';
 import { 
   DropdownMenu, 
@@ -1149,9 +1151,44 @@ export function RosterGridClient({
 
   const handleSendTodayNotifications = async () => {
     if (isTodayNotifSent || isSendingTodayNotif) return;
-    if (!confirm('¿Enviar notificaciones WhatsApp a todos los trabajadores con cambios de turno realizados HOY?')) return;
     setIsSendingTodayNotif(true);
     try {
+      // Step 1: Preview — show who will receive messages
+      const preview = await (previewTodayChangeNotifications as any)() as {
+        success: boolean; error?: string;
+        workers: Array<{ name: string; date: string; shift: string; alreadyNotified: boolean }>;
+      };
+
+      if (!preview.success) {
+        toast.error(preview.error || 'Error al obtener previsualización');
+        return;
+      }
+
+      const pending = preview.workers.filter((w: any) => !w.alreadyNotified);
+      const alreadySent = preview.workers.filter((w: any) => w.alreadyNotified);
+
+      if (pending.length === 0) {
+        toast.info(
+          alreadySent.length > 0
+            ? `Todos los cambios de hoy ya fueron notificados (${alreadySent.length} persona${alreadySent.length > 1 ? 's' : ''}).`
+            : 'No se encontraron cambios manuales publicados hoy.',
+          { duration: 6000 }
+        );
+        setIsTodayNotifSent(true);
+        return;
+      }
+
+      // Step 2: Show confirmation with names
+      const lines = pending.map((w: any) => `• ${w.name} — ${w.shift} (${w.date})`).join('\n');
+      const alreadyLine = alreadySent.length > 0
+        ? `\n\n(${alreadySent.length} persona${alreadySent.length > 1 ? 's' : ''} ya recibió notificación y NO se le reenviará.)`
+        : '';
+      const confirmed = confirm(
+        `Se enviará WhatsApp a ${pending.length} persona${pending.length > 1 ? 's' : ''}:\n\n${lines}${alreadyLine}\n\n¿Confirmar envío?`
+      );
+      if (!confirmed) return;
+
+      // Step 3: Send
       const res = await sendTodayChangeNotifications() as any;
       if (res.success) {
         setIsTodayNotifSent(true);
@@ -1166,7 +1203,7 @@ export function RosterGridClient({
             { duration: 8000 }
           );
         } else {
-          toast.info(`No se encontraron cambios manuales publicados hoy (de ${res.total ?? 0} asignaciones revisadas).`);
+          toast.info(`No se encontraron cambios manuales sin notificar hoy.`);
           setIsTodayNotifSent(true);
         }
       } else {
@@ -1178,6 +1215,7 @@ export function RosterGridClient({
       setIsSendingTodayNotif(false);
     }
   };
+
 
   return (
     <div className="flex flex-col h-full space-y-4">

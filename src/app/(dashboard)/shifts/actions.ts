@@ -772,6 +772,10 @@ export async function publishAssignments(input: string | string[], endDate?: str
 
             const res = await sendWhatsAppMessage(phone, message);
             if (res.success) {
+              // Mark assignment as notified — prevents duplicate sends
+              await supabase.from('shift_assignments')
+                .update({ whatsapp_notified_at: new Date().toISOString() })
+                .eq('id', ass.id);
               return `${person.first_name} ${person.last_name_father}`;
             } else {
               throw new Error(res.error || 'UltraMsg failed');
@@ -794,6 +798,73 @@ export async function publishAssignments(input: string | string[], endDate?: str
   revalidatePath('/dashboard');
   revalidatePath('/shifts/daily');
   return { success: true, notifiedWorkers };
+}
+
+// ─── Preview: qué trabajadores recibirán notificación (sin enviar) ─────────────
+// Úsalo antes de Notificar Hoy para ver exactamente quiénes recibirán mensaje.
+export async function previewTodayChangeNotifications(): Promise<{
+  success: boolean;
+  error?: string;
+  workers: Array<{ name: string; date: string; shift: string; alreadyNotified: boolean }>;
+}> {
+  if (!await isAdmin()) return { success: false, error: 'No autorizado', workers: [] };
+  const supabase = await createClient();
+
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayStart = `${todayStr}T00:00:00`;
+
+  // Primary: audit logs created today
+  const { data: todayLogs } = await supabase
+    .from('roster_audit_logs')
+    .select('personnel_id, date, assignment_id')
+    .gte('created_at', todayStart);
+
+  const logAssignmentIds = (todayLogs || []).map((l: any) => l.assignment_id).filter(Boolean);
+
+  // Fallback: manual published assignments for today (union with audit log results)
+  const { data: manualToday } = await supabase
+    .from('shift_assignments')
+    .select('id, date, personnel_id, shift_id, whatsapp_notified_at')
+    .eq('is_published', true)
+    .eq('is_manual', true)
+    .eq('date', todayStr);
+
+  // Combine both sources
+  const allIds = new Set<string>([
+    ...logAssignmentIds,
+    ...(manualToday || []).map((a: any) => a.id),
+  ]);
+
+  if (allIds.size === 0) return { success: true, workers: [] };
+
+  const { data: assignments } = await supabase
+    .from('shift_assignments')
+    .select('id, date, personnel_id, shift_id, whatsapp_notified_at')
+    .in('id', [...allIds]);
+
+  const personnelIds = [...new Set((assignments || []).map((a: any) => a.personnel_id))];
+  const shiftIds = [...new Set((assignments || []).map((a: any) => a.shift_id))];
+
+  const [{ data: personnelList }, { data: shiftsList }] = await Promise.all([
+    supabase.from('personnel').select('id, first_name, last_name_father').in('id', personnelIds),
+    supabase.from('shifts').select('id, name').in('id', shiftIds),
+  ]);
+
+  const personnelMap = new Map(personnelList?.map((p: any) => [p.id, p]));
+  const shiftsMap = new Map(shiftsList?.map((s: any) => [s.id, s]));
+
+  const workers = (assignments || []).map((a: any) => {
+    const person = personnelMap.get(a.personnel_id) as any;
+    const shift = shiftsMap.get(a.shift_id) as any;
+    return {
+      name: person ? `${person.first_name} ${person.last_name_father}` : 'Desconocido',
+      date: a.date,
+      shift: shift?.name || 'N/A',
+      alreadyNotified: !!a.whatsapp_notified_at,
+    };
+  });
+
+  return { success: true, workers };
 }
 
 // ─── One-shot: reenviar notificaciones de cambios de hoy ──────────────────────
@@ -828,14 +899,17 @@ export async function sendTodayChangeNotifications() {
     }
   }
 
-  // 1b. Fallback: published manual assignments for dates >= today that have no audit log
+  // 1b. Fallback: ONLY today's UNnotified manual published assignments
+  // Filter by whatsapp_notified_at IS NULL so we NEVER resend to someone
+  // who already received the message.
   const { data: manualAssignments } = await supabase
     .from('shift_assignments')
     .select('id, date, personnel_id, shift_id, area_id, position_id')
     .eq('is_published', true)
     .eq('is_manual', true)
     .eq('is_extra', false)
-    .gte('date', todayStr);
+    .eq('date', todayStr)          // Only TODAY — not the whole month
+    .is('whatsapp_notified_at', null);  // Only unnotified
 
   // Merge: include fallback assignments that don't already have an audit log entry from today
   const fallbackAssignments = (manualAssignments || []).filter((a: any) => {
@@ -940,7 +1014,13 @@ export async function sendTodayChangeNotifications() {
       `*Este es un mensaje automático. No lo responda. Si tiene alguna duda comuníquese con su supervisor.*`;
 
     const res = await sendWhatsAppMessage(phone, message);
-    if (res.success) return workerName;
+    if (res.success) {
+      // Mark as notified — prevents future duplicate sends
+      await supabase.from('shift_assignments')
+        .update({ whatsapp_notified_at: new Date().toISOString() })
+        .eq('id', ass.id);
+      return workerName;
+    }
     throw new Error((res as any).error || 'UltraMsg failed');
   }));
 
