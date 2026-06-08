@@ -104,7 +104,6 @@ export default function RosterClient({ data, selectedMonth }: RosterClientProps)
                   <tbody className="divide-y divide-slate-50">
                     {week.map(day => {
                         const assignment = getDayAssignment(day);
-                        const baseShift = getBaseShift(day);
                         const leave = getDayLeave(day);
                         const isFreeRequest = leave && (leave.type === 'free_request' || leave.reason === 'Solicitud mensual de días libres');
                         
@@ -112,7 +111,7 @@ export default function RosterClient({ data, selectedMonth }: RosterClientProps)
                           format(day, 'MM-dd') === format(parseISO(data.personnel.birth_date), 'MM-dd');
                         
                         const actualShiftName = assignment?.shift?.name || 'L';
-                        const isDifferent = baseShift && actualShiftName !== baseShift && actualShiftName !== 'L';
+                        const isDifferent = assignment && assignment.original_shift_id && assignment.shift_id !== assignment.original_shift_id;
                         const isToday = isSameDay(day, new Date());
 
                         return (

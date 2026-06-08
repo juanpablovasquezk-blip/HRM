@@ -253,14 +253,8 @@ export async function getWorkerRosterData(month?: string) {
     .eq('is_extra', false) // Only normal roster
     .neq('status', 'cancelled');
 
-  // 2. Fetch Base Roster (to compare)
-  const { data: roster } = await supabase
-    .from('roster')
-    .select('*')
-    .eq('personnel_id', session.id)
-    .eq('month', startOfMonth.getMonth() + 1)
-    .eq('year', startOfMonth.getFullYear())
-    .maybeSingle();
+  // 2. Fetch Base Roster (deprecated baseline table is replaced by original_shift_id comparison)
+  const roster = null;
 
   // 3. Fetch Leaves (to show approved free days)
   const { data: leaves } = await supabase
@@ -276,7 +270,7 @@ export async function getWorkerRosterData(month?: string) {
     month: startOfMonth.getMonth() + 1,
     year: startOfMonth.getFullYear(),
     assignments: assignments || [],
-    rosterBase: roster || null,
+    rosterBase: null,
     leaves: leaves || []
   };
 }

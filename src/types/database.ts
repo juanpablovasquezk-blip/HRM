@@ -147,6 +147,7 @@ export interface ShiftAssignment {
   frozen_by_rule: boolean;
   is_extra?: boolean;
   is_confirmed?: boolean;
+  original_shift_id?: string | null;
   override_by: string | null;
   override_reason: string | null;
   created_at: string;
