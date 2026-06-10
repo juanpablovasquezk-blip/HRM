@@ -1,9 +1,14 @@
-import { Users, UserCheck, Clock, CalendarOff } from 'lucide-react';
+import { 
+  Users, Star, CalendarOff, Plane, 
+  Car, Bus, GitCompare, Clock, AlertCircle, TrendingUp
+} from 'lucide-react';
 import { StatCard } from '@/components/dashboard/stat-card';
-import { KPIChart } from '@/components/dashboard/kpi-chart';
-import { AttendanceDonut } from '@/components/dashboard/attendance-donut';
+import { MonthlyEvolutionChart } from '@/components/dashboard/monthly-evolution-chart';
+import { AbsenceDonut } from '@/components/dashboard/absence-donut';
 import { TodoList } from '@/components/dashboard/todo-list';
 import { WhosAway } from '@/components/dashboard/whos-away';
+import { OnSickLeaveCard } from '@/components/dashboard/on-sick-leave-card';
+import { BirthdaysCard } from '@/components/dashboard/birthdays-card';
 
 import { createClient } from '@/lib/supabase/server';
 
@@ -12,62 +17,211 @@ export const dynamic = 'force-dynamic';
 export default async function DashboardPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  
+
+  // Date helpers
+  const today = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+  // Previous month for trend comparison
+  const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+  const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+
+  // ── KPI Data ──────────────────────────────────────────────────────────────────
   let totalPersonnel = 0;
-  let activeToday = 0;
-  let upcomingShifts = 0;
-  let onLeave = 0;
+  let extraShifts = 0;       let prevExtraShifts = 0;
+  let sickDays = 0;          let prevSickDays = 0;
+  let vacationDays = 0;      let prevVacationDays = 0;
+  let onLeaveToday = 0;
+  let ownTransport = 0;
+  let companyTransport = 0;
+  let manualChanges = 0;
+  let pendingRequests = 0;
+  let absencePercent = 0;
+
+  // For charts
+  let monthlyData: Array<{ month: string; extras: number; licencias: number; vacaciones: number }> = [];
+  let todayOnVacation = 0;
+  let todaySick = 0;
+  let todayActive = 0;
+
+  // For new sections
+  let sickLeaveNames: Array<{ name: string; startDate: string; endDate: string }> = [];
+  let birthdayPeople: Array<{ name: string; birthDate: string }> = [];
 
   if (user) {
-    const { data: profile } = await supabase.from('users').select('company_id').eq('id', user.id).single();
-    
+    const { data: profile } = await supabase
+      .from('users').select('company_id').eq('id', user.id).single();
+
     if (profile?.company_id) {
-      const today = new Date().toISOString().split('T')[0];
-      
-      // Total Personnel
+
+      // ── 1. Personal total ──────────────────────────────────────────────────
       const { count: staffCount } = await supabase
-        .from('personnel')
-        .select('id', { count: 'exact', head: true })
-        .eq('company_id', profile.company_id);
+        .from('personnel').select('id', { count: 'exact', head: true })
+        .eq('company_id', profile.company_id).eq('is_active', true);
       totalPersonnel = staffCount || 0;
 
-      // Active Today (Has a shift assignment today)
-      const { count: activeCount } = await supabase
-        .from('shift_assignments')
-        .select('id', { count: 'exact', head: true })
-        .eq('date', today);
-      activeToday = activeCount || 0;
+      // ── 2. Turnos extra (mes actual vs mes anterior) ────────────────────────
+      const [{ count: extraCurr }, { count: extraPrev }] = await Promise.all([
+        supabase.from('shift_assignments').select('id', { count: 'exact', head: true })
+          .eq('is_extra', true).gte('date', monthStart).lte('date', monthEnd),
+        supabase.from('shift_assignments').select('id', { count: 'exact', head: true })
+          .eq('is_extra', true).gte('date', prevMonthStart).lte('date', prevMonthEnd),
+      ]);
+      extraShifts = extraCurr || 0;
+      prevExtraShifts = extraPrev || 0;
 
-      // Pending Shifts Upcoming (Next 7 days)
-      const nextWeek = new Date();
-      nextWeek.setDate(nextWeek.getDate() + 7);
-      const { count: shiftCount } = await supabase
-        .from('shift_assignments')
-        .select('id', { count: 'exact', head: true })
-        .gte('date', today)
-        .lte('date', nextWeek.toISOString().split('T')[0]);
-      upcomingShifts = shiftCount || 0;
+      // ── 3. Licencias médicas (días aprobados mes actual) ───────────────────
+      const { data: sickLeaves } = await supabase
+        .from('leaves').select('start_date, end_date')
+        .eq('type', 'sick').eq('status', 'approved')
+        .lte('start_date', monthEnd).gte('end_date', monthStart);
 
-      // On Leave Today
-      const { count: leaveCount } = await supabase
-        .from('leaves')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'approved')
-        .lte('start_date', today)
-        .gte('end_date', today);
-      onLeave = leaveCount || 0;
+      const countDaysInMonth = (start: string, end: string) => {
+        const s = new Date(Math.max(new Date(start).getTime(), new Date(monthStart).getTime()));
+        const e = new Date(Math.min(new Date(end).getTime(), new Date(monthEnd).getTime()));
+        return Math.max(0, Math.floor((e.getTime() - s.getTime()) / 86400000) + 1);
+      };
+      sickDays = (sickLeaves || []).reduce((acc, l) => acc + countDaysInMonth(l.start_date, l.end_date), 0);
+
+      const { data: prevSickLeaves } = await supabase
+        .from('leaves').select('start_date, end_date')
+        .eq('type', 'sick').eq('status', 'approved')
+        .lte('start_date', prevMonthEnd).gte('end_date', prevMonthStart);
+      const countDaysPrevMonth = (start: string, end: string) => {
+        const s = new Date(Math.max(new Date(start).getTime(), new Date(prevMonthStart).getTime()));
+        const e = new Date(Math.min(new Date(end).getTime(), new Date(prevMonthEnd).getTime()));
+        return Math.max(0, Math.floor((e.getTime() - s.getTime()) / 86400000) + 1);
+      };
+      prevSickDays = (prevSickLeaves || []).reduce((acc, l) => acc + countDaysPrevMonth(l.start_date, l.end_date), 0);
+
+      // ── 4. Vacaciones (días aprobados mes actual) ──────────────────────────
+      const { data: vacLeaves } = await supabase
+        .from('leaves').select('start_date, end_date')
+        .eq('type', 'vacation').eq('status', 'approved')
+        .lte('start_date', monthEnd).gte('end_date', monthStart);
+      vacationDays = (vacLeaves || []).reduce((acc, l) => acc + countDaysInMonth(l.start_date, l.end_date), 0);
+
+      const { data: prevVacLeaves } = await supabase
+        .from('leaves').select('start_date, end_date')
+        .eq('type', 'vacation').eq('status', 'approved')
+        .lte('start_date', prevMonthEnd).gte('end_date', prevMonthStart);
+      prevVacationDays = (prevVacLeaves || []).reduce((acc, l) => acc + countDaysPrevMonth(l.start_date, l.end_date), 0);
+
+      // ── 5. Ausencias hoy (para donut y % ausentismo) ───────────────────────
+      const { data: todayLeaves } = await supabase
+        .from('leaves').select('type, start_date, end_date, personnel_id')
+        .eq('status', 'approved').lte('start_date', today).gte('end_date', today);
+
+      todayOnVacation = (todayLeaves || []).filter(l => l.type === 'vacation').length;
+      todaySick = (todayLeaves || []).filter(l => l.type === 'sick').length;
+      onLeaveToday = (todayLeaves || []).length;
+      todayActive = Math.max(0, totalPersonnel - onLeaveToday);
+      absencePercent = totalPersonnel > 0 ? Math.round((onLeaveToday / totalPersonnel) * 100) : 0;
+
+      // ── 5b. Nombres con licencia médica hoy ────────────────────────────────
+      const sickTodayLeaves = (todayLeaves || []).filter(l => l.type === 'sick');
+      if (sickTodayLeaves.length > 0) {
+        const personnelIds = sickTodayLeaves.map(l => l.personnel_id).filter(Boolean);
+        const { data: sickPersonnel } = await supabase
+          .from('personnel').select('id, first_name, last_name_father')
+          .in('id', personnelIds);
+        const pMap = new Map((sickPersonnel || []).map(p => [p.id, p]));
+        sickLeaveNames = sickTodayLeaves.map(l => {
+          const p = pMap.get(l.personnel_id) as any;
+          return {
+            name: p ? `${p.first_name} ${p.last_name_father}` : 'Desconocido',
+            startDate: l.start_date,
+            endDate: l.end_date,
+          };
+        });
+      }
+
+      // ── 6. Transportes (mes actual) ────────────────────────────────────────
+      const [{ count: ownCount }, { data: allTransport }] = await Promise.all([
+        supabase.from('transport_requests').select('id', { count: 'exact', head: true })
+          .eq('transport_type', 'PROPIO').gte('date', monthStart).lte('date', monthEnd),
+        supabase.from('transport_requests').select('id', { count: 'exact', head: true })
+          .neq('transport_type', 'PROPIO').neq('transport_type', 'PENDIENTE')
+          .gte('date', monthStart).lte('date', monthEnd),
+      ]);
+      ownTransport = ownCount || 0;
+      // For company transport, count = total - own - pending
+      const { count: totalTransport } = await supabase
+        .from('transport_requests').select('id', { count: 'exact', head: true })
+        .gte('date', monthStart).lte('date', monthEnd);
+      companyTransport = Math.max(0, (totalTransport || 0) - ownTransport);
+
+      // ── 7. Cambios manuales de turno (mes actual) ──────────────────────────
+      const { count: manualCount } = await supabase
+        .from('shift_assignments').select('id', { count: 'exact', head: true })
+        .eq('is_manual', true).gte('date', monthStart).lte('date', monthEnd);
+      manualChanges = manualCount || 0;
+
+      // ── 8. Solicitudes pendientes ──────────────────────────────────────────
+      const { count: pendingCount } = await supabase
+        .from('leaves').select('id', { count: 'exact', head: true })
+        .eq('status', 'pending');
+      pendingRequests = pendingCount || 0;
+
+      // ── 9. Cumpleaños del mes ──────────────────────────────────────────────
+      const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+      const { data: allPersonnel } = await supabase
+        .from('personnel').select('first_name, last_name_father, birth_date')
+        .eq('is_active', true).not('birth_date', 'is', null);
+      birthdayPeople = (allPersonnel || [])
+        .filter(p => p.birth_date && p.birth_date.slice(5, 7) === currentMonth)
+        .map(p => ({
+          name: `${p.first_name} ${p.last_name_father}`,
+          birthDate: p.birth_date,
+        }));
+
+      // ── 9. Evolución mensual (últimos 2 meses) ─────────────────────────────
+      const months = [];
+      for (let i = 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const mStart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+        const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split('T')[0];
+        const label = d.toLocaleDateString('es-CL', { month: 'short' });
+
+        const [{ count: mExtra }, { data: mSick }, { data: mVac }] = await Promise.all([
+          supabase.from('shift_assignments').select('id', { count: 'exact', head: true })
+            .eq('is_extra', true).gte('date', mStart).lte('date', mEnd),
+          supabase.from('leaves').select('start_date, end_date')
+            .eq('type', 'sick').eq('status', 'approved')
+            .lte('start_date', mEnd).gte('end_date', mStart),
+          supabase.from('leaves').select('start_date, end_date')
+            .eq('type', 'vacation').eq('status', 'approved')
+            .lte('start_date', mEnd).gte('end_date', mStart),
+        ]);
+
+        const countDays = (start: string, end: string, ms: string, me: string) => {
+          const s = new Date(Math.max(new Date(start).getTime(), new Date(ms).getTime()));
+          const e = new Date(Math.min(new Date(end).getTime(), new Date(me).getTime()));
+          return Math.max(0, Math.floor((e.getTime() - s.getTime()) / 86400000) + 1);
+        };
+
+        months.push({
+          month: label.charAt(0).toUpperCase() + label.slice(1),
+          extras: mExtra || 0,
+          licencias: (mSick || []).reduce((a, l) => a + countDays(l.start_date, l.end_date, mStart, mEnd), 0),
+          vacaciones: (mVac || []).reduce((a, l) => a + countDays(l.start_date, l.end_date, mStart, mEnd), 0),
+        });
+      }
+      monthlyData = months;
     }
   }
 
-  const now = new Date();
-  const greeting =
-    now.getHours() < 12 ? 'Buenos Días' : now.getHours() < 18 ? 'Buenas Tardes' : 'Buenas Noches';
-  const dateStr = now.toLocaleDateString('es-ES', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
+  // ── Trend helpers ─────────────────────────────────────────────────────────────
+  const trendValue = (curr: number, prev: number) => {
+    if (prev === 0) return undefined;
+    return { value: Math.round(Math.abs(((curr - prev) / prev) * 100)), label: 'vs mes anterior', positive: curr <= prev };
+  };
+
+  // ── Greeting ──────────────────────────────────────────────────────────────────
+  const greeting = now.getHours() < 12 ? 'Buenos Días' : now.getHours() < 18 ? 'Buenas Tardes' : 'Buenas Noches';
+  const dateStr = now.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   return (
     <div className="space-y-6">
@@ -75,50 +229,99 @@ export default async function DashboardPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Un resumen rápido de tu progreso hoy ({dateStr})
+          Resumen operacional — {dateStr}
         </p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Personal Total"
-          value={totalPersonnel}
-          icon={Users}
-          iconClassName="bg-blue-100 text-orange-600 dark:bg-blue-900/30 dark:text-blue-400"
-        />
-        <StatCard
-          title="Tareas Programadas"
-          value={activeToday}
-          icon={UserCheck}
-          iconClassName="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
-        />
-        <StatCard
-          title="Turnos Próximos"
-          value={upcomingShifts}
-          subtitle="Próx. 7 días"
-          icon={Clock}
-          iconClassName="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
-        />
-        <StatCard
-          title="En Licencia"
-          value={onLeave}
-          icon={CalendarOff}
-          iconClassName="bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400"
-        />
+      {/* ── Fila 1: KPIs principales ── */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Este mes</p>
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            title="Turnos Extra"
+            value={extraShifts}
+            subtitle={`Mes actual`}
+            icon={Star}
+            trend={trendValue(extraShifts, prevExtraShifts)}
+            iconClassName="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+          />
+          <StatCard
+            title="Días Licencia Médica"
+            value={sickDays}
+            subtitle="Días aprobados"
+            icon={CalendarOff}
+            trend={trendValue(sickDays, prevSickDays)}
+            iconClassName="bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"
+          />
+          <StatCard
+            title="Días Vacaciones"
+            value={vacationDays}
+            subtitle="Días aprobados"
+            icon={Plane}
+            trend={trendValue(vacationDays, prevVacationDays)}
+            iconClassName="bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400"
+          />
+          <StatCard
+            title="Ausentismo Hoy"
+            value={`${absencePercent}%`}
+            subtitle={`${onLeaveToday} de ${totalPersonnel} personas`}
+            icon={Users}
+            iconClassName="bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400"
+          />
+        </div>
       </div>
 
-      {/* Charts Row */}
+      {/* ── Fila 2: KPIs secundarios ── */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Operaciones</p>
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            title="Transporte Propio"
+            value={ownTransport}
+            subtitle="Solicitudes mes actual"
+            icon={Car}
+            iconClassName="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
+          />
+          <StatCard
+            title="Transporte Empresa"
+            value={companyTransport}
+            subtitle="Solicitudes mes actual"
+            icon={Bus}
+            iconClassName="bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400"
+          />
+          <StatCard
+            title="Cambios de Turno"
+            value={manualChanges}
+            subtitle="Reasignaciones manuales"
+            icon={GitCompare}
+            iconClassName="bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400"
+          />
+          <StatCard
+            title="Solicitudes Pendientes"
+            value={pendingRequests}
+            subtitle="Ausencias por aprobar"
+            icon={AlertCircle}
+            iconClassName={`${pendingRequests > 0 ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-slate-100 text-slate-500'}`}
+          />
+        </div>
+      </div>
+
+      {/* ── Gráficos ── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <div className="lg:col-span-3">
-          <KPIChart />
+          <MonthlyEvolutionChart data={monthlyData} />
         </div>
         <div className="lg:col-span-2">
-          <AttendanceDonut />
+          <AbsenceDonut
+            active={todayActive}
+            vacation={todayOnVacation}
+            sick={todaySick}
+            total={totalPersonnel}
+          />
         </div>
       </div>
 
-      {/* Bottom Row */}
+      {/* ── Fila inferior ── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <div className="lg:col-span-3">
           <TodoList />
@@ -126,6 +329,12 @@ export default async function DashboardPage() {
         <div className="lg:col-span-2">
           <WhosAway />
         </div>
+      </div>
+
+      {/* ── Fila: Licencias médicas + Cumpleaños ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <OnSickLeaveCard people={sickLeaveNames} />
+        <BirthdaysCard people={birthdayPeople} />
       </div>
     </div>
   );
