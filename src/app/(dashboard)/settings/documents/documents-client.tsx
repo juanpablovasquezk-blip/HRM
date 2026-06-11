@@ -87,8 +87,8 @@ export default function DocumentsClient({ initialDefinitions, positions }: Docum
   };
 
   // When a dependency is chosen, auto-restrict positions to those of the parent document
-  const handleDependencyChange = (val: string) => {
-    const newDepId = val === 'none' ? null : val;
+  const handleDependencyChange = (val: string | null) => {
+    const newDepId = !val || val === 'none' ? null : val;
     if (newDepId) {
       const parentDef = definitions.find(d => d.id === newDepId);
       // If parent has explicit positions, inherit them; otherwise use all
