@@ -86,6 +86,26 @@ export default function DocumentsClient({ initialDefinitions, positions }: Docum
     });
   };
 
+  // When a dependency is chosen, auto-restrict positions to those of the parent document
+  const handleDependencyChange = (val: string) => {
+    const newDepId = val === 'none' ? null : val;
+    if (newDepId) {
+      const parentDef = definitions.find(d => d.id === newDepId);
+      // If parent has explicit positions, inherit them; otherwise use all
+      const inheritedPositions =
+        parentDef?.applicable_positions && parentDef.applicable_positions.length > 0
+          ? parentDef.applicable_positions
+          : positions.map(p => p.id);
+      setEditingDefinition(prev => ({
+        ...prev,
+        depends_on_definition_id: newDepId,
+        applicable_positions: inheritedPositions,
+      }));
+    } else {
+      setEditingDefinition(prev => ({ ...prev, depends_on_definition_id: null }));
+    }
+  };
+
   const handleSave = async () => {
     if (!editingDefinition?.name) {
       toast.error('El nombre es obligatorio');
@@ -289,7 +309,7 @@ export default function DocumentsClient({ initialDefinitions, positions }: Docum
                     <Label className="text-[10px] font-bold uppercase text-indigo-400">Depende de (Documento Base)</Label>
                     <Select 
                       value={editingDefinition?.depends_on_definition_id || 'none'} 
-                      onValueChange={(val) => setEditingDefinition(prev => ({ ...prev, depends_on_definition_id: val === 'none' ? null : val }))}
+                      onValueChange={handleDependencyChange}
                     >
                       <SelectTrigger className="h-10 rounded-xl bg-white border-indigo-100 focus:ring-indigo-500">
                         <span className="truncate text-sm">
@@ -343,54 +363,101 @@ export default function DocumentsClient({ initialDefinitions, positions }: Docum
             </div>
 
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-bold uppercase text-slate-400 ml-1">Aplicable a Cargos:</Label>
-                <Badge variant="secondary" className="text-[10px] uppercase font-bold">
-                  {editingDefinition?.applicable_positions?.length || 0} seleccionados
-                </Badge>
-              </div>
-              
-              <div className="flex items-center space-x-3 p-3 bg-slate-100/50 rounded-xl border border-slate-200/50">
-                <Checkbox 
-                  id="select-all" 
-                  checked={editingDefinition?.applicable_positions?.length === positions.length && positions.length > 0}
-                  onCheckedChange={(checked: boolean) => {
-                    setEditingDefinition(prev => ({
-                      ...prev,
-                      applicable_positions: checked ? positions.map(p => p.id) : []
-                    }));
-                  }}
-                />
-                <label 
-                  htmlFor="select-all"
-                  className="text-sm font-bold text-slate-700 cursor-pointer flex-1"
-                >
-                  Seleccionar Todos
-                </label>
-              </div>
+              {/* Compute which positions are allowed based on dependency */
+              (() => {
+                const parentDef = editingDefinition?.depends_on_definition_id
+                  ? definitions.find(d => d.id === editingDefinition.depends_on_definition_id)
+                  : null;
+                const allowedIds: string[] = parentDef
+                  ? (parentDef.applicable_positions?.length > 0
+                      ? parentDef.applicable_positions
+                      : positions.map(p => p.id))
+                  : positions.map(p => p.id);
+                const hasDependency = !!parentDef;
+                const availablePositions = positions.filter(p => allowedIds.includes(p.id));
+                const disabledPositions = positions.filter(p => !allowedIds.includes(p.id));
 
-              <p className="text-[10px] text-slate-400 italic px-1">Si no seleccionas ninguno, aplicará a todos los cargos por defecto.</p>
-              
-              <ScrollArea className="h-48 rounded-2xl border border-slate-100 bg-slate-50/50 p-4">
-                <div className="space-y-2">
-                  {positions.map((pos) => (
-                    <div key={pos.id} className="flex items-center space-x-3 p-2 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-slate-100">
-                      <Checkbox 
-                        id={`pos-${pos.id}`} 
-                        checked={editingDefinition?.applicable_positions?.includes(pos.id)}
-                        onCheckedChange={() => togglePosition(pos.id)}
+                return (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-bold uppercase text-slate-400 ml-1">Aplicable a Cargos:</Label>
+                      <Badge variant="secondary" className="text-[10px] uppercase font-bold">
+                        {editingDefinition?.applicable_positions?.length || 0} seleccionados
+                      </Badge>
+                    </div>
+
+                    {hasDependency && (
+                      <div className="flex items-start gap-2 p-2.5 bg-indigo-50 border border-indigo-100 rounded-xl text-xs text-indigo-700">
+                        <span className="text-base leading-none mt-0.5">🔗</span>
+                        <span>
+                          Los cargos se heredan de <strong>{parentDef!.name}</strong>.
+                          {disabledPositions.length > 0 && <> {disabledPositions.length} cargo(s) no aplican.</>}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center space-x-3 p-3 bg-slate-100/50 rounded-xl border border-slate-200/50">
+                      <Checkbox
+                        id="select-all"
+                        checked={availablePositions.length > 0 && availablePositions.every(p => editingDefinition?.applicable_positions?.includes(p.id))}
+                        onCheckedChange={(checked: boolean) => {
+                          setEditingDefinition(prev => ({
+                            ...prev,
+                            applicable_positions: checked ? allowedIds : []
+                          }));
+                        }}
                       />
-                      <label 
-                        htmlFor={`pos-${pos.id}`}
-                        className="text-sm font-medium leading-none cursor-pointer flex-1"
-                      >
-                        {pos.name}
-                        <span className="text-[10px] text-slate-400 ml-2 block">{pos.area?.name}</span>
+                      <label htmlFor="select-all" className="text-sm font-bold text-slate-700 cursor-pointer flex-1">
+                        Seleccionar Todos
+                        {hasDependency && <span className="text-[10px] font-normal text-indigo-500 ml-1">(solo disponibles)</span>}
                       </label>
                     </div>
-                  ))}
-                </div>
-              </ScrollArea>
+
+                    {!hasDependency && (
+                      <p className="text-[10px] text-slate-400 italic px-1">Si no seleccionas ninguno, aplicará a todos los cargos por defecto.</p>
+                    )}
+
+                    <ScrollArea className="h-48 rounded-2xl border border-slate-100 bg-slate-50/50 p-4">
+                      <div className="space-y-2">
+                        {positions.map((pos) => {
+                          const isAllowed = allowedIds.includes(pos.id);
+                          const isChecked = editingDefinition?.applicable_positions?.includes(pos.id);
+                          return (
+                            <div
+                              key={pos.id}
+                              className={`flex items-center space-x-3 p-2 rounded-lg transition-colors border ${
+                                !isAllowed
+                                  ? 'opacity-35 cursor-not-allowed bg-slate-100/50 border-transparent'
+                                  : 'hover:bg-white hover:border-slate-100 border-transparent'
+                              }`}
+                            >
+                              <Checkbox
+                                id={`pos-${pos.id}`}
+                                checked={isChecked}
+                                disabled={!isAllowed}
+                                onCheckedChange={() => isAllowed && togglePosition(pos.id)}
+                              />
+                              <label
+                                htmlFor={`pos-${pos.id}`}
+                                className={`text-sm font-medium leading-none flex-1 ${
+                                  isAllowed ? 'cursor-pointer' : 'cursor-not-allowed text-slate-400'
+                                }`}
+                              >
+                                {pos.name}
+                                <span className="text-[10px] text-slate-400 ml-2 block">{pos.area?.name}</span>
+                              </label>
+                              {!isAllowed && (
+                                <span className="text-[9px] text-slate-400 italic shrink-0">No aplica</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </ScrollArea>
+                  </>
+                );
+              })()
+              }
             </div>
           </div>
 
