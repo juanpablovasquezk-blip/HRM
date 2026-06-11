@@ -8,6 +8,7 @@ import { AbsenceDonut } from '@/components/dashboard/absence-donut';
 import { TodoList } from '@/components/dashboard/todo-list';
 import { ActiveLeavesCard } from '@/components/dashboard/active-leaves-card';
 import { BirthdaysCard } from '@/components/dashboard/birthdays-card';
+import { MonthlyFinalAbsencesCard } from '@/components/dashboard/monthly-final-absences-card';
 
 import { createClient } from '@/lib/supabase/server';
 
@@ -48,6 +49,7 @@ export default async function DashboardPage() {
   // For new sections
   let activeLeavesPeople: Array<{ name: string; startDate: string; endDate: string; type: string }> = [];
   let finalAbsentPeople: Array<{ name: string }> = [];
+  let monthlyFinalAbsences: Array<{ name: string; count: number }> = [];
   let birthdayPeople: Array<{ name: string; birthDate: string }> = [];
 
   if (user) {
@@ -162,6 +164,51 @@ export default async function DashboardPage() {
           const p = fpMap.get(id) as any;
           return { name: p ? `${p.first_name} ${p.last_name_father}` : 'Desconocido' };
         });
+      }
+
+      // ── 5d. Ausentismo final del mes: agrupado por persona ────────────────
+      const { data: monthCancelledRaw } = await supabase
+        .from('shift_assignments').select('personnel_id, date')
+        .eq('status', 'cancelled').eq('is_confirmed', true).eq('is_extra', false)
+        .gte('date', monthStart).lte('date', monthEnd);
+
+      const { data: monthLeavesRaw } = await supabase
+        .from('leaves').select('personnel_id, start_date, end_date')
+        .eq('status', 'approved')
+        .lte('start_date', monthEnd).gte('end_date', monthStart);
+
+      // Build leave map for current month
+      const monthLeaveMap = new Map<string, {start: string; end: string}[]>();
+      (monthLeavesRaw || []).forEach((l: any) => {
+        if (!monthLeaveMap.has(l.personnel_id)) monthLeaveMap.set(l.personnel_id, []);
+        monthLeaveMap.get(l.personnel_id)!.push({ start: l.start_date, end: l.end_date });
+      });
+
+      // Count no-shows per person (excluding those on leave that day)
+      const noShowCountMap = new Map<string, number>();
+      (monthCancelledRaw || []).forEach((ca: any) => {
+        const leaves = monthLeaveMap.get(ca.personnel_id) || [];
+        const onLeave = leaves.some((l: any) => l.start <= ca.date && l.end >= ca.date);
+        if (!onLeave) {
+          noShowCountMap.set(ca.personnel_id, (noShowCountMap.get(ca.personnel_id) || 0) + 1);
+        }
+      });
+
+      if (noShowCountMap.size > 0) {
+        const noShowIds = [...noShowCountMap.keys()];
+        const { data: noShowPersonnel } = await supabase
+          .from('personnel').select('id, first_name, last_name_father')
+          .in('id', noShowIds);
+        const nsMap = new Map((noShowPersonnel || []).map((p: any) => [p.id, p]));
+        monthlyFinalAbsences = noShowIds
+          .map(id => {
+            const p = nsMap.get(id) as any;
+            return {
+              name: p ? `${p.first_name} ${p.last_name_father}` : 'Desconocido',
+              count: noShowCountMap.get(id) || 1,
+            };
+          })
+          .sort((a, b) => b.count - a.count); // Most absences first
       }
 
       // ── 6. Transportes (mes actual) ────────────────────────────────────────
@@ -377,9 +424,13 @@ export default async function DashboardPage() {
         <ActiveLeavesCard people={activeLeavesPeople} finalAbsences={finalAbsentPeople} />
       </div>
 
-      {/* ── Fila: Cumpleaños ── */}
+      {/* ── Fila: Cumpleaños + Ausentismo Final del Mes ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <BirthdaysCard people={birthdayPeople} />
+        <MonthlyFinalAbsencesCard
+          people={monthlyFinalAbsences}
+          monthLabel={now.toLocaleDateString('es-CL', { month: 'long' })}
+        />
       </div>
     </div>
   );
