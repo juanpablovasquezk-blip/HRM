@@ -14,6 +14,7 @@ export async function uploadDocument(
   const personnelId = formData.get('personnel_id') as string;
   const type = formData.get('type') as string;
   const number = (formData.get('number') as string) || '';
+  const definitionId = (formData.get('definition_id') as string) || null;
   const issueDate = formData.get('issue_date') as string;
   // Allow either tica_date or pcp_date as the reference anchor depending on doc type
   const ticaDateStr = (formData.get('tica_date') || formData.get('pcp_date')) as string;
@@ -55,12 +56,27 @@ export async function uploadDocument(
     .from('documents')
     .getPublicUrl(fileName);
 
-  // Calculate expiration
-  // If issueDate is provided, use it as the base uploadDate for 180-day calculations
+  // Look up definition to know if this document type requires expiration
+  let requiresExpiration = true; // default: calculate expiration for legacy uploads
+  if (definitionId) {
+    const { data: defRow } = await adminClient
+      .from('document_definitions')
+      .select('requires_expiration')
+      .eq('id', definitionId)
+      .single();
+    if (defRow) requiresExpiration = defRow.requires_expiration;
+  }
+
+  // Calculate expiration only when the definition requires it
   const baseDate = issueDate ? new Date(issueDate) : new Date();
   const ticaDate = ticaDateStr ? new Date(ticaDateStr) : null;
   const explicitExpirationDate = explicitExpirationDateStr ? new Date(explicitExpirationDateStr) : null;
-  const expResult = calculateExpiration(baseDate, ticaDate, explicitExpirationDate);
+
+  let expirationDateStr: string | null = null;
+  if (requiresExpiration) {
+    const expResult = calculateExpiration(baseDate, ticaDate, explicitExpirationDate);
+    expirationDateStr = expResult.expiration_date.toISOString().split('T')[0];
+  }
 
   // Save document record
   const { error: insertError } = await adminClient.from('documents').insert({
@@ -69,7 +85,7 @@ export async function uploadDocument(
     number,
     file_url: urlData.publicUrl,
     issue_date: issueDate || null,
-    expiration_date: expResult.expiration_date.toISOString().split('T')[0],
+    expiration_date: expirationDateStr,
     tica_date: ticaDateStr || null,
     uploaded_by: user.id,
   });

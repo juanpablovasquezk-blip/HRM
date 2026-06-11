@@ -279,7 +279,12 @@ export default async function PersonnelDetailPage({
               <TableBody>
                 {documents.map((doc: any) => {
                   const def = definitions.find(d => d.id === doc.definition_id);
-                  let displayExpiry = doc.expiration_date ? new Date(doc.expiration_date + 'T12:00:00') : null;
+                  // Only use stored expiration_date if the definition requires expiration
+                  // (or if there's no definition, i.e. legacy upload — respect whatever was stored)
+                  const hasExpiration = !def || def.requires_expiration !== false;
+                  let displayExpiry = (hasExpiration && doc.expiration_date)
+                    ? new Date(doc.expiration_date + 'T12:00:00')
+                    : null;
                   let isCalculated = false;
 
                   // If no manual expiry, check for dynamic calculation
