@@ -102,8 +102,9 @@ export default function DocumentsClient({ initialDefinitions, positions }: Docum
       } else {
         toast.error(res.error || 'Error al guardar');
       }
-    } catch (error) {
-      toast.error('Error de conexión');
+    } catch (error: any) {
+      console.error('[handleSave] catch:', error);
+      toast.error('Error inesperado: ' + (error?.message || 'Error de conexión'));
     } finally {
       setLoading(false);
     }
@@ -121,8 +122,9 @@ export default function DocumentsClient({ initialDefinitions, positions }: Docum
       } else {
         toast.error(res.error || 'Error al eliminar');
       }
-    } catch (error) {
-      toast.error('Error de conexión');
+    } catch (error: any) {
+      console.error('[handleDelete] catch:', error);
+      toast.error('Error inesperado: ' + (error?.message || 'Error de conexión'));
     } finally {
       setLoading(false);
     }
