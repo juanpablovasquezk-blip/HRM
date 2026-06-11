@@ -50,9 +50,19 @@ export default async function PersonnelDetailPage({
   const documents = (person.documents as Array<{ id: string; definition_id: string; type: string; expiration_date: string | null; file_url: string; uploaded_at: string; status: string }>) || [];
 
   // Dynamic Missing Documents Logic
-  const uploadedDefinitionIds = documents.map(doc => doc.definition_id);
+  // Match by definition_id for new uploads, OR by type name for legacy uploads
+  const uploadedDefIds = new Set(documents.map((doc: any) => doc.definition_id).filter(Boolean));
+  const uploadedTypes = new Set(
+    documents.map((doc: any) => (doc.type || '').toLowerCase().trim()).filter(Boolean)
+  );
+
   const missingDocs = definitions
-    .filter(def => def.is_mandatory && !uploadedDefinitionIds.includes(def.id))
+    .filter(def => {
+      if (!def.is_mandatory) return false;
+      if (uploadedDefIds.has(def.id)) return false; // matched by definition_id
+      if (uploadedTypes.has((def.name || '').toLowerCase().trim())) return false; // legacy match by name
+      return true;
+    })
     .map(def => def.name);
 
   return (
