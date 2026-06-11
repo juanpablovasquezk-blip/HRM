@@ -6,40 +6,81 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Upload } from 'lucide-react';
+import { Loader2, Upload, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { uploadDocument } from '@/app/(dashboard)/documents/actions';
-
-const DOCUMENT_TYPES = [
-  'Cédula de Identidad',
-  'Antecedentes para fines especiales',
-  'Tica',
-  'PCP',
-  'Licencia de Conducir',
-  'Hoja de vida del conductor'
-];
+import { DocumentDefinition } from '@/types/database';
 
 interface Personnel {
   id: string;
   first_name: string;
   last_name_father: string;
   last_name_mother: string;
+  main_position: string | null;
+  secondary_positions: string[];
 }
 
-function DocumentUploadForm({ personnelList }: { personnelList: Personnel[] }) {
+interface Props {
+  personnelList: Personnel[];
+  documentDefinitions: DocumentDefinition[];
+}
+
+function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
   const [isPending, startTransition] = useTransition();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [docType, setDocType] = useState('');
+  const [selectedPersonnelId, setSelectedPersonnelId] = useState('');
+  const [selectedDefId, setSelectedDefId] = useState('');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const personnelId = searchParams.get('personnel_id') || '';
+  const initialPersonnelId = searchParams.get('personnel_id') || '';
+
+  // ── Derive selected objects ───────────────────────────────────────────────
+  const selectedPersonnel = personnelList.find(p => p.id === selectedPersonnelId);
+  const selectedDef = documentDefinitions.find(d => d.id === selectedDefId);
+  const parentDef = selectedDef?.depends_on_definition_id
+    ? documentDefinitions.find(d => d.id === selectedDef!.depends_on_definition_id)
+    : null;
+
+  // ── Filter definitions by the selected worker's positions ─────────────────
+  // A definition is applicable if:
+  //   - it has no position restriction (applicable_positions is empty → applies to all), OR
+  //   - the worker's main or secondary positions are in the list
+  const applicableDefinitions = documentDefinitions.filter(def => {
+    if (!def.is_active) return false;
+    const hasRestriction = def.applicable_positions && def.applicable_positions.length > 0;
+    if (!hasRestriction) return true; // applies to all
+
+    if (!selectedPersonnel) return true; // no worker selected yet → show all active
+
+    const workerPositions = [
+      selectedPersonnel.main_position,
+      ...(selectedPersonnel.secondary_positions || []),
+    ].filter(Boolean) as string[];
+
+    return def.applicable_positions.some(p => workerPositions.includes(p));
+  });
+
+  // ── Date field logic driven by definition metadata ────────────────────────
+  // requires_expiration + no dependency → fixed expiration date
+  // requires_expiration + has dependency  → date from parent document (anchor)
+  // no requires_expiration                → issue date (engine calculates 180d)
+  const needsExpirationDate = selectedDef?.requires_expiration && !selectedDef?.depends_on_definition_id;
+  const needsAnchorDate = selectedDef?.requires_expiration && !!selectedDef?.depends_on_definition_id;
+  const needsIssueDate = selectedDef && !selectedDef.requires_expiration;
 
   const handleSubmit = async (formData: FormData) => {
     if (!selectedFile) {
       toast.error('Por favor selecciona un archivo');
       return;
     }
+    if (!selectedDef) {
+      toast.error('Por favor selecciona el tipo de documento');
+      return;
+    }
     formData.set('file', selectedFile);
+    // Use definition name as type for backward compatibility
+    formData.set('type', selectedDef.name);
+    formData.set('definition_id', selectedDef.id);
 
     startTransition(async () => {
       const result = await uploadDocument(formData);
@@ -64,13 +105,18 @@ function DocumentUploadForm({ personnelList }: { personnelList: Personnel[] }) {
           <CardTitle className="text-base">Detalles del Documento</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* ── Trabajador ───────────────────────────────────────────────── */}
           <div className="space-y-2">
             <Label htmlFor="personnel_id">Trabajador *</Label>
             <select
               id="personnel_id"
               name="personnel_id"
-              defaultValue={personnelId}
+              defaultValue={initialPersonnelId}
               required
+              onChange={e => {
+                setSelectedPersonnelId(e.target.value);
+                setSelectedDefId(''); // reset doc type when worker changes
+              }}
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">Seleccione un trabajador</option>
@@ -81,71 +127,84 @@ function DocumentUploadForm({ personnelList }: { personnelList: Personnel[] }) {
               ))}
             </select>
           </div>
-          
+
+          {/* ── Tipo de Documento (dynamic, filtered by position) ─────────── */}
           <div className="space-y-2">
-            <Label htmlFor="type">Tipo de Documento *</Label>
+            <Label htmlFor="doc_definition">Tipo de Documento *</Label>
             <select
-              id="type"
-              name="type"
-              value={docType}
-              onChange={(e) => setDocType(e.target.value)}
+              id="doc_definition"
+              name="doc_definition"
+              value={selectedDefId}
+              onChange={e => setSelectedDefId(e.target.value)}
               required
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">Seleccione tipo</option>
-              {DOCUMENT_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
+              {applicableDefinitions.map((def) => (
+                <option key={def.id} value={def.id}>
+                  {def.name}{def.is_mandatory ? ' *' : ''}
                 </option>
               ))}
             </select>
+            {selectedPersonnel && applicableDefinitions.length === 0 && (
+              <p className="text-xs text-amber-600 flex items-center gap-1">
+                <Info className="h-3 w-3" />
+                No hay documentos configurados para el cargo de este trabajador.
+              </p>
+            )}
+            {selectedPersonnel && documentDefinitions.length > applicableDefinitions.length && (
+              <p className="text-[10px] text-slate-400 italic">
+                Mostrando {applicableDefinitions.length} de {documentDefinitions.length} documentos según el cargo.
+              </p>
+            )}
           </div>
 
+          {/* ── Número de Documento ───────────────────────────────────────── */}
           <div className="space-y-2">
             <Label htmlFor="number">Número de Documento</Label>
-            <Input
-              id="number"
-              name="number"
-              placeholder="Opcional"
-            />
+            <Input id="number" name="number" placeholder="Opcional" />
           </div>
-          
-          {/* Expiration Logic conditionally rendered */}
-          {['Cédula de Identidad', 'Tica', 'PCP', 'Licencia de Conducir'].includes(docType) && (
+
+          {/* ── Date fields driven by definition metadata ─────────────────── */}
+          {needsExpirationDate && (
             <div className="space-y-2">
               <Label htmlFor="explicit_expiration_date">Fecha de Vencimiento *</Label>
               <Input id="explicit_expiration_date" name="explicit_expiration_date" type="date" required />
             </div>
           )}
 
-          {['Antecedentes para fines especiales', 'Hoja de vida del conductor'].includes(docType) && (
+          {needsIssueDate && (
             <div className="space-y-2">
               <Label htmlFor="issue_date">Fecha de Emisión *</Label>
               <Input id="issue_date" name="issue_date" type="date" required />
             </div>
           )}
 
-          {docType === 'Antecedentes para fines especiales' && (
+          {needsAnchorDate && parentDef && (
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="tica_date">
-                Fecha de Vencimiento de TICA (Opcional){' '}
-                <span className="text-xs text-muted-foreground">
-                  (Si ingresa TICA, el certificado vencerá 25 días antes. Si no, a los 180 días de emisión)
+                Fecha de Vencimiento de {parentDef.name}{' '}
+                <span className="text-xs text-muted-foreground font-normal">
+                  (el sistema calculará el vencimiento automáticamente)
                 </span>
               </Label>
-              <Input id="tica_date" name="tica_date" type="date" />
+              <Input id="tica_date" name="tica_date" type="date" required={needsAnchorDate} />
             </div>
           )}
 
-          {docType === 'Hoja de vida del conductor' && (
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="pcp_date">
-                Fecha de Vencimiento de PCP (Opcional){' '}
-                <span className="text-xs text-muted-foreground">
-                  (Mismo patrón que antecedentes, asociado al vencimiento del PCP)
-                </span>
-              </Label>
-              <Input id="pcp_date" name="pcp_date" type="date" />
+          {/* Issue date always shown when anchor date is used (for records) */}
+          {needsAnchorDate && (
+            <div className="space-y-2">
+              <Label htmlFor="issue_date">Fecha de Emisión</Label>
+              <Input id="issue_date" name="issue_date" type="date" />
+            </div>
+          )}
+
+          {/* ── Definition info badge ────────────────────────────────────── */}
+          {selectedDef?.description && (
+            <div className="md:col-span-2 flex items-start gap-2 p-3 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-700">
+              <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>{selectedDef.description}</span>
             </div>
           )}
         </CardContent>
@@ -159,18 +218,14 @@ function DocumentUploadForm({ personnelList }: { personnelList: Personnel[] }) {
           <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl p-8 text-center">
             <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
             <p className="text-sm text-muted-foreground mb-3">
-              {selectedFile
-                ? selectedFile.name
-                : 'Arrastra y suelta o haz clic para seleccionar'}
+              {selectedFile ? selectedFile.name : 'Arrastra y suelta o haz clic para seleccionar'}
             </p>
             <Input
               type="file"
               id="file-upload"
               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
               className="max-w-xs mx-auto"
-              onChange={(e) =>
-                setSelectedFile(e.target.files?.[0] || null)
-              }
+              onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
             />
           </div>
         </CardContent>
@@ -193,8 +248,7 @@ function DocumentUploadForm({ personnelList }: { personnelList: Personnel[] }) {
   );
 }
 
-// Separate generic component so it doesn't fail 'use client' compilation
-export function UploadDocumentClient({ personnelList }: { personnelList: Personnel[] }) {
+export function UploadDocumentClient({ personnelList, documentDefinitions }: Props) {
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
@@ -205,7 +259,7 @@ export function UploadDocumentClient({ personnelList }: { personnelList: Personn
       </div>
 
       <Suspense fallback={<div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>}>
-        <DocumentUploadForm personnelList={personnelList} />
+        <DocumentUploadForm personnelList={personnelList} documentDefinitions={documentDefinitions} />
       </Suspense>
     </div>
   );
