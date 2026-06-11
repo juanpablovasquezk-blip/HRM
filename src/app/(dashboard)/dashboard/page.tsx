@@ -142,24 +142,20 @@ export default async function DashboardPage() {
         });
       }
 
-      // ── 5c. Ausentismo final: asignaciones canceladas DESPUES de publicar (is_confirmed=true) ──
-      const { data: cancelledToday } = await supabase
+      // ── 5c. Ausentismo final: marcado por supervisor en vista Asistencia (attendance_status='absent') ──
+      const { data: absentToday } = await supabase
         .from('shift_assignments').select('personnel_id')
-        .eq('status', 'cancelled').eq('is_confirmed', true)
-        .eq('date', today).eq('is_extra', false);
+        .eq('attendance_status', 'absent').eq('date', today);
 
-      const leavePersonnelIdsToday = new Set((todayLeaves || []).map((l: any) => l.personnel_id));
       const finalAbsentIds = [...new Set(
-        (cancelledToday || [])
-          .map(a => a.personnel_id)
-          .filter(id => id && !leavePersonnelIdsToday.has(id))
+        (absentToday || []).map((a: any) => a.personnel_id).filter(Boolean)
       )];
 
       if (finalAbsentIds.length > 0) {
         const { data: finalPersonnel } = await supabase
           .from('personnel').select('id, first_name, last_name_father')
           .in('id', finalAbsentIds);
-        const fpMap = new Map((finalPersonnel || []).map(p => [p.id, p]));
+        const fpMap = new Map((finalPersonnel || []).map((p: any) => [p.id, p]));
         finalAbsentPeople = finalAbsentIds.map(id => {
           const p = fpMap.get(id) as any;
           return { name: p ? `${p.first_name} ${p.last_name_father}` : 'Desconocido' };
@@ -167,29 +163,15 @@ export default async function DashboardPage() {
       }
 
       // ── 5d. Ausentismo final del mes: agrupado por persona ────────────────
-      const { data: monthCancelledRaw } = await supabase
-        .from('shift_assignments').select('personnel_id, date')
-        .eq('status', 'cancelled').eq('is_confirmed', true).eq('is_extra', false)
+      const { data: monthAbsentRaw } = await supabase
+        .from('shift_assignments').select('personnel_id')
+        .eq('attendance_status', 'absent')
         .gte('date', monthStart).lte('date', monthEnd);
 
-      const { data: monthLeavesRaw } = await supabase
-        .from('leaves').select('personnel_id, start_date, end_date')
-        .eq('status', 'approved')
-        .lte('start_date', monthEnd).gte('end_date', monthStart);
-
-      // Build leave map for current month
-      const monthLeaveMap = new Map<string, {start: string; end: string}[]>();
-      (monthLeavesRaw || []).forEach((l: any) => {
-        if (!monthLeaveMap.has(l.personnel_id)) monthLeaveMap.set(l.personnel_id, []);
-        monthLeaveMap.get(l.personnel_id)!.push({ start: l.start_date, end: l.end_date });
-      });
-
-      // Count no-shows per person (excluding those on leave that day)
+      // Count no-shows per person
       const noShowCountMap = new Map<string, number>();
-      (monthCancelledRaw || []).forEach((ca: any) => {
-        const leaves = monthLeaveMap.get(ca.personnel_id) || [];
-        const onLeave = leaves.some((l: any) => l.start <= ca.date && l.end >= ca.date);
-        if (!onLeave) {
+      (monthAbsentRaw || []).forEach((ca: any) => {
+        if (ca.personnel_id) {
           noShowCountMap.set(ca.personnel_id, (noShowCountMap.get(ca.personnel_id) || 0) + 1);
         }
       });
@@ -208,7 +190,7 @@ export default async function DashboardPage() {
               count: noShowCountMap.get(id) || 1,
             };
           })
-          .sort((a, b) => b.count - a.count); // Most absences first
+          .sort((a, b) => b.count - a.count);
       }
 
       // ── 6. Transportes (mes actual) ────────────────────────────────────────
@@ -258,7 +240,7 @@ export default async function DashboardPage() {
         const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split('T')[0];
         const label = d.toLocaleDateString('es-CL', { month: 'short' });
 
-        const [{ count: mExtra }, { data: mSick }, { data: mVac }, { data: mCancelled }, { data: mLeaves }] = await Promise.all([
+        const [{ count: mExtra }, { data: mSick }, { data: mVac }, { count: mAbsent }] = await Promise.all([
           supabase.from('shift_assignments').select('id', { count: 'exact', head: true })
             .eq('is_extra', true).gte('date', mStart).lte('date', mEnd),
           supabase.from('leaves').select('start_date, end_date')
@@ -267,27 +249,12 @@ export default async function DashboardPage() {
           supabase.from('leaves').select('start_date, end_date')
             .eq('type', 'vacation').eq('status', 'approved')
             .lte('start_date', mEnd).gte('end_date', mStart),
-          supabase.from('shift_assignments').select('personnel_id, date')
-            .eq('status', 'cancelled').eq('is_confirmed', true).eq('is_extra', false)
+          supabase.from('shift_assignments').select('id', { count: 'exact', head: true })
+            .eq('attendance_status', 'absent')
             .gte('date', mStart).lte('date', mEnd),
-          supabase.from('leaves').select('personnel_id, start_date, end_date')
-            .eq('status', 'approved')
-            .lte('start_date', mEnd).gte('end_date', mStart),
         ]);
 
-        // Ausentismo final = cancelled assignments NOT covered by any approved leave
-        const leaveMap = new Map<string, {start: string; end: string}[]>();
-        (mLeaves || []).forEach((l: any) => {
-          if (!leaveMap.has(l.personnel_id)) leaveMap.set(l.personnel_id, []);
-          leaveMap.get(l.personnel_id)!.push({ start: l.start_date, end: l.end_date });
-        });
-        const uniqueNoShows = new Set<string>();
-        (mCancelled || []).forEach((ca: any) => {
-          const leaves = leaveMap.get(ca.personnel_id) || [];
-          const onLeave = leaves.some(l => l.start <= ca.date && l.end >= ca.date);
-          if (!onLeave) uniqueNoShows.add(`${ca.personnel_id}-${ca.date}`);
-        });
-        const ausentismo_final = uniqueNoShows.size;
+        const ausentismo_final = mAbsent || 0;
 
         const countDays = (start: string, end: string, ms: string, me: string) => {
           const s = new Date(Math.max(new Date(start).getTime(), new Date(ms).getTime()));
