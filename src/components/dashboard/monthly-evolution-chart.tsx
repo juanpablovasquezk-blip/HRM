@@ -64,9 +64,9 @@ export function MonthlyEvolutionChart({ data }: Props) {
                 iconSize={8}
                 wrapperStyle={{ fontSize: '12px', paddingTop: '12px' }}
               />
-              <Bar dataKey="extras" name="Turnos Extra" fill="#f59e0b" radius={[4, 4, 0, 0]} />
               <Bar dataKey="licencias" name="Licencias Médicas" fill="#ef4444" radius={[4, 4, 0, 0]} />
               <Bar dataKey="vacaciones" name="Vacaciones" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="extras" name="Turnos Extra" fill="#f59e0b" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

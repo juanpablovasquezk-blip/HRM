@@ -1,13 +1,12 @@
 import { 
   Users, Star, CalendarOff, Plane, 
-  Car, Bus, GitCompare, Clock, AlertCircle, TrendingUp
+  Car, Bus, GitCompare, AlertCircle
 } from 'lucide-react';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { MonthlyEvolutionChart } from '@/components/dashboard/monthly-evolution-chart';
 import { AbsenceDonut } from '@/components/dashboard/absence-donut';
 import { TodoList } from '@/components/dashboard/todo-list';
-import { WhosAway } from '@/components/dashboard/whos-away';
-import { OnSickLeaveCard } from '@/components/dashboard/on-sick-leave-card';
+import { ActiveLeavesCard } from '@/components/dashboard/active-leaves-card';
 import { BirthdaysCard } from '@/components/dashboard/birthdays-card';
 
 import { createClient } from '@/lib/supabase/server';
@@ -47,7 +46,7 @@ export default async function DashboardPage() {
   let todayActive = 0;
 
   // For new sections
-  let sickLeaveNames: Array<{ name: string; startDate: string; endDate: string }> = [];
+  let activeLeavesPeople: Array<{ name: string; startDate: string; endDate: string; type: string }> = [];
   let birthdayPeople: Array<{ name: string; birthDate: string }> = [];
 
   if (user) {
@@ -110,9 +109,11 @@ export default async function DashboardPage() {
       prevVacationDays = (prevVacLeaves || []).reduce((acc, l) => acc + countDaysPrevMonth(l.start_date, l.end_date), 0);
 
       // ── 5. Ausencias hoy (para donut y % ausentismo) ───────────────────────
+      // Exclude 'personal' (libres solicitados)
       const { data: todayLeaves } = await supabase
         .from('leaves').select('type, start_date, end_date, personnel_id')
-        .eq('status', 'approved').lte('start_date', today).gte('end_date', today);
+        .eq('status', 'approved').lte('start_date', today).gte('end_date', today)
+        .neq('type', 'personal');
 
       todayOnVacation = (todayLeaves || []).filter(l => l.type === 'vacation').length;
       todaySick = (todayLeaves || []).filter(l => l.type === 'sick').length;
@@ -120,20 +121,20 @@ export default async function DashboardPage() {
       todayActive = Math.max(0, totalPersonnel - onLeaveToday);
       absencePercent = totalPersonnel > 0 ? Math.round((onLeaveToday / totalPersonnel) * 100) : 0;
 
-      // ── 5b. Nombres con licencia médica hoy ────────────────────────────────
-      const sickTodayLeaves = (todayLeaves || []).filter(l => l.type === 'sick');
-      if (sickTodayLeaves.length > 0) {
-        const personnelIds = sickTodayLeaves.map(l => l.personnel_id).filter(Boolean);
-        const { data: sickPersonnel } = await supabase
+      // ── 5b. Ausencias activas hoy con nombres (excluye personal/libres) ─────
+      if ((todayLeaves || []).length > 0) {
+        const personnelIds = (todayLeaves || []).map(l => l.personnel_id).filter(Boolean);
+        const { data: leavePersonnel } = await supabase
           .from('personnel').select('id, first_name, last_name_father')
           .in('id', personnelIds);
-        const pMap = new Map((sickPersonnel || []).map(p => [p.id, p]));
-        sickLeaveNames = sickTodayLeaves.map(l => {
+        const pMap = new Map((leavePersonnel || []).map(p => [p.id, p]));
+        activeLeavesPeople = (todayLeaves || []).map(l => {
           const p = pMap.get(l.personnel_id) as any;
           return {
             name: p ? `${p.first_name} ${p.last_name_father}` : 'Desconocido',
             startDate: l.start_date,
             endDate: l.end_date,
+            type: l.type,
           };
         });
       }
@@ -321,19 +322,14 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Fila inferior ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <div className="lg:col-span-3">
-          <TodoList />
-        </div>
-        <div className="lg:col-span-2">
-          <WhosAway />
-        </div>
+      {/* ── Fila: TodoList + Ausencias activas ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <TodoList />
+        <ActiveLeavesCard people={activeLeavesPeople} />
       </div>
 
-      {/* ── Fila: Licencias médicas + Cumpleaños ── */}
+      {/* ── Fila: Cumpleaños ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <OnSickLeaveCard people={sickLeaveNames} />
         <BirthdaysCard people={birthdayPeople} />
       </div>
     </div>
