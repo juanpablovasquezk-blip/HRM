@@ -217,7 +217,7 @@ export default async function DashboardPage() {
   // ── Trend helpers ─────────────────────────────────────────────────────────────
   const trendValue = (curr: number, prev: number) => {
     if (prev === 0) return undefined;
-    return { value: Math.round(Math.abs(((curr - prev) / prev) * 100)), label: 'vs mes anterior', positive: curr <= prev };
+    return { value: Math.round(Math.abs(((curr - prev) / prev) * 100)), label: 'vs mes anterior', positive: curr >= prev };
   };
 
   // ── Greeting ──────────────────────────────────────────────────────────────────
