@@ -140,10 +140,11 @@ export default async function DashboardPage() {
         });
       }
 
-      // ── 5c. Ausentismo final: asignaciones canceladas hoy sin licencia aprobada ──
+      // ── 5c. Ausentismo final: asignaciones canceladas DESPUES de publicar (is_confirmed=true) ──
       const { data: cancelledToday } = await supabase
         .from('shift_assignments').select('personnel_id')
-        .eq('status', 'cancelled').eq('date', today).eq('is_extra', false);
+        .eq('status', 'cancelled').eq('is_confirmed', true)
+        .eq('date', today).eq('is_extra', false);
 
       const leavePersonnelIdsToday = new Set((todayLeaves || []).map((l: any) => l.personnel_id));
       const finalAbsentIds = [...new Set(
@@ -220,7 +221,7 @@ export default async function DashboardPage() {
             .eq('type', 'vacation').eq('status', 'approved')
             .lte('start_date', mEnd).gte('end_date', mStart),
           supabase.from('shift_assignments').select('personnel_id, date')
-            .eq('status', 'cancelled').eq('is_extra', false)
+            .eq('status', 'cancelled').eq('is_confirmed', true).eq('is_extra', false)
             .gte('date', mStart).lte('date', mEnd),
           supabase.from('leaves').select('personnel_id, start_date, end_date')
             .eq('status', 'approved')
