@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Loader2 } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Phone, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 import { createPersonnel, updatePersonnel } from '@/app/(dashboard)/personnel/actions';
 import type { Personnel } from '@/types/database';
@@ -20,6 +20,42 @@ interface PersonnelFormProps {
   positions?: { id: string; name: string; area?: { name: string } }[];
   shifts?: { id: string; name: string; start_time: string; end_time: string }[];
   areas?: { id: string; name: string }[];
+}
+
+// ── Phone helpers ──────────────────────────────────────────────────────────────
+// Accepts any partial input and returns a formatted +56 X XXXX XXXX string.
+function formatChileanPhone(raw: string): string {
+  // Strip everything except digits
+  let digits = raw.replace(/\D/g, '');
+  // Remove leading country code if present (56)
+  if (digits.startsWith('56')) digits = digits.slice(2);
+  // Cap at 9 digits (Chilean mobile = 9 digits local)
+  digits = digits.slice(0, 9);
+  if (!digits) return '';
+  // Build display string: +56 D XXXX XXXX
+  let out = '+56 ' + digits[0];
+  if (digits.length > 1) out += ' ' + digits.slice(1, 5);
+  if (digits.length > 5) out += ' ' + digits.slice(5);
+  return out;
+}
+
+function normalizePhone(display: string): string {
+  const digits = display.replace(/\D/g, '');
+  if (!digits) return '';
+  const local = digits.startsWith('56') ? digits.slice(2) : digits;
+  return local ? '+56' + local : '';
+}
+
+function isValidChileanPhone(display: string): boolean {
+  const digits = display.replace(/\D/g, '');
+  // Must have country code 56 + 9-digit local starting with 9 = 11 digits total
+  if (digits.startsWith('56')) return digits.length === 11 && digits[2] === '9';
+  return digits.length === 9 && digits[0] === '9';
+}
+
+// ── Email helper ───────────────────────────────────────────────────────────────
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
 }
 
 export function PersonnelForm({ personnel, companies = [], positions = [], shifts = [], areas = [] }: PersonnelFormProps) {
@@ -37,7 +73,32 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const [enableAccess, setEnableAccess] = useState(!!personnel?.user_id);
   const [isPrio04, setIsPrio04] = useState(personnel?.rotation_pattern?.includes('PRIO-04') || false);
   const [dropdownValue, setDropdownValue] = useState<string>('');
-  
+
+  // ── Phone controlled state ─────────────────────────────────────────────────
+  const [phoneDisplay, setPhoneDisplay] = useState(() =>
+    personnel?.phone ? formatChileanPhone(personnel.phone) : ''
+  );
+  const [phoneTouched, setPhoneTouched] = useState(false);
+  const phoneValid = !phoneDisplay || isValidChileanPhone(phoneDisplay);
+  const phoneError = phoneTouched && phoneDisplay && !phoneValid
+    ? 'Debe tener 9 dígitos locales: +56 9 XXXX XXXX'
+    : '';
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    // Allow the user to clear the field
+    if (!raw.replace(/\D/g, '')) { setPhoneDisplay(''); return; }
+    setPhoneDisplay(formatChileanPhone(raw));
+  };
+
+  // ── Email controlled state ─────────────────────────────────────────────────
+  const [emailDisplay, setEmailDisplay] = useState(personnel?.email || '');
+  const [emailTouched, setEmailTouched] = useState(false);
+  const emailValid = !emailDisplay || isValidEmail(emailDisplay);
+  const emailError = emailTouched && emailDisplay && !emailValid
+    ? 'Formato inválido. Ej: juan.perez@empresa.com'
+    : '';
+
   // Stabilize initial values for uncontrolled inputs to satisfy Base UI
   const [initialValues] = useState(() => {
     const addr = (personnel?.address as { street?: string; city?: string; region?: string }) || {};
@@ -65,6 +126,11 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const address = (personnel?.address as { street?: string; city?: string; region?: string }) || {};
 
   const handleSubmit = async (formData: FormData) => {
+    // Normalize phone to +56XXXXXXXXX before sending
+    formData.set('phone', normalizePhone(phoneDisplay));
+    // Email value is already correct (controlled)
+    formData.set('email', emailDisplay);
+
     formData.set('prefers_night', String(prefersNight));
     formData.set('avoids_night', String(avoidsNight));
     formData.set('has_special_contract', String(hasSpecialContract));
@@ -72,6 +138,18 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
     formData.set('is_active', String(isActive));
     formData.set('secondary_positions', selectedSecondary.join(','));
     formData.set('enable_access', String(enableAccess));
+
+    // Block submission if validations fail
+    if (phoneDisplay && !isValidChileanPhone(phoneDisplay)) {
+      setPhoneTouched(true);
+      toast.error('El número de teléfono no es válido');
+      return;
+    }
+    if (emailDisplay && !isValidEmail(emailDisplay)) {
+      setEmailTouched(true);
+      toast.error('El email no tiene un formato válido');
+      return;
+    }
 
     // Manage rotation pattern + priority tags
     let pattern = formData.get('rotation_pattern') as string;
@@ -123,16 +201,69 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
             <Input id="rut" name="rut" defaultValue={initialValues.rut} required placeholder="12.345.678-9" />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="email">Email (para acceso al sistema)</Label>
-            <Input id="email" name="email" type="email" defaultValue={initialValues.email} placeholder="juan.perez@ejemplo.com" />
+            <Label htmlFor="email">
+              <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />Email (para acceso al sistema)</span>
+            </Label>
+            <div className="relative">
+              <Input
+                id="email"
+                name="email"
+                type="text"
+                inputMode="email"
+                value={emailDisplay}
+                onChange={e => setEmailDisplay(e.target.value)}
+                onBlur={() => setEmailTouched(true)}
+                placeholder="juan.perez@empresa.com"
+                className={emailTouched && emailDisplay
+                  ? emailValid ? 'border-emerald-400 pr-8' : 'border-red-400 pr-8'
+                  : 'pr-8'
+                }
+              />
+              {emailTouched && emailDisplay && (
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                  {emailValid
+                    ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                    : <XCircle className="h-4 w-4 text-red-500" />}
+                </span>
+              )}
+            </div>
+            {emailError && <p className="text-xs text-red-600">{emailError}</p>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="birth_date">Fecha de Nacimiento *</Label>
             <Input id="birth_date" name="birth_date" type="date" defaultValue={initialValues.birth_date} required />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="phone">Teléfono</Label>
-            <Input id="phone" name="phone" defaultValue={initialValues.phone} placeholder="+56 9 1234 5678" />
+            <Label htmlFor="phone">
+              <span className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" />Teléfono (WhatsApp)</span>
+            </Label>
+            <div className="relative">
+              <Input
+                id="phone"
+                name="phone"
+                type="tel"
+                inputMode="numeric"
+                value={phoneDisplay}
+                onChange={handlePhoneChange}
+                onBlur={() => setPhoneTouched(true)}
+                placeholder="+56 9 1234 5678"
+                className={phoneTouched && phoneDisplay
+                  ? phoneValid ? 'border-emerald-400 pr-8' : 'border-red-400 pr-8'
+                  : 'pr-8'
+                }
+              />
+              {phoneTouched && phoneDisplay && (
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                  {phoneValid
+                    ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                    : <XCircle className="h-4 w-4 text-red-500" />}
+                </span>
+              )}
+            </div>
+            {phoneError
+              ? <p className="text-xs text-red-600">{phoneError}</p>
+              : <p className="text-xs text-muted-foreground">Formato: +56 9 XXXX XXXX — solo números chilenos</p>
+            }
           </div>
           
           <div className="flex items-center justify-between p-4 rounded-xl border border-blue-100 bg-blue-50/30 md:col-span-2">
