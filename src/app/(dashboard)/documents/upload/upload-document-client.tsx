@@ -28,11 +28,12 @@ interface Props {
 function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
   const [isPending, startTransition] = useTransition();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [selectedPersonnelId, setSelectedPersonnelId] = useState('');
   const [selectedDefId, setSelectedDefId] = useState('');
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Initialize from URL so filtering works immediately when coming from a profile page
   const initialPersonnelId = searchParams.get('personnel_id') || '';
+  const [selectedPersonnelId, setSelectedPersonnelId] = useState(initialPersonnelId);
 
   // ── Derive selected objects ───────────────────────────────────────────────
   const selectedPersonnel = personnelList.find(p => p.id === selectedPersonnelId);
@@ -111,7 +112,7 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
             <select
               id="personnel_id"
               name="personnel_id"
-              defaultValue={initialPersonnelId}
+              value={selectedPersonnelId}
               required
               onChange={e => {
                 setSelectedPersonnelId(e.target.value);
