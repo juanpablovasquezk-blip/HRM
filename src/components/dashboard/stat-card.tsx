@@ -11,6 +11,7 @@ interface StatCardProps {
     value: number;
     label: string;
     positive?: boolean;
+    isUp?: boolean;
   };
   className?: string;
   iconClassName?: string;
@@ -52,7 +53,7 @@ export function StatCard({
                       : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                   )}
                 >
-                  {trend.positive ? '↑' : '↓'} {Math.abs(trend.value)}%
+                  {(trend.isUp !== undefined ? trend.isUp : trend.positive) ? '↑' : '↓'} {Math.abs(trend.value)}%
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {trend.label}

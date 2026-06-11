@@ -215,9 +215,12 @@ export default async function DashboardPage() {
   }
 
   // ── Trend helpers ─────────────────────────────────────────────────────────────
-  const trendValue = (curr: number, prev: number) => {
+  const trendValue = (curr: number, prev: number, lowerIsBetter = false) => {
     if (prev === 0) return undefined;
-    return { value: Math.round(Math.abs(((curr - prev) / prev) * 100)), label: 'vs mes anterior', positive: curr >= prev };
+    const pct = Math.round(Math.abs(((curr - prev) / prev) * 100));
+    const isUp = curr > prev;
+    const positive = lowerIsBetter ? curr <= prev : curr >= prev;
+    return { value: pct, label: 'vs mes anterior', positive, isUp };
   };
 
   // ── Greeting ──────────────────────────────────────────────────────────────────
@@ -243,7 +246,7 @@ export default async function DashboardPage() {
             value={extraShifts}
             subtitle={`Mes actual`}
             icon={Star}
-            trend={trendValue(extraShifts, prevExtraShifts)}
+            trend={trendValue(extraShifts, prevExtraShifts, true)}
             iconClassName="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
           />
           <StatCard
@@ -251,7 +254,7 @@ export default async function DashboardPage() {
             value={sickDays}
             subtitle="Días aprobados"
             icon={CalendarOff}
-            trend={trendValue(sickDays, prevSickDays)}
+            trend={trendValue(sickDays, prevSickDays, true)}
             iconClassName="bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"
           />
           <StatCard
@@ -259,7 +262,7 @@ export default async function DashboardPage() {
             value={vacationDays}
             subtitle="Días aprobados"
             icon={Plane}
-            trend={trendValue(vacationDays, prevVacationDays)}
+            trend={trendValue(vacationDays, prevVacationDays, false)}
             iconClassName="bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400"
           />
           <StatCard
