@@ -292,7 +292,11 @@ export default function DocumentsClient({ initialDefinitions, positions }: Docum
                       onValueChange={(val) => setEditingDefinition(prev => ({ ...prev, depends_on_definition_id: val === 'none' ? null : val }))}
                     >
                       <SelectTrigger className="h-10 rounded-xl bg-white border-indigo-100 focus:ring-indigo-500">
-                        <SelectValue placeholder="Selecciona un documento..." />
+                        <span className="truncate text-sm">
+                          {editingDefinition?.depends_on_definition_id
+                            ? (definitions.find(d => d.id === editingDefinition.depends_on_definition_id)?.name ?? 'Selecciona un documento...')
+                            : 'Sin dependencia (Fecha fija)'}
+                        </span>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Sin dependencia (Fecha fija)</SelectItem>
