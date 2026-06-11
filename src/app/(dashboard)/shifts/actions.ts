@@ -639,6 +639,8 @@ export async function publishAssignments(input: string | string[], endDate?: str
 
   // 3. Trigger WhatsApp notifications for actual shift changes
   const notifiedWorkers: string[] = [];
+  const skippedWorkers: string[] = [];  // no phone number
+  const failedWorkers: string[] = [];   // API error
 
   if (assignmentsToPublish && assignmentsToPublish.length > 0) {
     try {
@@ -725,31 +727,34 @@ export async function publishAssignments(input: string | string[], endDate?: str
 
           const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hrm-roster-manager.vercel.app';
 
-          // Send notifications via WhatsApp in parallel and collect successful outcomes
+          // Send notifications via WhatsApp in parallel and collect outcomes
           const results = await Promise.allSettled(changedAssignments.map(async (ass) => {
             const log = latestAuditMap.get(`${ass.personnel_id}_${ass.date}`);
 
             const person = personnelMap.get(ass.personnel_id);
-            if (!person || !person.phone) return;
+            const workerName = person ? `${person.first_name} ${person.last_name_father}` : 'Desconocido';
 
-            const newShift = shiftsMap.get(ass.shift_id);
-            if (!newShift) return;
-
-            // Format phone correctly
-            let phone = person.phone.replace(/[^\d+]/g, '');
-            if (!phone.startsWith('+') && phone.startsWith('56')) {
-              phone = '+' + phone;
+            if (!person || !person.phone) {
+              return { type: 'skipped' as const, name: workerName };
             }
 
+            const newShift = shiftsMap.get(ass.shift_id);
+            if (!newShift) return { type: 'skipped' as const, name: workerName };
+
+            // Format phone: ensure country code
+            let phone = person.phone.replace(/[^\d+]/g, '');
+            if (!phone.startsWith('+') && phone.startsWith('56')) phone = '+' + phone;
+            // Chilean mobile without country code: 9XXXXXXXX → add +56
+            if (!phone.startsWith('+') && phone.length === 9 && phone.startsWith('9')) phone = '+56' + phone;
+
             const oldShift = log?.previous_shift_id ? shiftsMap.get(log.previous_shift_id) : null;
-            const oldShiftStr = oldShift 
+            const oldShiftStr = oldShift
               ? `${oldShift.name} (${oldShift.start_time.slice(0, 5)} - ${oldShift.end_time.slice(0, 5)})`
               : 'Libre / Sin Turno';
 
             const areaName = ass.area_id ? (areasMap.get(ass.area_id)?.name || 'No especificada') : 'No especificada';
             const positionName = ass.position_id ? (positionsMap.get(ass.position_id)?.name || 'No especificada') : 'No especificada';
 
-            // Format date: e.g. "Viernes, 05 de Junio"
             let formattedDate = ass.date;
             try {
               const parsed = parseISO(ass.date);
@@ -757,14 +762,12 @@ export async function publishAssignments(input: string | string[], endDate?: str
               formattedDate = rawFormat.charAt(0).toUpperCase() + rawFormat.slice(1);
             } catch (e) {}
 
-            const workerName = `${person.first_name} ${person.last_name_father}`;
-            
             const message = `🔄 *Notificación de Cambio de Turno*\n\n` +
               `Hola *${workerName}*,\n` +
               `Se ha registrado una modificación en tu programación de turnos:\n\n` +
               `📅 *Fecha:* ${formattedDate}\n\n` +
               `* *Turno Anterior:* ${oldShiftStr}\n` +
-              `* *Nuevo Turno:* *${newShift.name}* (*${newShift.start_time.slice(0, 5)}* - *${newShift.end_time.slice(0, 5)}*)\n` +
+              `* *Nuevo Turno:* *${(newShift as any).name}* (*${(newShift as any).start_time.slice(0, 5)}* - *${(newShift as any).end_time.slice(0, 5)}*)\n` +
               `📍 *Área:* ${areaName}\n` +
               `💼 *Función:* ${positionName}\n\n` +
               `Por favor, planifica tu jornada considerando esta actualización. Puedes revisar tu planilla completa en la plataforma: ${platformUrl}\n\n` +
@@ -772,19 +775,24 @@ export async function publishAssignments(input: string | string[], endDate?: str
 
             const res = await sendWhatsAppMessage(phone, message);
             if (res.success) {
-              // Mark assignment as notified — prevents duplicate sends
               await supabase.from('shift_assignments')
                 .update({ whatsapp_notified_at: new Date().toISOString() })
                 .eq('id', ass.id);
-              return `${person.first_name} ${person.last_name_father}`;
+              return { type: 'sent' as const, name: workerName };
             } else {
-              throw new Error(res.error || 'UltraMsg failed');
+              console.error(`[publishAssignments] WhatsApp failed for ${workerName} (${phone}):`, res.error);
+              return { type: 'failed' as const, name: workerName, error: res.error };
             }
           }));
 
           results.forEach(r => {
             if (r.status === 'fulfilled' && r.value) {
-              notifiedWorkers.push(r.value);
+              const val = r.value as any;
+              if (val.type === 'sent') notifiedWorkers.push(val.name);
+              else if (val.type === 'skipped') skippedWorkers.push(val.name);
+              else if (val.type === 'failed') failedWorkers.push(val.name);
+            } else if (r.status === 'rejected') {
+              console.error('[publishAssignments] Unexpected rejection:', r.reason);
             }
           });
         }
@@ -797,7 +805,7 @@ export async function publishAssignments(input: string | string[], endDate?: str
   revalidatePath('/shifts/roster');
   revalidatePath('/dashboard');
   revalidatePath('/shifts/daily');
-  return { success: true, notifiedWorkers };
+  return { success: true, notifiedWorkers, skippedWorkers, failedWorkers };
 }
 
 // ─── Preview: qué trabajadores recibirán notificación (sin enviar) ─────────────

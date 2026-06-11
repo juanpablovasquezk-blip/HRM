@@ -1046,18 +1046,39 @@ export function RosterGridClient({
       const { publishAssignments } = await import('@/app/(dashboard)/shifts/actions');
       const res = await publishAssignments(idsToPublish) as any;
       if (res.success) {
-        if (res.notifiedWorkers && res.notifiedWorkers.length > 0) {
+        const notified: string[] = res.notifiedWorkers || [];
+        const skipped: string[] = res.skippedWorkers || [];
+        const failed: string[] = res.failedWorkers || [];
+
+        if (notified.length > 0) {
           toast.success(
             <div>
               <p className="font-bold">{idsToPublish.length} turnos publicados</p>
-              <p className="text-xs text-slate-500 mt-1">
-                WhatsApp enviado a: <strong>{res.notifiedWorkers.join(', ')}</strong>
-              </p>
+              <p className="text-xs text-slate-500 mt-1">✅ WhatsApp enviado a: <strong>{notified.join(', ')}</strong></p>
+              {skipped.length > 0 && <p className="text-xs text-amber-600 mt-1">⚠️ Sin teléfono: {skipped.join(', ')}</p>}
+              {failed.length > 0 && <p className="text-xs text-red-600 mt-1">❌ Error envío: {failed.join(', ')}</p>}
             </div>,
-            { duration: 5000 }
+            { duration: 6000 }
+          );
+        } else if (skipped.length > 0) {
+          toast.warning(
+            <div>
+              <p className="font-bold">{idsToPublish.length} turnos publicados</p>
+              <p className="text-xs mt-1">⚠️ No se pudo notificar — sin número de teléfono: <strong>{skipped.join(', ')}</strong></p>
+              <p className="text-xs text-slate-400 mt-0.5">Agrega el teléfono en el perfil de cada persona</p>
+            </div>,
+            { duration: 8000 }
+          );
+        } else if (failed.length > 0) {
+          toast.error(
+            <div>
+              <p className="font-bold">{idsToPublish.length} turnos publicados</p>
+              <p className="text-xs mt-1">❌ Error al enviar WhatsApp a: <strong>{failed.join(', ')}</strong></p>
+            </div>,
+            { duration: 6000 }
           );
         } else {
-          toast.success(`${idsToPublish.length} turnos publicados (sin cambios para notificar)`);
+          toast.success(`${idsToPublish.length} turnos publicados (sin cambios de turno detectados)`);
         }
         setSelectedCells([]);
         router.refresh();
@@ -1089,20 +1110,32 @@ export function RosterGridClient({
       const { publishAssignments } = await import('@/app/(dashboard)/shifts/actions');
       const res = await publishAssignments(idsToPublish) as any;
       if (res.success) {
-        if (res.notifiedWorkers && res.notifiedWorkers.length > 0) {
+        const notified: string[] = res.notifiedWorkers || [];
+        const skipped: string[] = res.skippedWorkers || [];
+        const failed: string[] = res.failedWorkers || [];
+
+        if (notified.length > 0) {
           toast.success(
             <div>
               <p className="font-bold">{idsToPublish.length} turnos publicados con éxito</p>
-              <p className="text-xs text-slate-500 mt-1">
-                WhatsApp enviado a: <strong>{res.notifiedWorkers.join(', ')}</strong>
-              </p>
+              <p className="text-xs text-slate-500 mt-1">✅ WhatsApp enviado a: <strong>{notified.join(', ')}</strong></p>
+              {skipped.length > 0 && <p className="text-xs text-amber-600 mt-1">⚠️ Sin teléfono: {skipped.join(', ')}</p>}
+              {failed.length > 0 && <p className="text-xs text-red-600 mt-1">❌ Error: {failed.join(', ')}</p>}
             </div>,
-            { duration: 5000 }
+            { duration: 6000 }
+          );
+        } else if (skipped.length > 0) {
+          toast.warning(
+            <div>
+              <p className="font-bold">{idsToPublish.length} turnos publicados</p>
+              <p className="text-xs mt-1">⚠️ Sin número de teléfono: <strong>{skipped.join(', ')}</strong></p>
+            </div>,
+            { duration: 8000 }
           );
         } else {
           toast.success(`${idsToPublish.length} turnos publicados con éxito (sin cambios para notificar)`);
         }
-        window.location.reload();
+        router.refresh();
       } else {
         toast.error(res.error || 'Error al publicar');
       }
