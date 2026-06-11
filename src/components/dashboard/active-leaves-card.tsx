@@ -17,12 +17,18 @@ interface ActiveLeavesPerson {
   type: string;
 }
 
-interface ActiveLeavesCardProps {
-  people: ActiveLeavesPerson[];
+interface FinalAbsence {
+  name: string;
 }
 
-export function ActiveLeavesCard({ people }: ActiveLeavesCardProps) {
+interface ActiveLeavesCardProps {
+  people: ActiveLeavesPerson[];
+  finalAbsences: FinalAbsence[];
+}
+
+export function ActiveLeavesCard({ people, finalAbsences }: ActiveLeavesCardProps) {
   const today = new Date();
+  const totalAbsent = people.length + finalAbsences.length;
 
   return (
     <Card className="border-slate-200/60 dark:border-slate-800 shadow-sm">
@@ -34,50 +40,68 @@ export function ActiveLeavesCard({ people }: ActiveLeavesCardProps) {
           <div>
             <CardTitle className="text-base font-semibold">Ausencias Activas Hoy</CardTitle>
             <p className="text-xs text-muted-foreground">
-              {people.length === 0
+              {totalAbsent === 0
                 ? 'Sin ausencias activas'
-                : `${people.length} persona${people.length > 1 ? 's' : ''} fuera hoy`}
+                : `${totalAbsent} persona${totalAbsent > 1 ? 's' : ''} fuera hoy`}
             </p>
           </div>
         </div>
       </CardHeader>
       <CardContent className="pt-0">
-        {people.length === 0 ? (
+        {totalAbsent === 0 ? (
           <div className="flex flex-col items-center justify-center py-6 text-center">
             <span className="text-2xl mb-1">✅</span>
             <p className="text-sm text-muted-foreground">Todo el equipo presente hoy</p>
           </div>
         ) : (
-          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-            {people.map((person, i) => {
-              const style = LEAVE_LABELS[person.type] ?? LEAVE_LABELS.other;
-              const end = parseISO(person.endDate);
-              const daysLeft = differenceInDays(end, today) + 1;
-              const endFormatted = format(end, "d 'de' MMM", { locale: es });
-
-              return (
-                <div
-                  key={i}
-                  className={`flex items-center justify-between rounded-lg px-3 py-2 border ${style.bg} ${style.border}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <div className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${style.bg} ${style.color} border ${style.border}`}>
-                      {person.name.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium leading-tight">{person.name}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className={`text-xs font-semibold ${style.color}`}>{style.label}</span>
-                        <span className="text-xs text-muted-foreground">· hasta {endFormatted}</span>
+          <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
+            {/* ── Basales ── */}
+            {people.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Ausencias Programadas</p>
+                {people.map((person, i) => {
+                  const style = LEAVE_LABELS[person.type] ?? LEAVE_LABELS.other;
+                  const end = parseISO(person.endDate);
+                  const daysLeft = differenceInDays(end, today) + 1;
+                  const endFormatted = format(end, "d 'de' MMM", { locale: es });
+                  return (
+                    <div key={i} className={`flex items-center justify-between rounded-lg px-3 py-2 border ${style.bg} ${style.border}`}>
+                      <div className="flex items-center gap-2">
+                        <div className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${style.bg} ${style.color} border ${style.border}`}>
+                          {person.name.charAt(0)}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium leading-tight">{person.name}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className={`text-xs font-semibold ${style.color}`}>{style.label}</span>
+                            <span className="text-xs text-muted-foreground">· hasta {endFormatted}</span>
+                          </div>
+                        </div>
                       </div>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${style.bg} ${style.color} border ${style.border}`}>{daysLeft}d</span>
                     </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── Finales (No shows) ── */}
+            {finalAbsences.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 dark:text-orange-400 px-1">No Presentó al Turno</p>
+                {finalAbsences.map((person, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg px-3 py-2 border bg-orange-50 border-orange-100 dark:bg-orange-900/10 dark:border-orange-900/20">
+                    <div className="flex items-center gap-2">
+                      <div className="h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-orange-100 text-orange-700 border border-orange-200 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-900/30">
+                        {person.name.charAt(0)}
+                      </div>
+                      <p className="text-sm font-medium leading-tight">{person.name}</p>
+                    </div>
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200 dark:bg-orange-900/20 dark:text-orange-400">Ausente</span>
                   </div>
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${style.bg} ${style.color} border ${style.border}`}>
-                    {daysLeft}d
-                  </span>
-                </div>
-              );
-            })}
+                ))}
+              </div>
+            )}
           </div>
         )}
       </CardContent>

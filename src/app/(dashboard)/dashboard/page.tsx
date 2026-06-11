@@ -40,13 +40,14 @@ export default async function DashboardPage() {
   let absencePercent = 0;
 
   // For charts
-  let monthlyData: Array<{ month: string; extras: number; licencias: number; vacaciones: number }> = [];
+  let monthlyData: Array<{ month: string; extras: number; licencias: number; vacaciones: number; ausentismo_final: number }> = [];
   let todayOnVacation = 0;
   let todaySick = 0;
   let todayActive = 0;
 
   // For new sections
   let activeLeavesPeople: Array<{ name: string; startDate: string; endDate: string; type: string }> = [];
+  let finalAbsentPeople: Array<{ name: string }> = [];
   let birthdayPeople: Array<{ name: string; birthDate: string }> = [];
 
   if (user) {
@@ -139,6 +140,29 @@ export default async function DashboardPage() {
         });
       }
 
+      // ── 5c. Ausentismo final: asignaciones canceladas hoy sin licencia aprobada ──
+      const { data: cancelledToday } = await supabase
+        .from('shift_assignments').select('personnel_id')
+        .eq('status', 'cancelled').eq('date', today).eq('is_extra', false);
+
+      const leavePersonnelIdsToday = new Set((todayLeaves || []).map((l: any) => l.personnel_id));
+      const finalAbsentIds = [...new Set(
+        (cancelledToday || [])
+          .map(a => a.personnel_id)
+          .filter(id => id && !leavePersonnelIdsToday.has(id))
+      )];
+
+      if (finalAbsentIds.length > 0) {
+        const { data: finalPersonnel } = await supabase
+          .from('personnel').select('id, first_name, last_name_father')
+          .in('id', finalAbsentIds);
+        const fpMap = new Map((finalPersonnel || []).map(p => [p.id, p]));
+        finalAbsentPeople = finalAbsentIds.map(id => {
+          const p = fpMap.get(id) as any;
+          return { name: p ? `${p.first_name} ${p.last_name_father}` : 'Desconocido' };
+        });
+      }
+
       // ── 6. Transportes (mes actual) ────────────────────────────────────────
       const [{ count: ownCount }, { data: allTransport }] = await Promise.all([
         supabase.from('transport_requests').select('id', { count: 'exact', head: true })
@@ -186,7 +210,7 @@ export default async function DashboardPage() {
         const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split('T')[0];
         const label = d.toLocaleDateString('es-CL', { month: 'short' });
 
-        const [{ count: mExtra }, { data: mSick }, { data: mVac }] = await Promise.all([
+        const [{ count: mExtra }, { data: mSick }, { data: mVac }, { data: mCancelled }, { data: mLeaves }] = await Promise.all([
           supabase.from('shift_assignments').select('id', { count: 'exact', head: true })
             .eq('is_extra', true).gte('date', mStart).lte('date', mEnd),
           supabase.from('leaves').select('start_date, end_date')
@@ -195,7 +219,27 @@ export default async function DashboardPage() {
           supabase.from('leaves').select('start_date, end_date')
             .eq('type', 'vacation').eq('status', 'approved')
             .lte('start_date', mEnd).gte('end_date', mStart),
+          supabase.from('shift_assignments').select('personnel_id, date')
+            .eq('status', 'cancelled').eq('is_extra', false)
+            .gte('date', mStart).lte('date', mEnd),
+          supabase.from('leaves').select('personnel_id, start_date, end_date')
+            .eq('status', 'approved')
+            .lte('start_date', mEnd).gte('end_date', mStart),
         ]);
+
+        // Ausentismo final = cancelled assignments NOT covered by any approved leave
+        const leaveMap = new Map<string, {start: string; end: string}[]>();
+        (mLeaves || []).forEach((l: any) => {
+          if (!leaveMap.has(l.personnel_id)) leaveMap.set(l.personnel_id, []);
+          leaveMap.get(l.personnel_id)!.push({ start: l.start_date, end: l.end_date });
+        });
+        const uniqueNoShows = new Set<string>();
+        (mCancelled || []).forEach((ca: any) => {
+          const leaves = leaveMap.get(ca.personnel_id) || [];
+          const onLeave = leaves.some(l => l.start <= ca.date && l.end >= ca.date);
+          if (!onLeave) uniqueNoShows.add(`${ca.personnel_id}-${ca.date}`);
+        });
+        const ausentismo_final = uniqueNoShows.size;
 
         const countDays = (start: string, end: string, ms: string, me: string) => {
           const s = new Date(Math.max(new Date(start).getTime(), new Date(ms).getTime()));
@@ -208,6 +252,7 @@ export default async function DashboardPage() {
           extras: mExtra || 0,
           licencias: (mSick || []).reduce((a, l) => a + countDays(l.start_date, l.end_date, mStart, mEnd), 0),
           vacaciones: (mVac || []).reduce((a, l) => a + countDays(l.start_date, l.end_date, mStart, mEnd), 0),
+          ausentismo_final,
         });
       }
       monthlyData = months;
@@ -266,11 +311,11 @@ export default async function DashboardPage() {
             iconClassName="bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400"
           />
           <StatCard
-            title="Ausentismo Hoy"
-            value={`${absencePercent}%`}
-            subtitle={`${onLeaveToday} de ${totalPersonnel} personas`}
+            title="Ausentismo Final Hoy"
+            value={`${finalAbsentPeople.length}`}
+            subtitle={`${finalAbsentPeople.length} persona${finalAbsentPeople.length !== 1 ? 's' : ''} no presentó`}
             icon={Users}
-            iconClassName="bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400"
+            iconClassName={`${finalAbsentPeople.length > 0 ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' : 'bg-slate-100 text-slate-500'}`}
           />
         </div>
       </div>
@@ -328,7 +373,7 @@ export default async function DashboardPage() {
       {/* ── Fila: TodoList + Ausencias activas ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <TodoList />
-        <ActiveLeavesCard people={activeLeavesPeople} />
+        <ActiveLeavesCard people={activeLeavesPeople} finalAbsences={finalAbsentPeople} />
       </div>
 
       {/* ── Fila: Cumpleaños ── */}

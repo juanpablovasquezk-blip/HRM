@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 
 interface Props {
-  data: Array<{ month: string; extras: number; licencias: number; vacaciones: number }>;
+  data: Array<{ month: string; extras: number; licencias: number; vacaciones: number; ausentismo_final: number }>;
 }
 
 export function MonthlyEvolutionChart({ data }: Props) {
@@ -67,6 +67,7 @@ export function MonthlyEvolutionChart({ data }: Props) {
               <Bar dataKey="licencias" name="Licencias Médicas" fill="#ef4444" radius={[4, 4, 0, 0]} />
               <Bar dataKey="vacaciones" name="Vacaciones" fill="#3b82f6" radius={[4, 4, 0, 0]} />
               <Bar dataKey="extras" name="Turnos Extra" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="ausentismo_final" name="No Presentó" fill="#f97316" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
