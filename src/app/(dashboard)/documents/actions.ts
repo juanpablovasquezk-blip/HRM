@@ -78,6 +78,40 @@ export async function uploadDocument(
     expirationDateStr = expResult.expiration_date.toISOString().split('T')[0];
   }
 
+  // ── Upsert logic: delete previous document of same type/definition ────────
+  // Find existing doc(s) of the same type for this person
+  const dupQuery = adminClient
+    .from('documents')
+    .select('id, file_url')
+    .eq('personnel_id', personnelId);
+
+  const dupFilter = definitionId
+    ? dupQuery.eq('definition_id', definitionId)
+    : dupQuery.eq('type', type);
+
+  const { data: existingDocs } = await dupFilter;
+
+  if (existingDocs && existingDocs.length > 0) {
+    // Delete storage files for old documents
+    const oldPaths = existingDocs
+      .map((d: any) => {
+        const url = d.file_url as string;
+        // Extract storage path from public URL
+        const marker = '/documents/';
+        const idx = url.lastIndexOf(marker);
+        return idx !== -1 ? url.substring(idx + marker.length) : null;
+      })
+      .filter(Boolean) as string[];
+
+    if (oldPaths.length > 0) {
+      await adminClient.storage.from('documents').remove(oldPaths);
+    }
+
+    // Delete old DB records
+    const oldIds = existingDocs.map((d: any) => d.id);
+    await adminClient.from('documents').delete().in('id', oldIds);
+  }
+
   // Save document record
   const { error: insertError } = await adminClient.from('documents').insert({
     personnel_id: personnelId,

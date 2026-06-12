@@ -278,7 +278,11 @@ export default async function PersonnelDetailPage({
               </TableHeader>
               <TableBody>
                 {documents.map((doc: any) => {
-                  const def = definitions.find(d => d.id === doc.definition_id);
+                  const def = definitions.find(d => d.id === doc.definition_id)
+                    // Fallback: match by name for legacy uploads without definition_id
+                    || definitions.find(d =>
+                        (d.name || '').toLowerCase().trim() === (doc.type || '').toLowerCase().trim()
+                      );
                   // Only use stored expiration_date if the definition requires expiration
                   // (or if there's no definition, i.e. legacy upload — respect whatever was stored)
                   const hasExpiration = !def || def.requires_expiration !== false;
