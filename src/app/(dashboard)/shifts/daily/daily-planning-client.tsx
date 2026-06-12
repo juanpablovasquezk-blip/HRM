@@ -100,39 +100,43 @@ export default function DailyPlanningClient({
       if (success) {
         setIsConfirmed(true);
         toast.success(`Planificación actualizada. Se generaron/verificaron ${count || 0} rutas de transporte.`, { id });
-        router.refresh();
 
-        // Automatically capture a screenshot and send it to configured WhatsApp groups
-        setTimeout(async () => {
-          const wToastId = toast.loading("Enviando planificación automática a WhatsApp...");
-          try {
-            if (!reportRef.current) throw new Error("Referencia de reporte no disponible");
-            const html2canvas = (await import('html2canvas-pro')).default;
-            const canvas = await html2canvas(reportRef.current, {
-              scale: 2,
-              useCORS: true,
-              allowTaint: true,
-              backgroundColor: '#ffffff',
-              windowWidth: 800,
-              ignoreElements: (element) => {
-                return element.classList.contains('no-print');
-              }
-            });
-            
-            const base64Image = canvas.toDataURL('image/png');
-            
-            const sendResult = await sendDailyPlanScreenshotAction(base64Image, selectedDate);
-            
+        // Capture screenshot BEFORE router.refresh() to avoid ref becoming null after remount
+        const wToastId = toast.loading("Capturando y enviando planificación a WhatsApp...");
+        try {
+          if (!reportRef.current) throw new Error("Referencia de reporte no disponible");
+          const html2canvas = (await import('html2canvas-pro')).default;
+          const canvas = await html2canvas(reportRef.current, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: '#ffffff',
+            windowWidth: 800,
+            ignoreElements: (element) => {
+              return element.classList.contains('no-print');
+            }
+          });
+          
+          const base64Image = canvas.toDataURL('image/png');
+          
+          // Send to WhatsApp asynchronously (don't block router refresh)
+          sendDailyPlanScreenshotAction(base64Image, selectedDate).then((sendResult) => {
             if (sendResult.success) {
               toast.success("¡Planificación enviada exitosamente a los grupos de WhatsApp!", { id: wToastId });
             } else {
               toast.error(`No se pudo enviar a WhatsApp: ${sendResult.error}`, { id: wToastId });
             }
-          } catch (err: any) {
+          }).catch((err: any) => {
             console.error("WhatsApp plan share failed:", err);
-            toast.error(`Error al compartir en WhatsApp: ${err.message || String(err)}`, { id: wToastId });
-          }
-        }, 1000);
+            toast.error(`Error al enviar a WhatsApp: ${err.message || String(err)}`, { id: wToastId });
+          });
+        } catch (err: any) {
+          console.error("Screenshot capture failed:", err);
+          toast.error(`Error al capturar planificación: ${err.message || String(err)}`, { id: wToastId });
+        }
+
+        // Refresh page data after screenshot is captured
+        router.refresh();
       } else {
         toast.error(error || "No se pudo confirmar la planificación.", { id });
       }
