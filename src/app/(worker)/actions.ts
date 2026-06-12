@@ -360,8 +360,33 @@ export async function getWorkerTransportHistory(from?: string, to?: string) {
 }
 
 export async function getActiveDocumentDefinitions() {
-  // Temporarily returning empty array until the correct table is identified
-  return [];
+  const session = await getWorkerSession();
+  if (!session) return [];
+
+  const supabase = await createClient();
+
+  // Collect all the worker's position IDs
+  const positionIds: string[] = [];
+  if (session.main_position) positionIds.push(session.main_position);
+  if (Array.isArray(session.secondary_positions)) positionIds.push(...session.secondary_positions);
+
+  // Fetch all active document definitions
+  const { data: allDefs } = await supabase
+    .from('document_definitions')
+    .select('*')
+    .eq('is_active', true)
+    .order('name');
+
+  if (!allDefs) return [];
+
+  // Keep definitions that apply to this worker's position(s)
+  return allDefs.filter(def => {
+    const applicable: string[] = def.applicable_positions || [];
+    // No restriction → applies to everyone
+    if (applicable.length === 0) return true;
+    // Otherwise check intersection with worker's positions
+    return applicable.some((p: string) => positionIds.includes(p));
+  });
 }
 
 export async function getWorkerDocuments() {
@@ -382,39 +407,53 @@ export async function uploadDocumentRecord(record: any) {
   const session = await getWorkerSession();
   if (!session) return { success: false, error: 'No session' };
 
-  console.log('Record received in server:', record);
+  const adminClient = createAdminClient();
 
-  const supabase = createAdminClient();
-  
+  // Delete previous document of same definition (upsert pattern without needing DB unique constraint)
+  if (record.definition_id) {
+    const { data: existing } = await adminClient
+      .from('documents')
+      .select('id, file_url')
+      .eq('personnel_id', session.id)
+      .eq('definition_id', record.definition_id);
+
+    if (existing && existing.length > 0) {
+      // Remove old storage files
+      for (const old of existing) {
+        if (old.file_url) {
+          const marker = '/documents/';
+          const idx = old.file_url.lastIndexOf(marker);
+          if (idx !== -1) {
+            const storagePath = old.file_url.substring(idx + marker.length);
+            await adminClient.storage.from('documents').remove([storagePath]);
+          }
+        }
+      }
+      // Delete old DB records
+      const oldIds = existing.map((d: any) => d.id);
+      await adminClient.from('documents').delete().in('id', oldIds);
+    }
+  }
+
   const dataToSave: any = {
     personnel_id: session.id,
     definition_id: record.definition_id,
     file_url: record.file_url,
     type: record.type || 'Documento',
     status: 'PENDING',
-    uploaded_at: new Date().toISOString()
+    uploaded_at: new Date().toISOString(),
+    expiration_date: record.expiration_date || null,
   };
 
-  // Only add expiration_date if it's provided to avoid overwriting with null accidentally
-  if (record.expiration_date) {
-    dataToSave.expiration_date = record.expiration_date;
-  }
-
-  console.log('Final data to save:', dataToSave);
-
-  const { error, data } = await supabase
+  const { error } = await adminClient
     .from('documents')
-    .upsert(dataToSave, {
-      onConflict: 'personnel_id,definition_id'
-    })
-    .select();
+    .insert(dataToSave);
 
   if (error) {
     console.error('CRITICAL DATABASE ERROR:', error);
     return { success: false, error: error.message };
   }
-  
-  console.log('Upload successful:', data);
+
   revalidatePath('/worker/documents');
   return { success: true };
 }
