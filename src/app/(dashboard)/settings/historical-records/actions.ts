@@ -71,6 +71,7 @@ export async function getHistoricalData(startDate?: string, endDate?: string) {
     .select(`
       id,
       date,
+      type,
       transport_type,
       personnel:personnel!transport_requests_personnel_id_fkey(id, first_name, last_name_father)
     `)
@@ -115,6 +116,7 @@ export async function getHistoricalData(startDate?: string, endDate?: string) {
   const formattedTransports = (ownTransports || []).map((t: any) => ({
     id: t.id,
     date: t.date,
+    type: t.type,
     transport_type: t.transport_type,
     personnel: Array.isArray(t.personnel) ? t.personnel[0] : t.personnel
   }));
@@ -236,27 +238,26 @@ export async function createHistoricalExtraShift(payload: {
 export async function createHistoricalOwnTransport(payload: {
   personnelId: string;
   date: string;
+  type: 'ENTRADA' | 'SALIDA' | 'DOBLE';
 }) {
   try {
     const supabase = await createClient();
 
-    // Check if there is already an own transport for this personnel on this date
+    // Check if there are already own transports for this personnel on this date
     const { data: existingList, error: checkError } = await supabase
       .from('transport_requests')
-      .select('id')
+      .select('id, type')
       .eq('personnel_id', payload.personnelId)
       .eq('date', payload.date)
-      .eq('transport_type', 'PROPIO')
-      .limit(1);
+      .eq('transport_type', 'PROPIO');
 
     if (checkError) {
       console.error('Error checking existing transport:', checkError);
       return { error: `Error al verificar transporte existente: ${checkError.message}` };
     }
 
-    if (existingList && existingList.length > 0) {
-      return { error: 'El empleado ya tiene un registro de transporte propio para esta fecha.' };
-    }
+    const hasEntrada = existingList?.some(t => t.type === 'ENTRADA');
+    const hasSalida = existingList?.some(t => t.type === 'SALIDA');
 
     // Look up if there's a shift assignment for this person on this date to link it
     const { data: assignments, error: assignmentError } = await supabase
@@ -272,18 +273,66 @@ export async function createHistoricalOwnTransport(payload: {
 
     const assignmentId = assignments && assignments.length > 0 ? assignments[0].id : null;
 
-    const { data, error } = await supabase
-      .from('transport_requests')
-      .insert({
+    const toInsert = [];
+
+    if (payload.type === 'ENTRADA') {
+      if (hasEntrada) {
+        return { error: 'El empleado ya tiene un registro de transporte propio (Entrada) para esta fecha.' };
+      }
+      toInsert.push({
         personnel_id: payload.personnelId,
         date: payload.date,
         type: 'ENTRADA',
         transport_type: 'PROPIO',
         status: 'ABIERTO',
         assignment_id: assignmentId
-      })
-      .select()
-      .single();
+      });
+    } else if (payload.type === 'SALIDA') {
+      if (hasSalida) {
+        return { error: 'El empleado ya tiene un registro de transporte propio (Salida) para esta fecha.' };
+      }
+      toInsert.push({
+        personnel_id: payload.personnelId,
+        date: payload.date,
+        type: 'SALIDA',
+        transport_type: 'PROPIO',
+        status: 'ABIERTO',
+        assignment_id: assignmentId
+      });
+    } else if (payload.type === 'DOBLE') {
+      if (hasEntrada && hasSalida) {
+        return { error: 'El empleado ya tiene ambos traslados (Entrada y Salida) registrados para esta fecha.' };
+      }
+      if (!hasEntrada) {
+        toInsert.push({
+          personnel_id: payload.personnelId,
+          date: payload.date,
+          type: 'ENTRADA',
+          transport_type: 'PROPIO',
+          status: 'ABIERTO',
+          assignment_id: assignmentId
+        });
+      }
+      if (!hasSalida) {
+        toInsert.push({
+          personnel_id: payload.personnelId,
+          date: payload.date,
+          type: 'SALIDA',
+          transport_type: 'PROPIO',
+          status: 'ABIERTO',
+          assignment_id: assignmentId
+        });
+      }
+    }
+
+    if (toInsert.length === 0) {
+      return { error: 'No hay nuevos traslados para registrar.' };
+    }
+
+    const { data, error } = await supabase
+      .from('transport_requests')
+      .insert(toInsert)
+      .select();
 
     if (error) {
       console.error('Error creating historical transport in DB:', error);

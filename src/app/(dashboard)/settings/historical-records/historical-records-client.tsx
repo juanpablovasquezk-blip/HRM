@@ -33,6 +33,7 @@ interface HistoryItem {
   id: string;
   date: string;
   is_extra?: boolean;
+  type?: 'ENTRADA' | 'SALIDA';
   transport_type?: string;
   personnel?: { id: string; first_name: string; last_name_father: string } | null;
   shift?: { id: string; name: string; start_time: string; end_time: string } | null;
@@ -148,7 +149,8 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
   // Own Transport Form State
   const [transportForm, setTransportForm] = useState({
     personnelId: '',
-    date: ''
+    date: '',
+    type: 'DOBLE' as 'ENTRADA' | 'SALIDA' | 'DOBLE'
   });
 
   // Filter Query States
@@ -241,7 +243,7 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
 
   const handleSaveTransport = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!transportForm.personnelId || !transportForm.date) {
+    if (!transportForm.personnelId || !transportForm.date || !transportForm.type) {
       toast.error('Todos los campos son obligatorios.');
       return;
     }
@@ -256,7 +258,8 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
       toast.success('Transporte propio histórico registrado con éxito.');
       setTransportForm({
         personnelId: '',
-        date: ''
+        date: '',
+        type: 'DOBLE'
       });
       refreshHistory();
     }
@@ -481,6 +484,22 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm"
                   required
                 />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase flex items-center gap-1">
+                  <Car className="w-3 h-3" /> Tipo de Traslado
+                </label>
+                <select
+                  value={transportForm.type}
+                  onChange={(e) => setTransportForm({ ...transportForm, type: e.target.value as any })}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-sm"
+                  required
+                >
+                  <option value="DOBLE">Doble Traslado (Entrada y Salida)</option>
+                  <option value="ENTRADA">Solo Entrada</option>
+                  <option value="SALIDA">Solo Salida</option>
+                </select>
               </div>
 
               <button
@@ -718,9 +737,16 @@ export default function HistoricalRecordsClient({ metadata, initialHistory }: Pr
                         {t.personnel?.first_name} {t.personnel?.last_name_father}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-[10px] bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full font-bold uppercase">
-                          Propio
-                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          <span className="text-[10px] bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full font-bold uppercase">
+                            Propio
+                          </span>
+                          {t.type && (
+                            <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-400 px-2 py-0.5 rounded-full font-bold uppercase">
+                              {t.type === 'ENTRADA' ? 'Entrada' : 'Salida'}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <button
