@@ -161,13 +161,34 @@ export async function listDocuments(filters?: {
 export async function deleteDocument(
   id: string
 ): Promise<{ success: boolean; error: string | null }> {
-  const supabase = await createClient();
+  const adminClient = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
-  const { error } = await supabase.from('documents').delete().eq('id', id);
+  // First fetch the record to get the file URL
+  const { data: doc } = await adminClient
+    .from('documents')
+    .select('id, file_url, personnel_id')
+    .eq('id', id)
+    .single();
+
+  if (doc?.file_url) {
+    // Extract storage path from public URL
+    const marker = '/documents/';
+    const idx = doc.file_url.lastIndexOf(marker);
+    if (idx !== -1) {
+      const storagePath = doc.file_url.substring(idx + marker.length);
+      await adminClient.storage.from('documents').remove([storagePath]);
+    }
+  }
+
+  const { error } = await adminClient.from('documents').delete().eq('id', id);
 
   if (error) return { success: false, error: error.message };
 
   revalidatePath('/documents');
+  if (doc?.personnel_id) revalidatePath(`/personnel/${doc.personnel_id}`);
   return { success: true, error: null };
 }
 

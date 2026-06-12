@@ -2,8 +2,9 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Check, X, MessageSquare, Loader2 } from 'lucide-react';
+import { Check, X, Trash2, Loader2, AlertTriangle } from 'lucide-react';
 import { updateDocumentStatus } from '../actions';
+import { deleteDocument } from '@/app/(dashboard)/documents/actions';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { 
@@ -27,6 +28,7 @@ export function DocumentActions({ documentId, currentStatus, personnelId }: Docu
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
 
   const handleStatusUpdate = async (status: 'APPROVED' | 'REJECTED', reason?: string) => {
@@ -37,11 +39,29 @@ export function DocumentActions({ documentId, currentStatus, personnelId }: Docu
         toast.success(status === 'APPROVED' ? 'Documento aprobado' : 'Documento rechazado');
         setIsRejectDialogOpen(false);
         setRejectionReason('');
-        router.refresh(); // Smooth refresh, preserves scroll
+        router.refresh();
       } else {
         toast.error(res.error || 'Error al actualizar');
       }
-    } catch (error) {
+    } catch {
+      toast.error('Error de conexión');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    setLoading('DELETE');
+    try {
+      const res = await deleteDocument(documentId);
+      if (res.success) {
+        toast.success('Documento eliminado');
+        setIsDeleteDialogOpen(false);
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Error al eliminar');
+      }
+    } catch {
       toast.error('Error de conexión');
     } finally {
       setLoading(null);
@@ -50,6 +70,7 @@ export function DocumentActions({ documentId, currentStatus, personnelId }: Docu
 
   return (
     <div className="flex items-center gap-1 justify-end">
+      {/* ── Aprobar ── */}
       {currentStatus !== 'APPROVED' && (
         <Button 
           variant="ghost" 
@@ -63,19 +84,33 @@ export function DocumentActions({ documentId, currentStatus, personnelId }: Docu
         </Button>
       )}
 
+      {/* ── Rechazar ── */}
       {currentStatus !== 'REJECTED' && (
         <Button 
           variant="ghost" 
           size="icon" 
           disabled={!!loading}
           onClick={() => setIsRejectDialogOpen(true)}
-          className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg"
+          className="h-8 w-8 text-amber-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
           title="Rechazar"
         >
           <X className="h-4 w-4" />
         </Button>
       )}
 
+      {/* ── Eliminar ── */}
+      <Button 
+        variant="ghost" 
+        size="icon" 
+        disabled={!!loading}
+        onClick={() => setIsDeleteDialogOpen(true)}
+        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg"
+        title="Eliminar documento"
+      >
+        {loading === 'DELETE' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+      </Button>
+
+      {/* ── Dialog: Rechazar ── */}
       <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
         <DialogContent className="sm:max-w-[400px] rounded-2xl">
           <DialogHeader>
@@ -104,6 +139,32 @@ export function DocumentActions({ documentId, currentStatus, personnelId }: Docu
             >
               {loading === 'REJECTED' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Confirmar Rechazo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: Confirmar eliminación ── */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-[380px] rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              Eliminar Documento
+            </DialogTitle>
+            <DialogDescription>
+              Esta acción eliminará el documento permanentemente. No se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button variant="ghost" onClick={() => setIsDeleteDialogOpen(false)}>Cancelar</Button>
+            <Button 
+              variant="destructive" 
+              disabled={!!loading}
+              onClick={handleDelete}
+            >
+              {loading === 'DELETE' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              Eliminar
             </Button>
           </DialogFooter>
         </DialogContent>
