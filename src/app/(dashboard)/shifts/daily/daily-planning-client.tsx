@@ -33,6 +33,7 @@ import type {
 } from '@/types/database';
 import { deleteAssignment, deleteRequirement } from '../actions';
 import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, resetDailyPlan, updateAssignmentShift } from './actions';
+import { sendDailyPlanScreenshotAction } from './publish-actions';
 import { RotateCcw, Mail, Copy, Camera } from 'lucide-react';
 
 interface Props {
@@ -100,6 +101,38 @@ export default function DailyPlanningClient({
         setIsConfirmed(true);
         toast.success(`Planificación actualizada. Se generaron/verificaron ${count || 0} rutas de transporte.`, { id });
         router.refresh();
+
+        // Automatically capture a screenshot and send it to configured WhatsApp groups
+        setTimeout(async () => {
+          const wToastId = toast.loading("Enviando planificación automática a WhatsApp...");
+          try {
+            if (!reportRef.current) throw new Error("Referencia de reporte no disponible");
+            const html2canvas = (await import('html2canvas-pro')).default;
+            const canvas = await html2canvas(reportRef.current, {
+              scale: 2,
+              useCORS: true,
+              allowTaint: true,
+              backgroundColor: '#ffffff',
+              windowWidth: 800,
+              ignoreElements: (element) => {
+                return element.classList.contains('no-print');
+              }
+            });
+            
+            const base64Image = canvas.toDataURL('image/png');
+            
+            const sendResult = await sendDailyPlanScreenshotAction(base64Image, selectedDate);
+            
+            if (sendResult.success) {
+              toast.success("¡Planificación enviada exitosamente a los grupos de WhatsApp!", { id: wToastId });
+            } else {
+              toast.error(`No se pudo enviar a WhatsApp: ${sendResult.error}`, { id: wToastId });
+            }
+          } catch (err: any) {
+            console.error("WhatsApp plan share failed:", err);
+            toast.error(`Error al compartir en WhatsApp: ${err.message || String(err)}`, { id: wToastId });
+          }
+        }, 1000);
       } else {
         toast.error(error || "No se pudo confirmar la planificación.", { id });
       }

@@ -19,6 +19,8 @@ import { cn } from '@/lib/utils';
 import { DocumentActions } from './document-actions';
 import { calculateDynamicExpiration, calculateIntervalExpiration } from '@/lib/utils/document-calc';
 import { AccessActions } from './access-actions';
+import { LettersCard } from '@/components/personnel/letters-card';
+import { getUserRole } from '@/app/role-actions';
 
 export default async function PersonnelDetailPage({
   params,
@@ -28,10 +30,18 @@ export default async function PersonnelDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: person, error }, { data: allPositions }, { data: allShifts }] = await Promise.all([
+  const [
+    { data: person, error }, 
+    { data: allPositions }, 
+    { data: allShifts },
+    { data: lettersData },
+    role
+  ] = await Promise.all([
     supabase.from('personnel').select('*, company:companies(name), documents(*)').eq('id', id).single(),
     supabase.from('positions').select('id, name'),
     supabase.from('shifts').select('id, name'),
+    supabase.from('personnel_letters').select('*').eq('personnel_id', id).order('date', { ascending: false }),
+    getUserRole()
   ]);
 
   if (error || !person) notFound();
@@ -66,7 +76,7 @@ export default async function PersonnelDetailPage({
     .map(def => def.name);
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6 max-w-5xl pb-20">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/personnel">
@@ -377,12 +387,12 @@ export default async function PersonnelDetailPage({
                               <Button variant="ghost" size="icon" title="Ver Documento" className="h-8 w-8 text-orange-600">
                                 <FileText className="h-4 w-4" />
                               </Button>
-                            </a>
-                            <DocumentActions 
-                              documentId={doc.id} 
-                              currentStatus={doc.status} 
-                              personnelId={id} 
-                            />
+                             </a>
+                             <DocumentActions 
+                               documentId={doc.id} 
+                               currentStatus={doc.status} 
+                               personnelId={id} 
+                             />
                           </div>
                         ) : (
                           <span className="text-xs text-muted-foreground mr-2">N/A</span>
@@ -400,6 +410,13 @@ export default async function PersonnelDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {/* Cartas de Felicitación y Amonestación */}
+      <LettersCard 
+        personnelId={id} 
+        initialLetters={lettersData || []} 
+        role={role} 
+      />
     </div>
   );
 }
