@@ -176,8 +176,8 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
 
           {needsIssueDate && (
             <div className="space-y-2">
-              <Label htmlFor="issue_date">Fecha de Emisión *</Label>
-              <Input id="issue_date" name="issue_date" type="date" required />
+              <Label htmlFor="issue_date">Fecha de Emisión <span className="text-muted-foreground font-normal text-xs">(Opcional)</span></Label>
+              <Input id="issue_date" name="issue_date" type="date" />
             </div>
           )}
 
