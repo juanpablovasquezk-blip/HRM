@@ -3,8 +3,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Check, X, Trash2, Loader2, AlertTriangle } from 'lucide-react';
-import { updateDocumentStatus } from '../actions';
-import { deleteDocument } from '@/app/(dashboard)/documents/actions';
+import { updateDocumentStatus, deleteDocumentAction } from '../actions';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { 
@@ -53,7 +52,7 @@ export function DocumentActions({ documentId, currentStatus, personnelId }: Docu
   const handleDelete = async () => {
     setLoading('DELETE');
     try {
-      const res = await deleteDocument(documentId);
+      const res = await deleteDocumentAction(documentId);
       if (res.success) {
         toast.success('Documento eliminado');
         setIsDeleteDialogOpen(false);

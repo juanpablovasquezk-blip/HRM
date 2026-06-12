@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import type { Personnel } from '@/types/database';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { createClient as createSupabaseAdminClient } from '@supabase/supabase-js';
 
 function safeRevalidatePath(path: string) {
   try {
@@ -480,4 +481,37 @@ export async function resetPasswordToRut(
     console.error('Error resetting password:', error);
     return { success: false, error: error.message };
   }
+}
+
+export async function deleteDocumentAction(
+  id: string
+): Promise<{ success: boolean; error: string | null }> {
+  const adminClient = createSupabaseAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
+  // Fetch record first to get file URL and personnel_id for revalidation
+  const { data: doc } = await adminClient
+    .from('documents')
+    .select('id, file_url, personnel_id')
+    .eq('id', id)
+    .single();
+
+  // Remove storage file
+  if (doc?.file_url) {
+    const marker = '/documents/';
+    const idx = doc.file_url.lastIndexOf(marker);
+    if (idx !== -1) {
+      const storagePath = doc.file_url.substring(idx + marker.length);
+      await adminClient.storage.from('documents').remove([storagePath]);
+    }
+  }
+
+  const { error } = await adminClient.from('documents').delete().eq('id', id);
+  if (error) return { success: false, error: error.message };
+
+  safeRevalidatePath('/documents');
+  if (doc?.personnel_id) safeRevalidatePath(`/personnel/${doc.personnel_id}`);
+  return { success: true, error: null };
 }
