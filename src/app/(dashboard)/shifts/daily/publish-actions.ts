@@ -69,20 +69,29 @@ export async function sendDailyPlanScreenshotAction(base64Image: string, date: s
       return { success: false, error: 'No hay grupos de WhatsApp configurados en ajustes.' };
     }
 
-    // 5. Send media to all groups
-    const results = [];
+    // 5. Send media to all groups in parallel
     const caption = `Planificación diaria publicada para el día: ${date}`;
-
-    for (const group of groupsList) {
-      if (!group.id) continue;
-      console.log(`[DAILY-PUBLISH] Sending media to group: ${group.name} (${group.id})`);
-      const res = await sendWhatsAppMedia(group.id, publicUrl, caption, settings);
-      results.push({
-        groupName: group.name,
-        success: res.success,
-        error: res.error || null
+    const sendPromises = groupsList
+      .filter(group => group.id)
+      .map(async (group) => {
+        console.log(`[DAILY-PUBLISH] Sending media to group: ${group.name} (${group.id})`);
+        try {
+          const res = await sendWhatsAppMedia(group.id, publicUrl, caption, settings);
+          return {
+            groupName: group.name,
+            success: res.success,
+            error: res.error || null
+          };
+        } catch (e: any) {
+          return {
+            groupName: group.name,
+            success: false,
+            error: e.message || 'Error de envío'
+          };
+        }
       });
-    }
+
+    const results = await Promise.all(sendPromises);
 
     // 6. Schedule cleanup in 2 minutes (non-blocking)
     setTimeout(async () => {
