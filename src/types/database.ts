@@ -150,6 +150,10 @@ export interface ShiftAssignment {
   original_shift_id?: string | null;
   override_by: string | null;
   override_reason: string | null;
+  attendance_status?: string | null;
+  attendance_comment?: string | null;
+  attendance_updated_by?: string | null;
+  attendance_updated_at?: string | null;
   created_at: string;
 }
 

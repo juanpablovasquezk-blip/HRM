@@ -178,7 +178,7 @@ export async function updateAssignmentShift(assignmentId: string, newShiftId: st
   return { success: true };
 }
 
-export async function updateAttendance(assignmentId: string, status: 'present' | 'absent') {
+export async function updateAttendance(assignmentId: string, status: 'present' | 'absent', comment?: string) {
   const session = await getSupervisorSession();
   if (!session) return { success: false, error: 'No session' };
 
@@ -189,6 +189,7 @@ export async function updateAttendance(assignmentId: string, status: 'present' |
     .from('shift_assignments')
     .update({
       attendance_status: status,
+      attendance_comment: status === 'absent' ? (comment || 'sin motivo') : null,
       attendance_updated_by: session.id,
       attendance_updated_at: new Date().toISOString()
     })

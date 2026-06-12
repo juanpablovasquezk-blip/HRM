@@ -19,6 +19,7 @@ interface ActiveLeavesPerson {
 
 interface FinalAbsence {
   name: string;
+  comment?: string | null;
 }
 
 interface ActiveLeavesCardProps {
@@ -95,7 +96,14 @@ export function ActiveLeavesCard({ people, finalAbsences }: ActiveLeavesCardProp
                       <div className="h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-orange-100 text-orange-700 border border-orange-200 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-900/30">
                         {person.name.charAt(0)}
                       </div>
-                      <p className="text-sm font-medium leading-tight">{person.name}</p>
+                      <div>
+                        <p className="text-sm font-medium leading-tight">{person.name}</p>
+                        {person.comment && (
+                          <p className="text-[10px] text-orange-700 dark:text-orange-400 mt-0.5 font-medium italic">
+                            Motivo: {person.comment}
+                          </p>
+                        )}
+                      </div>
                     </div>
                     <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200 dark:bg-orange-900/20 dark:text-orange-400">Ausente</span>
                   </div>

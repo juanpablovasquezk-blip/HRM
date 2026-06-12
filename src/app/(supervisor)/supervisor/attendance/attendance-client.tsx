@@ -104,14 +104,27 @@ export default function AttendanceClient({ initialData }: { initialData: any }) 
   }, [data.assignments, searchTerm, selectedArea]);
 
   const handleStatusChange = (id: string, status: 'present' | 'absent') => {
+    let comment: string | undefined = undefined;
+    if (status === 'absent') {
+      const userInput = window.prompt("Comentario / Motivo de inasistencia (opcional):");
+      comment = userInput?.trim() || "sin motivo";
+    }
+
     startTransition(async () => {
-      const res = await updateAttendance(id, status);
+      const res = await updateAttendance(id, status, comment);
       if (res.success) {
         toast.success(`${status === 'present' ? 'Presente' : 'Ausente'}`);
         setData((prev: any) => ({
           ...prev,
           assignments: prev.assignments.map((a: any) => 
-            a.id === id ? { ...a, attendance_status: status, attendance_updated_by: 'Tú' } : a
+            a.id === id 
+              ? { 
+                  ...a, 
+                  attendance_status: status, 
+                  attendance_comment: status === 'absent' ? comment : null,
+                  attendance_updated_by: 'Tú' 
+                } 
+              : a
           )
         }));
       } else {
@@ -273,6 +286,12 @@ export default function AttendanceClient({ initialData }: { initialData: any }) 
                             `}>
                               {asg.personnel?.first_name} {asg.personnel?.last_name_father}
                             </p>
+
+                            {!isFutureDate && asg.attendance_status === 'absent' && (
+                              <p className="text-[9px] italic font-bold text-red-600 mt-0.5 uppercase tracking-wide">
+                                Motivo: {asg.attendance_comment || 'sin motivo'}
+                              </p>
+                            )}
                             
                             {/* Shift Selector for Warehouse Personnel */}
                             <div className="mt-1 flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity">

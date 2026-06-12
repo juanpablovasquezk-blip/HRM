@@ -144,7 +144,7 @@ export default async function DashboardPage() {
 
       // ── 5c. Ausentismo final: marcado por supervisor en vista Asistencia (attendance_status='absent') ──
       const { data: absentToday } = await supabase
-        .from('shift_assignments').select('personnel_id')
+        .from('shift_assignments').select('personnel_id, attendance_comment')
         .eq('attendance_status', 'absent').eq('date', today);
 
       const finalAbsentIds = [...new Set(
@@ -156,10 +156,16 @@ export default async function DashboardPage() {
           .from('personnel').select('id, first_name, last_name_father')
           .in('id', finalAbsentIds);
         const fpMap = new Map((finalPersonnel || []).map((p: any) => [p.id, p]));
-        finalAbsentPeople = finalAbsentIds.map(id => {
-          const p = fpMap.get(id) as any;
-          return { name: p ? `${p.first_name} ${p.last_name_father}` : 'Desconocido' };
-        });
+        finalAbsentPeople = (absentToday || [])
+          .map((a: any) => {
+            if (!a.personnel_id) return null;
+            const p = fpMap.get(a.personnel_id) as any;
+            return {
+              name: p ? `${p.first_name} ${p.last_name_father}` : 'Desconocido',
+              comment: a.attendance_comment || 'sin motivo'
+            };
+          })
+          .filter(Boolean) as any[];
       }
 
       // ── 5d. Ausentismo final del mes: agrupado por persona ────────────────
