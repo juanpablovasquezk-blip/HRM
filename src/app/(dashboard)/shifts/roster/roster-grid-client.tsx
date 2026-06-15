@@ -861,6 +861,7 @@ export function RosterGridClient({
         setSelectedCell(null);
         setSelectedCells([]);
         setIsAssignmentDialogOpen(false);
+        router.refresh();
       }
     });
   };
