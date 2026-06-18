@@ -33,36 +33,34 @@ async function getCurrentUserId() {
 
 // ─── Shift CRUD ───────────────────────────────────────────────────────────────
 
+// Helper: calculate shift duration in hours (handles overnight shifts crossing midnight)
+function calcDurationHours(startTime: string, endTime: string): number {
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  let startMins = sh * 60 + sm;
+  let endMins = eh * 60 + em;
+  if (endMins <= startMins) endMins += 24 * 60; // crosses midnight
+  return Math.round(((endMins - startMins) / 60) * 10) / 10;
+}
+
 export async function createShift(formData: FormData) {
   const supabase = await createClient();
   const geovRaw = formData.get('geov');
-  const companyId = formData.get('company_id') as string;
-  
+  const startTime = formData.get('start_time') as string;
+  const endTime = formData.get('end_time') as string;
+
   const shiftData = {
     name: formData.get('name') as string,
-    start_time: formData.get('start_time') as string,
-    end_time: formData.get('end_time') as string,
+    start_time: startTime,
+    end_time: endTime,
+    duration_hours: calcDurationHours(startTime, endTime),
     requires_transport: formData.get('requires_transport') === 'true',
     geov: geovRaw ? parseFloat(geovRaw as string) : null,
+    company_id: null,
   };
 
-  if (!companyId || companyId === '') {
-    // If no company selected, create for ALL companies to bypass NOT NULL constraint
-    const { data: companies } = await supabase.from('companies').select('id');
-    if (companies && companies.length > 0) {
-      const inserts = companies.map(c => ({ ...shiftData, company_id: c.id }));
-      const { error } = await supabase.from('shifts').insert(inserts);
-      if (error) return { success: false, error: error.message };
-    } else {
-      return { success: false, error: 'No se encontraron compañías para crear el turno global.' };
-    }
-  } else {
-    const { error } = await supabase.from('shifts').insert({
-      ...shiftData,
-      company_id: companyId,
-    });
-    if (error) return { success: false, error: error.message };
-  }
+  const { error } = await supabase.from('shifts').insert(shiftData);
+  if (error) return { success: false, error: error.message };
 
   revalidatePath('/shifts');
   return { success: true, error: null };
@@ -72,21 +70,17 @@ export async function updateShift(formData: FormData) {
   const supabase = await createClient();
   const id = formData.get('id') as string;
   const geovRaw = formData.get('geov');
-  const companyId = formData.get('company_id') as string;
+  const startTime = formData.get('start_time') as string;
+  const endTime = formData.get('end_time') as string;
 
-  // Note: For update, we only update the specific shift record
-  // If it was global, it was created as separate records, so we update them individually
   const updateData: any = {
     name: formData.get('name') as string,
-    start_time: formData.get('start_time') as string,
-    end_time: formData.get('end_time') as string,
+    start_time: startTime,
+    end_time: endTime,
+    duration_hours: calcDurationHours(startTime, endTime),
     requires_transport: formData.get('requires_transport') === 'true',
     geov: geovRaw ? parseFloat(geovRaw as string) : null,
   };
-
-  if (companyId && companyId !== '') {
-    updateData.company_id = companyId;
-  }
 
   const { error } = await supabase.from('shifts').update(updateData).eq('id', id);
   if (error) return { success: false, error: error.message };

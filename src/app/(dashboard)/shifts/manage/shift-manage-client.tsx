@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Loader2, Plus, Trash2, Edit2, X } from 'lucide-react';
+import { Loader2, Plus, Trash2, Edit2, X, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { createShift, updateShift, deleteShift } from '@/app/(dashboard)/shifts/actions';
 
@@ -33,15 +33,31 @@ interface ShiftManageClientProps {
   companies: Array<{ id: string; name: string }>;
 }
 
+// Calculates duration in hours from "HH:MM" strings, handles overnight shifts
+function calcDuration(start: string, end: string): number | null {
+  if (!start || !end || !start.includes(':') || !end.includes(':')) return null;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return null;
+  let startMins = sh * 60 + sm;
+  let endMins = eh * 60 + em;
+  if (endMins <= startMins) endMins += 24 * 60; // crosses midnight
+  return Math.round(((endMins - startMins) / 60) * 10) / 10;
+}
+
 export function ShiftManageClient({ initialShifts, companies }: ShiftManageClientProps) {
   const [isPending, startTransition] = useTransition();
   const [requiresTransport, setRequiresTransport] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const formRef = useRef<HTMLFormElement>(null);
+
+  const liveDuration = calcDuration(startTime, endTime);
 
   const handleSubmit = (formData: FormData) => {
     formData.set('requires_transport', String(requiresTransport));
-    
+
     startTransition(async () => {
       let result;
       if (editingId) {
@@ -63,21 +79,26 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
   const handleEdit = (shift: any) => {
     setEditingId(shift.id);
     setRequiresTransport(shift.requires_transport);
+    const st = shift.start_time?.slice(0, 5) || '';
+    const et = shift.end_time?.slice(0, 5) || '';
+    setStartTime(st);
+    setEndTime(et);
     if (!formRef.current) return;
-    
+
     const form = formRef.current;
     (form.elements.namedItem('name') as HTMLInputElement).value = shift.name;
-    (form.elements.namedItem('start_time') as HTMLInputElement).value = shift.start_time;
-    (form.elements.namedItem('end_time') as HTMLInputElement).value = shift.end_time;
-    (form.elements.namedItem('geov') as HTMLInputElement).value = shift.geov || '';
-    (form.elements.namedItem('company_id') as HTMLSelectElement).value = shift.company_id || companies[0]?.id;
-    
+    (form.elements.namedItem('start_time') as HTMLInputElement).value = st;
+    (form.elements.namedItem('end_time') as HTMLInputElement).value = et;
+    (form.elements.namedItem('geov') as HTMLInputElement).value = shift.geov ?? '';
+
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setRequiresTransport(false);
+    setStartTime('');
+    setEndTime('');
     if (formRef.current) formRef.current.reset();
   };
 
@@ -101,11 +122,11 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
         </a>
         <h1 className="text-2xl font-bold tracking-tight">Gestionar Turnos</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Crear y modificar las definiciones de turnos
+          Crear y modificar las definiciones de turnos (globales — aplican a todas las empresas)
         </p>
       </div>
 
-      {/* Create Form */}
+      {/* Create / Edit Form */}
       <Card className="border-slate-200/60 dark:border-slate-800 shadow-sm">
         <CardHeader>
           <CardTitle className="text-base flex items-center justify-between">
@@ -121,37 +142,62 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <form ref={formRef} action={handleSubmit} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-            <div className="space-y-2">
+          <form ref={formRef} action={handleSubmit} className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+            {/* Nombre */}
+            <div className="space-y-2 md:col-span-2">
               <Label htmlFor="shift-name">Nombre</Label>
               <Input id="shift-name" name="name" placeholder="Turno Mañana" required />
             </div>
+            {/* Entrada */}
             <div className="space-y-2">
               <Label htmlFor="shift-start">Entrada</Label>
-              <Input id="shift-start" name="start_time" type="time" required />
+              <Input
+                id="shift-start"
+                name="start_time"
+                type="time"
+                required
+                value={startTime}
+                onChange={e => setStartTime(e.target.value)}
+              />
             </div>
+            {/* Salida */}
             <div className="space-y-2">
               <Label htmlFor="shift-end">Salida</Label>
-              <Input id="shift-end" name="end_time" type="time" required />
+              <Input
+                id="shift-end"
+                name="end_time"
+                type="time"
+                required
+                value={endTime}
+                onChange={e => setEndTime(e.target.value)}
+              />
             </div>
+            {/* Duración (preview calculado en tiempo real) */}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1 text-slate-500">
+                <Clock className="h-3.5 w-3.5" />
+                Duración
+              </Label>
+              <div className="flex h-10 items-center px-3 rounded-md border border-slate-200 bg-slate-50 text-sm font-semibold text-orange-600">
+                {liveDuration !== null ? `${liveDuration}h` : '—'}
+              </div>
+            </div>
+            {/* GeoV */}
             <div className="space-y-2">
               <Label htmlFor="shift-geov">GeoV</Label>
               <Input id="shift-geov" name="geov" type="number" step="0.01" placeholder="0.00" />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="shift-company">Compañía (Opcional)</Label>
-              <select id="shift-company" name="company_id"
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                <option value="">Cualquier Compañía</option>
-                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div className="flex items-center justify-between">
+            {/* Usa Bus + Botón */}
+            <div className="flex items-center justify-between md:col-span-6">
               <div className="flex items-center gap-2">
                 <Switch checked={requiresTransport} onCheckedChange={setRequiresTransport} />
                 <Label className="text-xs">Usa Bus</Label>
               </div>
-              <Button type="submit" disabled={isPending} className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/25">
+              <Button
+                type="submit"
+                disabled={isPending}
+                className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/25"
+              >
                 {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : (editingId ? 'Guardar' : 'Crear')}
               </Button>
             </div>
@@ -168,7 +214,6 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
                 <TableHead>Turno</TableHead>
                 <TableHead>Entrada</TableHead>
                 <TableHead>Salida</TableHead>
-                <TableHead>Compañía</TableHead>
                 <TableHead>Duración</TableHead>
                 <TableHead>GeoV</TableHead>
                 <TableHead>Transporte</TableHead>
@@ -182,11 +227,12 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
                   <TableCell className="font-mono text-sm">{shift.start_time?.slice(0, 5)}</TableCell>
                   <TableCell className="font-mono text-sm">{shift.end_time?.slice(0, 5)}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="text-[10px] font-medium uppercase">
-                      {companies.find(c => c.id === shift.company_id)?.name || 'Cualquier Compañía'}
+                    <Badge variant="secondary">
+                      {shift.duration_hours > 0
+                        ? `${shift.duration_hours}h`
+                        : (calcDuration(shift.start_time?.slice(0, 5), shift.end_time?.slice(0, 5)) ?? 0) + 'h'}
                     </Badge>
                   </TableCell>
-                  <TableCell><Badge variant="secondary">{shift.duration_hours}h</Badge></TableCell>
                   <TableCell className="font-bold text-indigo-600">{shift.geov ?? '-'}</TableCell>
                   <TableCell>
                     {shift.requires_transport
