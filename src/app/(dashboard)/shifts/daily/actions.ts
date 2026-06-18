@@ -55,8 +55,45 @@ export async function getDailyOperationalData(date: string) {
     return true;
   }) as ShiftAssignmentWithDetails[];
 
+  // Deduplicate non-extra assignments per person: keep only the most recent one
+  // (highest created_at / id) and auto-delete older duplicates from DB.
+  const seenPersonNormal = new Map<string, ShiftAssignmentWithDetails>();
+  const duplicateIds: string[] = [];
+
+  for (const a of activeAssignments) {
+    if ((a as any).is_extra) continue; // extra shifts are allowed to coexist
+    const pid = (a as any).personnel_id as string;
+    const prev = seenPersonNormal.get(pid);
+    if (!prev) {
+      seenPersonNormal.set(pid, a);
+    } else {
+      // Keep the one with the greater id (more recently created), discard the other
+      if (a.id > prev.id) {
+        duplicateIds.push(prev.id);
+        seenPersonNormal.set(pid, a);
+      } else {
+        duplicateIds.push(a.id);
+      }
+    }
+  }
+
+  // Async cleanup of duplicates in the background (non-blocking)
+  if (duplicateIds.length > 0) {
+    const adminClient = createAdminClient();
+    adminClient.from('shift_assignments').delete().in('id', duplicateIds)
+      .then(({ error }) => {
+        if (error) console.error('[getDailyOperationalData] Error deleting duplicate assignments:', error.message);
+        else console.log(`[getDailyOperationalData] Auto-deleted ${duplicateIds.length} duplicate assignment(s) for ${date}`);
+      });
+  }
+
+  // Rebuild deduplicated list: all extra + one non-extra per person
+  const dedupedAssignments = activeAssignments.filter(a =>
+    (a as any).is_extra || seenPersonNormal.get((a as any).personnel_id)?.id === a.id
+  );
+
   return {
-    assignments: activeAssignments,
+    assignments: dedupedAssignments,
     requirements: (requirements || []) as ShiftRequirementWithDetails[],
   };
 }
