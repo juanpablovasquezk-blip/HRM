@@ -34,6 +34,7 @@ interface ShiftManageClientProps {
 }
 
 // Calculates duration in hours from "HH:MM" strings, handles overnight shifts
+// Subtracts 1 hour for mandatory lunch break (colación)
 function calcDuration(start: string, end: string): number | null {
   if (!start || !end || !start.includes(':') || !end.includes(':')) return null;
   const [sh, sm] = start.split(':').map(Number);
@@ -42,7 +43,8 @@ function calcDuration(start: string, end: string): number | null {
   let startMins = sh * 60 + sm;
   let endMins = eh * 60 + em;
   if (endMins <= startMins) endMins += 24 * 60; // crosses midnight
-  return Math.round(((endMins - startMins) / 60) * 10) / 10;
+  const rawHours = (endMins - startMins) / 60;
+  return Math.round((rawHours - 1) * 10) / 10; // -1h colación
 }
 
 export function ShiftManageClient({ initialShifts, companies }: ShiftManageClientProps) {
