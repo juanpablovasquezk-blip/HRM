@@ -58,10 +58,17 @@ export async function createShift(formData: FormData) {
     duration_hours: calcDurationHours(startTime, endTime),
     requires_transport: formData.get('requires_transport') === 'true',
     geov: geovRaw ? parseFloat(geovRaw as string) : null,
-    company_id: null,
   };
 
-  const { error } = await supabase.from('shifts').insert(shiftData);
+  // company_id is NOT NULL in the DB — create one row per company so the shift
+  // is available to all of them without requiring a schema migration.
+  const { data: companies } = await supabase.from('companies').select('id');
+  if (!companies || companies.length === 0) {
+    return { success: false, error: 'No se encontraron compañías para crear el turno.' };
+  }
+
+  const inserts = companies.map(c => ({ ...shiftData, company_id: c.id }));
+  const { error } = await supabase.from('shifts').insert(inserts);
   if (error) return { success: false, error: error.message };
 
   revalidatePath('/shifts');
@@ -84,8 +91,24 @@ export async function updateShift(formData: FormData) {
     geov: geovRaw ? parseFloat(geovRaw as string) : null,
   };
 
-  const { error } = await supabase.from('shifts').update(updateData).eq('id', id);
-  if (error) return { success: false, error: error.message };
+  // First fetch the canonical shift so we can find all company copies of it
+  const { data: original } = await supabase.from('shifts').select('name, start_time, end_time').eq('id', id).single();
+
+  if (original) {
+    // Update all company copies that share the same name+start+end
+    const { error } = await supabase
+      .from('shifts')
+      .update(updateData)
+      .eq('name', original.name)
+      .eq('start_time', original.start_time)
+      .eq('end_time', original.end_time);
+    if (error) return { success: false, error: error.message };
+  } else {
+    // Fallback: update by id only
+    const { error } = await supabase.from('shifts').update(updateData).eq('id', id);
+    if (error) return { success: false, error: error.message };
+  }
+
   revalidatePath('/shifts');
   return { success: true, error: null };
 }

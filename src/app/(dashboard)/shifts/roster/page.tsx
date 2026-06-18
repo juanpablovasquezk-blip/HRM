@@ -47,6 +47,16 @@ export default async function RosterPage({
       .order('date', { ascending: true })
   ]);
 
+  // Deduplicate shifts: one DB row per company exists due to NOT NULL constraint,
+  // but the roster selector should only show each logical shift once.
+  const seenShifts = new Set<string>();
+  const uniqueShifts = (shifts || []).filter(s => {
+    const key = `${s.name}|${s.start_time}|${s.end_time}`;
+    if (seenShifts.has(key)) return false;
+    seenShifts.add(key);
+    return true;
+  });
+
   return (
     <div className="space-y-6">
       <div>
@@ -58,7 +68,7 @@ export default async function RosterPage({
 
       <RosterGridClient 
         personnel={personnel || []}
-        shifts={shifts || []}
+        shifts={uniqueShifts}
         areas={areas || []}
         assignments={assignments || []}
         leaves={leaves || []}
@@ -70,3 +80,4 @@ export default async function RosterPage({
     </div>
   );
 }
+
