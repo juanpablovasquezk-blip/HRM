@@ -197,6 +197,7 @@ export interface TransportRequest {
   destination_address: string | null;
   status: TransportStatus;
   observations: string | null;
+  cost: number | null;
   created_at: string;
 }
 
