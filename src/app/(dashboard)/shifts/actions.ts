@@ -639,6 +639,11 @@ export async function publishAssignments(input: string | string[], endDate?: str
     return { success: false, error: 'Parámetros inválidos' };
   }
 
+  // Guard: Supabase returns 400 Bad Request for .in('id', []) with an empty array
+  if (Array.isArray(input) && input.length === 0) {
+    return { success: true, notifiedWorkers: [], skippedWorkers: [], failedWorkers: [] };
+  }
+
   const { data: assignmentsToPublish, error: selectError } = await selectQuery;
   if (selectError) {
     console.error('[publishAssignments] Error fetching assignments to publish:', selectError.message);
