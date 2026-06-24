@@ -8,16 +8,21 @@
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 -- Política: cada usuario solo puede ver y editar su propio perfil
-CREATE POLICY IF NOT EXISTS "Users can view own profile"
+-- (DROP IF EXISTS para hacerlo idempotente)
+DROP POLICY IF EXISTS "Users can view own profile"    ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own profile"  ON public.profiles;
+DROP POLICY IF EXISTS "Admins can view all profiles"  ON public.profiles;
+DROP POLICY IF EXISTS "Admins can manage all profiles" ON public.profiles;
+
+CREATE POLICY "Users can view own profile"
   ON public.profiles FOR SELECT
   USING (auth.uid() = id);
 
-CREATE POLICY IF NOT EXISTS "Users can update own profile"
+CREATE POLICY "Users can update own profile"
   ON public.profiles FOR UPDATE
   USING (auth.uid() = id);
 
--- Política: admins pueden ver todos los perfiles
-CREATE POLICY IF NOT EXISTS "Admins can view all profiles"
+CREATE POLICY "Admins can view all profiles"
   ON public.profiles FOR SELECT
   USING (
     EXISTS (
@@ -27,7 +32,7 @@ CREATE POLICY IF NOT EXISTS "Admins can view all profiles"
     )
   );
 
-CREATE POLICY IF NOT EXISTS "Admins can manage all profiles"
+CREATE POLICY "Admins can manage all profiles"
   ON public.profiles FOR ALL
   USING (
     EXISTS (
