@@ -527,9 +527,10 @@ export async function createManualAssignment(formData: FormData) {
       }
 
       // Log audit trail BEFORE updating the assignment.
-      // Always log when the shift actually changes so that publishAssignments
-      // can detect the change and send WhatsApp notifications regardless of
-      // whether the assignment was previously validated or published.
+      // was_published captures whether the assignment was already published at the
+      // time of the manual change. publishAssignments uses this flag to decide
+      // whether to send a WhatsApp notification: only published assignments that
+      // were later changed manually should trigger an alert.
       // Non-fatal: if roster_audit_logs table doesn't exist yet, we continue.
       try {
         await supabase.from('roster_audit_logs').insert({
@@ -538,6 +539,7 @@ export async function createManualAssignment(formData: FormData) {
           date: date,
           previous_shift_id: existing.shift_id,
           new_shift_id: shiftId,
+          was_published: existing.is_published === true,
           reason: (formData.get('reason') as string) || 'Cambio manual',
           changed_by: userId
         });
@@ -580,8 +582,8 @@ export async function createManualAssignment(formData: FormData) {
 
       if (insertError) return { success: false, error: insertError.message };
 
-      // Always log the insertion (Libre → new shift) so publishAssignments
-      // can detect new assignments and send WhatsApp notifications.
+      // Log the insertion (Libre → new shift). Since there was no prior assignment,
+      // was_published is always false: a brand-new slot has never been published.
       // Non-fatal: if roster_audit_logs table doesn't exist yet, we continue.
       try {
         await supabase.from('roster_audit_logs').insert({
@@ -590,6 +592,7 @@ export async function createManualAssignment(formData: FormData) {
           date: date,
           previous_shift_id: null,
           new_shift_id: shiftId,
+          was_published: false,
           reason: (formData.get('reason') as string) || 'Asignación manual',
           changed_by: userId
         });
@@ -690,31 +693,24 @@ export async function publishAssignments(input: string | string[], endDate?: str
       }
 
       // Decide which assignments to notify:
-      // PRIMARY:  assignments with a matching audit log (shows old → new shift)
-      // FALLBACK: if no audit logs available (table missing), notify all is_manual=true
+      // Only notify when the assignment was ALREADY published before the manual change
+      // (was_published = true in the audit log). First-time publications never send alerts.
+      // FALLBACK: if audit logs are unavailable, send nothing (safe default).
       let changedAssignments: typeof assignmentsToPublish;
 
       if (latestAuditMap.size > 0) {
-        // Primary path: only assignments that actually changed shift
+        // Primary path: only assignments whose audit log shows was_published = true
+        // AND the shift actually changed (previous_shift_id !== current shift_id)
         changedAssignments = assignmentsToPublish.filter(a => {
           const key = `${a.personnel_id}_${a.date}`;
           const log = latestAuditMap.get(key);
-          return log && log.previous_shift_id !== a.shift_id;
+          return log && log.was_published === true && log.previous_shift_id !== a.shift_id;
         });
       } else {
-        // Fallback path: audit logs table empty or missing → notify all manual assignments
-        const { data: manualFlags } = await supabase
-          .from('shift_assignments')
-          .select('id, is_manual')
-          .in('id', assignmentsToPublish.map(a => a.id));
-
-        const manualSet = new Set(
-          (manualFlags || []).filter((r: any) => r.is_manual).map((r: any) => r.id)
-        );
-        changedAssignments = assignmentsToPublish.filter(a => manualSet.has(a.id));
-        if (changedAssignments.length > 0) {
-          console.log(`[publishAssignments] Fallback: notifying ${changedAssignments.length} manual assignments (audit_logs unavailable).`);
-        }
+        // Fallback: audit logs unavailable → do not send any notifications
+        // (safer than notifying workers for first-time publications)
+        changedAssignments = [];
+        console.log('[publishAssignments] Fallback: audit_logs unavailable, skipping WhatsApp notifications.');
       }
 
       if (changedAssignments.length > 0) {
