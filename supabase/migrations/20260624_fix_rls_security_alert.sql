@@ -4,46 +4,7 @@
 -- Ejecutar en: Supabase → SQL Editor
 -- ============================================================
 
--- 1. Habilitar RLS en la tabla profiles (creada por defecto por Supabase)
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
--- Política: cada usuario solo puede ver y editar su propio perfil
--- (DROP IF EXISTS para hacerlo idempotente)
-DROP POLICY IF EXISTS "Users can view own profile"    ON public.profiles;
-DROP POLICY IF EXISTS "Users can update own profile"  ON public.profiles;
-DROP POLICY IF EXISTS "Admins can view all profiles"  ON public.profiles;
-DROP POLICY IF EXISTS "Admins can manage all profiles" ON public.profiles;
-
-CREATE POLICY "Users can view own profile"
-  ON public.profiles FOR SELECT
-  USING (auth.uid() = id);
-
-CREATE POLICY "Users can update own profile"
-  ON public.profiles FOR UPDATE
-  USING (auth.uid() = id);
-
-CREATE POLICY "Admins can view all profiles"
-  ON public.profiles FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid()
-        AND p.role IN ('admin', 'superadmin')
-    )
-  );
-
-CREATE POLICY "Admins can manage all profiles"
-  ON public.profiles FOR ALL
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid()
-        AND p.role IN ('admin', 'superadmin')
-    )
-  );
-
--- ============================================================
--- 2. Asegurarse de que todas las demás tablas tienen RLS
+-- 1. Habilitar RLS en todas las tablas públicas
 --    (idempotente: no rompe si ya estaba habilitado)
 -- ============================================================
 ALTER TABLE public.companies            ENABLE ROW LEVEL SECURITY;
@@ -63,15 +24,15 @@ ALTER TABLE public.document_definitions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.personnel_letters    ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================
--- 3. Agregar columna was_published a roster_audit_logs
+-- 2. Agregar columna was_published a roster_audit_logs
 --    (migración pendiente del 24-Jun-2026)
 -- ============================================================
 ALTER TABLE public.roster_audit_logs
   ADD COLUMN IF NOT EXISTS was_published boolean NOT NULL DEFAULT false;
 
 -- ============================================================
--- VERIFICACIÓN: Consulta para ver qué tablas tienen RLS
--- (ejecutar por separado si quieres confirmar)
+-- VERIFICACIÓN: ejecuta esto por separado para ver qué tablas
+-- tienen RLS habilitado
 -- ============================================================
 -- SELECT schemaname, tablename, rowsecurity
 -- FROM pg_tables

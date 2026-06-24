@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { generateSchedule, partialRecalculate } from '@/lib/scheduler';
 import type { RecalculationInput } from '@/lib/scheduler/types';
@@ -622,7 +623,11 @@ export async function validateAssignments(assignmentIds: string[]) {
 
 export async function publishAssignments(input: string | string[], endDate?: string, areaId?: string) {
   if (!await isAdmin()) return { success: false, error: 'No authorized' };
-  const supabase = await createClient();
+  // Use the admin client (service role) for all DB operations in this function.
+  // Auth is already verified above via isAdmin(). The service role bypasses RLS,
+  // which is necessary because the anon-key client is blocked by RLS policies
+  // on shift_assignments and roster_audit_logs.
+  const supabase = createAdminClient();
   
   // 1. Fetch assignments that are about to be published (were not published before)
   let selectQuery = supabase
