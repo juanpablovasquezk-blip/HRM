@@ -649,26 +649,71 @@ export async function publishAssignments(input: string | string[], endDate?: str
     return { success: true, notifiedWorkers: [], skippedWorkers: [], failedWorkers: [] };
   }
 
-  const { data: assignmentsToPublish, error: selectError } = await selectQuery;
-  if (selectError) {
-    console.error('[publishAssignments] SELECT error:', JSON.stringify(selectError));
-    return { success: false, error: `SELECT falló: ${selectError.message} (code: ${selectError.code})` };
+  // ── Helper: chunk array into batches to avoid PostgREST URL-length limits ──
+  const CHUNK_SIZE = 200;
+  function chunkArray<T>(arr: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+    return chunks;
   }
 
-  // 2. Perform the update
-  let query = supabase.from('shift_assignments').update({ is_published: true });
-  
+  // 1. Fetch assignments that are about to be published (were not published before)
+  //    When input is a large ID array, split into chunks to avoid URL length limits.
+  let assignmentsToPublish: { id: string; date: string; personnel_id: string; shift_id: string; area_id: string; position_id: string }[] = [];
+
   if (Array.isArray(input)) {
-    query = query.in('id', input);
+    const idChunks = chunkArray(input, CHUNK_SIZE);
+    for (const chunk of idChunks) {
+      const { data, error: selectError } = await supabase
+        .from('shift_assignments')
+        .select('id, date, personnel_id, shift_id, area_id, position_id')
+        .eq('is_published', false)
+        .in('id', chunk);
+      if (selectError) {
+        console.error('[publishAssignments] SELECT chunk error:', JSON.stringify(selectError));
+        return { success: false, error: `SELECT falló: ${selectError.message}` };
+      }
+      if (data) assignmentsToPublish.push(...data);
+    }
   } else if (typeof input === 'string' && endDate) {
-    query = query.gte('date', input).lte('date', endDate);
-    if (areaId) query = query.eq('area_id', areaId);
+    const { data, error: selectError } = await supabase
+      .from('shift_assignments')
+      .select('id, date, personnel_id, shift_id, area_id, position_id')
+      .eq('is_published', false)
+      .gte('date', input)
+      .lte('date', endDate)
+      .eq('area_id', areaId ?? '');
+    if (selectError) {
+      console.error('[publishAssignments] SELECT date-range error:', JSON.stringify(selectError));
+      return { success: false, error: `SELECT falló: ${selectError.message}` };
+    }
+    if (data) assignmentsToPublish = data;
+  } else {
+    return { success: false, error: 'Parámetros inválidos' };
   }
 
-  const { error, status, statusText } = await query;
-  if (error) {
-    console.error('[publishAssignments] UPDATE error:', JSON.stringify(error), 'status:', status, statusText);
-    return { success: false, error: `UPDATE falló (${status}): ${error.message} | code: ${error.code} | details: ${error.details}` };
+  // 2. Perform the update in chunks to avoid URL-length limits
+  if (Array.isArray(input)) {
+    const idChunks = chunkArray(input, CHUNK_SIZE);
+    for (const chunk of idChunks) {
+      const { error, status } = await supabase
+        .from('shift_assignments')
+        .update({ is_published: true })
+        .in('id', chunk);
+      if (error) {
+        console.error('[publishAssignments] UPDATE chunk error:', JSON.stringify(error), 'status:', status);
+        return { success: false, error: `UPDATE falló (${status}): ${error.message}` };
+      }
+    }
+  } else if (typeof input === 'string' && endDate) {
+    let updateQuery = supabase.from('shift_assignments').update({ is_published: true })
+      .gte('date', input).lte('date', endDate);
+    if (areaId) updateQuery = updateQuery.eq('area_id', areaId);
+    const { error, status } = await updateQuery;
+    if (error) {
+      console.error('[publishAssignments] UPDATE date-range error:', JSON.stringify(error), 'status:', status);
+      return { success: false, error: `UPDATE falló (${status}): ${error.message}` };
+    }
   }
 
   // 3. Trigger WhatsApp notifications for actual shift changes
