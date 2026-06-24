@@ -651,7 +651,8 @@ export async function publishAssignments(input: string | string[], endDate?: str
 
   const { data: assignmentsToPublish, error: selectError } = await selectQuery;
   if (selectError) {
-    console.error('[publishAssignments] Error fetching assignments to publish:', selectError.message);
+    console.error('[publishAssignments] SELECT error:', JSON.stringify(selectError));
+    return { success: false, error: `SELECT falló: ${selectError.message} (code: ${selectError.code})` };
   }
 
   // 2. Perform the update
@@ -664,9 +665,10 @@ export async function publishAssignments(input: string | string[], endDate?: str
     if (areaId) query = query.eq('area_id', areaId);
   }
 
-  const { error } = await query;
+  const { error, status, statusText } = await query;
   if (error) {
-    return { success: false, error: error.message };
+    console.error('[publishAssignments] UPDATE error:', JSON.stringify(error), 'status:', status, statusText);
+    return { success: false, error: `UPDATE falló (${status}): ${error.message} | code: ${error.code} | details: ${error.details}` };
   }
 
   // 3. Trigger WhatsApp notifications for actual shift changes
