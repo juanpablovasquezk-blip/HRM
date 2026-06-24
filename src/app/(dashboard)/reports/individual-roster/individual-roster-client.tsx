@@ -462,7 +462,20 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
         <div ref={rosterRef} className="bg-white p-8 border rounded-lg shadow-sm print:shadow-none print:border-none print:p-0">
           {/* Header */}
           <div className="grid grid-cols-3 border-2 border-black mb-6 text-center font-bold uppercase text-sm">
-            <div className="border-r-2 border-black py-2 bg-slate-50">MES: {format(parseISO(startDate), 'MMMM yy', { locale: es })}</div>
+            <div className="border-r-2 border-black py-2 bg-slate-50">MES: {(() => {
+              // Use the month that has more days in the range (e.g. if range is Jun 29 – Aug 2, use July)
+              const start = parseISO(startDate);
+              const end = parseISO(endDate);
+              const monthCount: Record<string, number> = {};
+              const cur = new Date(start);
+              while (cur <= end) {
+                const key = format(cur, 'yyyy-MM');
+                monthCount[key] = (monthCount[key] || 0) + 1;
+                cur.setDate(cur.getDate() + 1);
+              }
+              const dominantMonth = Object.entries(monthCount).sort((a, b) => b[1] - a[1])[0][0];
+              return format(parseISO(dominantMonth + '-01'), 'MMMM yy', { locale: es });
+            })()}</div>
             <div className="border-r-2 border-black py-2">NOMBRE: {data.personnel.first_name} {data.personnel.last_name_father}</div>
             <div className="py-2 bg-slate-50">{data.personnel.position?.name || 'TRABAJADOR'}</div>
           </div>
