@@ -44,6 +44,7 @@ export default async function ExtraShiftsReportPage(props: Props) {
     `)
     .eq('is_extra', true)
     .neq('status', 'cancelled')
+    .neq('attendance_status', 'absent')
     .gte('date', from)
     .lte('date', to);
 
