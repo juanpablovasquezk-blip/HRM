@@ -21,9 +21,11 @@ interface Company {
 interface AbsenceRecord {
   id: string;
   date: string;
+  is_extra: boolean;
   attendance_comment: string | null;
   attendance_updated_by: string | null;
   personnel: {
+    id: string;
     first_name: string;
     last_name_father: string;
     rut: string;
@@ -43,6 +45,12 @@ interface AbsenceRecord {
     name: string;
   } | null;
   supervisorName?: string;
+}
+
+interface ApprovedLeave {
+  personnel_id: string;
+  start_date: string;
+  end_date: string;
 }
 
 export default function AbsencesReportPage() {
@@ -75,9 +83,11 @@ export default function AbsencesReportPage() {
         .select(`
           id,
           date,
+          is_extra,
           attendance_comment,
           attendance_updated_by,
           personnel:personnel!inner(
+            id,
             first_name,
             last_name_father,
             rut,
@@ -106,7 +116,26 @@ export default function AbsencesReportPage() {
         return;
       }
 
-      // Fetch unique supervisor names
+      // ── Fetch approved leaves that overlap with the date range ──────────────
+      const personnelIds = Array.from(new Set(
+        (data as any[]).map(d => d.personnel.id).filter(Boolean)
+      )) as string[];
+
+      let approvedLeaves: ApprovedLeave[] = [];
+      if (personnelIds.length > 0) {
+        const { data: leaves } = await supabase
+          .from('leaves')
+          .select('personnel_id, start_date, end_date')
+          .eq('status', 'approved')
+          .in('personnel_id', personnelIds)
+          // Leave overlaps with the query window
+          .lte('start_date', endDate)
+          .gte('end_date', startDate);
+
+        approvedLeaves = (leaves || []) as ApprovedLeave[];
+      }
+
+      // ── Fetch unique supervisor names ───────────────────────────────────────
       const supervisorIds = Array.from(new Set(
         data.map(d => d.attendance_updated_by).filter(Boolean)
       )) as string[];
@@ -123,18 +152,37 @@ export default function AbsencesReportPage() {
         });
       }
 
-      const formatted = (data as any[]).map(item => ({
-        ...item,
-        supervisorName: item.attendance_updated_by
-          ? (supervisorMap.get(item.attendance_updated_by) || 'Desconocido')
-          : 'No registrado'
-      }));
+      // ── Build records, filtering out absences covered by an approved leave ──
+      const formatted = (data as any[])
+        .map(item => ({
+          ...item,
+          supervisorName: item.attendance_updated_by
+            ? (supervisorMap.get(item.attendance_updated_by) || 'Desconocido')
+            : 'No registrado'
+        }))
+        .filter(item => {
+          // If there's an approved leave covering this absence date → exclude
+          return !approvedLeaves.some(
+            l =>
+              l.personnel_id === item.personnel.id &&
+              l.start_date <= item.date &&
+              l.end_date >= item.date
+          );
+        });
 
       // Sort by date descending
       formatted.sort((a, b) => b.date.localeCompare(a.date));
 
+      const hiddenCount = data.length - formatted.length;
       setRecords(formatted);
-      toast.success(`Se encontraron ${formatted.length} registros`);
+
+      if (hiddenCount > 0) {
+        toast.success(
+          `Se encontraron ${formatted.length} registros (${hiddenCount} ocultado${hiddenCount > 1 ? 's' : ''} por licencia médica aprobada)`
+        );
+      } else {
+        toast.success(`Se encontraron ${formatted.length} registros`);
+      }
     } catch (error: any) {
       console.error('Error fetching absences:', error);
       toast.error('Error al consultar inasistencias: ' + error.message);
@@ -156,6 +204,7 @@ export default function AbsencesReportPage() {
         'Colaborador': `${r.personnel.first_name} ${r.personnel.last_name_father}`,
         'RUT': r.personnel.rut,
         'Empresa': r.personnel.company ? r.personnel.company.name : 'N/A',
+        'Tipo Turno': r.is_extra ? 'Turno Extra' : 'Turno Planificado',
         'Área': r.area ? r.area.name : 'N/A',
         'Cargo': r.position ? r.position.name : 'N/A',
         'Turno': r.shift ? `${r.shift.name} (${r.shift.start_time.substring(0, 5)} - ${r.shift.end_time.substring(0, 5)})` : 'N/A',
@@ -200,7 +249,10 @@ export default function AbsencesReportPage() {
           <Calendar className="h-6 w-6 text-rose-600" />
           Reporte de Ausencias (Inasistencias)
         </h1>
-        <p className="text-slate-500 text-sm">Consulta y exporta el personal ausente reportado por supervisores</p>
+        <p className="text-slate-500 text-sm">
+          Consulta y exporta el personal ausente reportado por supervisores.{' '}
+          <span className="text-amber-600 font-medium">Las ausencias cubiertas por una licencia médica aprobada se excluyen automáticamente.</span>
+        </p>
       </div>
 
       {/* Filters Bar */}
@@ -297,6 +349,7 @@ export default function AbsencesReportPage() {
                     <TableHead className="w-[100px]">Fecha</TableHead>
                     <TableHead>Colaborador</TableHead>
                     <TableHead>Empresa</TableHead>
+                    <TableHead>Tipo Turno</TableHead>
                     <TableHead>Área / Cargo</TableHead>
                     <TableHead>Turno</TableHead>
                     <TableHead>Supervisor</TableHead>
@@ -317,6 +370,17 @@ export default function AbsencesReportPage() {
                         <TableCell className="font-semibold">{r.date}</TableCell>
                         <TableCell className="font-bold text-slate-800">{employeeName}</TableCell>
                         <TableCell>{companyName}</TableCell>
+                        <TableCell>
+                          {r.is_extra ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-700">
+                              Turno Extra
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
+                              Planificado
+                            </span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-xs text-slate-600">
                           {areaName} <span className="text-slate-300">/</span> {positionName}
                         </TableCell>
