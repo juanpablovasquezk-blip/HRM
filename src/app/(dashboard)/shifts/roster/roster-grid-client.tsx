@@ -2513,6 +2513,9 @@ export function RosterGridClient({
           return true;
         });
         const dateAsgns = assignmentsByDate[dateStr] || [];
+        dateReqs.sort((a: any, b: any) =>
+          (shiftsMap[a.shift_id]?.start_time || '').localeCompare(shiftsMap[b.shift_id]?.start_time || '')
+        );
 
         return (
           <Dialog open onOpenChange={() => setCoverageDialog(null)}>
