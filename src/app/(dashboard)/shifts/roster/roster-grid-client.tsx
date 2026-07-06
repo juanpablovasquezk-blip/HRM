@@ -47,10 +47,12 @@ import {
   Cake,
   MapPin,
   EyeOff,
-  Send
+  Send,
+  Briefcase
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { BlueConfigurator } from './blue-configurator';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -226,6 +228,9 @@ export function RosterGridClient({
 
   // Multi-selection state
   const [selectedCells, setSelectedCells] = useState<{ personId: string; dateStr: string }[]>([]);
+
+  // Coverage detail dialog state
+  const [coverageDialog, setCoverageDialog] = useState<{ dateStr: string; day: Date } | null>(null);
 
   const monthDate = new Date(currentMonth + 'T00:00:00');
   const days = eachDayOfInterval({
@@ -1638,6 +1643,7 @@ export function RosterGridClient({
                 })}
               </tr>
             </thead>
+            <TooltipProvider delay={400}>
             <tbody>
               {/* Row: Coverage Summary */}
               <tr className="bg-slate-50/80 dark:bg-slate-900 shadow-sm border-b-2 border-slate-200 dark:border-slate-800">
@@ -1697,14 +1703,15 @@ export function RosterGridClient({
                   return (
                     <td key={`coverage-${dateStr}`} 
                         title={shiftBreakdown}
+                        onClick={() => setCoverageDialog({ dateStr, day })}
                         className={cn(
-                      "p-2 text-center border-r border-slate-200 dark:border-slate-800 transition-colors",
+                      "p-2 text-center border-r border-slate-200 dark:border-slate-800 transition-colors cursor-pointer hover:brightness-95 active:scale-95",
                       isUndercovered 
                         ? "bg-red-500/10 dark:bg-red-900/40 border-red-200 dark:border-red-900 shadow-inner" 
                         : "bg-slate-50/80 dark:bg-slate-900",
                       isToday(day) && "ring-2 ring-inset ring-orange-400/30"
                     )}>
-                      <div className="flex flex-col items-center cursor-help">
+                      <div className="flex flex-col items-center">
                         <span className={cn(
                           "text-xs font-black tracking-tighter",
                           isUndercovered ? "text-red-600 dark:text-red-400 underline decoration-2 underline-offset-4" : "text-emerald-500"
@@ -1752,6 +1759,7 @@ export function RosterGridClient({
                 />
               ))}
             </tbody>
+            </TooltipProvider>
           </table>
         </div>
       </div>
@@ -2490,6 +2498,155 @@ export function RosterGridClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Coverage Detail Dialog */}
+      {coverageDialog && (() => {
+        const { dateStr, day } = coverageDialog;
+        const dateReqs = (requirementsByDate[dateStr] || []).filter((r: any) => {
+          if (areaFilter && areaFilter !== 'none') {
+            if (r.area_id !== areaFilter) return false;
+          }
+          if (positionFilter && positionFilter !== 'none') {
+            const reqName = r.position?.name?.toUpperCase() || '';
+            if (positionFilter.toUpperCase() !== reqName) return false;
+          }
+          return true;
+        });
+        const dateAsgns = assignmentsByDate[dateStr] || [];
+
+        return (
+          <Dialog open onOpenChange={() => setCoverageDialog(null)}>
+            <DialogContent className="max-w-md p-0 overflow-hidden rounded-2xl gap-0">
+              {/* Header */}
+              <div className="px-6 pt-5 pb-4 bg-slate-900 text-white">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Cobertura del día</p>
+                <DialogTitle className="text-lg font-black tracking-tight capitalize text-white">
+                  {format(day, "EEEE d 'de' MMMM", { locale: es })}
+                </DialogTitle>
+                {(positionFilter || areaFilter) && (
+                  <div className="flex gap-2 mt-2 flex-wrap">
+                    {positionFilter && (
+                      <span className="flex items-center gap-1 text-[10px] font-black bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                        <Briefcase className="h-2.5 w-2.5" />{positionFilter}
+                      </span>
+                    )}
+                    {areaFilter && (
+                      <span className="flex items-center gap-1 text-[10px] font-black bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                        <MapPin className="h-2.5 w-2.5" />{areasMap[areaFilter]?.name || areaFilter}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Content */}
+              <div className="overflow-y-auto max-h-[60vh] divide-y divide-slate-100">
+                {dateReqs.length === 0 ? (
+                  <div className="py-12 text-center">
+                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Sin requerimientos</p>
+                    <p className="text-xs text-slate-300 mt-1">No hay necesidades definidas para este día</p>
+                  </div>
+                ) : dateReqs.map((req: any, i: number) => {
+                  const shift = shiftsMap[req.shift_id];
+                  const position = positionsMap[req.position_id];
+                  const area = areasMap[req.area_id];
+                  const assigned = dateAsgns.filter((a: any) =>
+                    a.shift_id === req.shift_id &&
+                    (!req.position_id || a.position_id === req.position_id)
+                  );
+                  const assignedWorkers = assigned
+                    .map((a: any) => personnel.find((p: Personnel) => p.id === a.personnel_id))
+                    .filter(Boolean) as Personnel[];
+                  const isFull = assigned.length >= req.required_count;
+                  const vacancies = Math.max(0, req.required_count - assigned.length);
+
+                  return (
+                    <div key={i} className="px-5 py-4 space-y-3">
+                      {/* Shift header */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={cn(
+                            "h-8 w-8 rounded-lg flex items-center justify-center",
+                            isFull ? "bg-emerald-100" : "bg-red-100"
+                          )}>
+                            <Clock className={cn("h-4 w-4", isFull ? "text-emerald-600" : "text-red-500")} />
+                          </div>
+                          <div>
+                            <p className={cn("text-sm font-black uppercase tracking-tight leading-none", isFull ? "text-emerald-700" : "text-red-600")}>
+                              {shift?.name || 'Turno'}
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+                              {shift?.start_time?.substring(0, 5)}–{shift?.end_time?.substring(0, 5)}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={cn(
+                          "text-xs font-black px-2.5 py-1",
+                          isFull
+                            ? "border-emerald-200 text-emerald-700 bg-emerald-50"
+                            : "border-red-200 text-red-600 bg-red-50"
+                        )}>
+                          {assigned.length} / {req.required_count}
+                        </Badge>
+                      </div>
+
+                      {/* Area + Cargo */}
+                      <div className="flex gap-3">
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                          <MapPin className="h-2.5 w-2.5" />{area?.name || 'Sin área'}
+                        </span>
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+                          <Briefcase className="h-2.5 w-2.5" />{position?.name || 'Sin cargo'}
+                        </span>
+                      </div>
+
+                      {/* Workers list */}
+                      <div className="space-y-1.5">
+                        {assignedWorkers.map((worker: Personnel) => (
+                          <div key={worker.id} className="flex items-center gap-2.5 py-1 px-2 rounded-lg bg-slate-50">
+                            <div className="h-6 w-6 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
+                              <UserIcon className="h-3.5 w-3.5 text-orange-600" />
+                            </div>
+                            <span className="text-xs font-semibold text-slate-700">
+                              {worker.first_name} {worker.last_name_father}
+                            </span>
+                            <span className="ml-auto text-[9px] font-black text-emerald-600 uppercase tracking-wide flex items-center gap-0.5">
+                              <Check className="h-2.5 w-2.5" />Asignado
+                            </span>
+                          </div>
+                        ))}
+                        {Array.from({ length: vacancies }).map((_, j) => (
+                          <div key={`vacant-${j}`} className="flex items-center gap-2.5 py-1 px-2 rounded-lg border border-dashed border-slate-200">
+                            <div className="h-6 w-6 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center shrink-0">
+                              <UserIcon className="h-3.5 w-3.5 text-slate-300" />
+                            </div>
+                            <span className="text-xs text-slate-300 italic font-medium">Vacante</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  {dateReqs.reduce((s: number, r: any) => s + r.required_count, 0)} requeridos en total
+                </span>
+                <Button
+                  variant="outline"
+                  className="h-8 text-xs font-bold"
+                  onClick={() => setCoverageDialog(null)}
+                >
+                  Cerrar
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
+
     </div>
   );
 }
@@ -2566,6 +2723,7 @@ const PersonnelRow = memo(({
         const assignment = assignmentsMap[person.id]?.[dateStr];
         const shift = assignment ? shiftsMap[assignment.shift_id] : null;
         const area = assignment ? areasMap[assignment.area_id] : null;
+        const positionName = assignment ? positionsMap[assignment.position_id]?.name : null;
         const personLeaves = leavesMap[person.id] || [];
         const leave = personLeaves.find((l: any) => 
           dateStr >= l.start_date && 
@@ -2655,31 +2813,79 @@ const PersonnelRow = memo(({
                   {getLeaveLabel(leave.type)}
                 </Badge>
               ) : shift ? (
-                <div 
-                  draggable={!isBlocked && assignment?.status !== 'cancelled'}
-                  onDragStart={(e) => handleDragStart(e, assignment)}
-                  className={cn(
-                    "flex flex-col items-center justify-center rounded-lg p-1 border shadow-sm transition-all cursor-grab active:cursor-grabbing",
-                    assignment?.status === 'confirmed' || assignment?.is_confirmed
-                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700" 
-                      : "bg-blue-500/10 border-blue-500/30 text-blue-700",
-                    assignment?.is_extra && "ring-2 ring-amber-400 ring-offset-1 ring-offset-white ring-inset",
-                    assignment?.status === 'cancelled' && "opacity-40 grayscale",
-                    isAirport && "border-indigo-400 border-dashed"
-                  )}
-                >
-                  <span className="text-[10px] font-black leading-tight uppercase">{shift.name}</span>
-                  <div className="flex items-center gap-0.5 mt-0.5">
-                    {assignment?.is_published ? (
-                      <Sparkles className="h-2 w-2 text-emerald-500" />
-                    ) : (
-                      <div className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                    )}
-                    <span className="text-[8px] opacity-70">
-                      {shift.start_time.substring(0, 5)}
-                    </span>
-                  </div>
-                </div>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <div 
+                      draggable={!isBlocked && assignment?.status !== 'cancelled'}
+                      onDragStart={(e) => handleDragStart(e, assignment)}
+                      className={cn(
+                        "flex flex-col items-center justify-center rounded-lg p-1 border shadow-sm transition-all cursor-grab active:cursor-grabbing",
+                        assignment?.status === 'confirmed' || assignment?.is_confirmed
+                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700" 
+                          : "bg-blue-500/10 border-blue-500/30 text-blue-700",
+                        assignment?.is_extra && "ring-2 ring-amber-400 ring-offset-1 ring-offset-white ring-inset",
+                        assignment?.status === 'cancelled' && "opacity-40 grayscale",
+                        isAirport && "border-indigo-400 border-dashed"
+                      )}
+                    >
+                      <span className="text-[10px] font-black leading-tight uppercase">{shift.name}</span>
+                      <div className="flex items-center gap-0.5 mt-0.5">
+                        {assignment?.is_published ? (
+                          <Sparkles className="h-2 w-2 text-emerald-500" />
+                        ) : (
+                          <div className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                        )}
+                        <span className="text-[8px] opacity-70">
+                          {shift.start_time.substring(0, 5)}
+                        </span>
+                      </div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="top"
+                    sideOffset={6}
+                    className="p-0 overflow-hidden rounded-xl border border-slate-200 shadow-xl bg-white text-slate-900 min-w-[210px] max-w-[260px]"
+                  >
+                    {/* Header: trabajador */}
+                    <div className="px-3 pt-2.5 pb-2 border-b border-slate-100 bg-slate-50">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-0.5">Trabajador</p>
+                      <p className="text-xs font-bold text-slate-800 leading-tight">{person.first_name} {person.last_name_father}</p>
+                    </div>
+                    {/* Cuerpo: turno, área, cargo */}
+                    <div className="px-3 py-2.5 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-3 w-3 text-slate-400 shrink-0" />
+                        <span className="text-[11px] font-bold text-slate-700">
+                          {shift.name} · {shift.start_time.substring(0, 5)}–{shift.end_time.substring(0, 5)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-3 w-3 text-indigo-400 shrink-0" />
+                        <span className="text-[11px] font-bold text-indigo-700">{area?.name || 'Sin área'}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Briefcase className="h-3 w-3 text-orange-400 shrink-0" />
+                        <span className="text-[11px] font-bold text-orange-700">{positionName || 'Sin cargo'}</span>
+                      </div>
+                    </div>
+                    {/* Footer: estado */}
+                    <div className="px-3 pb-2.5 pt-0 flex items-center gap-1.5 border-t border-slate-50">
+                      {assignment?.is_published ? (
+                        <span className="flex items-center gap-1 text-[9px] font-black text-emerald-600 uppercase tracking-wide">
+                          <Sparkles className="h-2.5 w-2.5" />Publicado
+                        </span>
+                      ) : assignment?.is_validated ? (
+                        <span className="flex items-center gap-1 text-[9px] font-black text-blue-600 uppercase tracking-wide">
+                          <CheckCircle2 className="h-2.5 w-2.5" />Validado
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[9px] font-black text-slate-400 uppercase tracking-wide">
+                          <div className="h-1.5 w-1.5 rounded-full bg-slate-300" />Pendiente
+                        </span>
+                      )}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
               ) : (
                 <span className="text-[9px] font-bold text-slate-300/40">OFF</span>
               )}
