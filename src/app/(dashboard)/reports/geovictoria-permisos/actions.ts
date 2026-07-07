@@ -79,23 +79,30 @@ export async function getGeoVictoriaPermisosData(filters: {
     personnelList.forEach(p => personnelMap.set(p.id, p.rut));
     const allPersonnelIds = personnelList.map(p => p.id);
 
+    // Use admin client for all reads to bypass RLS and avoid schema cache issues
+    const adminClient = createAdminClient();
+
     // -------------------------------------------------------------------
     // 2. Source A: approved vacation (-1) and sick (-2) leaves
     // -------------------------------------------------------------------
-    let leavesQuery = supabase
+    let leavesQuery = adminClient
       .from('leaves')
-      .select('id, personnel_id, type, start_date, end_date, reason, geov_permisos_downloaded_at')
-      .in('status', ['approved'])
+      .select('id, personnel_id, type, start_date, end_date, reason')
+      .eq('status', 'approved')
       .in('type', ['vacation', 'sick'])
       .lte('start_date', filters.endDate)
       .gte('end_date', filters.startDate)
       .in('personnel_id', allPersonnelIds);
 
     if (filters.onlyNew) {
-      leavesQuery = leavesQuery.is('geov_permisos_downloaded_at', null);
+      // Use raw filter for the new column to avoid PostgREST schema-cache issues
+      leavesQuery = (leavesQuery as any).is('geov_permisos_downloaded_at', null);
     }
 
-    const { data: leavesRaw } = await leavesQuery;
+    const { data: leavesRaw, error: leavesError } = await leavesQuery;
+    if (leavesError) {
+      console.error('[GeoVictoriaPermisos] leaves query error:', leavesError);
+    }
 
     // -------------------------------------------------------------------
     // 3. Source B: manually cancelled assignments (paid leave = -12)
@@ -105,7 +112,7 @@ export async function getGeoVictoriaPermisosData(filters: {
 
     // First, collect all (personnel_id, date) pairs covered by approved
     // vacation/sick leaves so we can exclude them from the -12 set.
-    const { data: allVacSickLeaves } = await supabase
+    const { data: allVacSickLeaves } = await adminClient
       .from('leaves')
       .select('personnel_id, start_date, end_date')
       .eq('status', 'approved')
@@ -121,9 +128,9 @@ export async function getGeoVictoriaPermisosData(filters: {
       });
     });
 
-    let assignmentsQuery = supabase
+    let assignmentsQuery = adminClient
       .from('shift_assignments')
-      .select('id, personnel_id, date, geov_permisos_downloaded_at')
+      .select('id, personnel_id, date')
       .eq('status', 'cancelled')
       .eq('is_extra', false)
       .gte('date', filters.startDate)
@@ -131,7 +138,7 @@ export async function getGeoVictoriaPermisosData(filters: {
       .in('personnel_id', allPersonnelIds);
 
     if (filters.onlyNew) {
-      assignmentsQuery = assignmentsQuery.is('geov_permisos_downloaded_at', null);
+      assignmentsQuery = (assignmentsQuery as any).is('geov_permisos_downloaded_at', null);
     }
 
     const { data: cancelledAssignments } = await assignmentsQuery;
