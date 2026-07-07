@@ -22,6 +22,7 @@ export default function ReportsPage() {
           { title: 'Transport Usage', desc: 'Company transport utilization', href: '/reports/transport' },
           { title: 'Scheduling Efficiency', desc: 'Constraint violations and coverage %', href: '/reports/efficiency' },
           { title: 'GeoVictoria Export', desc: 'Excel export for attendance system integration', href: '/reports/geovictoria' },
+          { title: 'Reporte de Permisos GeoVictoria', desc: 'Exporta vacaciones, licencias médicas y permisos con goce de sueldo en formato GeoVictoria', href: '/reports/geovictoria-permisos' },
           { title: 'Reporte de Ausencias', desc: 'Listado de inasistencias de personal por fecha y comentarios de supervisión', href: '/reports/absences' },
           { title: 'Reporte de Amonestaciones y Felicitaciones', desc: 'Historial detallado de cartas de amonestación y felicitación registradas', href: '/reports/warnings' },
         ].map((report) => (
