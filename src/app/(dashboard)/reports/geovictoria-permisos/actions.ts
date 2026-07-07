@@ -16,9 +16,9 @@ export interface GeoVictoriaPermisoRecord {
   'Año': number;
   Extension: number;
   Comentario: string;
-  'Hora Inicio': string;
-  'Hora Fin': string;
-  Asignacion: string;
+  'Hora Inicio': null;
+  'Hora Fin': null;
+  Asignacion: null;
 }
 
 export interface PersonnelFilterItem {
@@ -174,9 +174,9 @@ export async function getGeoVictoriaPermisosData(filters: {
         'Año': startDate.getFullYear(),
         Extension: extension,
         Comentario: leave.reason || '',
-        'Hora Inicio': '',
-        'Hora Fin': '',
-        Asignacion: '',
+        'Hora Inicio': null,
+        'Hora Fin': null,
+        Asignacion: null,
       });
 
       leaveIds.push(leave.id);
@@ -197,9 +197,9 @@ export async function getGeoVictoriaPermisosData(filters: {
         'Año': day.getFullYear(),
         Extension: 1,
         Comentario: 'Cancelacion de turno',
-        'Hora Inicio': '',
-        'Hora Fin': '',
-        Asignacion: '',
+        'Hora Inicio': null,
+        'Hora Fin': null,
+        Asignacion: null,
       });
 
       assignmentIds.push(assignment.id);
