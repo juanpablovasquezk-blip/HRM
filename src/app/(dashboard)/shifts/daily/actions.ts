@@ -351,10 +351,10 @@ export async function assignExtraPersonnel(
     return { success: false, error: validation.error };
   }
 
-  // Check if the extra assignment already exists to avoid duplicate key errors
+  // Check if the extra assignment already exists (could be active or cancelled)
   const { data: existing } = await supabase
     .from('shift_assignments')
-    .select('id')
+    .select('id, status')
     .eq('date', date)
     .eq('shift_id', shiftId)
     .eq('personnel_id', personnelId)
@@ -362,7 +362,17 @@ export async function assignExtraPersonnel(
     .maybeSingle();
 
   if (existing) {
-    console.log(`[assignExtraPersonnel] Already exists: ${existing.id} for personnel=${personnelId} date=${date} shift=${shiftId}`);
+    if (existing.status === 'cancelled') {
+      // Re-activate the cancelled assignment instead of inserting a new one
+      console.log(`[assignExtraPersonnel] Reactivating cancelled assignment ${existing.id}`);
+      const { error } = await supabase
+        .from('shift_assignments')
+        .update({ status: 'scheduled', area_id: areaId, position_id: positionId, is_manual: true })
+        .eq('id', existing.id);
+      if (error) return { success: false, error: error.message };
+    } else {
+      console.log(`[assignExtraPersonnel] Already active: ${existing.id}`);
+    }
     revalidatePath('/shifts/daily');
     return { success: true };
   }
@@ -379,11 +389,10 @@ export async function assignExtraPersonnel(
   });
 
   if (error) {
-    console.error(`[assignExtraPersonnel] Insert error: ${error.message}`, { date, shiftId, areaId, positionId, personnelId });
+    console.error(`[assignExtraPersonnel] Insert error: ${error.message}`);
     return { success: false, error: error.message };
   }
 
-  console.log(`[assignExtraPersonnel] Successfully inserted extra for personnel=${personnelId} date=${date}`);
   revalidatePath('/shifts/daily');
   return { success: true };
 }
