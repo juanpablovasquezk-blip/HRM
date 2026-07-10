@@ -426,8 +426,12 @@ export default function DailyPlanningClient({
 
   const handleAssignExtra = async (posId: string, shiftId: string, areaId: string, persId: string) => {
     const res = await assignExtraPersonnel(selectedDate, shiftId, areaId, posId, persId);
-    if (res.success) toast.success('Personal asignado correctamente');
-    else toast.error('Error al asignar: ' + res.error);
+    if (res.success) {
+      toast.success('Personal asignado correctamente');
+      router.refresh();
+    } else {
+      toast.error('Error al asignar: ' + res.error);
+    }
   };
 
 
