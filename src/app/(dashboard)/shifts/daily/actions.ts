@@ -315,6 +315,21 @@ export async function assignExtraPersonnel(
     return { success: false, error: validation.error };
   }
 
+  // Check if the extra assignment already exists to avoid duplicate key errors
+  const { data: existing } = await supabase
+    .from('shift_assignments')
+    .select('id')
+    .eq('date', date)
+    .eq('shift_id', shiftId)
+    .eq('personnel_id', personnelId)
+    .eq('is_extra', true)
+    .maybeSingle();
+
+  if (existing) {
+    // Already assigned — treat as success (idempotent)
+    return { success: true };
+  }
+
   const { error } = await supabase.from('shift_assignments').insert({
     date,
     shift_id: shiftId,
