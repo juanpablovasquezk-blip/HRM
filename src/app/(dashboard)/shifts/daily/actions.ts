@@ -46,6 +46,29 @@ export async function getDailyOperationalData(date: string) {
     return { error: 'Error al cargar datos operativos' };
   }
 
+  // 3. Count how many active extra assignments exist for each requirement slot (server-side)
+  const { data: extraAssignments } = await supabase
+    .from('shift_assignments')
+    .select('shift_id, area_id, position_id')
+    .eq('date', date)
+    .eq('is_extra', true)
+    .neq('status', 'cancelled');
+
+  // Build a lookup: "shift_id|area_id|position_id" -> count
+  const extraFillCount = new Map<string, number>();
+  for (const ea of extraAssignments || []) {
+    const key = `${ea.shift_id}|${ea.area_id}|${ea.position_id}`;
+    extraFillCount.set(key, (extraFillCount.get(key) || 0) + 1);
+  }
+
+  // Attach filled_count to each requirement
+  const requirementsWithFill = (requirements || []).map(r => ({
+    ...r,
+    filled_count: r.is_extra
+      ? (extraFillCount.get(`${r.shift_id}|${r.area_id}|${r.position_id}`) || 0)
+      : 0,
+  }));
+
   const activeAssignments = (assignments || []).filter(a => {
     const p = a.personnel as any;
     if (!p) return false;
@@ -94,9 +117,10 @@ export async function getDailyOperationalData(date: string) {
 
   return {
     assignments: dedupedAssignments,
-    requirements: (requirements || []) as ShiftRequirementWithDetails[],
+    requirements: requirementsWithFill as ShiftRequirementWithDetails[],
   };
 }
+
 
 function getShiftInterval(dateStr: string, startTime: string, endTime: string): { start: Date; end: Date } | null {
   if (!dateStr || !startTime || !endTime) return null;
@@ -124,7 +148,7 @@ function getShiftInterval(dateStr: string, startTime: string, endTime: string): 
  * Filters out those who already have a shift or are on leave.
  */
 export async function getAvailableForExtra(date: string, positionId: string, extraShiftId?: string) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   // 1. Get all personnel qualified for this position
   const { data: personnel, error: pErr } = await supabase

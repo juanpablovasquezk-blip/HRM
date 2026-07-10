@@ -849,7 +849,7 @@ export default function DailyPlanningClient({
 
         {/* EXTRA SLOTS */}
         {initialRequirements.filter(r => r.is_extra).map(req => {
-          const filled = activeAssignments.filter(a => (a as any).is_extra && a.shift_id === req.shift_id && a.position_id === req.position_id && a.area_id === req.area_id && a.status !== 'cancelled').length;
+          const filled = (req as any).filled_count ?? activeAssignments.filter(a => (a as any).is_extra && a.shift_id === req.shift_id && a.position_id === req.position_id && a.area_id === req.area_id).length;
           const left = req.required_count - filled;
           if (left <= 0) return null;
           return (
