@@ -428,7 +428,7 @@ export default function DailyPlanningClient({
     const res = await assignExtraPersonnel(selectedDate, shiftId, areaId, posId, persId);
     if (res.success) {
       toast.success('Personal asignado correctamente');
-      router.refresh();
+      router.push(`/shifts/daily?date=${selectedDate}`);
     } else {
       toast.error('Error al asignar: ' + res.error);
     }

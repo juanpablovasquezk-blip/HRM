@@ -27,7 +27,7 @@ export async function updateAssignmentShift(assignmentId: string, shiftId: strin
  * Fetch all data for the daily operational view
  */
 export async function getDailyOperationalData(date: string) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   // 1. Get all assignments for this day
   const { data: assignments, error: assErr } = await supabase
