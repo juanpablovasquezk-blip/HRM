@@ -47,12 +47,17 @@ export async function getDailyOperationalData(date: string) {
   }
 
   // 3. Count how many active extra assignments exist for each requirement slot (server-side)
-  const { data: extraAssignments } = await supabase
+  const { data: extraAssignments, error: extraErr } = await supabase
     .from('shift_assignments')
-    .select('shift_id, area_id, position_id')
+    .select('shift_id, area_id, position_id, personnel_id, status')
     .eq('date', date)
     .eq('is_extra', true)
     .neq('status', 'cancelled');
+
+  console.log(`[getDailyOperationalData] date=${date} extraAssignments found: ${extraAssignments?.length ?? 0}`, 
+    extraErr ? `ERROR: ${extraErr.message}` : '',
+    JSON.stringify(extraAssignments?.map(e => ({ sid: e.shift_id, aid: e.area_id, pid: e.position_id, per: e.personnel_id, st: e.status })))
+  );
 
   // Build a lookup: "shift_id|area_id|position_id" -> count
   const extraFillCount = new Map<string, number>();
@@ -61,7 +66,14 @@ export async function getDailyOperationalData(date: string) {
     extraFillCount.set(key, (extraFillCount.get(key) || 0) + 1);
   }
 
-  // Attach filled_count to each requirement
+  // Attach filled_count to each extra requirement
+  const extraReqs = (requirements || []).filter(r => r.is_extra);
+  for (const r of extraReqs) {
+    const key = `${r.shift_id}|${r.area_id}|${r.position_id}`;
+    const count = extraFillCount.get(key) || 0;
+    console.log(`[getDailyOperationalData] Extra req: key=${key} required=${r.required_count} filled=${count}`);
+  }
+
   const requirementsWithFill = (requirements || []).map(r => ({
     ...r,
     filled_count: r.is_extra
@@ -350,7 +362,8 @@ export async function assignExtraPersonnel(
     .maybeSingle();
 
   if (existing) {
-    // Already assigned — treat as success (idempotent)
+    console.log(`[assignExtraPersonnel] Already exists: ${existing.id} for personnel=${personnelId} date=${date} shift=${shiftId}`);
+    revalidatePath('/shifts/daily');
     return { success: true };
   }
 
@@ -365,8 +378,12 @@ export async function assignExtraPersonnel(
     status: 'scheduled'
   });
 
-  if (error) return { success: false, error: error.message };
+  if (error) {
+    console.error(`[assignExtraPersonnel] Insert error: ${error.message}`, { date, shiftId, areaId, positionId, personnelId });
+    return { success: false, error: error.message };
+  }
 
+  console.log(`[assignExtraPersonnel] Successfully inserted extra for personnel=${personnelId} date=${date}`);
   revalidatePath('/shifts/daily');
   return { success: true };
 }
