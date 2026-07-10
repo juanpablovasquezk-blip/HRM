@@ -344,7 +344,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
       {/* Controls - Hidden during print */}
       <Card className="print:hidden border-slate-200/60 shadow-sm">
         <CardContent className="pt-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 items-end">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
             <div className="space-y-2 min-w-0">
               <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Área (Opcional)</Label>
               <select
@@ -389,56 +389,57 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
               <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Hasta</Label>
               <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-9 border-slate-200 text-xs px-2" />
             </div>
+          </div>
 
-            <div className="flex gap-2 sm:col-span-2 lg:col-span-1">
-              <Button onClick={handleFetch} disabled={isPending} size="sm" className="flex-1 h-9 bg-orange-600 hover:bg-orange-700 shadow-sm text-xs">
-                {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
-                Generar
-              </Button>
+          {/* Action buttons row — always visible, wraps on small screens */}
+          <div className="flex flex-wrap gap-2 mt-4 items-center">
+            <Button onClick={handleFetch} disabled={isPending} size="sm" className="h-9 bg-orange-600 hover:bg-orange-700 shadow-sm text-xs">
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+              Generar
+            </Button>
 
-              {/* Masivo — disabled while an individual roster is loaded */}
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => {
-                  setBulkAreaId(selectedAreaId);
-                  setSelectedWorkers([]);
-                  setIsBulkModalOpen(true);
-                }}
-                disabled={!!data}
-                className="h-9 border-slate-200 text-xs px-3 text-slate-700 hover:bg-slate-50 gap-1.5 bg-white shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-                title={data ? "Cierra el roster individual antes de usar el envío masivo" : "Envío Masivo WhatsApp"}
-              >
-                <Users className="h-4 w-4 text-emerald-500" />
-                Masivo
-              </Button>
+            {/* Masivo — disabled while an individual roster is loaded */}
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                setBulkAreaId(selectedAreaId);
+                setSelectedWorkers([]);
+                setIsBulkModalOpen(true);
+              }}
+              disabled={!!data}
+              className="h-9 border-slate-200 text-xs px-3 text-slate-700 hover:bg-slate-50 gap-1.5 bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+              title={data ? "Cierra el roster individual antes de usar el envío masivo" : "Envío Masivo WhatsApp"}
+            >
+              <Users className="h-4 w-4 text-emerald-500" />
+              Masivo
+            </Button>
 
-              {data && (
-                <>
-                  {/* Individual WhatsApp button */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleSendIndividualWhatsApp}
-                    disabled={isSendingIndividual}
-                    title={`Enviar roster de ${data.personnel.first_name} por WhatsApp`}
-                    className="h-9 border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-xs px-3 shrink-0 gap-1.5 font-semibold"
-                  >
-                    {isSendingIndividual
-                      ? <Loader2 className="h-4 w-4 animate-spin" />
-                      : <MessageSquare className="h-4 w-4" />
-                    }
-                    {isSendingIndividual ? 'Enviando...' : 'WhatsApp'}
-                  </Button>
-                  <Button variant="outline" size="icon" onClick={handlePrint} title="Imprimir" className="h-9 w-9 border-slate-200 shrink-0 bg-white">
-                    <Printer className="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" size="icon" onClick={handleCopyScreenshot} title="Copiar Captura" className="h-9 w-9 border-slate-200 shrink-0 text-slate-600 hover:text-slate-900 bg-white">
-                    <Camera className="h-4 w-4" />
-                  </Button>
-                </>
-              )}
-            </div>
+            {data && (
+              <>
+                {/* Individual WhatsApp button */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSendIndividualWhatsApp}
+                  disabled={isSendingIndividual}
+                  title={`Enviar roster de ${data.personnel.first_name} por WhatsApp`}
+                  className="h-9 border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-xs px-3 gap-1.5 font-semibold"
+                >
+                  {isSendingIndividual
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <MessageSquare className="h-4 w-4" />
+                  }
+                  {isSendingIndividual ? 'Enviando...' : 'WhatsApp'}
+                </Button>
+                <Button variant="outline" size="icon" onClick={handlePrint} title="Imprimir" className="h-9 w-9 border-slate-200 bg-white">
+                  <Printer className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" onClick={handleCopyScreenshot} title="Copiar Captura" className="h-9 w-9 border-slate-200 text-slate-600 hover:text-slate-900 bg-white">
+                  <Camera className="h-4 w-4" />
+                </Button>
+              </>
+            )}
           </div>
 
           {/* Legend: manual changes or post-publish leaves */}
