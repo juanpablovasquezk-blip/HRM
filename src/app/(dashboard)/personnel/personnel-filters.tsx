@@ -20,10 +20,11 @@ interface PersonnelFiltersProps {
   initialSearch?: string;
   initialCompanyId?: string;
   initialPositionId?: string;
-  initialStatus?: 'active' | 'inactive' | 'all';
+  initialStatus?: 'active' | 'inactive' | 'pending' | 'all';
   companies: Company[];
   positions: Position[];
 }
+
 
 export function PersonnelFilters({ 
   companies, 
@@ -124,8 +125,10 @@ export function PersonnelFilters({
         >
           <option value="active">Solo Activos</option>
           <option value="inactive">Solo Bajas</option>
+          <option value="pending">Solicitudes Pendientes</option>
           <option value="all">Todos</option>
         </select>
+
       </div>
       {(currentSearch || currentCompanyId || currentPositionId || currentStatus !== 'active') && (
         <Button 

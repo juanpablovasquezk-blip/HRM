@@ -56,14 +56,33 @@ export interface Personnel {
   has_special_contract: boolean;
   is_active: boolean;
   created_at: string;
+  
+  // Emergency Contact
+  emergency_contact_name?: string | null;
+  emergency_contact_relationship?: string | null;
+  emergency_contact_phone?: string | null;
+
+  // Clothing Sizes
+  clothing_tshirt_size?: string | null;
+  clothing_polar_size?: string | null;
+  clothing_pants_size_letter?: string | null;
+  clothing_pants_size_number?: string | null;
+  clothing_shoe_size?: string | null;
+  clothing_parka_size?: string | null;
+  clothing_overall_size?: string | null;
+
+  // Onboarding status
+  onboarding_status?: 'pending' | 'approved' | 'rejected' | null;
 }
 
 export interface PersonnelAddress {
   street: string;
   city: string;
   region: string;
+  comuna?: string;
   zip?: string;
 }
+
 
 export interface Document {
   id: string;

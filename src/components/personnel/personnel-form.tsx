@@ -22,6 +22,11 @@ interface PersonnelFormProps {
   areas?: { id: string; name: string }[];
 }
 
+const CLOTHING_SIZES_LETTER = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+const PANTS_SIZES_NUMBER = ['36', '38', '40', '42', '44', '46', '48', '50', '52', '54', '56', '58'];
+const SHOE_SIZES = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47'];
+
+
 // ── Phone helpers ──────────────────────────────────────────────────────────────
 // Accepts any partial input and returns a formatted +56 X XXXX XXXX string.
 function formatChileanPhone(raw: string): string {
@@ -101,7 +106,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
 
   // Stabilize initial values for uncontrolled inputs to satisfy Base UI
   const [initialValues] = useState(() => {
-    const addr = (personnel?.address as { street?: string; city?: string; region?: string }) || {};
+    const addr = (personnel?.address as { street?: string; city?: string; region?: string; comuna?: string }) || {};
     return {
       first_name: personnel?.first_name || '',
       last_name_father: personnel?.last_name_father || '',
@@ -113,6 +118,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
       address_street: addr.street || '',
       address_city: addr.city || '',
       address_region: addr.region || '',
+      address_comuna: addr.comuna || '',
       driver_licenses: personnel?.driver_licenses?.join(', ') || '',
       main_position: personnel?.main_position || '',
       rotation_pattern: personnel?.rotation_pattern || '5x2',
@@ -120,10 +126,22 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
       hire_date: personnel?.hire_date || '',
       termination_date: personnel?.termination_date || '',
       company_id: personnel?.company_id || '',
+      // Emergency Contact
+      emergency_contact_name: personnel?.emergency_contact_name || '',
+      emergency_contact_relationship: personnel?.emergency_contact_relationship || '',
+      emergency_contact_phone: personnel?.emergency_contact_phone || '',
+      // Clothing Sizes
+      clothing_tshirt_size: personnel?.clothing_tshirt_size || '',
+      clothing_polar_size: personnel?.clothing_polar_size || '',
+      clothing_pants_size_letter: personnel?.clothing_pants_size_letter || '',
+      clothing_pants_size_number: personnel?.clothing_pants_size_number || '',
+      clothing_shoe_size: personnel?.clothing_shoe_size || '',
+      clothing_parka_size: personnel?.clothing_parka_size || '',
+      clothing_overall_size: personnel?.clothing_overall_size || '',
     };
   });
 
-  const address = (personnel?.address as { street?: string; city?: string; region?: string }) || {};
+  const address = (personnel?.address as { street?: string; city?: string; region?: string; comuna?: string }) || {};
 
   const handleSubmit = async (formData: FormData) => {
     // Normalize phone to +56XXXXXXXXX before sending
@@ -285,10 +303,14 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
         <CardHeader>
           <CardTitle className="text-base">Dirección</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-2 md:col-span-3">
+        <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="space-y-2 md:col-span-4">
             <Label htmlFor="address_street">Calle</Label>
             <Textarea id="address_street" name="address_street" defaultValue={initialValues.address_street} placeholder="Av. Providencia 1234" rows={2} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="address_comuna">Comuna</Label>
+            <Input id="address_comuna" name="address_comuna" defaultValue={initialValues.address_comuna} placeholder="Providencia" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="address_city">Ciudad</Label>
@@ -300,6 +322,99 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
           </div>
         </CardContent>
       </Card>
+
+      {/* Contacto de Emergencia */}
+      <Card className="border-slate-200/60 dark:border-slate-800 shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base">Contacto de Emergencia</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="emergency_contact_name">Nombre de Contacto</Label>
+            <Input id="emergency_contact_name" name="emergency_contact_name" defaultValue={initialValues.emergency_contact_name} placeholder="María Gómez" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="emergency_contact_relationship">Parentesco</Label>
+            <Input id="emergency_contact_relationship" name="emergency_contact_relationship" defaultValue={initialValues.emergency_contact_relationship} placeholder="Cónyuge / Madre / Hermano" />
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="emergency_contact_phone">Teléfono de Contacto</Label>
+            <Input id="emergency_contact_phone" name="emergency_contact_phone" defaultValue={initialValues.emergency_contact_phone} placeholder="+56 9 8765 4321" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Tallas de Ropa */}
+      <Card className="border-slate-200/60 dark:border-slate-800 shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base">Tallas de Ropa y Calzado</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="clothing_tshirt_size">Talla de Polera</Label>
+            <select id="clothing_tshirt_size" name="clothing_tshirt_size" defaultValue={initialValues.clothing_tshirt_size}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar talla</option>
+              {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="clothing_polar_size">Talla de Polar</Label>
+            <select id="clothing_polar_size" name="clothing_polar_size" defaultValue={initialValues.clothing_polar_size}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar talla</option>
+              {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="clothing_pants_size_letter">Talla de Pantalón (Letra)</Label>
+            <select id="clothing_pants_size_letter" name="clothing_pants_size_letter" defaultValue={initialValues.clothing_pants_size_letter}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar talla</option>
+              {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="clothing_pants_size_number">Talla de Pantalón (Número)</Label>
+            <select id="clothing_pants_size_number" name="clothing_pants_size_number" defaultValue={initialValues.clothing_pants_size_number}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar talla</option>
+              {PANTS_SIZES_NUMBER.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="clothing_shoe_size">Talla de Zapatos</Label>
+            <select id="clothing_shoe_size" name="clothing_shoe_size" defaultValue={initialValues.clothing_shoe_size}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar talla</option>
+              {SHOE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="clothing_parka_size">Talla de Parka</Label>
+            <select id="clothing_parka_size" name="clothing_parka_size" defaultValue={initialValues.clothing_parka_size}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar talla</option>
+              {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="clothing_overall_size">Talla de Jardinera Térmica</Label>
+            <select id="clothing_overall_size" name="clothing_overall_size" defaultValue={initialValues.clothing_overall_size}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar talla</option>
+              {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </CardContent>
+      </Card>
+
 
       {/* Cargo y Empresa */}
       <Card className="border-slate-200/60 dark:border-slate-800 shadow-sm">

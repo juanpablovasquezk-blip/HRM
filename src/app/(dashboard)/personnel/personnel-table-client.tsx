@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useTransition } from 'react';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import { 
@@ -11,6 +11,13 @@ import {
   FileText, 
   Settings2,
   Check,
+  Plus,
+  CheckCircle2,
+  XCircle,
+  Link2,
+  Copy,
+  UserCheck,
+  UserX
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +30,18 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { toast } from 'sonner';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { createOnboardingToken, approveOnboarding, rejectOnboarding } from './actions';
+
 
 interface Personnel {
   id: string;
@@ -46,13 +65,18 @@ interface Personnel {
   is_active: boolean;
   driver_licenses?: string[];
   company: { name: string } | null;
+  onboarding_status?: string | null;
 }
+
 
 interface PersonnelTableClientProps {
   personnel: Personnel[];
   positionMap: Record<string, string>;
   shiftMap: Record<string, string>;
   canEdit: boolean;
+  companies?: { id: string; name: string }[];
+  positions?: { id: string; name: string; area?: { name: string } }[];
+  shifts?: { id: string; name: string; start_time: string; end_time: string }[];
 }
 
 interface ColumnConfig {
@@ -65,10 +89,96 @@ export default function PersonnelTableClient({
   personnel,
   positionMap,
   shiftMap,
-  canEdit
+  canEdit,
+  companies = [],
+  positions = [],
+  shifts = []
 }: PersonnelTableClientProps) {
   const [showColumnPanel, setShowColumnPanel] = useState(false);
   const columnPanelRef = useRef<HTMLDivElement>(null);
+
+  const [isPending, startTransition] = useTransition();
+
+  // Invite states
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [inviteCompanyId, setInviteCompanyId] = useState('');
+  const [generatedLink, setGeneratedLink] = useState('');
+
+  // Approval states
+  const [isApproveOpen, setIsApproveOpen] = useState(false);
+  const [selectedPerson, setSelectedPerson] = useState<Personnel | null>(null);
+  const [approvePositionId, setApprovePositionId] = useState('');
+  const [approveRotationPattern, setApproveRotationPattern] = useState('5x2');
+  const [approveFixedShiftId, setApproveFixedShiftId] = useState('');
+  const [approveEnableAccess, setApproveEnableAccess] = useState(true);
+
+  // Invite handler
+  const handleGenerateInvite = async () => {
+    if (!inviteCompanyId) {
+      toast.error('Selecciona una empresa');
+      return;
+    }
+    const result = await createOnboardingToken(inviteCompanyId);
+    if (result.success && result.token) {
+      const link = window.location.origin + '/onboarding?token=' + result.token;
+      setGeneratedLink(link);
+      toast.success('Enlace generado con éxito');
+    } else {
+      toast.error(result.error || 'Error al generar enlace');
+    }
+  };
+
+  // Copy link helper
+  const handleCopyLink = () => {
+    if (generatedLink) {
+      navigator.clipboard.writeText(generatedLink);
+      toast.success('Enlace copiado al portapapeles');
+    }
+  };
+
+  // Approval handler
+  const handleApprove = () => {
+    if (!selectedPerson) return;
+    if (!approvePositionId) {
+      toast.error('Selecciona un cargo principal para el trabajador');
+      return;
+    }
+
+    startTransition(async () => {
+      const res = await approveOnboarding(
+        selectedPerson.id,
+        approvePositionId,
+        approveRotationPattern,
+        approveFixedShiftId || null,
+        approveEnableAccess
+      );
+
+      if (res.success) {
+        toast.success(`Trabajador ${selectedPerson.first_name} aprobado y activado`);
+        setIsApproveOpen(false);
+        setSelectedPerson(null);
+        window.location.reload();
+      } else {
+        toast.error(res.error || 'Error al aprobar ficha');
+      }
+    });
+  };
+
+  // Reject handler
+  const handleReject = (person: Personnel) => {
+    if (!confirm(`¿Estás seguro de que deseas rechazar la postulación de ${person.first_name} ${person.last_name_father}?`)) return;
+    
+    startTransition(async () => {
+      const res = await rejectOnboarding(person.id);
+      if (res.success) {
+        toast.success(`Postulación de ${person.first_name} rechazada`);
+        window.location.reload();
+      } else {
+        toast.error(res.error || 'Error al rechazar postulación');
+      }
+    });
+  };
+
 
   // Close panel when clicking outside
   useEffect(() => {
@@ -279,8 +389,26 @@ export default function PersonnelTableClient({
             <FileSpreadsheet className="h-4 w-4" />
             Descargar Excel
           </Button>
+
+          {/* Invitation Link Button */}
+          {canEdit && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIsInviteOpen(true);
+                setGeneratedLink('');
+                setInviteCompanyId('');
+              }}
+              className="h-9 bg-orange-50/50 hover:bg-orange-50 border-orange-200 text-orange-700 hover:text-orange-800 dark:bg-orange-950/20 dark:border-orange-900 dark:text-orange-400 gap-1.5 text-xs font-semibold rounded-lg"
+            >
+              <Link2 className="h-4 w-4" />
+              Generar Link de Invitación
+            </Button>
+          )}
         </div>
       </div>
+
 
       {/* Main Table */}
       {personnel.length > 0 ? (
@@ -461,7 +589,37 @@ export default function PersonnelTableClient({
 
                     {/* Actions Cell */}
                     <TableCell className="text-right">
-                      {canEdit ? (
+                      {person.onboarding_status === 'pending' ? (
+                        <div className="flex justify-end gap-1">
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            disabled={isPending}
+                            onClick={() => {
+                              setSelectedPerson(person);
+                              setApprovePositionId(person.main_position || '');
+                              setApproveRotationPattern(person.rotation_pattern || '5x2');
+                              setApproveFixedShiftId(person.fixed_shift_id || '');
+                              setApproveEnableAccess(true);
+                              setIsApproveOpen(true);
+                            }}
+                            className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                            title="Aprobar ficha"
+                          >
+                            <UserCheck className="h-4 w-4" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            disabled={isPending}
+                            onClick={() => handleReject(person)}
+                            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                            title="Rechazar ficha"
+                          >
+                            <UserX className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : canEdit ? (
                         <Link href={`/personnel/${person.id}/edit`}>
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
                              <Edit className="h-4 w-4" />
@@ -475,6 +633,7 @@ export default function PersonnelTableClient({
                         </Link>
                       )}
                     </TableCell>
+
                   </TableRow>
                 );
               })}
@@ -491,6 +650,164 @@ export default function PersonnelTableClient({
           </p>
         </div>
       )}
+      {/* DIALOG 1: GENERAR LINK DE INVITACIÓN */}
+      <Dialog open={isInviteOpen} onOpenChange={setIsInviteOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white dark:bg-slate-900 border-none shadow-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase tracking-tight flex items-center gap-2">
+              <Link2 className="h-5 w-5 text-orange-500" />
+              Generar Link de Invitación
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Selecciona la empresa del nuevo trabajador para generar el link.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-company">Empresa *</Label>
+              <select 
+                id="invite-company" 
+                value={inviteCompanyId}
+                onChange={e => setInviteCompanyId(e.target.value)}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                <option value="">Seleccionar empresa...</option>
+                {companies.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {generatedLink && (
+              <div className="space-y-1.5">
+                <Label>Link de Invitación</Label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    readOnly 
+                    value={generatedLink}
+                    className="flex-1 h-10 rounded-lg bg-slate-50 border border-slate-200 px-3 text-xs font-mono"
+                  />
+                  <Button size="icon" onClick={handleCopyLink} className="bg-slate-900 hover:bg-slate-800 text-white rounded-lg h-10 w-10">
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-[10px] text-emerald-600 font-medium">¡Copiado! Puedes enviarlo por WhatsApp al nuevo trabajador.</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="mt-4 gap-2 flex-col sm:flex-row">
+            <Button variant="ghost" onClick={() => setIsInviteOpen(false)} className="rounded-xl font-bold uppercase text-xs">
+              Cerrar
+            </Button>
+            {!generatedLink && (
+              <Button 
+                onClick={handleGenerateInvite}
+                disabled={!inviteCompanyId}
+                className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-6 font-black uppercase text-xs"
+              >
+                Generar Enlace
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG 2: APROBAR POSTULACIÓN */}
+      <Dialog open={isApproveOpen} onOpenChange={setIsApproveOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white dark:bg-slate-900 border-none shadow-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase tracking-tight flex items-center gap-2">
+              <UserCheck className="h-5 w-5 text-emerald-500" />
+              Aprobar Postulación
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Configura los datos del cargo y turnos para {selectedPerson?.first_name} {selectedPerson?.last_name_father}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="approve-position">Cargo Principal *</Label>
+              <select 
+                id="approve-position" 
+                value={approvePositionId}
+                onChange={e => setApprovePositionId(e.target.value)}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                <option value="">Seleccionar cargo...</option>
+                {positions.map(p => (
+                  <option key={p.id} value={p.id}>{p.name} {p.area?.name ? `(${p.area.name})` : ''}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="approve-rotation">Patrón de Rotación *</Label>
+              <select 
+                id="approve-rotation" 
+                value={approveRotationPattern}
+                onChange={e => setApproveRotationPattern(e.target.value)}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                <option value="5x2">5x2 (Semanal / Rotativo)</option>
+                <option value="5X2-RELEVO-A">5x2 Relevo A</option>
+                <option value="5X2-RELEVO-B">5x2 Relevo B</option>
+                <option value="l-v">Lunes a Viernes</option>
+                <option value="7x7">7x7 (Rotativo)</option>
+                <option value="7X7-A">7x7 Relevo A</option>
+                <option value="7X7-B">7x7 Relevo B</option>
+                <option value="4x4_noche">4x4 Noche</option>
+                <option value="part_time">Part Time</option>
+                <option value="manual">Manual / Sin Rotación</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="approve-shift">Turno Fijo (Opcional)</Label>
+              <select 
+                id="approve-shift" 
+                value={approveFixedShiftId}
+                onChange={e => setApproveFixedShiftId(e.target.value)}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                <option value="">Ninguno / Rotativo</option>
+                {shifts.map(s => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.start_time.substring(0,5)} - {s.end_time.substring(0,5)})</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-lg border border-blue-100 bg-blue-50/20">
+              <div className="space-y-0.5">
+                <Label className="text-xs font-bold text-blue-900">Dar Acceso al Sistema</Label>
+                <p className="text-[10px] text-blue-700">Crea un usuario usando el email y RUT como clave inicial.</p>
+              </div>
+              <Switch 
+                checked={approveEnableAccess}
+                onCheckedChange={setApproveEnableAccess}
+                disabled={!selectedPerson?.email}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="mt-4 gap-2 flex-col sm:flex-row">
+            <Button variant="ghost" onClick={() => { setIsApproveOpen(false); setSelectedPerson(null); }} className="rounded-xl font-bold uppercase text-xs">
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleApprove}
+              disabled={isPending || !approvePositionId}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl px-6 font-black uppercase text-xs"
+            >
+              {isPending ? 'Aprobando...' : 'Aprobar e Incorporar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+

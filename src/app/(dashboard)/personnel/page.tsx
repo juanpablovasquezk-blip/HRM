@@ -11,7 +11,7 @@ import PersonnelTableClient from './personnel-table-client';
 export default async function PersonnelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'all' }>;
+  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'all' }>;
 }) {
   const params = await searchParams;
   const supabase = await createClient();
@@ -44,10 +44,13 @@ export default async function PersonnelPage({
 
   const status = params.status || 'active';
   if (status === 'active') {
-    query = query.eq('is_active', true);
+    query = query.eq('is_active', true).or('onboarding_status.is.null,onboarding_status.eq.approved');
   } else if (status === 'inactive') {
-    query = query.eq('is_active', false);
+    query = query.eq('is_active', false).or('onboarding_status.is.null,onboarding_status.eq.approved,onboarding_status.eq.rejected');
+  } else if (status === 'pending') {
+    query = query.eq('onboarding_status', 'pending');
   }
+
 
   if (positionIds.length > 0) {
     query = query.in('main_position', positionIds);
@@ -68,7 +71,8 @@ export default async function PersonnelPage({
     query,
     supabase.from('positions').select('id, name'),
     supabase.from('companies').select('id, name').order('name'),
-    supabase.from('shifts').select('id, name')
+    supabase.from('shifts').select('id, name, start_time, end_time')
+
   ]);
 
   if (pErr || posErr || cErr || sErr) {
@@ -131,7 +135,11 @@ export default async function PersonnelPage({
             positionMap={positionMap} 
             shiftMap={shiftMap}
             canEdit={canEdit}
+            companies={companies || []}
+            positions={positions || []}
+            shifts={shifts || []}
           />
+
         </CardContent>
       </Card>
     </div>

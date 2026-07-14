@@ -1,0 +1,642 @@
+'use client';
+
+import React, { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Loader2, CheckCircle2, XCircle, Phone, Mail, User, ShieldAlert, Award, Shirt, HelpCircle } from 'lucide-react';
+import { toast } from 'sonner';
+
+interface OnboardingFormProps {
+  token: string;
+  companyName: string;
+}
+
+const CLOTHING_SIZES_LETTER = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+const PANTS_SIZES_NUMBER = ['36', '38', '40', '42', '44', '46', '48', '50', '52', '54', '56', '58'];
+const SHOE_SIZES = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47'];
+const DRIVER_LICENSES = ['B', 'C', 'D', 'A1', 'A2', 'A3', 'A4', 'A5'];
+
+// Chilean RUT formatter
+function formatRut(value: string): string {
+  const clean = value.replace(/[^0-9kK]/g, '');
+  if (clean.length <= 1) return clean;
+  
+  const body = clean.slice(0, -1);
+  const dv = clean.slice(-1).toUpperCase();
+  
+  let formatted = '';
+  for (let i = body.length - 1, j = 0; i >= 0; i--, j++) {
+    if (j > 0 && j % 3 === 0) formatted = '.' + formatted;
+    formatted = body[i] + formatted;
+  }
+  return formatted + '-' + dv;
+}
+
+// Phone formatting display (+56 9 XXXX XXXX)
+function formatChileanPhone(raw: string): string {
+  let digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('56')) digits = digits.slice(2);
+  digits = digits.slice(0, 9);
+  if (!digits) return '';
+  let out = '+56 ' + digits[0];
+  if (digits.length > 1) out += ' ' + digits.slice(1, 5);
+  if (digits.length > 5) out += ' ' + digits.slice(5);
+  return out;
+}
+
+function normalizePhone(display: string): string {
+  const digits = display.replace(/\D/g, '');
+  if (!digits) return '';
+  const local = digits.startsWith('56') ? digits.slice(2) : digits;
+  return local ? '+56' + local : '';
+}
+
+function isValidChileanPhone(display: string): boolean {
+  const digits = display.replace(/\D/g, '');
+  if (digits.startsWith('56')) return digits.length === 11 && digits[2] === '9';
+  return digits.length === 9 && digits[0] === '9';
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+}
+
+export default function OnboardingForm({ token, companyName }: OnboardingFormProps) {
+  const [isPending, startTransition] = useTransition();
+  const [isSuccess, setIsSuccess] = useState(false);
+
+  // Form states
+  const [firstName, setFirstName] = useState('');
+  const [lastNameFather, setLastNameFather] = useState('');
+  const [lastNameMother, setLastNameMother] = useState('');
+  const [rut, setRut] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [emailDisplay, setEmailDisplay] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
+  
+  const [phoneDisplay, setPhoneDisplay] = useState('');
+  const [phoneTouched, setPhoneTouched] = useState(false);
+
+  // Address
+  const [addressStreet, setAddressStreet] = useState('');
+  const [addressCity, setAddressCity] = useState('');
+  const [addressRegion, setAddressRegion] = useState('');
+  const [addressComuna, setAddressComuna] = useState('');
+
+  // Emergency contact
+  const [emergencyName, setEmergencyName] = useState('');
+  const [emergencyRelationship, setEmergencyRelationship] = useState('');
+  const [emergencyPhone, setEmergencyPhone] = useState('');
+
+  // Tallas de ropa
+  const [clothingTshirt, setClothingTshirt] = useState('');
+  const [clothingPolar, setClothingPolar] = useState('');
+  const [clothingPantsLetter, setClothingPantsLetter] = useState('');
+  const [clothingPantsNumber, setClothingPantsNumber] = useState('');
+  const [clothingShoe, setClothingShoe] = useState('');
+  const [clothingParka, setClothingParka] = useState('');
+  const [clothingOverall, setClothingOverall] = useState('');
+
+  // Licencias
+  const [selectedLicenses, setSelectedLicenses] = useState<string[]>([]);
+
+  // Validation results
+  const emailValid = !emailDisplay || isValidEmail(emailDisplay);
+  const phoneValid = !phoneDisplay || isValidChileanPhone(phoneDisplay);
+  const emergencyPhoneValid = !emergencyPhone || isValidChileanPhone(emergencyPhone);
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (!raw.replace(/\D/g, '')) { setPhoneDisplay(''); return; }
+    setPhoneDisplay(formatChileanPhone(raw));
+  };
+
+  const handleEmergencyPhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (!raw.replace(/\D/g, '')) { setEmergencyPhone(''); return; }
+    setEmergencyPhone(formatChileanPhone(raw));
+  };
+
+  const handleRutChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setRut(formatRut(raw));
+  };
+
+  const handleLicenseToggle = (license: string) => {
+    setSelectedLicenses(prev => 
+      prev.includes(license) 
+        ? prev.filter(l => l !== license) 
+        : [...prev, license]
+    );
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!firstName || !lastNameFather || !rut || !birthDate) {
+      toast.error('Por favor, completa todos los campos requeridos');
+      return;
+    }
+
+    if (emailDisplay && !isValidEmail(emailDisplay)) {
+      setEmailTouched(true);
+      toast.error('El correo electrónico no es válido');
+      return;
+    }
+
+    if (phoneDisplay && !isValidChileanPhone(phoneDisplay)) {
+      setPhoneTouched(true);
+      toast.error('El número de teléfono no es válido');
+      return;
+    }
+
+    if (emergencyPhone && !isValidChileanPhone(emergencyPhone)) {
+      toast.error('El teléfono de contacto de emergencia no es válido');
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        const response = await fetch('/api/onboarding', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            token,
+            personalData: {
+              first_name: firstName,
+              last_name_father: lastNameFather,
+              last_name_mother: lastNameMother,
+              rut,
+              birth_date: birthDate,
+              email: emailDisplay,
+              phone: normalizePhone(phoneDisplay),
+              address_street: addressStreet,
+              address_city: addressCity,
+              address_region: addressRegion,
+              address_comuna: addressComuna,
+              
+              emergency_contact_name: emergencyName,
+              emergency_contact_relationship: emergencyRelationship,
+              emergency_contact_phone: normalizePhone(emergencyPhone),
+
+              clothing_tshirt_size: clothingTshirt,
+              clothing_polar_size: clothingPolar,
+              clothing_pants_size_letter: clothingPantsLetter,
+              clothing_pants_size_number: clothingPantsNumber,
+              clothing_shoe_size: clothingShoe,
+              clothing_parka_size: clothingParka,
+              clothing_overall_size: clothingOverall,
+
+              driver_licenses: selectedLicenses
+            }
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          toast.error(result.error || 'Ocurrió un error al enviar la ficha');
+        } else {
+          toast.success('Ficha enviada con éxito');
+          setIsSuccess(true);
+        }
+      } catch (err: any) {
+        console.error(err);
+        toast.error('Error de red al enviar la ficha. Reintenta.');
+      }
+    });
+  };
+
+  if (isSuccess) {
+    return (
+      <Card className="border-none shadow-2xl rounded-3xl overflow-hidden bg-white dark:bg-slate-900">
+        <CardContent className="p-8 text-center space-y-6">
+          <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-500 dark:bg-emerald-950/30 dark:text-emerald-400">
+            <CheckCircle2 className="h-8 w-8" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-black uppercase tracking-tight text-slate-950 dark:text-slate-50">¡Ficha Enviada!</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto">
+              Tus datos han sido registrados en la plataforma de <strong>{companyName}</strong>. Su incorporación está pendiente de la aprobación del administrador.
+            </p>
+          </div>
+          <div className="pt-4">
+            <p className="text-xs text-slate-400">Ya puedes cerrar esta pestaña.</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* 1. Información Personal */}
+      <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <User className="h-5 w-5 text-orange-500" />
+            Información Personal
+          </CardTitle>
+          <CardDescription>Completa tus datos de identificación básica.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="first_name">Nombres *</Label>
+              <Input 
+                id="first_name" 
+                value={firstName} 
+                onChange={e => setFirstName(e.target.value)} 
+                required 
+                placeholder="JUAN ANTONIO" 
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="last_name_father">Apellido Paterno *</Label>
+              <Input 
+                id="last_name_father" 
+                value={lastNameFather} 
+                onChange={e => setLastNameFather(e.target.value)} 
+                required 
+                placeholder="PÉREZ" 
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="last_name_mother">Apellido Materno</Label>
+              <Input 
+                id="last_name_mother" 
+                value={lastNameMother} 
+                onChange={e => setLastNameMother(e.target.value)} 
+                placeholder="GARCÍA" 
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="rut">RUT *</Label>
+              <Input 
+                id="rut" 
+                value={rut} 
+                onChange={handleRutChange} 
+                required 
+                placeholder="12.345.678-9" 
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="birth_date">Fecha de Nacimiento *</Label>
+              <Input 
+                id="birth_date" 
+                type="date" 
+                value={birthDate} 
+                onChange={e => setBirthDate(e.target.value)} 
+                required 
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="email">Correo Electrónico (Opcional)</Label>
+              <div className="relative">
+                <Input 
+                  id="email" 
+                  type="email" 
+                  value={emailDisplay} 
+                  onChange={e => setEmailDisplay(e.target.value)} 
+                  onBlur={() => setEmailTouched(true)}
+                  placeholder="juan.perez@empresa.com" 
+                  className={`h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500 pr-10 ${
+                    emailTouched && emailDisplay ? (emailValid ? 'border-emerald-500' : 'border-red-500') : ''
+                  }`}
+                />
+                {emailTouched && emailDisplay && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {emailValid ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <XCircle className="h-4 w-4 text-red-500" />}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="phone">Teléfono (WhatsApp)</Label>
+              <div className="relative">
+                <Input 
+                  id="phone" 
+                  value={phoneDisplay} 
+                  onChange={handlePhoneChange} 
+                  onBlur={() => setPhoneTouched(true)}
+                  placeholder="+56 9 1234 5678" 
+                  className={`h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500 pr-10 ${
+                    phoneTouched && phoneDisplay ? (phoneValid ? 'border-emerald-500' : 'border-red-500') : ''
+                  }`}
+                />
+                {phoneTouched && phoneDisplay && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {phoneValid ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <XCircle className="h-4 w-4 text-red-500" />}
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-400">Formato: +56 9 XXXX XXXX</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 2. Dirección */}
+      <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <Mail className="h-5 w-5 text-orange-500" />
+            Dirección Habitual
+          </CardTitle>
+          <CardDescription>Especifica tu lugar de residencia actual.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="address_street">Calle y Número *</Label>
+            <Textarea 
+              id="address_street" 
+              value={addressStreet} 
+              onChange={e => setAddressStreet(e.target.value)} 
+              required
+              placeholder="AV. PROVIDENCIA 1234 DEPT. 45" 
+              rows={2}
+              className="rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="address_comuna">Comuna *</Label>
+              <Input 
+                id="address_comuna" 
+                value={addressComuna} 
+                onChange={e => setAddressComuna(e.target.value)} 
+                required
+                placeholder="PROVIDENCIA" 
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="address_city">Ciudad *</Label>
+              <Input 
+                id="address_city" 
+                value={addressCity} 
+                onChange={e => setAddressCity(e.target.value)} 
+                required
+                placeholder="SANTIAGO" 
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="address_region">Región *</Label>
+              <Input 
+                id="address_region" 
+                value={addressRegion} 
+                onChange={e => setAddressRegion(e.target.value)} 
+                required
+                placeholder="METROPOLITANA" 
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 3. Contacto de Emergencia */}
+      <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-orange-500" />
+            Contacto de Emergencia
+          </CardTitle>
+          <CardDescription>¿A quién avisar en caso de accidente o acontecimiento?</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="emergency_name">Nombre Completo *</Label>
+              <Input 
+                id="emergency_name" 
+                value={emergencyName} 
+                onChange={e => setEmergencyName(e.target.value)} 
+                required
+                placeholder="MARÍA GÓMEZ" 
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="emergency_relationship">Parentesco *</Label>
+              <Input 
+                id="emergency_relationship" 
+                value={emergencyRelationship} 
+                onChange={e => setEmergencyRelationship(e.target.value)} 
+                required
+                placeholder="CÓNYUGE / MADRE / HERMANO" 
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="emergency_phone">Teléfono de Contacto *</Label>
+              <div className="relative">
+                <Input 
+                  id="emergency_phone" 
+                  value={emergencyPhone} 
+                  onChange={handleEmergencyPhoneChange} 
+                  required
+                  placeholder="+56 9 8765 4321" 
+                  className={`h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500 pr-10 ${
+                    emergencyPhone ? (emergencyPhoneValid ? 'border-emerald-500' : 'border-red-500') : ''
+                  }`}
+                />
+                {emergencyPhone && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {emergencyPhoneValid ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <XCircle className="h-4 w-4 text-red-500" />}
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-400">Formato: +56 9 XXXX XXXX</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 4. Tallas de Ropa */}
+      <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <Shirt className="h-5 w-5 text-orange-500" />
+            Tallas de Ropa y Calzado
+          </CardTitle>
+          <CardDescription>Selecciona tus tallas para la asignación de uniforme corporativo.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Polera */}
+            <div className="space-y-1.5">
+              <Label htmlFor="clothing_tshirt">Talla de Polera *</Label>
+              <Select value={clothingTshirt} onValueChange={(val) => setClothingTshirt(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar talla" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLOTHING_SIZES_LETTER.map(size => (
+                    <SelectItem key={size} value={size}>{size}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Polar */}
+            <div className="space-y-1.5">
+              <Label htmlFor="clothing_polar">Talla de Polar *</Label>
+              <Select value={clothingPolar} onValueChange={(val) => setClothingPolar(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar talla" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLOTHING_SIZES_LETTER.map(size => (
+                    <SelectItem key={size} value={size}>{size}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Pantalon Letra */}
+            <div className="space-y-1.5">
+              <Label htmlFor="clothing_pants_letter">Talla de Pantalón (Letra) *</Label>
+              <Select value={clothingPantsLetter} onValueChange={(val) => setClothingPantsLetter(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar talla" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLOTHING_SIZES_LETTER.map(size => (
+                    <SelectItem key={size} value={size}>{size}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Pantalon Numero */}
+            <div className="space-y-1.5">
+              <Label htmlFor="clothing_pants_number">Talla de Pantalón (Número) *</Label>
+              <Select value={clothingPantsNumber} onValueChange={(val) => setClothingPantsNumber(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar talla" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PANTS_SIZES_NUMBER.map(size => (
+                    <SelectItem key={size} value={size}>{size}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Zapatos */}
+            <div className="space-y-1.5">
+              <Label htmlFor="clothing_shoe">Talla de Zapatos *</Label>
+              <Select value={clothingShoe} onValueChange={(val) => setClothingShoe(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar talla" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SHOE_SIZES.map(size => (
+                    <SelectItem key={size} value={size}>{size}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Parka */}
+            <div className="space-y-1.5">
+              <Label htmlFor="clothing_parka">Talla de Parka *</Label>
+              <Select value={clothingParka} onValueChange={(val) => setClothingParka(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar talla" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLOTHING_SIZES_LETTER.map(size => (
+                    <SelectItem key={size} value={size}>{size}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Jardinera Térmica */}
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="clothing_overall">Talla de Jardinera Térmica *</Label>
+              <Select value={clothingOverall} onValueChange={(val) => setClothingOverall(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar talla" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLOTHING_SIZES_LETTER.map(size => (
+                    <SelectItem key={size} value={size}>{size}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 5. Licencias de Conducir */}
+      <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <Award className="h-5 w-5 text-orange-500" />
+            Licencias de Conducir (Opcional)
+          </CardTitle>
+          <CardDescription>Selecciona las clases de licencias de conducir vigentes que posees.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {DRIVER_LICENSES.map(license => (
+              <div key={license} className="flex items-center space-x-2 p-2 rounded-lg bg-slate-50/80 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700">
+                <Checkbox 
+                  id={`lic-${license}`} 
+                  checked={selectedLicenses.includes(license)}
+                  onCheckedChange={() => handleLicenseToggle(license)}
+                  className="rounded border-slate-300 text-orange-600 focus:ring-orange-500"
+                />
+                <Label htmlFor={`lic-${license}`} className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer w-full py-1">
+                  Clase {license}
+                </Label>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Submit Button */}
+      <Button 
+        type="submit" 
+        disabled={isPending}
+        className="w-full h-12 bg-slate-900 hover:bg-slate-800 dark:bg-orange-600 dark:hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-wider text-xs shadow-lg shadow-slate-900/10 transition-all flex items-center justify-center gap-2"
+      >
+        {isPending ? (
+          <>
+            <Loader2 className="h-4 w-5 animate-spin" />
+            Enviando Ficha...
+          </>
+        ) : (
+          'Enviar Ficha de Ingreso'
+        )}
+      </Button>
+    </form>
+  );
+}

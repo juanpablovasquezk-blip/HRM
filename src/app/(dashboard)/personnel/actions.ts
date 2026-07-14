@@ -84,6 +84,11 @@ export async function getPersonnel(
   return { data: data as Personnel, error: null };
 }
 
+function toUpper(val: any): any {
+  if (typeof val === 'string') return val.trim().toUpperCase();
+  return val;
+}
+
 export async function createPersonnel(
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
@@ -94,13 +99,13 @@ export async function createPersonnel(
 
   const personnelData = {
     company_id: formData.get('company_id') as string,
-    first_name: formData.get('first_name') as string,
-    last_name_father: formData.get('last_name_father') as string,
-    last_name_mother: (formData.get('last_name_mother') as string) || '',
-    rut: formData.get('rut') as string,
-    email: (formData.get('email') as string) || null,
+    first_name: toUpper(formData.get('first_name')),
+    last_name_father: toUpper(formData.get('last_name_father')),
+    last_name_mother: toUpper(formData.get('last_name_mother')) || '',
+    rut: toUpper(formData.get('rut')),
+    email: (formData.get('email') as string)?.trim().toLowerCase() || null,
     birth_date: formData.get('birth_date') as string,
-    phone: (formData.get('phone') as string) || '',
+    phone: toUpper(formData.get('phone')) || '',
     main_position: formData.get('main_position') as string,
     secondary_positions: secondaryPositions ? secondaryPositions.split(',').map(s => s.trim()).filter(Boolean) : [],
     driver_licenses: driverLicenses ? driverLicenses.split(',').map(s => s.trim()).filter(Boolean) : [],
@@ -113,10 +118,23 @@ export async function createPersonnel(
     has_special_contract: formData.get('has_special_contract') === 'true',
     is_active: formData.get('is_active') === 'true',
     address: {
-      street: (formData.get('address_street') as string) || '',
-      city: (formData.get('address_city') as string) || '',
-      region: (formData.get('address_region') as string) || '',
+      street: toUpper(formData.get('address_street')) || '',
+      city: toUpper(formData.get('address_city')) || '',
+      region: toUpper(formData.get('address_region')) || '',
+      comuna: toUpper(formData.get('address_comuna')) || '',
     },
+    // Emergency Contact
+    emergency_contact_name: toUpper(formData.get('emergency_contact_name')) || null,
+    emergency_contact_relationship: toUpper(formData.get('emergency_contact_relationship')) || null,
+    emergency_contact_phone: toUpper(formData.get('emergency_contact_phone')) || null,
+    // Clothing Sizes
+    clothing_tshirt_size: toUpper(formData.get('clothing_tshirt_size')) || null,
+    clothing_polar_size: toUpper(formData.get('clothing_polar_size')) || null,
+    clothing_pants_size_letter: toUpper(formData.get('clothing_pants_size_letter')) || null,
+    clothing_pants_size_number: toUpper(formData.get('clothing_pants_size_number')) || null,
+    clothing_shoe_size: toUpper(formData.get('clothing_shoe_size')) || null,
+    clothing_parka_size: toUpper(formData.get('clothing_parka_size')) || null,
+    clothing_overall_size: toUpper(formData.get('clothing_overall_size')) || null,
   };
 
   const todayStr = new Date().toLocaleDateString('sv');
@@ -156,13 +174,13 @@ export async function updatePersonnel(
 
   const updateData = {
     company_id: formData.get('company_id') as string,
-    first_name: formData.get('first_name') as string,
-    last_name_father: formData.get('last_name_father') as string,
-    last_name_mother: (formData.get('last_name_mother') as string) || '',
-    rut: formData.get('rut') as string,
-    email: (formData.get('email') as string) || null,
+    first_name: toUpper(formData.get('first_name')),
+    last_name_father: toUpper(formData.get('last_name_father')),
+    last_name_mother: toUpper(formData.get('last_name_mother')) || '',
+    rut: toUpper(formData.get('rut')),
+    email: (formData.get('email') as string)?.trim().toLowerCase() || null,
     birth_date: formData.get('birth_date') as string,
-    phone: (formData.get('phone') as string) || '',
+    phone: toUpper(formData.get('phone')) || '',
     main_position: formData.get('main_position') as string,
     secondary_positions: secondaryPositions ? secondaryPositions.split(',').map(s => s.trim()).filter(Boolean) : [],
     driver_licenses: driverLicenses ? driverLicenses.split(',').map(s => s.trim()).filter(Boolean) : [],
@@ -170,21 +188,36 @@ export async function updatePersonnel(
     avoids_night: formData.get('avoids_night') === 'true',
     fixed_shift_id: (formData.get('fixed_shift_id') as string) || null,
     rotation_pattern: (formData.get('rotation_pattern') as string) || '5x2',
+    parent_personnel_id: formData.get('parent_personnel_id') || undefined,
     hire_date: (formData.get('hire_date') as string) || null,
     termination_date: (formData.get('termination_date') as string) || null,
     has_special_contract: formData.get('has_special_contract') === 'true',
     is_active: formData.get('is_active') === 'true',
     address: {
-      street: (formData.get('address_street') as string) || '',
-      city: (formData.get('address_city') as string) || '',
-      region: (formData.get('address_region') as string) || '',
+      street: toUpper(formData.get('address_street')) || '',
+      city: toUpper(formData.get('address_city')) || '',
+      region: toUpper(formData.get('address_region')) || '',
+      comuna: toUpper(formData.get('address_comuna')) || '',
     },
+    // Emergency Contact
+    emergency_contact_name: toUpper(formData.get('emergency_contact_name')) || null,
+    emergency_contact_relationship: toUpper(formData.get('emergency_contact_relationship')) || null,
+    emergency_contact_phone: toUpper(formData.get('emergency_contact_phone')) || null,
+    // Clothing Sizes
+    clothing_tshirt_size: toUpper(formData.get('clothing_tshirt_size')) || null,
+    clothing_polar_size: toUpper(formData.get('clothing_polar_size')) || null,
+    clothing_pants_size_letter: toUpper(formData.get('clothing_pants_size_letter')) || null,
+    clothing_pants_size_number: toUpper(formData.get('clothing_pants_size_number')) || null,
+    clothing_shoe_size: toUpper(formData.get('clothing_shoe_size')) || null,
+    clothing_parka_size: toUpper(formData.get('clothing_parka_size')) || null,
+    clothing_overall_size: toUpper(formData.get('clothing_overall_size')) || null,
   };
 
   const todayStr = new Date().toLocaleDateString('sv');
   if (updateData.termination_date && updateData.termination_date <= todayStr) {
     updateData.is_active = false;
   }
+
 
   // Check previous state for user ban logic
   const { data: previousPerson } = await supabase.from('personnel').select('user_id, is_active').eq('id', id).single();
@@ -528,4 +561,143 @@ export async function deleteDocumentAction(
   safeRevalidatePath('/documents');
   if (doc?.personnel_id) safeRevalidatePath(`/personnel/${doc.personnel_id}`);
   return { success: true, error: null };
+}
+
+// Generar token de invitación
+export async function createOnboardingToken(
+  companyId: string
+): Promise<{ success: boolean; token: string | null; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7); // Expiración en 7 días
+
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    const { data, error } = await supabase
+      .from('onboarding_tokens')
+      .insert({
+        company_id: companyId,
+        expires_at: expiresAt.toISOString(),
+        created_by: user?.id || null
+      })
+      .select('token')
+      .single();
+
+    if (error) throw error;
+    return { success: true, token: data.token, error: null };
+  } catch (error: any) {
+    console.error('Error creating onboarding token:', error);
+    return { success: false, token: null, error: error.message };
+  }
+}
+
+// Listar postulaciones pendientes
+export async function listPendingOnboarding(
+  companyId?: string
+): Promise<{ data: Personnel[]; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    let query = supabase
+      .from('personnel')
+      .select('*')
+      .eq('onboarding_status', 'pending');
+
+    if (companyId) {
+      query = query.eq('company_id', companyId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return { data: data || [], error: null };
+  } catch (error: any) {
+    console.error('Error listing pending onboarding:', error);
+    return { data: [], error: error.message };
+  }
+}
+
+// Aprobar postulación asignando cargo y rotación
+export async function approveOnboarding(
+  personnelId: string,
+  mainPositionId: string,
+  rotationPattern: string,
+  fixedShiftId?: string | null,
+  enableAccess?: boolean
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    const admin = createAdminClient();
+
+    // 1. Fetch postulation details
+    const { data: personnel, error: fetchErr } = await supabase
+      .from('personnel')
+      .select('*')
+      .eq('id', personnelId)
+      .single();
+
+    if (fetchErr || !personnel) throw new Error('No se encontró la ficha de postulación');
+
+    // 2. Update status and configure roster fields
+    const { error: updateErr } = await admin
+      .from('personnel')
+      .update({
+        onboarding_status: 'approved',
+        is_active: true,
+        main_position: mainPositionId,
+        rotation_pattern: rotationPattern,
+        fixed_shift_id: fixedShiftId || null,
+        hire_date: new Date().toISOString().split('T')[0] // Set hire date to today
+      })
+      .eq('id', personnelId);
+
+    if (updateErr) throw updateErr;
+
+    // 3. Create system access if email is present and requested
+    if (enableAccess && personnel.email) {
+      let role: 'SUPERVISOR' | 'USER' = 'USER';
+      const { data: pos } = await supabase
+        .from('positions')
+        .select('name')
+        .eq('id', mainPositionId)
+        .single();
+      
+      if (pos?.name.toUpperCase().includes('SUPERVISOR')) {
+        role = 'SUPERVISOR';
+      }
+      
+      await enablePersonnelAccess(personnelId, personnel.email, role);
+    }
+
+    safeRevalidatePath('/personnel');
+    safeRevalidatePath('/dashboard');
+    return { success: true, error: null };
+  } catch (error: any) {
+    console.error('Error approving onboarding:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Rechazar postulación
+export async function rejectOnboarding(
+  personnelId: string
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const admin = createAdminClient();
+    const { error } = await admin
+      .from('personnel')
+      .update({
+        onboarding_status: 'rejected',
+        is_active: false
+      })
+      .eq('id', personnelId);
+
+    if (error) throw error;
+
+    safeRevalidatePath('/personnel');
+    return { success: true, error: null };
+  } catch (error: any) {
+    console.error('Error rejecting onboarding:', error);
+    return { success: false, error: error.message };
+  }
 }
