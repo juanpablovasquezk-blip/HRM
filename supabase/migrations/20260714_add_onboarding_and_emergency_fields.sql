@@ -23,10 +23,12 @@ CREATE TABLE IF NOT EXISTS public.onboarding_tokens (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
   token UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
+  created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
   expires_at TIMESTAMPTZ NOT NULL,
   used_at TIMESTAMPTZ DEFAULT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
 
 -- Index for quick lookup
 CREATE INDEX IF NOT EXISTS idx_onboarding_tokens_token ON public.onboarding_tokens(token);
