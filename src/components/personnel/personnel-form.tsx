@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect } from 'react';
+
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,6 +46,25 @@ const ISAPRE_LIST = [
   'VIDA TRES',
   'ESENCIAL'
 ];
+
+const BANK_LIST = [
+  'BANCO ESTADO',
+  'BANCO DE CHILE',
+  'BANCO SANTANDER',
+  'BANCO BCI',
+  'BANCO ITAÚ',
+  'BANCO SCOTIABANK',
+  'BANCO BICE',
+  'BANCO SECURITY',
+  'BANCO CONSORCIO',
+  'BANCO INTERNACIONAL',
+  'BANCO FALABELLA',
+  'BANCO RIPLEY',
+  'PREPAGO LOS HÉROES',
+  'PREPAGO TENPO',
+  'PREPAGO MACH'
+];
+
 
 
 
@@ -100,6 +120,21 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const [isPrio04, setIsPrio04] = useState(personnel?.rotation_pattern?.includes('PRIO-04') || false);
   const [dropdownValue, setDropdownValue] = useState<string>('');
   const [healthSystem, setHealthSystem] = useState(personnel?.health_system || '');
+  
+  // RUT, Bank Details & Gender
+  const [rutValue, setRutValue] = useState(personnel?.rut || '');
+  const [bankAccountType, setBankAccountType] = useState(personnel?.bank_account_type || '');
+  const [bankName, setBankName] = useState(personnel?.bank_name || '');
+  const [bankAccountNumber, setBankAccountNumber] = useState(personnel?.bank_account_number || '');
+
+  useEffect(() => {
+    if (bankAccountType === 'RUT') {
+      setBankName('BANCO ESTADO');
+      const body = rutValue.replace(/[^0-9kK]/g, '').slice(0, -1).replace(/\D/g, '');
+      setBankAccountNumber(body);
+    }
+  }, [bankAccountType, rutValue]);
+
 
 
   // ── Phone controlled state ─────────────────────────────────────────────────
@@ -164,7 +199,12 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
       afp: personnel?.afp || '',
       health_system: personnel?.health_system || '',
       isapre: personnel?.isapre || '',
+      gender: personnel?.gender || '',
+      bank_account_type: personnel?.bank_account_type || '',
+      bank_name: personnel?.bank_name || '',
+      bank_account_number: personnel?.bank_account_number || '',
     };
+
 
   });
 
@@ -183,6 +223,13 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
     formData.set('is_active', String(isActive));
     formData.set('secondary_positions', selectedSecondary.join(','));
     formData.set('enable_access', String(enableAccess));
+
+    // Manually set bank/health fields to avoid disabled fields being omitted
+    formData.set('health_system', healthSystem);
+    formData.set('bank_account_type', bankAccountType);
+    formData.set('bank_name', bankName);
+    formData.set('bank_account_number', bankAccountNumber);
+
 
     // Block submission if validations fail
     if (phoneDisplay && !isValidChileanPhone(phoneDisplay)) {
@@ -243,8 +290,9 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
           </div>
           <div className="space-y-2">
             <Label htmlFor="rut">RUT *</Label>
-            <Input id="rut" name="rut" defaultValue={initialValues.rut} required placeholder="12.345.678-9" />
+            <Input id="rut" name="rut" value={rutValue} onChange={e => setRutValue(e.target.value)} required placeholder="12.345.678-9" />
           </div>
+
           <div className="space-y-2">
             <Label htmlFor="email">
               <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />Email (para acceso al sistema)</span>
@@ -310,6 +358,18 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
               : <p className="text-xs text-muted-foreground">Formato: +56 9 XXXX XXXX — solo números chilenos</p>
             }
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="gender">Género *</Label>
+            <select id="gender" name="gender" defaultValue={initialValues.gender} required
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar género</option>
+              <option value="MASCULINO">MASCULINO</option>
+              <option value="FEMENINO">FEMENINO</option>
+              <option value="OTRO">OTRO</option>
+            </select>
+          </div>
+
           
           <div className="flex items-center justify-between p-4 rounded-xl border border-blue-100 bg-blue-50/30 md:col-span-2">
             <div className="space-y-0.5">
@@ -406,6 +466,58 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
               </select>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Datos Bancarios */}
+      <Card className="border-slate-200/60 dark:border-slate-800 shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base">Datos Bancarios</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="bank_account_type">Tipo de Cuenta</Label>
+            <select id="bank_account_type" name="bank_account_type" value={bankAccountType} onChange={e => setBankAccountType(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar tipo</option>
+              <option value="VISTA">VISTA</option>
+              <option value="CORRIENTE">CORRIENTE</option>
+              <option value="RUT">RUT (CUENTA RUT)</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="bank_name">Banco</Label>
+            <select 
+              id="bank_name" 
+              name="bank_name" 
+              value={bankName} 
+              onChange={e => setBankName(e.target.value)}
+              disabled={bankAccountType === 'RUT'}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-80"
+            >
+              <option value="">Seleccionar banco</option>
+              {BANK_LIST.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="bank_account_number">Número de Cuenta</Label>
+            <Input 
+              id="bank_account_number" 
+              name="bank_account_number" 
+              type="text" 
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={bankAccountNumber} 
+              onChange={e => setBankAccountNumber(e.target.value.replace(/\D/g, ''))}
+              readOnly={bankAccountType === 'RUT'}
+              placeholder="123456789" 
+            />
+            {bankAccountType === 'RUT' && (
+              <p className="text-[10px] text-blue-600 font-medium">Autocompletado con el RUT.</p>
+            )}
+          </div>
         </CardContent>
       </Card>
 

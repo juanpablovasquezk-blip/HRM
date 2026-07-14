@@ -23,6 +23,13 @@ ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS afp TEXT;
 ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS health_system TEXT;
 ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS isapre TEXT;
 
+-- Add Gender and Bank details fields
+ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS gender TEXT;
+ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS bank_account_type TEXT;
+ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS bank_name TEXT;
+ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS bank_account_number TEXT;
+
+
 
 -- Create onboarding tokens table
 CREATE TABLE IF NOT EXISTS public.onboarding_tokens (

@@ -78,7 +78,14 @@ export interface Personnel {
   afp?: string | null;
   health_system?: string | null;
   isapre?: string | null;
+
+  // Gender & Bank Details
+  gender?: string | null;
+  bank_account_type?: string | null;
+  bank_name?: string | null;
+  bank_account_number?: string | null;
 }
+
 
 
 export interface PersonnelAddress {

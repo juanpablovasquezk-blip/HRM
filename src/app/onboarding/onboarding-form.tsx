@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useTransition } from 'react';
+import React, { useState, useTransition, useEffect } from 'react';
+
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +17,8 @@ import {
   SelectValue 
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, CheckCircle2, XCircle, Phone, Mail, User, ShieldAlert, Award, Shirt, HelpCircle, ShieldCheck } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Phone, Mail, User, ShieldAlert, Award, Shirt, HelpCircle, ShieldCheck, CreditCard } from 'lucide-react';
+
 
 import { toast } from 'sonner';
 
@@ -49,6 +51,25 @@ const ISAPRE_LIST = [
   'VIDA TRES',
   'ESENCIAL'
 ];
+
+const BANK_LIST = [
+  'BANCO ESTADO',
+  'BANCO DE CHILE',
+  'BANCO SANTANDER',
+  'BANCO BCI',
+  'BANCO ITAÚ',
+  'BANCO SCOTIABANK',
+  'BANCO BICE',
+  'BANCO SECURITY',
+  'BANCO CONSORCIO',
+  'BANCO INTERNACIONAL',
+  'BANCO FALABELLA',
+  'BANCO RIPLEY',
+  'PREPAGO LOS HÉROES',
+  'PREPAGO TENPO',
+  'PREPAGO MACH'
+];
+
 
 
 // Chilean RUT formatter
@@ -140,6 +161,21 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   const [healthSystem, setHealthSystem] = useState('');
   const [isapre, setIsapre] = useState('');
 
+  // Género y Datos Bancarios
+  const [gender, setGender] = useState('');
+  const [bankAccountType, setBankAccountType] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+
+  useEffect(() => {
+    if (bankAccountType === 'RUT') {
+      setBankName('BANCO ESTADO');
+      const body = rut.replace(/[^0-9kK]/g, '').slice(0, -1).replace(/\D/g, '');
+      setBankAccountNumber(body);
+    }
+  }, [bankAccountType, rut]);
+
+
 
   // Validation results
   const emailValid = !emailDisplay || isValidEmail(emailDisplay);
@@ -174,7 +210,7 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!firstName || !lastNameFather || !lastNameMother || !rut || !birthDate || !emailDisplay || !phoneDisplay || !afp || !healthSystem) {
+    if (!firstName || !lastNameFather || !lastNameMother || !rut || !birthDate || !emailDisplay || !phoneDisplay || !afp || !healthSystem || !gender || !bankAccountType || !bankName || !bankAccountNumber) {
       toast.error('Por favor, completa todos los campos requeridos');
       return;
     }
@@ -241,8 +277,15 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
               // Social Security
               afp,
               health_system: healthSystem,
-              isapre: healthSystem === 'ISAPRE' ? isapre : null
+              isapre: healthSystem === 'ISAPRE' ? isapre : null,
+
+              // Gender & Bank Details
+              gender,
+              bank_account_type: bankAccountType,
+              bank_name: bankName,
+              bank_account_number: bankAccountNumber
             }
+
           }),
         });
 
@@ -373,7 +416,7 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
                 )}
               </div>
             </div>
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className="space-y-1.5">
               <Label htmlFor="phone">Teléfono (WhatsApp) *</Label>
               <div className="relative">
                 <Input 
@@ -394,6 +437,20 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
                 )}
               </div>
               <p className="text-[10px] text-slate-400">Formato: +56 9 XXXX XXXX</p>
+            </div>
+            
+            <div className="space-y-1.5">
+              <Label htmlFor="gender">Género *</Label>
+              <Select value={gender} onValueChange={(val) => setGender(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar género" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="MASCULINO">MASCULINO</SelectItem>
+                  <SelectItem value="FEMENINO">FEMENINO</SelectItem>
+                  <SelectItem value="OTRO">OTRO</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardContent>
@@ -523,7 +580,80 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
         </CardContent>
       </Card>
 
+      {/* Datos Bancarios */}
+      <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <CreditCard className="h-5 w-5 text-orange-500" />
+            Datos Bancarios
+          </CardTitle>
+          <CardDescription>Indica la cuenta donde deseas recibir el pago de tus remuneraciones.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Tipo de Cuenta */}
+            <div className="space-y-1.5">
+              <Label htmlFor="bank_account_type">Tipo de Cuenta *</Label>
+              <Select value={bankAccountType} onValueChange={(val) => setBankAccountType(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar tipo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="VISTA">VISTA</SelectItem>
+                  <SelectItem value="CORRIENTE">CORRIENTE</SelectItem>
+                  <SelectItem value="RUT">RUT (CUENTA RUT)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Banco */}
+            <div className="space-y-1.5">
+              <Label htmlFor="bank_name">Banco *</Label>
+              <Select 
+                value={bankName} 
+                onValueChange={(val) => setBankName(val || '')} 
+                required
+                disabled={bankAccountType === 'RUT'}
+              >
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar banco" />
+                </SelectTrigger>
+                <SelectContent>
+                  {BANK_LIST.map(item => (
+                    <SelectItem key={item} value={item}>{item}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Número de Cuenta */}
+            <div className="space-y-1.5">
+              <Label htmlFor="bank_account_number">Número de Cuenta *</Label>
+              <Input 
+                id="bank_account_number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={bankAccountNumber} 
+                onChange={e => {
+                  const val = e.target.value.replace(/\D/g, '');
+                  setBankAccountNumber(val);
+                }} 
+                required
+                readOnly={bankAccountType === 'RUT'}
+                placeholder="123456789"
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+              />
+              {bankAccountType === 'RUT' && (
+                <p className="text-[10px] text-blue-600 font-medium">Autocompletado con tu RUT sin puntos ni guión.</p>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 3. Contacto de Emergencia */}
+
 
       <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
         <CardHeader className="pb-4">

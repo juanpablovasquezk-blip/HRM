@@ -140,7 +140,14 @@ export async function createPersonnel(
     afp: toUpper(formData.get('afp')) || null,
     health_system: toUpper(formData.get('health_system')) || null,
     isapre: (formData.get('health_system') as string)?.toUpperCase() === 'ISAPRE' ? toUpper(formData.get('isapre')) : null,
+
+    // Gender & Bank Details
+    gender: toUpper(formData.get('gender')) || null,
+    bank_account_type: toUpper(formData.get('bank_account_type')) || null,
+    bank_name: toUpper(formData.get('bank_name')) || null,
+    bank_account_number: toUpper(formData.get('bank_account_number')) || null,
   };
+
 
 
   const todayStr = new Date().toLocaleDateString('sv');
@@ -222,7 +229,14 @@ export async function updatePersonnel(
     afp: toUpper(formData.get('afp')) || null,
     health_system: toUpper(formData.get('health_system')) || null,
     isapre: (formData.get('health_system') as string)?.toUpperCase() === 'ISAPRE' ? toUpper(formData.get('isapre')) : null,
+
+    // Gender & Bank Details
+    gender: toUpper(formData.get('gender')) || null,
+    bank_account_type: toUpper(formData.get('bank_account_type')) || null,
+    bank_name: toUpper(formData.get('bank_name')) || null,
+    bank_account_number: toUpper(formData.get('bank_account_number')) || null,
   };
+
 
 
   const todayStr = new Date().toLocaleDateString('sv');

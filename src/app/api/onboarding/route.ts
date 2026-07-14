@@ -55,14 +55,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Datos incompletos' }, { status: 400 });
     }
 
-    const { first_name, last_name_father, last_name_mother, rut, birth_date, email, phone, afp, health_system, isapre } = personalData;
-    if (!first_name || !last_name_father || !last_name_mother || !rut || !birth_date || !email || !phone || !afp || !health_system) {
+    const { 
+      first_name, 
+      last_name_father, 
+      last_name_mother, 
+      rut, 
+      birth_date, 
+      email, 
+      phone, 
+      afp, 
+      health_system, 
+      isapre,
+      gender,
+      bank_account_type,
+      bank_name,
+      bank_account_number
+    } = personalData;
+
+    if (!first_name || !last_name_father || !last_name_mother || !rut || !birth_date || !email || !phone || !afp || !health_system || !gender || !bank_account_type || !bank_name || !bank_account_number) {
       return NextResponse.json({ success: false, error: 'Por favor, completa todos los campos requeridos.' }, { status: 400 });
     }
 
     if (health_system === 'ISAPRE' && !isapre) {
       return NextResponse.json({ success: false, error: 'Por favor, especifica cuál es tu Isapre.' }, { status: 400 });
     }
+
 
 
 
@@ -150,8 +167,15 @@ export async function POST(request: NextRequest) {
       // Social security fields
       afp: toUpper(personalData.afp),
       health_system: toUpper(personalData.health_system),
-      isapre: personalData.health_system === 'ISAPRE' ? toUpper(personalData.isapre) : null
+      isapre: personalData.health_system === 'ISAPRE' ? toUpper(personalData.isapre) : null,
+
+      // Gender & Bank Details
+      gender: toUpper(personalData.gender),
+      bank_account_type: toUpper(personalData.bank_account_type),
+      bank_name: toUpper(personalData.bank_name),
+      bank_account_number: toUpper(personalData.bank_account_number)
     };
+
 
 
     // Insert new personnel
