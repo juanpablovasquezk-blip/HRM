@@ -55,6 +55,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Datos incompletos' }, { status: 400 });
     }
 
+    const { first_name, last_name_father, last_name_mother, rut, birth_date, email, phone } = personalData;
+    if (!first_name || !last_name_father || !last_name_mother || !rut || !birth_date || !email || !phone) {
+      return NextResponse.json({ success: false, error: 'Por favor, completa todos los campos requeridos.' }, { status: 400 });
+    }
+
+
     const supabase = createAdminClient();
     const now = new Date().toISOString();
 

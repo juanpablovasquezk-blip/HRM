@@ -146,22 +146,23 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!firstName || !lastNameFather || !rut || !birthDate) {
+    if (!firstName || !lastNameFather || !lastNameMother || !rut || !birthDate || !emailDisplay || !phoneDisplay) {
       toast.error('Por favor, completa todos los campos requeridos');
       return;
     }
 
-    if (emailDisplay && !isValidEmail(emailDisplay)) {
+    if (!isValidEmail(emailDisplay)) {
       setEmailTouched(true);
       toast.error('El correo electrónico no es válido');
       return;
     }
 
-    if (phoneDisplay && !isValidChileanPhone(phoneDisplay)) {
+    if (!isValidChileanPhone(phoneDisplay)) {
       setPhoneTouched(true);
       toast.error('El número de teléfono no es válido');
       return;
     }
+
 
     if (emergencyPhone && !isValidChileanPhone(emergencyPhone)) {
       toast.error('El teléfono de contacto de emergencia no es válido');
@@ -279,11 +280,12 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="last_name_mother">Apellido Materno</Label>
+              <Label htmlFor="last_name_mother">Apellido Materno *</Label>
               <Input 
                 id="last_name_mother" 
                 value={lastNameMother} 
                 onChange={e => setLastNameMother(e.target.value)} 
+                required
                 placeholder="GARCÍA" 
                 className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
               />
@@ -311,7 +313,7 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="email">Correo Electrónico (Opcional)</Label>
+              <Label htmlFor="email">Correo Electrónico *</Label>
               <div className="relative">
                 <Input 
                   id="email" 
@@ -319,6 +321,7 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
                   value={emailDisplay} 
                   onChange={e => setEmailDisplay(e.target.value)} 
                   onBlur={() => setEmailTouched(true)}
+                  required
                   placeholder="juan.perez@empresa.com" 
                   className={`h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500 pr-10 ${
                     emailTouched && emailDisplay ? (emailValid ? 'border-emerald-500' : 'border-red-500') : ''
@@ -332,13 +335,14 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
               </div>
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="phone">Teléfono (WhatsApp)</Label>
+              <Label htmlFor="phone">Teléfono (WhatsApp) *</Label>
               <div className="relative">
                 <Input 
                   id="phone" 
                   value={phoneDisplay} 
                   onChange={handlePhoneChange} 
                   onBlur={() => setPhoneTouched(true)}
+                  required
                   placeholder="+56 9 1234 5678" 
                   className={`h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500 pr-10 ${
                     phoneTouched && phoneDisplay ? (phoneValid ? 'border-emerald-500' : 'border-red-500') : ''
@@ -355,6 +359,7 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
           </div>
         </CardContent>
       </Card>
+
 
       {/* 2. Dirección */}
       <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
