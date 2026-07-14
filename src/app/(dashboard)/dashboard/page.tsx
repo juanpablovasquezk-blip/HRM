@@ -11,10 +11,14 @@ import { BirthdaysCard } from '@/components/dashboard/birthdays-card';
 import { MonthlyFinalAbsencesCard } from '@/components/dashboard/monthly-final-absences-card';
 
 import { createClient } from '@/lib/supabase/server';
+import { deactivateExpiredPersonnel } from '@/lib/deactivate-expired';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
+  // Auto-deactivate personnel whose termination date has arrived (fire-and-forget)
+  deactivateExpiredPersonnel().catch(() => {});
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
