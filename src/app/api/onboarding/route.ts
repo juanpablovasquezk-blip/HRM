@@ -55,10 +55,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Datos incompletos' }, { status: 400 });
     }
 
-    const { first_name, last_name_father, last_name_mother, rut, birth_date, email, phone } = personalData;
-    if (!first_name || !last_name_father || !last_name_mother || !rut || !birth_date || !email || !phone) {
+    const { first_name, last_name_father, last_name_mother, rut, birth_date, email, phone, afp, health_system, isapre } = personalData;
+    if (!first_name || !last_name_father || !last_name_mother || !rut || !birth_date || !email || !phone || !afp || !health_system) {
       return NextResponse.json({ success: false, error: 'Por favor, completa todos los campos requeridos.' }, { status: 400 });
     }
+
+    if (health_system === 'ISAPRE' && !isapre) {
+      return NextResponse.json({ success: false, error: 'Por favor, especifica cuál es tu Isapre.' }, { status: 400 });
+    }
+
 
 
     const supabase = createAdminClient();
@@ -140,8 +145,14 @@ export async function POST(request: NextRequest) {
 
       // Onboarding status and active state
       onboarding_status: 'pending',
-      is_active: false // Admin must approve to set active
+      is_active: false, // Admin must approve to set active
+
+      // Social security fields
+      afp: toUpper(personalData.afp),
+      health_system: toUpper(personalData.health_system),
+      isapre: personalData.health_system === 'ISAPRE' ? toUpper(personalData.isapre) : null
     };
+
 
     // Insert new personnel
     const { error: insertError } = await supabase

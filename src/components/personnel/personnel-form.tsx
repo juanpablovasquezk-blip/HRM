@@ -26,6 +26,27 @@ const CLOTHING_SIZES_LETTER = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
 const PANTS_SIZES_NUMBER = ['36', '38', '40', '42', '44', '46', '48', '50', '52', '54', '56', '58'];
 const SHOE_SIZES = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47'];
 
+const AFP_LIST = [
+  'CAPITAL',
+  'CUPRUM',
+  'HABITAT',
+  'MODELO',
+  'PLANVITAL',
+  'PROVIDA',
+  'UNO'
+];
+
+const ISAPRE_LIST = [
+  'BANMÉDICA',
+  'COLMENA',
+  'CONSALUD',
+  'CRUZBLANCA',
+  'NUEVA MASVIDA',
+  'VIDA TRES',
+  'ESENCIAL'
+];
+
+
 
 // ── Phone helpers ──────────────────────────────────────────────────────────────
 // Accepts any partial input and returns a formatted +56 X XXXX XXXX string.
@@ -78,6 +99,8 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const [enableAccess, setEnableAccess] = useState(!!personnel?.user_id);
   const [isPrio04, setIsPrio04] = useState(personnel?.rotation_pattern?.includes('PRIO-04') || false);
   const [dropdownValue, setDropdownValue] = useState<string>('');
+  const [healthSystem, setHealthSystem] = useState(personnel?.health_system || '');
+
 
   // ── Phone controlled state ─────────────────────────────────────────────────
   const [phoneDisplay, setPhoneDisplay] = useState(() =>
@@ -138,7 +161,11 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
       clothing_shoe_size: personnel?.clothing_shoe_size || '',
       clothing_parka_size: personnel?.clothing_parka_size || '',
       clothing_overall_size: personnel?.clothing_overall_size || '',
+      afp: personnel?.afp || '',
+      health_system: personnel?.health_system || '',
+      isapre: personnel?.isapre || '',
     };
+
   });
 
   const address = (personnel?.address as { street?: string; city?: string; region?: string; comuna?: string }) || {};
@@ -341,6 +368,44 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
             <Label htmlFor="emergency_contact_phone">Teléfono de Contacto</Label>
             <Input id="emergency_contact_phone" name="emergency_contact_phone" defaultValue={initialValues.emergency_contact_phone} placeholder="+56 9 8765 4321" />
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Previsión Social */}
+      <Card className="border-slate-200/60 dark:border-slate-800 shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base">Previsión Social (AFP y Salud)</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="afp">AFP</Label>
+            <select id="afp" name="afp" defaultValue={initialValues.afp}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar AFP</option>
+              {AFP_LIST.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="health_system">Sistema de Salud</Label>
+            <select id="health_system" name="health_system" value={healthSystem} onChange={e => setHealthSystem(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar Sistema</option>
+              <option value="FONASA">FONASA</option>
+              <option value="ISAPRE">ISAPRE</option>
+            </select>
+          </div>
+
+          {healthSystem === 'ISAPRE' && (
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="isapre">Isapre</Label>
+              <select id="isapre" name="isapre" defaultValue={initialValues.isapre}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <option value="">Seleccionar Isapre</option>
+                {ISAPRE_LIST.map(i => <option key={i} value={i}>{i}</option>)}
+              </select>
+            </div>
+          )}
         </CardContent>
       </Card>
 

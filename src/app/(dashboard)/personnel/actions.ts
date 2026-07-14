@@ -135,7 +135,13 @@ export async function createPersonnel(
     clothing_shoe_size: toUpper(formData.get('clothing_shoe_size')) || null,
     clothing_parka_size: toUpper(formData.get('clothing_parka_size')) || null,
     clothing_overall_size: toUpper(formData.get('clothing_overall_size')) || null,
+
+    // Social Security (AFP & Health)
+    afp: toUpper(formData.get('afp')) || null,
+    health_system: toUpper(formData.get('health_system')) || null,
+    isapre: (formData.get('health_system') as string)?.toUpperCase() === 'ISAPRE' ? toUpper(formData.get('isapre')) : null,
   };
+
 
   const todayStr = new Date().toLocaleDateString('sv');
   if (personnelData.termination_date && personnelData.termination_date <= todayStr) {
@@ -211,7 +217,13 @@ export async function updatePersonnel(
     clothing_shoe_size: toUpper(formData.get('clothing_shoe_size')) || null,
     clothing_parka_size: toUpper(formData.get('clothing_parka_size')) || null,
     clothing_overall_size: toUpper(formData.get('clothing_overall_size')) || null,
+
+    // Social Security (AFP & Health)
+    afp: toUpper(formData.get('afp')) || null,
+    health_system: toUpper(formData.get('health_system')) || null,
+    isapre: (formData.get('health_system') as string)?.toUpperCase() === 'ISAPRE' ? toUpper(formData.get('isapre')) : null,
   };
+
 
   const todayStr = new Date().toLocaleDateString('sv');
   if (updateData.termination_date && updateData.termination_date <= todayStr) {

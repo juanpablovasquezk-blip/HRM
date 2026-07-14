@@ -73,7 +73,13 @@ export interface Personnel {
 
   // Onboarding status
   onboarding_status?: 'pending' | 'approved' | 'rejected' | null;
+
+  // Social Security (AFP & Health)
+  afp?: string | null;
+  health_system?: string | null;
+  isapre?: string | null;
 }
+
 
 export interface PersonnelAddress {
   street: string;

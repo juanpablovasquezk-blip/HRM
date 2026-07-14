@@ -16,7 +16,8 @@ import {
   SelectValue 
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, CheckCircle2, XCircle, Phone, Mail, User, ShieldAlert, Award, Shirt, HelpCircle } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Phone, Mail, User, ShieldAlert, Award, Shirt, HelpCircle, ShieldCheck } from 'lucide-react';
+
 import { toast } from 'sonner';
 
 interface OnboardingFormProps {
@@ -28,6 +29,27 @@ const CLOTHING_SIZES_LETTER = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
 const PANTS_SIZES_NUMBER = ['36', '38', '40', '42', '44', '46', '48', '50', '52', '54', '56', '58'];
 const SHOE_SIZES = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47'];
 const DRIVER_LICENSES = ['B', 'C', 'D', 'A1', 'A2', 'A3', 'A4', 'A5'];
+
+const AFP_LIST = [
+  'CAPITAL',
+  'CUPRUM',
+  'HABITAT',
+  'MODELO',
+  'PLANVITAL',
+  'PROVIDA',
+  'UNO'
+];
+
+const ISAPRE_LIST = [
+  'BANMÉDICA',
+  'COLMENA',
+  'CONSALUD',
+  'CRUZBLANCA',
+  'NUEVA MASVIDA',
+  'VIDA TRES',
+  'ESENCIAL'
+];
+
 
 // Chilean RUT formatter
 function formatRut(value: string): string {
@@ -113,6 +135,12 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   // Licencias
   const [selectedLicenses, setSelectedLicenses] = useState<string[]>([]);
 
+  // Previsión Social
+  const [afp, setAfp] = useState('');
+  const [healthSystem, setHealthSystem] = useState('');
+  const [isapre, setIsapre] = useState('');
+
+
   // Validation results
   const emailValid = !emailDisplay || isValidEmail(emailDisplay);
   const phoneValid = !phoneDisplay || isValidChileanPhone(phoneDisplay);
@@ -146,8 +174,13 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!firstName || !lastNameFather || !lastNameMother || !rut || !birthDate || !emailDisplay || !phoneDisplay) {
+    if (!firstName || !lastNameFather || !lastNameMother || !rut || !birthDate || !emailDisplay || !phoneDisplay || !afp || !healthSystem) {
       toast.error('Por favor, completa todos los campos requeridos');
+      return;
+    }
+
+    if (healthSystem === 'ISAPRE' && !isapre) {
+      toast.error('Por favor, selecciona tu Isapre');
       return;
     }
 
@@ -203,10 +236,16 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
               clothing_parka_size: clothingParka,
               clothing_overall_size: clothingOverall,
 
-              driver_licenses: selectedLicenses
+              driver_licenses: selectedLicenses,
+
+              // Social Security
+              afp,
+              health_system: healthSystem,
+              isapre: healthSystem === 'ISAPRE' ? isapre : null
             }
           }),
         });
+
 
         const result = await response.json();
 
@@ -421,7 +460,71 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
         </CardContent>
       </Card>
 
+      {/* Previsión Social */}
+      <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-orange-500" />
+            Previsión Social (AFP y Salud)
+          </CardTitle>
+          <CardDescription>Indica tus instituciones de previsión social y salud.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* AFP */}
+            <div className="space-y-1.5">
+              <Label htmlFor="afp">AFP *</Label>
+              <Select value={afp} onValueChange={(val) => setAfp(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar AFP" />
+                </SelectTrigger>
+                <SelectContent>
+                  {AFP_LIST.map(item => (
+                    <SelectItem key={item} value={item}>{item}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Sistema de Salud */}
+            <div className="space-y-1.5">
+              <Label htmlFor="health_system">Sistema de Salud *</Label>
+              <Select value={healthSystem} onValueChange={(val) => {
+                setHealthSystem(val || '');
+                if (val !== 'ISAPRE') setIsapre('');
+              }} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar Sistema" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="FONASA">FONASA</SelectItem>
+                  <SelectItem value="ISAPRE">ISAPRE</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Isapre Dropdown */}
+            {healthSystem === 'ISAPRE' && (
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="isapre">Isapre *</Label>
+                <Select value={isapre} onValueChange={(val) => setIsapre(val || '')} required>
+                  <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                    <SelectValue placeholder="Seleccionar Isapre" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ISAPRE_LIST.map(item => (
+                      <SelectItem key={item} value={item}>{item}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 3. Contacto de Emergencia */}
+
       <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
         <CardHeader className="pb-4">
           <CardTitle className="text-base font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">

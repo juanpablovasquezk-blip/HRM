@@ -18,6 +18,12 @@ ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS clothing_overall_size TEXT
 -- 'rejected' = rejected by admin
 ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS onboarding_status TEXT DEFAULT NULL;
 
+-- Add AFP and Health System fields
+ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS afp TEXT;
+ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS health_system TEXT;
+ALTER TABLE public.personnel ADD COLUMN IF NOT EXISTS isapre TEXT;
+
+
 -- Create onboarding tokens table
 CREATE TABLE IF NOT EXISTS public.onboarding_tokens (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
