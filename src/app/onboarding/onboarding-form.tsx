@@ -167,6 +167,11 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   const [bankName, setBankName] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
 
+  // Consentimiento de datos
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [showTermsDetail, setShowTermsDetail] = useState(false);
+
+
   useEffect(() => {
     if (bankAccountType === 'RUT') {
       setBankName('BANCO ESTADO');
@@ -210,10 +215,16 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!acceptedTerms) {
+      toast.error('Debes leer y aceptar la política de tratamiento de datos personales para continuar.');
+      return;
+    }
+
     if (!firstName || !lastNameFather || !lastNameMother || !rut || !birthDate || !emailDisplay || !phoneDisplay || !afp || !healthSystem || !gender || !bankAccountType || !bankName || !bankAccountNumber) {
       toast.error('Por favor, completa todos los campos requeridos');
       return;
     }
+
 
     if (healthSystem === 'ISAPRE' && !isapre) {
       toast.error('Por favor, selecciona tu Isapre');
@@ -860,11 +871,49 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
         </CardContent>
       </Card>
 
+      {/* Consentimiento y Términos */}
+      <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
+        <CardContent className="p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            <Checkbox 
+              id="accept_terms" 
+              checked={acceptedTerms}
+              onCheckedChange={(checked) => setAcceptedTerms(checked === true)}
+              className="mt-0.5"
+            />
+            <div className="space-y-1">
+              <label 
+                htmlFor="accept_terms" 
+                className="text-sm font-semibold text-slate-800 dark:text-slate-200 cursor-pointer select-none"
+              >
+                He leído y acepto la política de tratamiento de datos personales *
+              </label>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Debes leer y aceptar esta política para poder enviar la ficha.{' '}
+                <button 
+                  type="button" 
+                  onClick={() => setShowTermsDetail(!showTermsDetail)}
+                  className="text-orange-600 hover:text-orange-700 font-bold underline focus:outline-none"
+                >
+                  {showTermsDetail ? 'Ver menos' : 'Ver política completa'}
+                </button>
+              </p>
+            </div>
+          </div>
+
+          {showTermsDetail && (
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400 leading-relaxed transition-all duration-200">
+              Los datos recolectados en esta ficha serán tratados exclusivamente para la gestión de su incorporación a la empresa, la confección y ejecución de su contrato de trabajo, el pago de remuneraciones, la gestión de beneficios legales y convencionales, la seguridad en el lugar de trabajo y el cumplimiento de las obligaciones legales, previsionales, tributarias y laborales vigentes en Chile.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Submit Button */}
       <Button 
         type="submit" 
-        disabled={isPending}
-        className="w-full h-12 bg-slate-900 hover:bg-slate-800 dark:bg-orange-600 dark:hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-wider text-xs shadow-lg shadow-slate-900/10 transition-all flex items-center justify-center gap-2"
+        disabled={isPending || !acceptedTerms}
+        className="w-full h-12 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-2xl font-black uppercase tracking-wider text-xs shadow-lg shadow-orange-500/20 disabled:opacity-50 transition-all flex items-center justify-center gap-2 border-none"
       >
         {isPending ? (
           <>
@@ -875,6 +924,7 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
           'Enviar Ficha de Ingreso'
         )}
       </Button>
+
     </form>
   );
 }
