@@ -39,6 +39,7 @@ export async function getIndividualRoster(personnelId: string, startDate: string
     .eq('personnel_id', personnelId)
     .gte('date', startDate)
     .lte('date', endDate)
+    .eq('is_extra', false)
     .order('date', { ascending: true });
 
   if (aErr) return { error: aErr.message };
