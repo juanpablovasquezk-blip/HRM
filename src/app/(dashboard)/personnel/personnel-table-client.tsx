@@ -17,8 +17,10 @@ import {
   Link2,
   Copy,
   UserCheck,
-  UserX
+  UserX,
+  Printer
 } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -620,17 +622,32 @@ export default function PersonnelTableClient({
                           </Button>
                         </div>
                       ) : canEdit ? (
-                        <Link href={`/personnel/${person.id}/edit`}>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
-                             <Edit className="h-4 w-4" />
-                          </Button>
-                        </Link>
+                        <div className="flex justify-end gap-1">
+                          <Link href={`/personnel-print/${person.id}`} target="_blank">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Imprimir Ficha">
+                              <Printer className="h-4 w-4" />
+                            </Button>
+                          </Link>
+                          <Link href={`/personnel/${person.id}/edit`}>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
+                               <Edit className="h-4 w-4" />
+                            </Button>
+                          </Link>
+                        </div>
                       ) : (
-                        <Link href={`/personnel/${person.id}`}>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
-                             <FileText className="h-4 w-4" />
-                          </Button>
-                        </Link>
+                        <div className="flex justify-end gap-1">
+                          <Link href={`/personnel-print/${person.id}`} target="_blank">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Imprimir Ficha">
+                              <Printer className="h-4 w-4" />
+                            </Button>
+                          </Link>
+                          <Link href={`/personnel/${person.id}`}>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
+                               <FileText className="h-4 w-4" />
+                            </Button>
+                          </Link>
+                        </div>
+
                       )}
                     </TableCell>
 

@@ -13,7 +13,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ArrowLeft, Edit, FileText, Cake, Moon, SunMedium, AlertTriangle, Mail, Repeat, CalendarCheck, Pin, ShieldCheck, User } from 'lucide-react';
+import { ArrowLeft, Edit, FileText, Cake, Moon, SunMedium, AlertTriangle, Mail, Repeat, CalendarCheck, Pin, ShieldCheck, User, Printer } from 'lucide-react';
+
 import { format, differenceInDays, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { DocumentActions } from './document-actions';
@@ -98,12 +99,21 @@ export default async function PersonnelDetailPage({
             </Badge>
           )}
         </div>
-        <Link href={`/personnel/${id}/edit`}>
-          <Button variant="outline">
-            <Edit className="mr-2 h-4 w-4" />
-            Editar
-          </Button>
-        </Link>
+        <div className="flex gap-2">
+          <Link href={`/personnel-print/${id}`} target="_blank">
+            <Button variant="outline" className="border-orange-200 text-orange-700 hover:bg-orange-50 gap-1.5">
+              <Printer className="h-4 w-4" />
+              Imprimir Ficha
+            </Button>
+          </Link>
+          <Link href={`/personnel/${id}/edit`}>
+            <Button variant="outline">
+              <Edit className="mr-2 h-4 w-4" />
+              Editar
+            </Button>
+          </Link>
+        </div>
+
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
