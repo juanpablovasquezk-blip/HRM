@@ -342,7 +342,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
   return (
     <div className="space-y-6">
       {/* Controls - Hidden during print */}
-      <Card className="print:hidden border-slate-200/60 shadow-sm">
+      <Card className="no-print border-slate-200/60 shadow-sm">
         <CardContent className="pt-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
             <div className="space-y-2 min-w-0">

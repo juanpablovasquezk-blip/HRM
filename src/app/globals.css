@@ -144,8 +144,9 @@
   select,
   input,
   .print\:hidden,
+  .no-print,
   div:has(> button),
-  .text-amber-700 bg-amber-50 { /* hides warning legends if not needed, or just let it stay */
+  .text-amber-700 bg-amber-50 {
     display: none !important;
   }
 
