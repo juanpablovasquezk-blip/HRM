@@ -448,7 +448,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
               parseISO(a.date) >= parseISO(l.start_date) &&
               parseISO(a.date) <= parseISO(l.end_date))
           )) && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5 w-fit">
+            <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5 w-fit no-print">
               <span className="inline-block w-3 h-3 rounded-sm bg-amber-400 border border-amber-500 shrink-0" />
               <span>
                 Días resaltados en ámbar: turno modificado manualmente o solicitud de ausencia sobre turno publicado

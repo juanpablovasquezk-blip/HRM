@@ -145,8 +145,7 @@
   input,
   .print\:hidden,
   .no-print,
-  div:has(> button),
-  .text-amber-700 bg-amber-50 {
+  div:has(> button) {
     display: none !important;
   }
 
