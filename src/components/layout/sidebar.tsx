@@ -18,6 +18,7 @@ import {
   ClipboardList,
   ChevronLeft,
   LogOut,
+  Shirt,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,7 @@ const navItems: NavItem[] = [
   { label: 'Planificación Diaria', href: '/shifts/daily', icon: ClipboardList, requiredPermission: 'viewShifts' },
   { label: 'Licencias', href: '/leaves', icon: Briefcase },
   { label: 'Transporte', href: '/transport', icon: Bus, requiredPermission: 'manageTransport' },
+  { label: 'EPP y Uniformes', href: '/epp', icon: Shirt, requiredPermission: 'viewPersonnel' },
   { label: 'Reportes', href: '/reports', icon: BarChart3, requiredPermission: 'viewReports' },
 ];
 
