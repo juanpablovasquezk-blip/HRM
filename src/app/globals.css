@@ -130,6 +130,11 @@
 }
 
 /* ── Print Media Queries ── */
+@page {
+  size: portrait;
+  margin: 6mm;
+}
+
 @media print {
   /* Hide sidebar aside navigation, header topbar, buttons, select, and filter cards */
   aside,
@@ -139,7 +144,8 @@
   select,
   input,
   .print\:hidden,
-  div:has(> button) {
+  div:has(> button),
+  .text-amber-700 bg-amber-50 { /* hides warning legends if not needed, or just let it stay */
     display: none !important;
   }
 
@@ -178,5 +184,29 @@
     padding: 0 !important;
     margin: 0 !important;
     width: 100% !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Compress gap between weekly tables to fit exactly on one page */
+  .print-roster-container .space-y-8 {
+    margin-top: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  .print-roster-container .space-y-8 > * + * {
+    margin-top: 8px !important;
+  }
+
+  /* Reduce table cell padding and text size for printable font scale */
+  .print-roster-container table th,
+  .print-roster-container table td {
+    padding: 2px 3px !important;
+    font-size: 8px !important;
+  }
+
+  /* Reduce margin under header card */
+  .print-roster-container .mb-6 {
+    margin-bottom: 8px !important;
   }
 }
