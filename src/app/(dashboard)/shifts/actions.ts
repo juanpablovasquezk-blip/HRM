@@ -621,7 +621,7 @@ export async function validateAssignments(assignmentIds: string[]) {
   return { success: !error, error: error?.message };
 }
 
-export async function publishAssignments(input: string | string[], endDate?: string, areaId?: string) {
+export async function publishAssignments(input: string | string[], endDate?: string, areaId?: string, options?: { skipWhatsApp?: boolean }) {
   if (!await isAdmin()) return { success: false, error: 'No authorized' };
   // Use the admin client (service role) for all DB operations in this function.
   // Auth is already verified above via isAdmin(). The service role bypasses RLS,
@@ -721,7 +721,7 @@ export async function publishAssignments(input: string | string[], endDate?: str
   const skippedWorkers: string[] = [];  // no phone number
   const failedWorkers: string[] = [];   // API error
 
-  if (assignmentsToPublish && assignmentsToPublish.length > 0) {
+  if (!options?.skipWhatsApp && assignmentsToPublish && assignmentsToPublish.length > 0) {
     try {
       const personnelIds = [...new Set(assignmentsToPublish.map(a => a.personnel_id))];
       const dates = [...new Set(assignmentsToPublish.map(a => a.date))];

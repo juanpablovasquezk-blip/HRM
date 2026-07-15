@@ -48,7 +48,9 @@ import {
   MapPin,
   EyeOff,
   Send,
-  Briefcase
+  Briefcase,
+  ChevronDown,
+  MessageCircleOff
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -86,7 +88,8 @@ import {
   DropdownMenuTrigger,
   DropdownMenuCheckboxItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator
+  DropdownMenuSeparator,
+  DropdownMenuItem
 } from '@/components/ui/dropdown-menu';
 
 interface Position { id: string; name: string; area_id: string; }
@@ -1033,7 +1036,7 @@ export function RosterGridClient({
     });
   };
 
-  const handlePublishSelection = () => {
+  const handlePublishSelection = (skipWhatsApp = false) => {
     if (selectedCells.length === 0) {
        toast.error('Selecciona turnos primero (clic en las celdas)');
        return;
@@ -1050,41 +1053,45 @@ export function RosterGridClient({
 
     startTransition(async () => {
       const { publishAssignments } = await import('@/app/(dashboard)/shifts/actions');
-      const res = await publishAssignments(idsToPublish) as any;
+      const res = await publishAssignments(idsToPublish, undefined, undefined, { skipWhatsApp }) as any;
       if (res.success) {
-        const notified: string[] = res.notifiedWorkers || [];
-        const skipped: string[] = res.skippedWorkers || [];
-        const failed: string[] = res.failedWorkers || [];
-
-        if (notified.length > 0) {
-          toast.success(
-            <div>
-              <p className="font-bold">{idsToPublish.length} turnos publicados</p>
-              <p className="text-xs text-slate-500 mt-1">✅ WhatsApp enviado a: <strong>{notified.join(', ')}</strong></p>
-              {skipped.length > 0 && <p className="text-xs text-amber-600 mt-1">⚠️ Sin teléfono: {skipped.join(', ')}</p>}
-              {failed.length > 0 && <p className="text-xs text-red-600 mt-1">❌ Error envío: {failed.join(', ')}</p>}
-            </div>,
-            { duration: 6000 }
-          );
-        } else if (skipped.length > 0) {
-          toast.warning(
-            <div>
-              <p className="font-bold">{idsToPublish.length} turnos publicados</p>
-              <p className="text-xs mt-1">⚠️ No se pudo notificar — sin número de teléfono: <strong>{skipped.join(', ')}</strong></p>
-              <p className="text-xs text-slate-400 mt-0.5">Agrega el teléfono en el perfil de cada persona</p>
-            </div>,
-            { duration: 8000 }
-          );
-        } else if (failed.length > 0) {
-          toast.error(
-            <div>
-              <p className="font-bold">{idsToPublish.length} turnos publicados</p>
-              <p className="text-xs mt-1">❌ Error al enviar WhatsApp a: <strong>{failed.join(', ')}</strong></p>
-            </div>,
-            { duration: 6000 }
-          );
+        if (skipWhatsApp) {
+          toast.success(`${idsToPublish.length} turnos publicados (sin notificación WhatsApp)`);
         } else {
-          toast.success(`${idsToPublish.length} turnos publicados (sin cambios de turno detectados)`);
+          const notified: string[] = res.notifiedWorkers || [];
+          const skipped: string[] = res.skippedWorkers || [];
+          const failed: string[] = res.failedWorkers || [];
+
+          if (notified.length > 0) {
+            toast.success(
+              <div>
+                <p className="font-bold">{idsToPublish.length} turnos publicados</p>
+                <p className="text-xs text-slate-500 mt-1">✅ WhatsApp enviado a: <strong>{notified.join(', ')}</strong></p>
+                {skipped.length > 0 && <p className="text-xs text-amber-600 mt-1">⚠️ Sin teléfono: {skipped.join(', ')}</p>}
+                {failed.length > 0 && <p className="text-xs text-red-600 mt-1">❌ Error envío: {failed.join(', ')}</p>}
+              </div>,
+              { duration: 6000 }
+            );
+          } else if (skipped.length > 0) {
+            toast.warning(
+              <div>
+                <p className="font-bold">{idsToPublish.length} turnos publicados</p>
+                <p className="text-xs mt-1">⚠️ No se pudo notificar — sin número de teléfono: <strong>{skipped.join(', ')}</strong></p>
+                <p className="text-xs text-slate-400 mt-0.5">Agrega el teléfono en el perfil de cada persona</p>
+              </div>,
+              { duration: 8000 }
+            );
+          } else if (failed.length > 0) {
+            toast.error(
+              <div>
+                <p className="font-bold">{idsToPublish.length} turnos publicados</p>
+                <p className="text-xs mt-1">❌ Error al enviar WhatsApp a: <strong>{failed.join(', ')}</strong></p>
+              </div>,
+              { duration: 6000 }
+            );
+          } else {
+            toast.success(`${idsToPublish.length} turnos publicados (sin cambios de turno detectados)`);
+          }
         }
         setSelectedCells([]);
         router.refresh();
@@ -1094,11 +1101,14 @@ export function RosterGridClient({
     });
   };
 
-  const handlePublishRange = () => {
+  const handlePublishRange = (skipWhatsApp = false) => {
     const start = format(days[0], 'yyyy-MM-dd');
     const end = format(days[days.length - 1], 'yyyy-MM-dd');
     
-    if (!confirm(`¿Publicar todos los turnos visibles (${start} al ${end})?`)) return;
+    const confirmMsg = skipWhatsApp
+      ? `¿Publicar todos los turnos visibles (${start} al ${end}) SIN enviar WhatsApp?`
+      : `¿Publicar todos los turnos visibles (${start} al ${end})?`;
+    if (!confirm(confirmMsg)) return;
 
     const personnelIds = new Set(filteredPersonnel.map(p => p.id));
     const dateStrings = new Set(days.map(d => format(d, 'yyyy-MM-dd')));
@@ -1114,32 +1124,36 @@ export function RosterGridClient({
 
     startTransition(async () => {
       const { publishAssignments } = await import('@/app/(dashboard)/shifts/actions');
-      const res = await publishAssignments(idsToPublish) as any;
+      const res = await publishAssignments(idsToPublish, undefined, undefined, { skipWhatsApp }) as any;
       if (res.success) {
-        const notified: string[] = res.notifiedWorkers || [];
-        const skipped: string[] = res.skippedWorkers || [];
-        const failed: string[] = res.failedWorkers || [];
-
-        if (notified.length > 0) {
-          toast.success(
-            <div>
-              <p className="font-bold">{idsToPublish.length} turnos publicados con éxito</p>
-              <p className="text-xs text-slate-500 mt-1">✅ WhatsApp enviado a: <strong>{notified.join(', ')}</strong></p>
-              {skipped.length > 0 && <p className="text-xs text-amber-600 mt-1">⚠️ Sin teléfono: {skipped.join(', ')}</p>}
-              {failed.length > 0 && <p className="text-xs text-red-600 mt-1">❌ Error: {failed.join(', ')}</p>}
-            </div>,
-            { duration: 6000 }
-          );
-        } else if (skipped.length > 0) {
-          toast.warning(
-            <div>
-              <p className="font-bold">{idsToPublish.length} turnos publicados</p>
-              <p className="text-xs mt-1">⚠️ Sin número de teléfono: <strong>{skipped.join(', ')}</strong></p>
-            </div>,
-            { duration: 8000 }
-          );
+        if (skipWhatsApp) {
+          toast.success(`${idsToPublish.length} turnos publicados con éxito (sin notificación WhatsApp)`);
         } else {
-          toast.success(`${idsToPublish.length} turnos publicados con éxito (sin cambios para notificar)`);
+          const notified: string[] = res.notifiedWorkers || [];
+          const skipped: string[] = res.skippedWorkers || [];
+          const failed: string[] = res.failedWorkers || [];
+
+          if (notified.length > 0) {
+            toast.success(
+              <div>
+                <p className="font-bold">{idsToPublish.length} turnos publicados con éxito</p>
+                <p className="text-xs text-slate-500 mt-1">✅ WhatsApp enviado a: <strong>{notified.join(', ')}</strong></p>
+                {skipped.length > 0 && <p className="text-xs text-amber-600 mt-1">⚠️ Sin teléfono: {skipped.join(', ')}</p>}
+                {failed.length > 0 && <p className="text-xs text-red-600 mt-1">❌ Error: {failed.join(', ')}</p>}
+              </div>,
+              { duration: 6000 }
+            );
+          } else if (skipped.length > 0) {
+            toast.warning(
+              <div>
+                <p className="font-bold">{idsToPublish.length} turnos publicados</p>
+                <p className="text-xs mt-1">⚠️ Sin número de teléfono: <strong>{skipped.join(', ')}</strong></p>
+              </div>,
+              { duration: 8000 }
+            );
+          } else {
+            toast.success(`${idsToPublish.length} turnos publicados con éxito (sin cambios para notificar)`);
+          }
         }
         router.refresh();
       } else {
@@ -1526,16 +1540,33 @@ export function RosterGridClient({
                   <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-indigo-600" />
                   Validar Todo
                 </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="h-8 border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs ml-1"
-                  onClick={handlePublishRange}
-                  disabled={isPending}
-                >
-                  <Sparkles className="h-3.5 w-3.5 mr-1 text-emerald-600" />
-                  Publicar
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    className="inline-flex items-center justify-center rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-50 h-8 px-3 ml-1"
+                    disabled={isPending}
+                  >
+                    <Sparkles className="h-3.5 w-3.5 mr-1 text-emerald-600" />
+                    Publicar
+                    <ChevronDown className="h-3 w-3 ml-1 opacity-60" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem onClick={() => handlePublishRange(false)} className="cursor-pointer">
+                      <Sparkles className="h-4 w-4 mr-2 text-emerald-600" />
+                      <div>
+                        <p className="font-medium">Publicar y Notificar</p>
+                        <p className="text-xs text-muted-foreground">Publica y envía WhatsApp</p>
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handlePublishRange(true)} className="cursor-pointer">
+                      <MessageCircleOff className="h-4 w-4 mr-2 text-slate-500" />
+                      <div>
+                        <p className="font-medium">Solo Publicar</p>
+                        <p className="text-xs text-muted-foreground">Sin enviar WhatsApp</p>
+                      </div>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 {/* One-shot button: send today's change notifications retroactively */}
                 {!isTodayNotifSent && (
                   <Button
@@ -1925,14 +1956,32 @@ export function RosterGridClient({
                 <CheckCircle2 className="h-4 w-4" />
                 Validar
               </Button>
-              <Button 
-                variant="outline"
-                className="text-emerald-400 border-emerald-500/50 hover:bg-emerald-50/10 hover:text-emerald-300 gap-2"
-                onClick={handlePublishSelection}
-              >
-                <Sparkles className="h-4 w-4" />
-                Publicar
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-emerald-500/50 text-emerald-400 hover:bg-emerald-50/10 hover:text-emerald-300 h-9 px-4 gap-2"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Publicar
+                  <ChevronDown className="h-3 w-3 opacity-60" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onClick={() => handlePublishSelection(false)} className="cursor-pointer">
+                    <Sparkles className="h-4 w-4 mr-2 text-emerald-600" />
+                    <div>
+                      <p className="font-medium">Publicar y Notificar</p>
+                      <p className="text-xs text-muted-foreground">Publica y envía WhatsApp</p>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => handlePublishSelection(true)} className="cursor-pointer">
+                    <MessageCircleOff className="h-4 w-4 mr-2 text-slate-500" />
+                    <div>
+                      <p className="font-medium">Solo Publicar</p>
+                      <p className="text-xs text-muted-foreground">Sin enviar WhatsApp</p>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button 
                 variant="outline"
                 className="text-slate-400 border-slate-500/50 hover:bg-slate-50/10 hover:text-slate-300 gap-2"
