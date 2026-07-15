@@ -460,7 +460,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
 
       {/* Roster View */}
       {data && (
-        <div ref={rosterRef} className="bg-white p-8 border rounded-lg shadow-sm print:shadow-none print:border-none print:p-0">
+        <div ref={rosterRef} className="print-roster-container bg-white p-8 border rounded-lg shadow-sm print:shadow-none print:border-none print:p-0">
           {/* Header */}
           <div className="grid grid-cols-3 border-2 border-black mb-6 text-center font-bold uppercase text-sm">
             <div className="border-r-2 border-black py-2 bg-slate-50">MES: {(() => {

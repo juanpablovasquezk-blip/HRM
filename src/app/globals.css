@@ -128,3 +128,55 @@
     @apply font-sans;
   }
 }
+
+/* ── Print Media Queries ── */
+@media print {
+  /* Hide sidebar aside navigation, header topbar, buttons, select, and filter cards */
+  aside,
+  header,
+  nav,
+  button,
+  select,
+  input,
+  .print\:hidden,
+  div:has(> button) {
+    display: none !important;
+  }
+
+  /* Reset outer layout constraints from flex/h-screen to normal block flow */
+  div.flex.h-screen,
+  .h-screen,
+  .overflow-hidden {
+    height: auto !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  /* Expand main content container to 100% and remove spacing */
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    display: block !important;
+    background: white !important;
+  }
+
+  /* Force background white and text dark for printable pages */
+  body, html {
+    background: white !important;
+    color: black !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Remove borders, shadows, padding on the printable element wrapper */
+  .print-roster-container {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+}
