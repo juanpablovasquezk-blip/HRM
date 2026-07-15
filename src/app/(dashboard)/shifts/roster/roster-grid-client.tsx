@@ -50,7 +50,8 @@ import {
   Send,
   Briefcase,
   ChevronDown,
-  MessageCircleOff
+  MessageCircleOff,
+  Download
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -1528,6 +1529,32 @@ export function RosterGridClient({
               Reporte Mensual
             </Button>
 
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold shadow-sm px-3"
+              onClick={async () => {
+                const { generateRosterPDF } = await import('./generate-roster-pdf');
+                const monthLabelStr = format(monthDate, "MMMM yyyy", { locale: es });
+                generateRosterPDF({
+                  personnel: filteredPersonnel,
+                  assignments,
+                  shifts,
+                  areas,
+                  positions,
+                  leaves,
+                  days,
+                  monthLabel: monthLabelStr.charAt(0).toUpperCase() + monthLabelStr.slice(1),
+                  areaFilter: areaFilter !== 'all' ? areaFilter : undefined,
+                  positionFilter: positionFilter || undefined,
+                });
+              }}
+              title="Descargar roster mensual en PDF"
+            >
+              <Download className="h-4 w-4 mr-1.5 text-slate-500" />
+              PDF
+            </Button>
+
             <div className="flex items-center gap-1 border-l pl-3 ml-1 border-slate-200">
                <Button 
                   variant="outline" 
@@ -1609,6 +1636,31 @@ export function RosterGridClient({
             >
               <FileText className="h-4 w-4 mr-2 text-orange-500" />
               Reporte Mensual
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold shadow-sm px-3"
+              onClick={async () => {
+                const { generateRosterPDF } = await import('./generate-roster-pdf');
+                const monthLabelStr = format(monthDate, "MMMM yyyy", { locale: es });
+                generateRosterPDF({
+                  personnel: filteredPersonnel,
+                  assignments,
+                  shifts,
+                  areas,
+                  positions,
+                  leaves,
+                  days,
+                  monthLabel: monthLabelStr.charAt(0).toUpperCase() + monthLabelStr.slice(1),
+                  areaFilter: areaFilter !== 'all' ? areaFilter : undefined,
+                  positionFilter: positionFilter || undefined,
+                });
+              }}
+              title="Descargar roster mensual en PDF"
+            >
+              <Download className="h-4 w-4 mr-1.5 text-slate-500" />
+              PDF
             </Button>
             <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-200 font-bold uppercase text-[9px] px-2 py-1">
               Modo Solo Lectura
