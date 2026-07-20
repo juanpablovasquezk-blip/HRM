@@ -1191,6 +1191,7 @@ export default function EPPPage() {
                     <TableHead className="text-center">Renovación</TableHead>
                     <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
+                </TableHeader>
                 <TableBody>
                   {catalog.map((item) => {
                     const sizeLabel = item.uses_sizes
