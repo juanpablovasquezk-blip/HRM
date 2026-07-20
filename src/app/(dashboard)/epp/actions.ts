@@ -211,14 +211,14 @@ export async function getEPPPersonnelData(): Promise<{
     .from('epp_position_requirements')
     .select('*');
 
-  if (reqsErr) return { data: { personnel: [], requirements: [], inventory: [], companies: [] }, error: reqsErr.message };
+  if (reqsErr) console.warn('Warning fetching epp_position_requirements:', reqsErr.message);
 
   // Fetch inventory
   const { data: inventory, error: invErr } = await supabase
     .from('epp_inventory')
     .select('*');
 
-  if (invErr) return { data: { personnel: [], requirements: [], inventory: [], companies: [] }, error: invErr.message };
+  if (invErr) console.warn('Warning fetching epp_inventory:', invErr.message);
 
   // Fetch companies for select
   const { data: companies, error: compErr } = await supabase
@@ -236,16 +236,20 @@ export async function getEPPPersonnelData(): Promise<{
       event:epp_delivery_events(*)
     `);
 
-  if (itemsErr) return { data: { personnel: [], requirements: [], inventory: [], companies: [] }, error: itemsErr.message };
+  if (itemsErr) console.warn('Warning fetching epp_delivery_items:', itemsErr.message);
+
+  const safeRequirements = reqsErr ? [] : (requirements || []);
+  const safeInventory = invErr ? [] : (inventory || []);
+  const safeDeliveryItems = itemsErr ? [] : (deliveryItems || []);
 
   // Assemble EPP delivery history per person
   const assembledPersonnel = personnel.map((p: any) => {
     // Requirements for this person's main_position
-    const persReqs = requirements?.filter(r => r.position_id === p.main_position) || [];
+    const persReqs = safeRequirements.filter(r => r.position_id === p.main_position);
 
     // Deliveries received by this person
-    const persDeliveries = deliveryItems
-      ?.filter((item: any) => item.event?.personnel_id === p.id)
+    const persDeliveries = safeDeliveryItems
+      .filter((item: any) => item.event?.personnel_id === p.id)
       ?.map((item: any) => ({
         id: item.id,
         deliveryEventId: item.delivery_event_id,
@@ -344,8 +348,8 @@ export async function getEPPPersonnelData(): Promise<{
   return {
     data: {
       personnel: assembledPersonnel,
-      requirements: requirements as any[],
-      inventory: inventory as any[],
+      requirements: safeRequirements as any[],
+      inventory: safeInventory as any[],
       companies: companies || []
     },
     error: null,
