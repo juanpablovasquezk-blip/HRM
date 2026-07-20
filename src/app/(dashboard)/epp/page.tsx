@@ -22,7 +22,11 @@ import {
   ExternalLink, 
   Trash2,
   Undo2,
-  FileDown
+  FileDown,
+  Settings2,
+  Save,
+  Edit,
+  Grid3X3
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -54,13 +58,17 @@ import { createClient } from '@/lib/supabase/client';
 import { 
   getEPPPersonnelData, 
   addInventoryBatch, 
-  saveEPPRequirement, 
-  deleteEPPRequirement, 
   registerDeliveryEvent, 
   returnDeliveryItem, 
   uploadSignedFormUrl,
   getMonthlyEPPForecastReport,
-  ForecastReportItem
+  ForecastReportItem,
+  getProductCatalog,
+  saveProductCatalogItem,
+  deleteProductCatalogItem,
+  getAllPositionsWithAreas,
+  bulkSaveRequirementsMatrix,
+  ProductCatalogItem
 } from './actions';
 import { generateDeliveryFormPDF } from './generate-delivery-pdf';
 
@@ -83,7 +91,7 @@ export default function EPPPage() {
 
   // Dialog States
   const [isAddStockOpen, setIsAddStockOpen] = useState(false);
-  const [isAddReqOpen, setIsAddReqOpen] = useState(false);
+  const [isCatalogDialogOpen, setIsCatalogDialogOpen] = useState(false);
   const [isDeliverOpen, setIsDeliverOpen] = useState(false);
   const [isReturnOpen, setIsReturnOpen] = useState(false);
 
@@ -96,13 +104,20 @@ export default function EPPPage() {
   const [stockQty, setStockQty] = useState(0);
   const [stockCompany, setStockCompany] = useState('');
 
-  // Form States - Add/Edit Requirement
-  const [reqPositionId, setReqPositionId] = useState('');
-  const [reqProductType, setReqProductType] = useState<'UNIFORM' | 'EPP'>('EPP');
-  const [reqProductName, setReqProductName] = useState('');
-  const [reqQty, setReqQty] = useState(1);
-  const [reqRenewal, setReqRenewal] = useState(180);
-  const [reqSizeField, setReqSizeField] = useState('');
+  // Form States - Catalog Item
+  const [editingCatalogItem, setEditingCatalogItem] = useState<ProductCatalogItem | null>(null);
+  const [catType, setCatType] = useState<'UNIFORM' | 'EPP'>('EPP');
+  const [catName, setCatName] = useState('');
+  const [catUsesSizes, setCatUsesSizes] = useState(false);
+  const [catSizeField, setCatSizeField] = useState('');
+  const [catRenewalDays, setCatRenewalDays] = useState(180);
+
+  // Catalog & Matrix Data
+  const [catalog, setCatalog] = useState<ProductCatalogItem[]>([]);
+  const [allPositions, setAllPositions] = useState<any[]>([]);
+  const [matrixData, setMatrixData] = useState<Record<string, Record<string, number>>>({});
+  const [originalMatrixData, setOriginalMatrixData] = useState<Record<string, Record<string, number>>>({});
+  const [savingMatrix, setSavingMatrix] = useState(false);
 
   // Form States - Deliver Items
   const [activeWorker, setActiveWorker] = useState<any | null>(null);
@@ -137,7 +152,12 @@ export default function EPPPage() {
 
   // Fetch initial data
   const fetchData = async () => {
-    const res = await getEPPPersonnelData();
+    const [res, catRes, posRes] = await Promise.all([
+      getEPPPersonnelData(),
+      getProductCatalog(),
+      getAllPositionsWithAreas(),
+    ]);
+
     if (res.error) {
       toast.error('Error al cargar datos: ' + res.error);
     } else if (res.data) {
@@ -150,7 +170,29 @@ export default function EPPPage() {
       if (res.data.companies.length > 0) {
         setStockCompany(res.data.companies[0].id);
       }
+
+      // Build matrix data from existing requirements
+      if (catRes.data && posRes.data) {
+        const matrix: Record<string, Record<string, number>> = {};
+        posRes.data.forEach((pos: any) => {
+          matrix[pos.id] = {};
+          catRes.data!.forEach(cat => {
+            matrix[pos.id][cat.id] = 0;
+          });
+        });
+        // Populate from existing requirements
+        (res.data.requirements || []).forEach((req: any) => {
+          if (req.product_catalog_id && matrix[req.position_id]) {
+            matrix[req.position_id][req.product_catalog_id] = req.quantity || 0;
+          }
+        });
+        setMatrixData(matrix);
+        setOriginalMatrixData(JSON.parse(JSON.stringify(matrix)));
+      }
     }
+
+    if (catRes.data) setCatalog(catRes.data);
+    if (posRes.data) setAllPositions(posRes.data);
   };
 
   useEffect(() => {
@@ -231,31 +273,28 @@ export default function EPPPage() {
     });
   };
 
-  // Add Requirement handler
-  const handleAddReqSubmit = async (e: React.FormEvent) => {
+  // Add Catalog Item handler
+  const handleCatalogSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reqPositionId || !reqProductName) {
-      toast.error('Faltan campos obligatorios');
+    if (!catName) {
+      toast.error('El nombre del implemento es obligatorio');
       return;
     }
 
     startTransition(async () => {
-      const res = await saveEPPRequirement({
-        positionId: reqPositionId,
-        productType: reqProductType,
-        productName: reqProductName,
-        quantity: reqQty,
-        renewalDays: reqRenewal,
-        sizeField: reqSizeField || null
+      const res = await saveProductCatalogItem({
+        id: editingCatalogItem?.id,
+        productType: catType,
+        name: catName,
+        usesSizes: catUsesSizes,
+        sizeField: catUsesSizes ? catSizeField || null : null,
+        renewalDays: catRenewalDays,
       });
 
       if (res.success) {
-        toast.success('Requerimiento configurado correctamente');
-        setIsAddReqOpen(false);
-        setReqProductName('');
-        setReqQty(1);
-        setReqRenewal(180);
-        setReqSizeField('');
+        toast.success(editingCatalogItem ? 'Implemento actualizado' : 'Implemento creado correctamente');
+        setIsCatalogDialogOpen(false);
+        resetCatalogForm();
         fetchData();
       } else {
         toast.error('Error: ' + res.error);
@@ -263,19 +302,87 @@ export default function EPPPage() {
     });
   };
 
-  // Delete Requirement
-  const handleDeleteReq = async (id: string) => {
-    if (!confirm('¿Seguro que deseas eliminar este requerimiento por cargo?')) return;
+  const resetCatalogForm = () => {
+    setEditingCatalogItem(null);
+    setCatType('EPP');
+    setCatName('');
+    setCatUsesSizes(false);
+    setCatSizeField('');
+    setCatRenewalDays(180);
+  };
+
+  const openEditCatalog = (item: ProductCatalogItem) => {
+    setEditingCatalogItem(item);
+    setCatType(item.product_type);
+    setCatName(item.name);
+    setCatUsesSizes(item.uses_sizes);
+    setCatSizeField(item.size_field || '');
+    setCatRenewalDays(item.renewal_days);
+    setIsCatalogDialogOpen(true);
+  };
+
+  // Delete Catalog Item
+  const handleDeleteCatalog = async (id: string) => {
+    if (!confirm('¿Seguro que deseas eliminar este implemento del catálogo?')) return;
     startTransition(async () => {
-      const res = await deleteEPPRequirement(id);
+      const res = await deleteProductCatalogItem(id);
       if (res.success) {
-        toast.success('Requerimiento eliminado');
+        toast.success('Implemento eliminado del catálogo');
         fetchData();
       } else {
         toast.error('Error: ' + res.error);
       }
     });
   };
+
+  // Matrix cell change
+  const handleMatrixChange = (positionId: string, catalogId: string, value: number) => {
+    setMatrixData(prev => ({
+      ...prev,
+      [positionId]: {
+        ...prev[positionId],
+        [catalogId]: value,
+      },
+    }));
+  };
+
+  // Check if matrix has unsaved changes
+  const matrixHasChanges = JSON.stringify(matrixData) !== JSON.stringify(originalMatrixData);
+
+  // Save Matrix
+  const handleSaveMatrix = async () => {
+    setSavingMatrix(true);
+    const entries: { positionId: string; productCatalogId: string; quantity: number }[] = [];
+    const allPosIds = allPositions.map(p => p.id);
+    const allCatIds = catalog.map(c => c.id);
+
+    for (const posId of allPosIds) {
+      for (const catId of allCatIds) {
+        const qty = matrixData[posId]?.[catId] || 0;
+        if (qty > 0) {
+          entries.push({ positionId: posId, productCatalogId: catId, quantity: qty });
+        }
+      }
+    }
+
+    const res = await bulkSaveRequirementsMatrix(entries, allPosIds, allCatIds);
+    if (res.success) {
+      toast.success('Matriz de requerimientos guardada exitosamente');
+      setOriginalMatrixData(JSON.parse(JSON.stringify(matrixData)));
+      fetchData();
+    } else {
+      toast.error('Error al guardar: ' + res.error);
+    }
+    setSavingMatrix(false);
+  };
+
+  // Group positions by area for matrix display
+  const positionsByArea = allPositions.reduce((acc: Record<string, any[]>, pos: any) => {
+    const areaName = pos.area?.name || 'Sin Área';
+    if (!acc[areaName]) acc[areaName] = [];
+    acc[areaName].push(pos);
+    return acc;
+  }, {} as Record<string, any[]>);
 
   // Open Delivery Dialog
   const openDeliverDialog = (worker: any) => {
@@ -602,14 +709,6 @@ export default function EPPPage() {
           >
             <Boxes className="h-4 w-4" />
             Ingresar Stock
-          </Button>
-          <Button 
-            onClick={() => setIsAddReqOpen(true)}
-            variant="outline"
-            className="border-slate-300 dark:border-slate-800 flex items-center gap-1.5"
-          >
-            <Plus className="h-4 w-4" />
-            Configurar Requerimiento
           </Button>
         </div>
       </div>
@@ -1007,82 +1106,236 @@ export default function EPPPage() {
           </Card>
         </TabsContent>
 
-        {/* ── TAB 3: POSITION REQUIREMENTS ───────────────────────────────────── */}
-        <TabsContent value="config" className="space-y-4">
+        {/* ── TAB 3: CATALOG + MATRIX ─────────────────────────────────────── */}
+        <TabsContent value="config" className="space-y-6">
+
+          {/* ── Section 1: Product Catalog ──────────────────────────────────── */}
           <Card className="border-slate-200/60 dark:border-slate-800 shadow-md">
             <CardHeader>
               <CardTitle className="text-lg flex items-center justify-between">
-                <span>Configuración de Requerimientos por Cargo</span>
+                <span className="flex items-center gap-2">
+                  <Settings2 className="h-5 w-5 text-orange-600" />
+                  Catálogo de Implementos
+                </span>
                 <Button 
-                  onClick={() => setIsAddReqOpen(true)}
+                  onClick={() => { resetCatalogForm(); setIsCatalogDialogOpen(true); }}
                   className="bg-orange-600 hover:bg-orange-700 text-white flex items-center gap-1.5 h-8 text-xs"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Asignar Implemento a Cargo
+                  Agregar Implemento
                 </Button>
               </CardTitle>
               <CardDescription>
-                Define qué elementos, cantidad y días de renovación deben entregarse obligatoriamente a cada cargo.
+                Define los implementos disponibles (EPP y Uniformes), si usan tallas y su duración de renovación planificada.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <Table className="border rounded-xl">
                 <TableHeader className="bg-slate-50 dark:bg-slate-900">
                   <TableRow>
-                    <TableHead>Cargo</TableHead>
-                    <TableHead>Área</TableHead>
                     <TableHead>Tipo</TableHead>
-                    <TableHead>Implemento Requerido</TableHead>
-                    <TableHead className="text-center">Cant. Estándar</TableHead>
+                    <TableHead>Nombre del Implemento</TableHead>
+                    <TableHead className="text-center">Usa Tallas</TableHead>
+                    <TableHead>Campo Talla</TableHead>
                     <TableHead className="text-center">Renovación</TableHead>
-                    <TableHead>Mapeo Talla Ficha</TableHead>
                     <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {requirements.map((req) => {
-                    const mappedSizeField = sizeFieldOptions.find(o => o.value === req.size_field)?.label || 'Talla Única';
+                  {catalog.map((item) => {
+                    const sizeLabel = item.uses_sizes
+                      ? (sizeFieldOptions.find(o => o.value === item.size_field)?.label || item.size_field || 'No definido')
+                      : '—';
+                    const renewalLabel = item.renewal_days >= 30
+                      ? `${Math.round(item.renewal_days / 30)} mes${Math.round(item.renewal_days / 30) !== 1 ? 'es' : ''}`
+                      : `${item.renewal_days} días`;
                     return (
-                      <TableRow key={req.id}>
-                        <TableCell className="font-semibold">{req.position?.name || 'Desconocido'}</TableCell>
-                        <TableCell className="text-xs">{req.position?.area?.name || 'General'}</TableCell>
+                      <TableRow key={item.id}>
                         <TableCell>
                           <Badge variant="outline" className={
-                            req.product_type === 'UNIFORM' 
+                            item.product_type === 'UNIFORM' 
                               ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400'
                               : 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/30 dark:text-teal-400'
                           }>
-                            {req.product_type === 'UNIFORM' ? 'Uniforme' : 'EPP'}
+                            {item.product_type === 'UNIFORM' ? 'Uniforme' : 'EPP'}
                           </Badge>
                         </TableCell>
-                        <TableCell className="font-medium">{req.product_name}</TableCell>
-                        <TableCell className="text-center">{req.quantity}</TableCell>
-                        <TableCell className="text-center">{req.renewal_days} días</TableCell>
-                        <TableCell className="text-xs text-slate-500 font-medium">{mappedSizeField}</TableCell>
+                        <TableCell className="font-semibold">{item.name}</TableCell>
+                        <TableCell className="text-center">
+                          {item.uses_sizes 
+                            ? <Badge className="bg-green-100 text-green-800 border-green-200 dark:bg-green-950/30 dark:text-green-400">Sí</Badge>
+                            : <Badge variant="outline" className="text-slate-400 border-slate-200">Única</Badge>
+                          }
+                        </TableCell>
+                        <TableCell className="text-xs text-slate-500">{sizeLabel}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant="outline" className="border-orange-200 text-orange-700 dark:text-orange-400">
+                            {renewalLabel}
+                          </Badge>
+                        </TableCell>
                         <TableCell className="text-right">
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-7 w-7 text-red-500 hover:text-red-700"
-                            onClick={() => handleDeleteReq(req.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-7 w-7 text-slate-500 hover:text-orange-600"
+                              onClick={() => openEditCatalog(item)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-7 w-7 text-red-500 hover:text-red-700"
+                              onClick={() => handleDeleteCatalog(item.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
                   })}
 
-                  {requirements.length === 0 && (
+                  {catalog.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground italic">
-                        No hay requerimientos configurados. Haz clic en "Asignar Implemento a Cargo" para configurar.
+                      <TableCell colSpan={6} className="text-center py-8 text-muted-foreground italic">
+                        No hay implementos creados. Haz clic en "Agregar Implemento" para crear el primer elemento del catálogo.
                       </TableCell>
                     </TableRow>
                   )}
                 </TableBody>
               </Table>
             </CardContent>
+          </Card>
+
+          {/* ── Section 2: Requirements Matrix ─────────────────────────────── */}
+          <Card className="border-slate-200/60 dark:border-slate-800 shadow-md relative">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Grid3X3 className="h-5 w-5 text-orange-600" />
+                Matriz de Asignación: Cargos × Implementos
+              </CardTitle>
+              <CardDescription>
+                Define la cantidad de cada implemento que debe entregarse a cada cargo. Modifica las celdas y guarda los cambios.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pb-20">
+              {catalog.length === 0 || allPositions.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground border border-dashed rounded-lg bg-slate-50/50 dark:bg-slate-950/20">
+                  {catalog.length === 0 
+                    ? 'Primero crea implementos en el catálogo de arriba para poder asignarlos a los cargos.'
+                    : 'No hay cargos registrados en el sistema. Crea cargos en la configuración de áreas y posiciones.'}
+                </div>
+              ) : (
+                <div className="overflow-x-auto border rounded-xl">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 dark:bg-slate-900 border-b">
+                        <th className="sticky left-0 z-10 bg-slate-50 dark:bg-slate-900 text-left px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-300 min-w-[200px] border-r">
+                          Cargo / Función
+                        </th>
+                        {catalog.map(cat => (
+                          <th key={cat.id} className="px-2 py-2.5 text-center min-w-[90px] max-w-[120px]">
+                            <div className="flex flex-col items-center gap-0.5">
+                              <Badge variant="outline" className={
+                                `text-[10px] px-1.5 py-0 ${
+                                  cat.product_type === 'UNIFORM' 
+                                    ? 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400'
+                                    : 'bg-teal-50 text-teal-600 border-teal-200 dark:bg-teal-950/30 dark:text-teal-400'
+                                }`
+                              }>
+                                {cat.product_type === 'UNIFORM' ? 'UNI' : 'EPP'}
+                              </Badge>
+                              <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 leading-tight text-center">
+                                {cat.name}
+                              </span>
+                            </div>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(positionsByArea).map(([areaName, positions]) => (
+                        <React.Fragment key={areaName}>
+                          {/* Area group header */}
+                          <tr className="bg-slate-100/70 dark:bg-slate-800/50">
+                            <td 
+                              colSpan={catalog.length + 1} 
+                              className="sticky left-0 z-10 bg-slate-100/70 dark:bg-slate-800/50 px-3 py-1.5 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 border-r"
+                            >
+                              {areaName}
+                            </td>
+                          </tr>
+                          {/* Position rows */}
+                          {(positions as any[]).map((pos: any) => (
+                            <tr key={pos.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-orange-50/30 dark:hover:bg-orange-950/10 transition-colors">
+                              <td className="sticky left-0 z-10 bg-white dark:bg-slate-950 px-3 py-1.5 font-medium text-slate-800 dark:text-slate-200 border-r text-xs">
+                                {pos.name}
+                              </td>
+                              {catalog.map(cat => {
+                                const currentVal = matrixData[pos.id]?.[cat.id] || 0;
+                                const originalVal = originalMatrixData[pos.id]?.[cat.id] || 0;
+                                const isChanged = currentVal !== originalVal;
+                                return (
+                                  <td key={cat.id} className="px-1 py-1 text-center">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="99"
+                                      value={currentVal || ''}
+                                      onChange={(e) => {
+                                        const val = parseInt(e.target.value) || 0;
+                                        handleMatrixChange(pos.id, cat.id, Math.max(0, Math.min(99, val)));
+                                      }}
+                                      className={`w-14 h-8 text-center text-xs font-semibold rounded-md border transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-orange-500/50 ${
+                                        isChanged
+                                          ? 'border-orange-400 bg-orange-50 text-orange-800 dark:bg-orange-950/30 dark:text-orange-300 dark:border-orange-600 ring-1 ring-orange-300'
+                                          : currentVal > 0
+                                            ? 'border-slate-300 bg-white text-slate-800 dark:bg-slate-900 dark:text-white dark:border-slate-700'
+                                            : 'border-slate-200 bg-slate-50/50 text-slate-400 dark:bg-slate-950 dark:text-slate-600 dark:border-slate-800'
+                                      }`}
+                                      placeholder="0"
+                                    />
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+
+            {/* Sticky Save Button — always visible at bottom */}
+            {catalog.length > 0 && allPositions.length > 0 && (
+              <div className="sticky bottom-0 left-0 right-0 z-20 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm border-t border-slate-200 dark:border-slate-800 px-6 py-3 flex items-center justify-between rounded-b-xl">
+                <div className="text-xs text-muted-foreground">
+                  {matrixHasChanges ? (
+                    <span className="flex items-center gap-1.5 text-orange-600 font-semibold">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Hay cambios sin guardar en la matriz
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-green-600">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Todos los cambios guardados
+                    </span>
+                  )}
+                </div>
+                <Button
+                  onClick={handleSaveMatrix}
+                  disabled={!matrixHasChanges || savingMatrix}
+                  className="bg-orange-600 hover:bg-orange-700 text-white flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {savingMatrix ? 'Guardando...' : 'Guardar Cambios'}
+                </Button>
+              </div>
+            )}
           </Card>
         </TabsContent>
 
@@ -1400,31 +1653,28 @@ export default function EPPPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── DIALOG 2: ADD REQUIREMENT ──────────────────────────────────────── */}
-      <Dialog open={isAddReqOpen} onOpenChange={setIsAddReqOpen}>
-        <DialogContent className="sm:max-w-[460px]">
+      {/* ── DIALOG 2: ADD/EDIT CATALOG ITEM ────────────────────────────────── */}
+      <Dialog open={isCatalogDialogOpen} onOpenChange={(open) => { if (!open) resetCatalogForm(); setIsCatalogDialogOpen(open); }}>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Requerimiento de Implemento por Cargo</DialogTitle>
+            <DialogTitle>{editingCatalogItem ? 'Editar Implemento' : 'Agregar Implemento al Catálogo'}</DialogTitle>
             <DialogDescription>
-              Configura qué implementos obligatorios, cantidades y días de renovación le corresponden a un cargo específico.
+              {editingCatalogItem 
+                ? 'Modifica las propiedades de este implemento. Los cambios se reflejarán en todas las asignaciones.'
+                : 'Define un nuevo implemento (EPP o Uniforme) con sus propiedades de talla y renovación.'}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleAddReqSubmit} className="space-y-4">
+          <form onSubmit={handleCatalogSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2 col-span-2">
-                <Label htmlFor="req_position">Cargo / Función *</Label>
-                <select 
-                  id="req_position"
+                <Label htmlFor="cat_name">Nombre del Implemento *</Label>
+                <Input 
+                  id="cat_name" 
+                  placeholder="Ej: Protector Auditivo (Fonos)" 
                   required
-                  value={reqPositionId}
-                  onChange={(e) => setReqPositionId(e.target.value)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <option value="">Seleccionar cargo</option>
-                  {uniquePositions.map((pos: any) => (
-                    <option key={pos.id} value={pos.id}>{pos.name} ({pos.area?.name || 'General'})</option>
-                  ))}
-                </select>
+                  value={catName}
+                  onChange={(e) => setCatName(e.target.value)}
+                />
               </div>
 
               <div className="space-y-2 col-span-2">
@@ -1433,9 +1683,9 @@ export default function EPPPage() {
                   <label className="flex items-center gap-1.5 text-sm font-medium cursor-pointer">
                     <input 
                       type="radio" 
-                      name="req_type" 
-                      checked={reqProductType === 'EPP'}
-                      onChange={() => setReqProductType('EPP')}
+                      name="cat_type" 
+                      checked={catType === 'EPP'}
+                      onChange={() => setCatType('EPP')}
                       className="h-4 w-4 accent-orange-600"
                     />
                     Equipo de Protección (EPP)
@@ -1443,9 +1693,9 @@ export default function EPPPage() {
                   <label className="flex items-center gap-1.5 text-sm font-medium cursor-pointer">
                     <input 
                       type="radio" 
-                      name="req_type" 
-                      checked={reqProductType === 'UNIFORM'}
-                      onChange={() => setReqProductType('UNIFORM')}
+                      name="cat_type" 
+                      checked={catType === 'UNIFORM'}
+                      onChange={() => setCatType('UNIFORM')}
                       className="h-4 w-4 accent-orange-600"
                     />
                     Vestuario / Uniforme
@@ -1454,61 +1704,81 @@ export default function EPPPage() {
               </div>
 
               <div className="space-y-2 col-span-2">
-                <Label htmlFor="req_name">Nombre del Implemento *</Label>
-                <Input 
-                  id="req_name" 
-                  placeholder="Ej: Calzado de Seguridad (Con puntera)" 
-                  required
-                  value={reqProductName}
-                  onChange={(e) => setReqProductName(e.target.value)}
-                  list="suggested-products-req"
-                />
-                <datalist id="suggested-products-req">
-                  {uniqueProducts.map(name => <option key={name} value={name} />)}
-                </datalist>
+                <Label>¿Este implemento usa tallas?</Label>
+                <div className="flex gap-3">
+                  <label className="flex items-center gap-1.5 text-sm font-medium cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="cat_sizes" 
+                      checked={!catUsesSizes}
+                      onChange={() => setCatUsesSizes(false)}
+                      className="h-4 w-4 accent-orange-600"
+                    />
+                    Talla Única
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm font-medium cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="cat_sizes" 
+                      checked={catUsesSizes}
+                      onChange={() => setCatUsesSizes(true)}
+                      className="h-4 w-4 accent-orange-600"
+                    />
+                    Usa Tallas (se lee de la ficha del trabajador)
+                  </label>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="req_qty">Cantidad *</Label>
-                <Input 
-                  id="req_qty" 
-                  type="number" 
-                  min="1"
-                  required
-                  value={reqQty}
-                  onChange={(e) => setReqQty(Number(e.target.value))}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="req_renewal">Renovación (Días) *</Label>
-                <Input 
-                  id="req_renewal" 
-                  type="number" 
-                  min="1"
-                  required
-                  value={reqRenewal}
-                  onChange={(e) => setReqRenewal(Number(e.target.value))}
-                />
-              </div>
+              {catUsesSizes && (
+                <div className="space-y-2 col-span-2">
+                  <Label htmlFor="cat_size_field">Campo de Talla de la Ficha Personal</Label>
+                  <select 
+                    id="cat_size_field"
+                    value={catSizeField}
+                    onChange={(e) => setCatSizeField(e.target.value)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">Seleccionar campo de talla</option>
+                    {sizeFieldOptions.filter(o => o.value !== '').map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+              )}
 
               <div className="space-y-2 col-span-2">
-                <Label htmlFor="req_size_field">Mapeo con Campo de Talla de la Ficha</Label>
+                <Label htmlFor="cat_renewal">Duración Planificada (Renovación) *</Label>
                 <select 
-                  id="req_size_field"
-                  value={reqSizeField}
-                  onChange={(e) => setReqSizeField(e.target.value)}
+                  id="cat_renewal"
+                  value={catRenewalDays}
+                  onChange={(e) => setCatRenewalDays(Number(e.target.value))}
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  {sizeFieldOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  <option value={30}>1 mes (30 días)</option>
+                  <option value={60}>2 meses (60 días)</option>
+                  <option value={90}>3 meses (90 días)</option>
+                  <option value={180}>6 meses (180 días)</option>
+                  <option value={365}>12 meses (365 días)</option>
+                  <option value={730}>24 meses (730 días)</option>
                 </select>
+                {![30, 60, 90, 180, 365, 730].includes(catRenewalDays) && (
+                  <div className="flex items-center gap-2 mt-1">
+                    <Label htmlFor="cat_renewal_custom" className="text-xs text-muted-foreground whitespace-nowrap">Personalizado (días):</Label>
+                    <Input 
+                      id="cat_renewal_custom"
+                      type="number" 
+                      min="1"
+                      value={catRenewalDays}
+                      onChange={(e) => setCatRenewalDays(Number(e.target.value))}
+                      className="h-8 w-24"
+                    />
+                  </div>
+                )}
               </div>
             </div>
             
             <DialogFooter className="mt-4">
-              <Button type="button" variant="ghost" onClick={() => setIsAddReqOpen(false)}>Cancelar</Button>
+              <Button type="button" variant="ghost" onClick={() => { resetCatalogForm(); setIsCatalogDialogOpen(false); }}>Cancelar</Button>
               <Button type="submit" disabled={isPending} className="bg-orange-600 hover:bg-orange-700 text-white">
-                {isPending ? 'Guardando...' : 'Asignar Requerimiento'}
+                {isPending ? 'Guardando...' : (editingCatalogItem ? 'Guardar Cambios' : 'Crear Implemento')}
               </Button>
             </DialogFooter>
           </form>

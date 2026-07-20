@@ -29,6 +29,17 @@ export interface InventoryItem {
   created_at: string;
 }
 
+export interface ProductCatalogItem {
+  id: string;
+  product_type: 'UNIFORM' | 'EPP';
+  name: string;
+  uses_sizes: boolean;
+  size_field: string | null;
+  renewal_days: number;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface PositionRequirement {
   id: string;
   position_id: string;
@@ -610,4 +621,149 @@ export async function getMonthlyEPPForecastReport(
   report.sort((a, b) => a.productName.localeCompare(b.productName, 'es'));
 
   return { data: report, error: null };
+}
+
+// ── 8. Product Catalog Actions ───────────────────────────────────────────────
+
+export async function getProductCatalog(): Promise<{ data: ProductCatalogItem[]; error: string | null }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('epp_product_catalog')
+    .select('*')
+    .eq('is_active', true)
+    .order('product_type', { ascending: true })
+    .order('name', { ascending: true });
+
+  if (error) return { data: [], error: error.message };
+  return { data: (data || []) as ProductCatalogItem[], error: null };
+}
+
+export async function saveProductCatalogItem(payload: {
+  id?: string;
+  productType: 'UNIFORM' | 'EPP';
+  name: string;
+  usesSizes: boolean;
+  sizeField: string | null;
+  renewalDays: number;
+}): Promise<{ success: boolean; error: string | null }> {
+  const supabase = await createClient();
+  let error;
+
+  if (payload.id) {
+    const { error: err } = await supabase
+      .from('epp_product_catalog')
+      .update({
+        product_type: payload.productType,
+        name: payload.name,
+        uses_sizes: payload.usesSizes,
+        size_field: payload.usesSizes ? payload.sizeField : null,
+        renewal_days: payload.renewalDays,
+      })
+      .eq('id', payload.id);
+    error = err;
+  } else {
+    const { error: err } = await supabase
+      .from('epp_product_catalog')
+      .insert([{
+        product_type: payload.productType,
+        name: payload.name,
+        uses_sizes: payload.usesSizes,
+        size_field: payload.usesSizes ? payload.sizeField : null,
+        renewal_days: payload.renewalDays,
+      }]);
+    error = err;
+  }
+
+  if (error) return { success: false, error: error.message };
+  safeRevalidatePath('/epp');
+  return { success: true, error: null };
+}
+
+export async function deleteProductCatalogItem(id: string): Promise<{ success: boolean; error: string | null }> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from('epp_product_catalog')
+    .update({ is_active: false })
+    .eq('id', id);
+
+  if (error) return { success: false, error: error.message };
+  safeRevalidatePath('/epp');
+  return { success: true, error: null };
+}
+
+// ── 9. Positions for Matrix ─────────────────────────────────────────────────
+
+export async function getAllPositionsWithAreas(): Promise<{ data: any[]; error: string | null }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('positions')
+    .select(`
+      id,
+      name,
+      area:areas(id, name)
+    `)
+    .order('name', { ascending: true });
+
+  if (error) return { data: [], error: error.message };
+  return { data: data || [], error: null };
+}
+
+// ── 10. Bulk Save Requirements Matrix ───────────────────────────────────────
+
+export async function bulkSaveRequirementsMatrix(
+  entries: { positionId: string; productCatalogId: string; quantity: number }[],
+  allPositionIds: string[],
+  allCatalogItemIds: string[]
+): Promise<{ success: boolean; error: string | null }> {
+  const supabase = await createClient();
+
+  // 1. Fetch catalog items to get denormalized fields
+  const { data: catalogItems, error: catErr } = await supabase
+    .from('epp_product_catalog')
+    .select('*')
+    .in('id', allCatalogItemIds);
+
+  if (catErr) return { success: false, error: catErr.message };
+
+  const catalogMap = new Map((catalogItems || []).map(c => [c.id, c]));
+
+  // 2. Delete existing requirements for the positions and catalog items involved
+  for (const posId of allPositionIds) {
+    const { error: delErr } = await supabase
+      .from('epp_position_requirements')
+      .delete()
+      .eq('position_id', posId)
+      .in('product_catalog_id', allCatalogItemIds);
+
+    if (delErr) {
+      console.error(`Error deleting requirements for position ${posId}:`, delErr.message);
+    }
+  }
+
+  // 3. Insert new requirements for entries with quantity > 0
+  const nonZeroEntries = entries.filter(e => e.quantity > 0);
+
+  if (nonZeroEntries.length > 0) {
+    const insertRows = nonZeroEntries.map(entry => {
+      const cat = catalogMap.get(entry.productCatalogId);
+      return {
+        position_id: entry.positionId,
+        product_catalog_id: entry.productCatalogId,
+        product_type: cat?.product_type || 'EPP',
+        product_name: cat?.name || '',
+        quantity: entry.quantity,
+        renewal_days: cat?.renewal_days || 180,
+        size_field: cat?.uses_sizes ? cat?.size_field : null,
+      };
+    });
+
+    const { error: insertErr } = await supabase
+      .from('epp_position_requirements')
+      .insert(insertRows);
+
+    if (insertErr) return { success: false, error: insertErr.message };
+  }
+
+  safeRevalidatePath('/epp');
+  return { success: true, error: null };
 }
