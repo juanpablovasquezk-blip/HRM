@@ -68,6 +68,7 @@ import {
   deleteProductCatalogItem,
   getAllPositionsWithAreas,
   bulkSaveRequirementsMatrix,
+  updateWorkerClothingSizes,
   ProductCatalogItem
 } from './actions';
 import { generateDeliveryFormPDF } from './generate-delivery-pdf';
@@ -151,6 +152,15 @@ export default function EPPPage() {
   // File Upload State
   const [uploadingEventId, setUploadingEventId] = useState<string | null>(null);
 
+  // Quick Edit Worker Sizes States
+  const [activeWorkerForSizes, setActiveWorkerForSizes] = useState<any | null>(null);
+  const [isEditSizesOpen, setIsEditSizesOpen] = useState(false);
+  const [sizesForm, setSizesForm] = useState<Record<string, string>>({});
+
+  // Missing Sizes Dialog & Filter States
+  const [isMissingSizesDialogOpen, setIsMissingSizesDialogOpen] = useState(false);
+  const [filterMissingSizes, setFilterMissingSizes] = useState(false);
+
   // Fetch initial data
   const fetchData = async () => {
     const [res, catRes, posRes] = await Promise.all([
@@ -208,12 +218,82 @@ export default function EPPPage() {
     setSearchQuery(e.target.value);
   };
 
+  // Workers missing sizes
+  const workersMissingSizes = useMemo(() => {
+    return personnel.filter(p => p.requirements.some((r: any) => r.size === 'No ingresada'));
+  }, [personnel]);
+
+  // Grouped Forecast Summary (Sumatoria total por implemento)
+  const forecastSummary = useMemo(() => {
+    const map = new Map<string, {
+      productName: string;
+      productType: 'UNIFORM' | 'EPP';
+      totalNeeded: number;
+      totalInStock: number;
+      totalToPurchase: number;
+      missingSizeCount: number;
+    }>();
+
+    forecastData.forEach(item => {
+      const existing = map.get(item.productName) || {
+        productName: item.productName,
+        productType: item.productType,
+        totalNeeded: 0,
+        totalInStock: 0,
+        totalToPurchase: 0,
+        missingSizeCount: 0,
+      };
+      existing.totalNeeded += item.qtyNeeded;
+      existing.totalInStock += item.qtyInStock;
+      existing.totalToPurchase += item.qtyToPurchase;
+      if (item.size === 'No ingresada') {
+        existing.missingSizeCount += item.qtyNeeded;
+      }
+      map.set(item.productName, existing);
+    });
+
+    return Array.from(map.values());
+  }, [forecastData]);
+
+  const openQuickEditSizes = (worker: any) => {
+    setActiveWorkerForSizes(worker);
+    setSizesForm({
+      clothing_tshirt_size: worker.clothing_tshirt_size || '',
+      clothing_polar_size: worker.clothing_polar_size || '',
+      clothing_pants_size_letter: worker.clothing_pants_size_letter || '',
+      clothing_pants_size_number: worker.clothing_pants_size_number || '',
+      clothing_shoe_size: worker.clothing_shoe_size || '',
+      clothing_parka_size: worker.clothing_parka_size || '',
+      clothing_overall_size: worker.clothing_overall_size || '',
+      ...(worker.custom_clothing_sizes || {}),
+    });
+    setIsEditSizesOpen(true);
+  };
+
+  const handleSaveWorkerSizes = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeWorkerForSizes) return;
+
+    startTransition(async () => {
+      const res = await updateWorkerClothingSizes(activeWorkerForSizes.id, sizesForm);
+      if (res.success) {
+        toast.success('Tallas actualizadas correctamente');
+        setIsEditSizesOpen(false);
+        fetchData();
+        if (forecastMonth) handleGenerateForecast();
+      } else {
+        toast.error('Error al guardar tallas: ' + res.error);
+      }
+    });
+  };
+
   // Filtered workers list
   const filteredPersonnel = personnel.filter(p => {
     const fullName = `${p.first_name} ${p.last_name_father} ${p.last_name_mother || ''}`.toLowerCase();
     const matchesSearch = fullName.includes(searchQuery.toLowerCase()) || p.rut.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCompany = selectedCompanyId === 'all' || p.company_id === selectedCompanyId;
-    return matchesSearch && matchesCompany;
+    const matchesMissing = !filterMissingSizes || p.requirements.some((r: any) => r.size === 'No ingresada');
+    return matchesSearch && matchesCompany && matchesMissing;
   });
 
   // Calculate unique list of products currently in requirements/inventory to auto-suggest
@@ -654,7 +734,7 @@ export default function EPPPage() {
     setGeneratingForecast(false);
   };
 
-  // Generate PDF of forecast
+  // Generate PDF of forecast (Page 1: Executive Summary by item, Page 2+: Breakdown by size)
   const downloadForecastPDF = () => {
     if (forecastData.length === 0) return;
 
@@ -670,16 +750,23 @@ export default function EPPPage() {
 
     let y = 15;
 
-    // Header
+    // ── PAGE 1: RESUMEN EJECUTIVO (TOTALES POR IMPLEMENTO) ─────────────────
+
+    // Header Banner
     doc.setFillColor(26, 54, 93);
     doc.rect(margin, y, usableW, 10, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text('INFORME MENSUAL DE REQUERIMIENTOS Y COMPRAS EPP', margin + usableW / 2, y + 6, { align: 'center' });
+    doc.text('INFORME MENSUAL DE REQUERIMIENTOS Y COMPRAS EPP', margin + usableW / 2, y + 6.5, { align: 'center' });
 
-    y += 13;
+    y += 14;
     doc.setTextColor(50, 50, 50);
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text('1. RESUMEN GENERAL (SUMATORIA TOTAL POR IMPLEMENTO)', margin, y);
+
+    y += 5;
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.text(`Mes de Consulta: ${forecastMonth}`, margin, y);
@@ -687,20 +774,111 @@ export default function EPPPage() {
 
     y += 5;
 
-    // Table Header
+    // Table Header Page 1
     doc.setFillColor(241, 245, 249);
     doc.rect(margin, y, usableW, 7, 'F');
     doc.setDrawColor(200, 200, 200);
     doc.rect(margin, y, usableW, 7);
-    
+
     doc.setTextColor(26, 54, 93);
     doc.setFont('helvetica', 'bold');
-    
+
     doc.text('IMPLEMENTO', margin + 3, y + 4.5);
-    doc.text('TALLA', margin + 70, y + 4.5);
-    doc.text('CANT. REQUERIDA', margin + 95, y + 4.5, { align: 'center' });
-    doc.text('CANT. STOCK', margin + 125, y + 4.5, { align: 'center' });
-    doc.text('A COMPRAR', margin + 155, y + 4.5, { align: 'center' });
+    doc.text('TIPO', margin + 80, y + 4.5);
+    doc.text('REQUERIDO TOTAL', margin + 110, y + 4.5, { align: 'center' });
+    doc.text('EN STOCK', margin + 145, y + 4.5, { align: 'center' });
+    doc.text('A COMPRAR TOTAL', margin + 175, y + 4.5, { align: 'center' });
+
+    y += 7;
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(30, 30, 30);
+
+    let totalSumNeeded = 0;
+    let totalSumStock = 0;
+    let totalSumPurchase = 0;
+
+    forecastSummary.forEach((item, index) => {
+      totalSumNeeded += item.totalNeeded;
+      totalSumStock += item.totalInStock;
+      totalSumPurchase += item.totalToPurchase;
+
+      if (index % 2 === 0) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(margin, y, usableW, 6, 'F');
+      }
+      doc.rect(margin, y, usableW, 6);
+
+      doc.text(item.productName, margin + 3, y + 4);
+      doc.text(item.productType === 'UNIFORM' ? 'Uniforme' : 'EPP', margin + 80, y + 4);
+      doc.text(item.totalNeeded.toString(), margin + 110, y + 4, { align: 'center' });
+      doc.text(item.totalInStock.toString(), margin + 145, y + 4, { align: 'center' });
+
+      if (item.totalToPurchase > 0) {
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(220, 38, 38);
+      }
+      doc.text(item.totalToPurchase.toString(), margin + 175, y + 4, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(30, 30, 30);
+
+      y += 6;
+    });
+
+    // Total Row Summary
+    doc.setFillColor(226, 232, 240);
+    doc.rect(margin, y, usableW, 7, 'F');
+    doc.rect(margin, y, usableW, 7);
+    doc.setFont('helvetica', 'bold');
+    doc.text('TOTALES GENERALES', margin + 3, y + 4.5);
+    doc.text(totalSumNeeded.toString(), margin + 110, y + 4.5, { align: 'center' });
+    doc.text(totalSumStock.toString(), margin + 145, y + 4.5, { align: 'center' });
+    doc.setTextColor(totalSumPurchase > 0 ? 220 : 30, totalSumPurchase > 0 ? 38 : 30, totalSumPurchase > 0 ? 38 : 30);
+    doc.text(totalSumPurchase.toString(), margin + 175, y + 4.5, { align: 'center' });
+
+    // Warning note if missing sizes exist
+    const totalMissing = forecastData.filter(i => i.size === 'No ingresada').reduce((acc, i) => acc + i.qtyNeeded, 0);
+    if (totalMissing > 0) {
+      y += 12;
+      doc.setFillColor(254, 243, 199);
+      doc.setDrawColor(245, 158, 11);
+      doc.rect(margin, y, usableW, 12, 'FD');
+      doc.setTextColor(180, 83, 9);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`* ATENCIÓN: Se detectaron ${totalMissing} requerimientos asignados a trabajadores sin talla en su ficha.`, margin + 3, y + 5);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Consulte el desglose detallado por talla en la siguiente página y registre las tallas faltantes en el sistema.`, margin + 3, y + 9.5);
+    }
+
+    // ── PAGE 2: DESGLOSE DETALLADO POR TALLA ───────────────────────────────
+    doc.addPage();
+    y = 15;
+
+    // Header Banner Page 2
+    doc.setFillColor(26, 54, 93);
+    doc.rect(margin, y, usableW, 10, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('DESGLOSE DETALLADO POR IMPLEMENTO Y TALLA', margin + usableW / 2, y + 6.5, { align: 'center' });
+
+    y += 14;
+
+    // Table Header Page 2
+    doc.setFillColor(241, 245, 249);
+    doc.rect(margin, y, usableW, 7, 'F');
+    doc.setDrawColor(200, 200, 200);
+    doc.rect(margin, y, usableW, 7);
+
+    doc.setTextColor(26, 54, 93);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+
+    doc.text('IMPLEMENTO', margin + 3, y + 4.5);
+    doc.text('TALLA', margin + 75, y + 4.5);
+    doc.text('CANT. REQUERIDA', margin + 110, y + 4.5, { align: 'center' });
+    doc.text('CANT. STOCK', margin + 145, y + 4.5, { align: 'center' });
+    doc.text('A COMPRAR', margin + 175, y + 4.5, { align: 'center' });
 
     y += 7;
     doc.setFont('helvetica', 'normal');
@@ -710,6 +888,25 @@ export default function EPPPage() {
       if (y > 270) {
         doc.addPage();
         y = 15;
+
+        doc.setFillColor(241, 245, 249);
+        doc.rect(margin, y, usableW, 7, 'F');
+        doc.setDrawColor(200, 200, 200);
+        doc.rect(margin, y, usableW, 7);
+
+        doc.setTextColor(26, 54, 93);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+
+        doc.text('IMPLEMENTO', margin + 3, y + 4.5);
+        doc.text('TALLA', margin + 75, y + 4.5);
+        doc.text('CANT. REQUERIDA', margin + 110, y + 4.5, { align: 'center' });
+        doc.text('CANT. STOCK', margin + 145, y + 4.5, { align: 'center' });
+        doc.text('A COMPRAR', margin + 175, y + 4.5, { align: 'center' });
+
+        y += 7;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(30, 30, 30);
       }
 
       if (index % 2 === 0) {
@@ -719,15 +916,23 @@ export default function EPPPage() {
       doc.rect(margin, y, usableW, 6);
 
       doc.text(item.productName, margin + 3, y + 4);
-      doc.text(item.size, margin + 70, y + 4);
-      doc.text(item.qtyNeeded.toString(), margin + 95, y + 4, { align: 'center' });
-      doc.text(item.qtyInStock.toString(), margin + 125, y + 4, { align: 'center' });
+
+      if (item.size === 'No ingresada') {
+        doc.setTextColor(217, 119, 6);
+        doc.setFont('helvetica', 'bold');
+      }
+      doc.text(item.size, margin + 75, y + 4);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(30, 30, 30);
+
+      doc.text(item.qtyNeeded.toString(), margin + 110, y + 4, { align: 'center' });
+      doc.text(item.qtyInStock.toString(), margin + 145, y + 4, { align: 'center' });
 
       if (item.qtyToPurchase > 0) {
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(220, 38, 38); // red text
+        doc.setTextColor(220, 38, 38);
       }
-      doc.text(item.qtyToPurchase.toString(), margin + 155, y + 4, { align: 'center' });
+      doc.text(item.qtyToPurchase.toString(), margin + 175, y + 4, { align: 'center' });
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(30, 30, 30);
 
@@ -813,12 +1018,24 @@ export default function EPPPage() {
                     {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
+
+                <Button
+                  variant={filterMissingSizes ? "default" : "outline"}
+                  onClick={() => setFilterMissingSizes(!filterMissingSizes)}
+                  className={filterMissingSizes 
+                    ? "bg-amber-600 text-white hover:bg-amber-700 h-10 gap-1.5 shrink-0" 
+                    : "border-slate-300 text-slate-700 hover:bg-slate-50 h-10 gap-1.5 shrink-0"}
+                >
+                  <AlertTriangle className={`h-4 w-4 ${filterMissingSizes ? 'text-white' : 'text-amber-600'}`} />
+                  Sin Tallas ({workersMissingSizes.length})
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
                 {filteredPersonnel.map((worker) => {
                   const isExpanded = !!expandedWorkers[worker.id];
+                  const hasMissingSizes = worker.requirements.some((r: any) => r.size === 'No ingresada');
                   const overallStatusBadge = {
                     RED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400',
                     ORANGE: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400',
@@ -857,7 +1074,22 @@ export default function EPPPage() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2.5">
+                          {hasMissingSizes && (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 text-[11px] gap-1">
+                              <AlertTriangle className="h-3 w-3 text-amber-600" />
+                              Tallas Incompletas
+                            </Badge>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => { e.stopPropagation(); openQuickEditSizes(worker); }}
+                            className="border-amber-300 text-amber-900 hover:bg-amber-100/70 h-7 text-xs gap-1 font-semibold"
+                          >
+                            <Edit className="h-3.5 w-3.5 text-amber-700" />
+                            Registrar Tallas
+                          </Button>
                           <Badge variant="outline" className={overallStatusBadge}>
                             {worker.overallStatus === 'RED' ? 'Pendiente / Vencido' :
                              worker.overallStatus === 'ORANGE' ? 'Por Vencer' : 'Al Día'}
@@ -1395,13 +1627,13 @@ export default function EPPPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
             {/* Purchase Forecast report */}
-            <Card className="border-slate-200/60 dark:border-slate-800 shadow-md flex flex-col">
+            <Card className="border-slate-200/60 dark:border-slate-800 shadow-md flex flex-col lg:col-span-2">
               <CardHeader>
                 <CardTitle className="text-lg">Previsión Mensual de Entregas y Compras</CardTitle>
                 <CardDescription>
                   Calcula qué elementos vencen o deben entregarse por primera vez en un mes para estimar compras requeridas.
                 </CardDescription>
-                <div className="flex gap-3 mt-4">
+                <div className="flex gap-3 mt-4 max-w-md">
                   <div className="flex-1">
                     <Input 
                       type="month" 
@@ -1423,39 +1655,117 @@ export default function EPPPage() {
                       className="border-slate-300 dark:border-slate-800 gap-1.5"
                     >
                       <FileDown className="h-4 w-4" />
-                      PDF
+                      Descargar PDF
                     </Button>
                   )}
                 </div>
               </CardHeader>
               <CardContent className="flex-1">
                 {forecastData.length > 0 ? (
-                  <Table className="border rounded-lg">
-                    <TableHeader className="bg-slate-50 dark:bg-slate-900">
-                      <TableRow>
-                        <TableHead>Implemento</TableHead>
-                        <TableHead>Talla</TableHead>
-                        <TableHead className="text-center">Requerido</TableHead>
-                        <TableHead className="text-center">En Stock</TableHead>
-                        <TableHead className="text-center">Comprar</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {forecastData.map((item, index) => (
-                        <TableRow key={index}>
-                          <TableCell className="font-semibold text-xs py-1.5">{item.productName}</TableCell>
-                          <TableCell className="text-xs py-1.5">{item.size}</TableCell>
-                          <TableCell className="text-center text-xs py-1.5">{item.qtyNeeded}</TableCell>
-                          <TableCell className="text-center text-xs py-1.5">{item.qtyInStock}</TableCell>
-                          <TableCell className="text-center text-xs py-1.5 font-bold">
-                            <span className={item.qtyToPurchase > 0 ? 'text-red-500 font-black' : 'text-slate-500'}>
-                              {item.qtyToPurchase}
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  <div className="space-y-6">
+                    {/* Warning alert if missing sizes exist */}
+                    {forecastData.some(i => i.size === 'No ingresada') && (
+                      <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300 rounded-lg p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                          <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                          <div>
+                            <p className="font-semibold text-xs sm:text-sm">Se detectaron requerimientos para trabajadores sin talla registrada en su ficha</p>
+                            <p className="text-[11px] text-amber-700 dark:text-amber-400">Registra las tallas pendientes para optimizar las compras y evitar prendas sin asignar.</p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsMissingSizesDialogOpen(true)}
+                          className="border-amber-300 bg-amber-100/70 hover:bg-amber-200 text-amber-900 gap-1.5 h-8 text-xs font-semibold shrink-0"
+                        >
+                          <Search className="h-3.5 w-3.5" />
+                          Ver Trabajadores Sin Talla ({forecastData.filter(i => i.size === 'No ingresada').reduce((acc, i) => acc + i.qtyNeeded, 0)})
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Tabla 1: Resumen General (Sumatoria Total por Implemento) */}
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2.5 flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-orange-500"></span>
+                        1. Resumen General (Sumatoria Total por Implemento)
+                      </h4>
+                      <Table className="border rounded-lg">
+                        <TableHeader className="bg-slate-100 dark:bg-slate-900">
+                          <TableRow>
+                            <TableHead className="font-bold text-xs">Implemento</TableHead>
+                            <TableHead className="font-bold text-xs">Tipo</TableHead>
+                            <TableHead className="text-center font-bold text-xs">Requerido Total</TableHead>
+                            <TableHead className="text-center font-bold text-xs">En Stock</TableHead>
+                            <TableHead className="text-center font-bold text-xs">Comprar Total</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {forecastSummary.map((sumItem, idx) => (
+                            <TableRow key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-900/50">
+                              <TableCell className="font-bold text-xs py-2">{sumItem.productName}</TableCell>
+                              <TableCell className="text-xs py-2">
+                                <Badge variant="outline" className={sumItem.productType === 'UNIFORM' ? 'bg-blue-50 text-blue-600' : 'bg-teal-50 text-teal-600'}>
+                                  {sumItem.productType === 'UNIFORM' ? 'Uniforme' : 'EPP'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-center text-xs py-2 font-semibold text-slate-700 dark:text-slate-300">{sumItem.totalNeeded}</TableCell>
+                              <TableCell className="text-center text-xs py-2 font-semibold text-slate-700 dark:text-slate-300">{sumItem.totalInStock}</TableCell>
+                              <TableCell className="text-center text-xs py-2 font-black">
+                                <span className={sumItem.totalToPurchase > 0 ? 'text-red-600 dark:text-red-400 font-black' : 'text-slate-500'}>
+                                  {sumItem.totalToPurchase}
+                                </span>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    {/* Tabla 2: Detalle Desglosado por Talla */}
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2.5 flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-blue-500"></span>
+                        2. Detalle Desglosado por Talla
+                      </h4>
+                      <Table className="border rounded-lg">
+                        <TableHeader className="bg-slate-50 dark:bg-slate-900">
+                          <TableRow>
+                            <TableHead className="text-xs">Implemento</TableHead>
+                            <TableHead className="text-xs">Talla</TableHead>
+                            <TableHead className="text-center text-xs">Requerido</TableHead>
+                            <TableHead className="text-center text-xs">En Stock</TableHead>
+                            <TableHead className="text-center text-xs">Comprar</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {forecastData.map((item, index) => (
+                            <TableRow key={index} className="hover:bg-slate-50/50">
+                              <TableCell className="font-semibold text-xs py-1.5">{item.productName}</TableCell>
+                              <TableCell className="text-xs py-1.5">
+                                {item.size === 'No ingresada' ? (
+                                  <span className="text-amber-700 dark:text-amber-400 font-bold flex items-center gap-1">
+                                    <AlertTriangle className="h-3 w-3 text-amber-500 inline" />
+                                    No ingresada
+                                  </span>
+                                ) : (
+                                  item.size
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center text-xs py-1.5">{item.qtyNeeded}</TableCell>
+                              <TableCell className="text-center text-xs py-1.5">{item.qtyInStock}</TableCell>
+                              <TableCell className="text-center text-xs py-1.5 font-bold">
+                                <span className={item.qtyToPurchase > 0 ? 'text-red-500 font-black' : 'text-slate-500'}>
+                                  {item.qtyToPurchase}
+                                </span>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
                 ) : (
                   <div className="text-center py-12 text-muted-foreground border border-dashed rounded-lg bg-slate-50/50">
                     Selecciona un mes y haz clic en "Calcular" para ver las compras sugeridas de EPP/Uniformes.
@@ -2003,6 +2313,196 @@ export default function EPPPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      {/* ── DIALOG 6: QUICK EDIT WORKER SIZES ───────────────────────────── */}
+      <Dialog open={isEditSizesOpen} onOpenChange={setIsEditSizesOpen}>
+        <DialogContent className="sm:max-w-[550px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-white">
+              <Edit className="h-5 w-5 text-orange-600" />
+              Registrar Tallas de Ropa y EPP
+            </DialogTitle>
+            <DialogDescription>
+              {activeWorkerForSizes ? `${activeWorkerForSizes.first_name} ${activeWorkerForSizes.last_name_father} (${activeWorkerForSizes.rut})` : ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSaveWorkerSizes} className="space-y-4 pt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="clothing_tshirt_size" className="text-xs">Talla de Polera</Label>
+                <Input
+                  id="clothing_tshirt_size"
+                  value={sizesForm.clothing_tshirt_size || ''}
+                  onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_tshirt_size: e.target.value }))}
+                  placeholder="Ej: S, M, L, XL..."
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="clothing_polar_size" className="text-xs">Talla de Polar</Label>
+                <Input
+                  id="clothing_polar_size"
+                  value={sizesForm.clothing_polar_size || ''}
+                  onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_polar_size: e.target.value }))}
+                  placeholder="Ej: S, M, L, XL..."
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="clothing_pants_size_letter" className="text-xs">Talla Pantalón (Letra)</Label>
+                <Input
+                  id="clothing_pants_size_letter"
+                  value={sizesForm.clothing_pants_size_letter || ''}
+                  onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_pants_size_letter: e.target.value }))}
+                  placeholder="Ej: S, M, L, XL..."
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="clothing_pants_size_number" className="text-xs">Talla Pantalón (Número)</Label>
+                <Input
+                  id="clothing_pants_size_number"
+                  value={sizesForm.clothing_pants_size_number || ''}
+                  onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_pants_size_number: e.target.value }))}
+                  placeholder="Ej: 42, 44, 46..."
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="clothing_shoe_size" className="text-xs">Talla de Zapatos</Label>
+                <Input
+                  id="clothing_shoe_size"
+                  value={sizesForm.clothing_shoe_size || ''}
+                  onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_shoe_size: e.target.value }))}
+                  placeholder="Ej: 40, 41, 42..."
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="clothing_parka_size" className="text-xs">Talla de Parka</Label>
+                <Input
+                  id="clothing_parka_size"
+                  value={sizesForm.clothing_parka_size || ''}
+                  onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_parka_size: e.target.value }))}
+                  placeholder="Ej: S, M, L, XL..."
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1.5 col-span-2">
+                <Label htmlFor="clothing_overall_size" className="text-xs">Talla Jardinera Térmica</Label>
+                <Input
+                  id="clothing_overall_size"
+                  value={sizesForm.clothing_overall_size || ''}
+                  onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_overall_size: e.target.value }))}
+                  placeholder="Ej: S, M, L, XL..."
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              {/* Custom fields dynamically from catalog */}
+              {catalog.filter(c => c.size_field?.startsWith('clothing_custom_')).map(catItem => {
+                const key = catItem.size_field!;
+                const clean = key.replace('clothing_custom_', '').replace(/_/g, ' ');
+                const label = 'Talla: ' + clean.charAt(0).toUpperCase() + clean.slice(1);
+                return (
+                  <div key={key} className="space-y-1.5 col-span-2">
+                    <Label htmlFor={key} className="text-xs font-semibold text-orange-700">{label}</Label>
+                    <Input
+                      id={key}
+                      value={sizesForm[key] || ''}
+                      onChange={(e) => setSizesForm(prev => ({ ...prev, [key]: e.target.value }))}
+                      placeholder="Ej: S, M, L, XL, 42..."
+                      className="h-9 text-xs border-orange-200"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="ghost" onClick={() => setIsEditSizesOpen(false)}>Cancelar</Button>
+              <Button type="submit" disabled={isPending} className="bg-orange-600 hover:bg-orange-700 text-white">
+                {isPending ? 'Guardando...' : 'Guardar Tallas'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── DIALOG 7: WORKERS MISSING SIZES LIST ────────────────────────── */}
+      <Dialog open={isMissingSizesDialogOpen} onOpenChange={setIsMissingSizesDialogOpen}>
+        <DialogContent className="sm:max-w-[650px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="h-5 w-5" />
+              Trabajadores con Tallas Incompletas
+            </DialogTitle>
+            <DialogDescription>
+              Lista de trabajadores que tienen requerimientos de EPP/Uniformes asignados pero les falta registrar la talla en su ficha.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 pt-2">
+            {workersMissingSizes.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground text-sm">
+                ✅ ¡Excelente! Todos los trabajadores con requerimientos tienen sus tallas registradas.
+              </div>
+            ) : (
+              <Table className="border rounded-lg text-xs">
+                <TableHeader className="bg-slate-50 dark:bg-slate-900">
+                  <TableRow>
+                    <TableHead>Trabajador</TableHead>
+                    <TableHead>Cargo</TableHead>
+                    <TableHead>Requerimientos Afectados</TableHead>
+                    <TableHead className="text-right">Acción</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {workersMissingSizes.map(worker => {
+                    const missingReqs = worker.requirements.filter((r: any) => r.size === 'No ingresada');
+                    return (
+                      <TableRow key={worker.id}>
+                        <TableCell className="font-semibold">
+                          <div>{worker.first_name} {worker.last_name_father}</div>
+                          <div className="text-[10px] text-muted-foreground font-mono">{worker.rut}</div>
+                        </TableCell>
+                        <TableCell>{worker.position?.name || '—'}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {missingReqs.map((mr: any, idx: number) => (
+                              <Badge key={idx} variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 text-[10px]">
+                                {mr.productName}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setIsMissingSizesDialogOpen(false);
+                              openQuickEditSizes(worker);
+                            }}
+                            className="bg-orange-600 hover:bg-orange-700 text-white h-7 text-[11px] px-2 gap-1"
+                          >
+                            <Edit className="h-3 w-3" />
+                            Cargar Talla
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

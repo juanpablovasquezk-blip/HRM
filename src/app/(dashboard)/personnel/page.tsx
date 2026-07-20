@@ -45,6 +45,9 @@ export default async function PersonnelPage({
   const status = params.status || 'active';
   if (status === 'active') {
     query = query.eq('is_active', true).or('onboarding_status.is.null,onboarding_status.eq.approved');
+  } else if (status === 'missing_sizes') {
+    query = query.eq('is_active', true)
+      .or('clothing_tshirt_size.is.null,clothing_shoe_size.is.null,clothing_pants_size_letter.is.null,clothing_pants_size_number.is.null');
   } else if (status === 'inactive') {
     query = query.eq('is_active', false).or('onboarding_status.is.null,onboarding_status.eq.approved,onboarding_status.eq.rejected');
   } else if (status === 'pending') {

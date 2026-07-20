@@ -124,6 +124,7 @@ export function PersonnelFilters({
           onChange={(e) => updateFilter('status', e.target.value)}
         >
           <option value="active">Solo Activos</option>
+          <option value="missing_sizes">⚠️ Sin Tallas EPP</option>
           <option value="inactive">Solo Bajas</option>
           <option value="pending">Solicitudes Pendientes</option>
           <option value="all">Todos</option>

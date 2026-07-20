@@ -784,3 +784,65 @@ export async function bulkSaveRequirementsMatrix(
   }
 }
 
+// ── 11. Quick Update Worker Clothing Sizes ───────────────────────────────
+
+export async function updateWorkerClothingSizes(
+  personnelId: string,
+  sizes: Record<string, string>
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const supabase = await createClient();
+
+    const standardFields = [
+      'clothing_tshirt_size',
+      'clothing_polar_size',
+      'clothing_pants_size_letter',
+      'clothing_pants_size_number',
+      'clothing_shoe_size',
+      'clothing_parka_size',
+      'clothing_overall_size',
+    ];
+
+    const updateData: Record<string, any> = {};
+    const customSizes: Record<string, string> = {};
+
+    // Get current personnel to merge existing custom sizes
+    const { data: currentPerson } = await supabase
+      .from('personnel')
+      .select('custom_clothing_sizes')
+      .eq('id', personnelId)
+      .single();
+
+    const existingCustom = (currentPerson?.custom_clothing_sizes as Record<string, string>) || {};
+
+    for (const [key, val] of Object.entries(sizes)) {
+      const cleanVal = val ? val.trim().toUpperCase() : null;
+      if (standardFields.includes(key)) {
+        updateData[key] = cleanVal;
+      } else if (key.startsWith('clothing_custom_')) {
+        if (cleanVal) {
+          customSizes[key] = cleanVal;
+        } else {
+          delete existingCustom[key];
+        }
+      }
+    }
+
+    updateData.custom_clothing_sizes = { ...existingCustom, ...customSizes };
+
+    const { error } = await supabase
+      .from('personnel')
+      .update(updateData)
+      .eq('id', personnelId);
+
+    if (error) return { success: false, error: error.message };
+
+    safeRevalidatePath('/epp');
+    safeRevalidatePath('/personnel');
+    return { success: true, error: null };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error al actualizar tallas' };
+  }
+}
+
+
