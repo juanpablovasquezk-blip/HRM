@@ -1000,10 +1000,19 @@ export default function EPPPage() {
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => handleCopyWorkerSelfServiceLink()}
+            variant="outline"
+            className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 text-xs font-semibold flex items-center gap-1.5 h-10 px-3 shadow-sm"
+            title="Copiar enlace público de autoservicio de tallas para funcionarios"
+          >
+            <Link2 className="h-4 w-4 text-orange-600" />
+            Copiar Link para Funcionarios
+          </Button>
           <Button 
             onClick={() => setIsAddStockOpen(true)}
-            className="bg-orange-600 hover:bg-orange-700 text-white shadow-sm flex items-center gap-1.5"
+            className="bg-orange-600 hover:bg-orange-700 text-white shadow-sm flex items-center gap-1.5 h-10"
           >
             <Boxes className="h-4 w-4" />
             Ingresar Stock
@@ -1022,8 +1031,8 @@ export default function EPPPage() {
             <Boxes className="h-4 w-4" />
             Stock de Inventario
           </TabsTrigger>
-          <TabsTrigger value="config" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
-            <Shirt className="h-4 w-4" />
+          <TabsTrigger value="requirements" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
+            <Settings2 className="h-4 w-4" />
             Requerimientos de Cargos
           </TabsTrigger>
           <TabsTrigger value="reports" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
@@ -1032,20 +1041,23 @@ export default function EPPPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* --- TAB 1: DELIVERIES --- */}
+        {/* --- TAB 1: DELIVERIES ──────────────────────────────────────────────── */}
         <TabsContent value="deliveries" className="space-y-4">
-          <Card className="border-slate-200/60 dark:border-slate-800 shadow-md">
+          <Card className="border-slate-200/80 dark:border-slate-800 shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Entregas de Uniforme y EPP por Trabajador</CardTitle>
-              <CardDescription>
+              <CardTitle className="text-base font-semibold text-slate-800 dark:text-white">
+                Entregas de Uniforme y EPP por Trabajador
+              </CardTitle>
+              <CardDescription className="text-xs">
                 Revisa el estado de vigencia de los implementos de los trabajadores de acuerdo a su cargo y talla.
               </CardDescription>
-              <div className="flex flex-col md:flex-row gap-3 mt-4">
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-3">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input 
                     placeholder="Buscar trabajador por nombre o RUT..." 
-                    className="pl-9"
+                    className="pl-9 h-10"
                     value={searchQuery}
                     onChange={handleSearchChange}
                   />
@@ -1063,7 +1075,10 @@ export default function EPPPage() {
 
                 <Button
                   variant={filterMissingSizes ? "default" : "outline"}
-                  onClick={() => setFilterMissingSizes(!filterMissingSizes)}
+                  onClick={() => {
+                    setFilterMissingSizes(!filterMissingSizes);
+                    setIsMissingSizesDialogOpen(true);
+                  }}
                   className={filterMissingSizes 
                     ? "bg-amber-600 text-white hover:bg-amber-700 h-10 gap-1.5 shrink-0" 
                     : "border-slate-300 text-slate-700 hover:bg-slate-50 h-10 gap-1.5 shrink-0"}

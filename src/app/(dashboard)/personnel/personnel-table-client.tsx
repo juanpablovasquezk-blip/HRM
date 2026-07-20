@@ -43,6 +43,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { createOnboardingToken, approveOnboarding, rejectOnboarding } from './actions';
+import { createWorkerSizeToken } from '../epp/actions';
 
 
 interface Personnel {
@@ -243,6 +244,21 @@ export default function PersonnelTableClient({
 
   const resetDefault = () => {
     setVisibleColumns(Object.fromEntries(columns.map(c => [c.id, c.defaultVisible])));
+  };
+
+  const handleCopyWorkerSizeTokenLink = async (person: Personnel) => {
+    try {
+      const res = await createWorkerSizeToken(person.id, 3);
+      if (res.success && res.token) {
+        const link = `${window.location.origin}/tallas?token=${res.token}`;
+        navigator.clipboard.writeText(link);
+        toast.success(`¡Link de tallas exclusivo para ${person.first_name} ${person.last_name_father} copiado! (Válido 3 días)`);
+      } else {
+        toast.error('Error al generar el enlace de tallas');
+      }
+    } catch (e) {
+      toast.error('Error de conexión');
+    }
   };
 
   // Export to Excel
@@ -664,19 +680,37 @@ export default function PersonnelTableClient({
                         </div>
                       ) : canEdit ? (
                         <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleCopyWorkerSizeTokenLink(person)}
+                            className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/20"
+                            title="Copiar Link WhatsApp exclusivo de tallas (Válido 3 días)"
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </Button>
                           <Link href={`/personnel-print/${person.id}`} target="_blank">
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Imprimir Ficha">
                               <Printer className="h-4 w-4" />
                             </Button>
                           </Link>
                           <Link href={`/personnel/${person.id}/edit`}>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Editar Ficha">
                                <Edit className="h-4 w-4" />
                             </Button>
                           </Link>
                         </div>
                       ) : (
                         <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleCopyWorkerSizeTokenLink(person)}
+                            className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/20"
+                            title="Copiar Link WhatsApp exclusivo de tallas (Válido 3 días)"
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </Button>
                           <Link href={`/personnel-print/${person.id}`} target="_blank">
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Imprimir Ficha">
                               <Printer className="h-4 w-4" />
