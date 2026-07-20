@@ -1050,10 +1050,10 @@ export default function EPPPage() {
                       {/* Header block of worker */}
                       <div 
                         onClick={() => toggleWorker(worker.id)}
-                        className="flex items-center justify-between p-4 cursor-pointer select-none"
+                        className="flex flex-col md:flex-row md:items-center justify-between p-4 cursor-pointer select-none gap-3"
                       >
                         <div className="flex items-center gap-3">
-                          <div className={`h-2 w-2 rounded-full ${
+                          <div className={`h-2.5 w-2.5 rounded-full shrink-0 ${
                             worker.overallStatus === 'RED' ? 'bg-red-500 animate-pulse' :
                             worker.overallStatus === 'ORANGE' ? 'bg-amber-500' : 'bg-emerald-500'
                           }`} />
@@ -1071,25 +1071,29 @@ export default function EPPPage() {
                                 {worker.company?.name || 'Sin Empresa'}
                               </span>
                             </div>
+
+                            {/* Direct summary of missing sizes for items required by their position */}
+                            {hasMissingSizes && (
+                              <div className="flex items-center gap-1.5 mt-2 text-xs text-amber-800 dark:text-amber-300 font-medium bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 rounded-md border border-amber-200 dark:border-amber-800/60 w-fit">
+                                <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                                <span>Falta registrar talla de: <strong className="text-amber-950 dark:text-amber-200 font-bold">{worker.requirements.filter((r: any) => r.size === 'No ingresada').map((r: any) => r.productName).join(', ')}</strong></span>
+                              </div>
+                            )}
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex items-center gap-2.5 shrink-0 self-end md:self-auto">
                           {hasMissingSizes && (
-                            <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 text-[11px] gap-1">
-                              <AlertTriangle className="h-3 w-3 text-amber-600" />
-                              Tallas Incompletas
-                            </Badge>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => { e.stopPropagation(); openQuickEditSizes(worker); }}
+                              className="border-amber-300 bg-amber-100/70 hover:bg-amber-200 text-amber-950 h-8 text-xs gap-1 font-semibold"
+                            >
+                              <Edit className="h-3.5 w-3.5 text-amber-700" />
+                              Registrar Tallas
+                            </Button>
                           )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(e) => { e.stopPropagation(); openQuickEditSizes(worker); }}
-                            className="border-amber-300 text-amber-900 hover:bg-amber-100/70 h-7 text-xs gap-1 font-semibold"
-                          >
-                            <Edit className="h-3.5 w-3.5 text-amber-700" />
-                            Registrar Tallas
-                          </Button>
                           <Badge variant="outline" className={overallStatusBadge}>
                             {worker.overallStatus === 'RED' ? 'Pendiente / Vencido' :
                              worker.overallStatus === 'ORANGE' ? 'Por Vencer' : 'Al Día'}

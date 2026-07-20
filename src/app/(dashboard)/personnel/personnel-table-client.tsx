@@ -201,6 +201,7 @@ export default function PersonnelTableClient({
     { id: 'rut', label: 'RUT', defaultVisible: true },
     { id: 'main_position', label: 'Cargo', defaultVisible: true },
     { id: 'company', label: 'Empresa', defaultVisible: true },
+    { id: 'epp_sizes', label: 'Tallas EPP', defaultVisible: true },
     { id: 'rotation_pattern', label: 'Planificación', defaultVisible: true },
     { id: 'preferences', label: 'Preferencias', defaultVisible: true },
     { id: 'email', label: 'Correo', defaultVisible: false },
@@ -422,6 +423,7 @@ export default function PersonnelTableClient({
                 {visibleColumns.rut && <TableHead>RUT</TableHead>}
                 {visibleColumns.main_position && <TableHead>Cargo</TableHead>}
                 {visibleColumns.company && <TableHead>Empresa</TableHead>}
+                {visibleColumns.epp_sizes && <TableHead>Tallas EPP</TableHead>}
                 {visibleColumns.rotation_pattern && <TableHead>Planificación</TableHead>}
                 {visibleColumns.preferences && <TableHead>Preferencias</TableHead>}
                 {visibleColumns.email && <TableHead>Correo</TableHead>}
@@ -437,6 +439,8 @@ export default function PersonnelTableClient({
             </TableHeader>
             <TableBody>
               {personnel.map((person) => {
+                const hasStandardSizes = person.clothing_tshirt_size || person.clothing_shoe_size || person.clothing_pants_size_letter;
+
                 return (
                   <TableRow key={person.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     {/* Full Name Cell */}
@@ -476,6 +480,35 @@ export default function PersonnelTableClient({
                     {visibleColumns.company && (
                       <TableCell className="text-muted-foreground">
                         {person.company?.name || '—'}
+                      </TableCell>
+                    )}
+
+                    {/* Tallas EPP Cell */}
+                    {visibleColumns.epp_sizes && (
+                      <TableCell>
+                        {hasStandardSizes ? (
+                          <div className="flex flex-wrap gap-1 text-[10px]">
+                            {person.clothing_tshirt_size && (
+                              <Badge variant="outline" className="bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800">
+                                Polera: {person.clothing_tshirt_size}
+                              </Badge>
+                            )}
+                            {person.clothing_pants_size_letter && (
+                              <Badge variant="outline" className="bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800">
+                                Pantalón: {person.clothing_pants_size_letter}
+                              </Badge>
+                            )}
+                            {person.clothing_shoe_size && (
+                              <Badge variant="outline" className="bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800">
+                                Calzado: {person.clothing_shoe_size}
+                              </Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 text-[10px]">
+                            ⚠️ Sin Tallas
+                          </Badge>
+                        )}
                       </TableCell>
                     )}
 
