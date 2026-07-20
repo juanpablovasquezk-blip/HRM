@@ -26,9 +26,24 @@ import {
   Settings2,
   Save,
   Edit,
-  Grid3X3
+  Grid3X3,
+  Link2
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+
+const CLOTHING_SIZES_LETTER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL'];
+const PANTS_SIZES_NUMBER = ['36', '38', '40', '42', '44', '46', '48', '50', '52', '54', '56', '58', '60'];
+const SHOE_SIZES = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48'];
+
+function getItemSizeOptions(catItem?: { size_type?: string | null; size_field?: string | null }) {
+  if (catItem?.size_type === 'NUMBER' || catItem?.size_field === 'clothing_pants_size_number') {
+    return PANTS_SIZES_NUMBER;
+  }
+  if (catItem?.size_type === 'SHOE' || catItem?.size_field === 'clothing_shoe_size') {
+    return SHOE_SIZES;
+  }
+  return CLOTHING_SIZES_LETTER;
+}
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -66,9 +81,8 @@ import {
   getProductCatalog,
   saveProductCatalogItem,
   deleteProductCatalogItem,
-  getAllPositionsWithAreas,
-  bulkSaveRequirementsMatrix,
   updateWorkerClothingSizes,
+  createWorkerSizeToken,
   ProductCatalogItem
 } from './actions';
 import { generateDeliveryFormPDF } from './generate-delivery-pdf';
@@ -113,6 +127,29 @@ export default function EPPPage() {
   const [catSizeField, setCatSizeField] = useState('');
   const [customSizeFieldName, setCustomSizeFieldName] = useState('');
   const [catRenewalDays, setCatRenewalDays] = useState(180);
+  const [catSizeType, setCatSizeType] = useState<'LETTER' | 'NUMBER' | 'SHOE'>('LETTER');
+
+  const handleCopyWorkerSelfServiceLink = async (workerId?: string, workerName?: string) => {
+    if (!workerId) {
+      const baseUrl = window.location.origin + '/tallas';
+      navigator.clipboard.writeText(baseUrl);
+      toast.success('¡Enlace general para funcionarios copiado!');
+      return;
+    }
+
+    try {
+      const res = await createWorkerSizeToken(workerId, 3); // 3 días de expiración
+      if (res.success && res.token) {
+        const link = `${window.location.origin}/tallas?token=${res.token}`;
+        navigator.clipboard.writeText(link);
+        toast.success(`¡Enlace exclusivo con expiración para ${workerName || 'funcionario'} copiado! (Válido 3 días)`);
+      } else {
+        toast.error('Error al generar enlace exclusivo');
+      }
+    } catch (e) {
+      toast.error('Error al generar enlace');
+    }
+  };
 
   // Catalog & Matrix Data
   const [catalog, setCatalog] = useState<ProductCatalogItem[]>([]);
@@ -412,6 +449,7 @@ export default function EPPPage() {
         name: catName,
         usesSizes: catUsesSizes,
         sizeField: finalSizeField,
+        sizeType: catUsesSizes ? catSizeType : null,
         renewalDays: catRenewalDays,
       });
 
@@ -433,6 +471,7 @@ export default function EPPPage() {
     setCatUsesSizes(false);
     setCatSizeField('');
     setCustomSizeFieldName('');
+    setCatSizeType('LETTER');
     setCatRenewalDays(180);
   };
 
@@ -443,6 +482,7 @@ export default function EPPPage() {
     setCatUsesSizes(item.uses_sizes);
     setCatSizeField(item.size_field || '');
     setCustomSizeFieldName('');
+    setCatSizeType(item.size_type || 'LETTER');
     setCatRenewalDays(item.renewal_days);
     setIsCatalogDialogOpen(true);
   };
@@ -2096,17 +2136,33 @@ export default function EPPPage() {
 
               {catUsesSizes && (
                 <div className="space-y-3 col-span-2 bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
-                  <div className="space-y-2">
-                    <Label htmlFor="cat_size_field">Campo de Talla de la Ficha Personal</Label>
-                    <select 
-                      id="cat_size_field"
-                      value={catSizeField}
-                      onChange={(e) => setCatSizeField(e.target.value)}
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <option value="">Seleccionar campo de talla</option>
-                      {sizeFieldOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="cat_size_type" className="text-xs font-semibold text-orange-700 dark:text-orange-400">Tipo de Tallas Permitidas *</Label>
+                      <select 
+                        id="cat_size_type"
+                        value={catSizeType}
+                        onChange={(e) => setCatSizeType(e.target.value as any)}
+                        className="flex h-10 w-full rounded-md border border-orange-200 dark:border-orange-900 bg-background px-3 py-2 text-xs"
+                      >
+                        <option value="LETTER">Tallas en Letra (XS, S, M, L, XL, XXL, 3XL, 4XL)</option>
+                        <option value="NUMBER">Tallas Numéricas (36, 38, 40, 42, 44, 46, 48...)</option>
+                        <option value="SHOE">Tallas de Calzado (35, 36, 37, 38, 39, 40...)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="cat_size_field" className="text-xs font-semibold">Campo de Talla en la Ficha *</Label>
+                      <select 
+                        id="cat_size_field"
+                        value={catSizeField}
+                        onChange={(e) => setCatSizeField(e.target.value)}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-xs"
+                      >
+                        <option value="">Seleccionar campo de talla</option>
+                        {sizeFieldOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
                   </div>
 
                   {catSizeField === '__NEW_CUSTOM__' && (
@@ -2335,81 +2391,96 @@ export default function EPPPage() {
 
           <form onSubmit={handleSaveWorkerSizes} className="space-y-4 pt-2">
             <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="clothing_tshirt_size" className="text-xs">Talla de Polera</Label>
-                <Input
+                <Label htmlFor="clothing_tshirt_size" className="text-xs font-semibold">Talla de Polera</Label>
+                <select
                   id="clothing_tshirt_size"
                   value={sizesForm.clothing_tshirt_size || ''}
                   onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_tshirt_size: e.target.value }))}
-                  placeholder="Ej: S, M, L, XL..."
-                  className="h-9 text-xs"
-                />
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
+                >
+                  <option value="">Seleccionar talla...</option>
+                  {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="clothing_polar_size" className="text-xs">Talla de Polar</Label>
-                <Input
+                <Label htmlFor="clothing_polar_size" className="text-xs font-semibold">Talla de Polar</Label>
+                <select
                   id="clothing_polar_size"
                   value={sizesForm.clothing_polar_size || ''}
                   onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_polar_size: e.target.value }))}
-                  placeholder="Ej: S, M, L, XL..."
-                  className="h-9 text-xs"
-                />
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
+                >
+                  <option value="">Seleccionar talla...</option>
+                  {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="clothing_pants_size_letter" className="text-xs">Talla Pantalón (Letra)</Label>
-                <Input
+                <Label htmlFor="clothing_pants_size_letter" className="text-xs font-semibold">Talla Pantalón (Letra)</Label>
+                <select
                   id="clothing_pants_size_letter"
                   value={sizesForm.clothing_pants_size_letter || ''}
                   onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_pants_size_letter: e.target.value }))}
-                  placeholder="Ej: S, M, L, XL..."
-                  className="h-9 text-xs"
-                />
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
+                >
+                  <option value="">Seleccionar talla...</option>
+                  {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="clothing_pants_size_number" className="text-xs">Talla Pantalón (Número)</Label>
-                <Input
+                <Label htmlFor="clothing_pants_size_number" className="text-xs font-semibold">Talla Pantalón (Número)</Label>
+                <select
                   id="clothing_pants_size_number"
                   value={sizesForm.clothing_pants_size_number || ''}
                   onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_pants_size_number: e.target.value }))}
-                  placeholder="Ej: 42, 44, 46..."
-                  className="h-9 text-xs"
-                />
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
+                >
+                  <option value="">Seleccionar número...</option>
+                  {PANTS_SIZES_NUMBER.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="clothing_shoe_size" className="text-xs">Talla de Zapatos</Label>
-                <Input
+                <Label htmlFor="clothing_shoe_size" className="text-xs font-semibold">Talla de Zapatos</Label>
+                <select
                   id="clothing_shoe_size"
                   value={sizesForm.clothing_shoe_size || ''}
                   onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_shoe_size: e.target.value }))}
-                  placeholder="Ej: 40, 41, 42..."
-                  className="h-9 text-xs"
-                />
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
+                >
+                  <option value="">Seleccionar calzado...</option>
+                  {SHOE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="clothing_parka_size" className="text-xs">Talla de Parka</Label>
-                <Input
+                <Label htmlFor="clothing_parka_size" className="text-xs font-semibold">Talla de Parka</Label>
+                <select
                   id="clothing_parka_size"
                   value={sizesForm.clothing_parka_size || ''}
                   onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_parka_size: e.target.value }))}
-                  placeholder="Ej: S, M, L, XL..."
-                  className="h-9 text-xs"
-                />
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
+                >
+                  <option value="">Seleccionar talla...</option>
+                  {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
 
               <div className="space-y-1.5 col-span-2">
-                <Label htmlFor="clothing_overall_size" className="text-xs">Talla Jardinera Térmica</Label>
-                <Input
+                <Label htmlFor="clothing_overall_size" className="text-xs font-semibold">Talla Jardinera Térmica</Label>
+                <select
                   id="clothing_overall_size"
                   value={sizesForm.clothing_overall_size || ''}
                   onChange={(e) => setSizesForm(prev => ({ ...prev, clothing_overall_size: e.target.value }))}
-                  placeholder="Ej: S, M, L, XL..."
-                  className="h-9 text-xs"
-                />
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs"
+                >
+                  <option value="">Seleccionar talla...</option>
+                  {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
 
               {/* Custom fields dynamically from catalog */}
@@ -2417,16 +2488,20 @@ export default function EPPPage() {
                 const key = catItem.size_field!;
                 const clean = key.replace('clothing_custom_', '').replace(/_/g, ' ');
                 const label = 'Talla: ' + clean.charAt(0).toUpperCase() + clean.slice(1);
+                const options = getItemSizeOptions(catItem);
+
                 return (
                   <div key={key} className="space-y-1.5 col-span-2">
-                    <Label htmlFor={key} className="text-xs font-semibold text-orange-700">{label}</Label>
-                    <Input
+                    <Label htmlFor={key} className="text-xs font-semibold text-orange-700 dark:text-orange-400">{label}</Label>
+                    <select
                       id={key}
                       value={sizesForm[key] || ''}
                       onChange={(e) => setSizesForm(prev => ({ ...prev, [key]: e.target.value }))}
-                      placeholder="Ej: S, M, L, XL, 42..."
-                      className="h-9 text-xs border-orange-200"
-                    />
+                      className="flex h-9 w-full rounded-md border border-orange-200 dark:border-orange-900 bg-background px-3 text-xs"
+                    >
+                      <option value="">Seleccionar talla...</option>
+                      {options.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
                   </div>
                 );
               })}
@@ -2444,7 +2519,7 @@ export default function EPPPage() {
 
       {/* ── DIALOG 7: WORKERS MISSING SIZES LIST ────────────────────────── */}
       <Dialog open={isMissingSizesDialogOpen} onOpenChange={setIsMissingSizesDialogOpen}>
-        <DialogContent className="sm:max-w-[650px] max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[680px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
               <AlertTriangle className="h-5 w-5" />
@@ -2490,17 +2565,29 @@ export default function EPPPage() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              setIsMissingSizesDialogOpen(false);
-                              openQuickEditSizes(worker);
-                            }}
-                            className="bg-orange-600 hover:bg-orange-700 text-white h-7 text-[11px] px-2 gap-1"
-                          >
-                            <Edit className="h-3 w-3" />
-                            Cargar Talla
-                          </Button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleCopyWorkerSelfServiceLink(worker.id, `${worker.first_name} ${worker.last_name_father}`)}
+                              className="border-slate-300 text-slate-700 hover:bg-slate-100 h-7 text-[11px] px-2 gap-1 font-medium"
+                              title="Generar y copiar enlace exclusivo con vencimiento de 3 días para enviar por WhatsApp"
+                            >
+                              <Link2 className="h-3 w-3 text-orange-600" />
+                              Link WhatsApp
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setIsMissingSizesDialogOpen(false);
+                                openQuickEditSizes(worker);
+                              }}
+                              className="bg-orange-600 hover:bg-orange-700 text-white h-7 text-[11px] px-2 gap-1"
+                            >
+                              <Edit className="h-3 w-3" />
+                              Cargar Talla
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

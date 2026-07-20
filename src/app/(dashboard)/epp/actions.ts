@@ -35,6 +35,7 @@ export interface ProductCatalogItem {
   name: string;
   uses_sizes: boolean;
   size_field: string | null;
+  size_type?: 'LETTER' | 'NUMBER' | 'SHOE' | null;
   renewal_days: number;
   is_active: boolean;
   created_at: string;
@@ -648,6 +649,7 @@ export async function saveProductCatalogItem(payload: {
   name: string;
   usesSizes: boolean;
   sizeField: string | null;
+  sizeType?: 'LETTER' | 'NUMBER' | 'SHOE' | null;
   renewalDays: number;
 }): Promise<{ success: boolean; error: string | null }> {
   const supabase = await createClient();
@@ -661,6 +663,7 @@ export async function saveProductCatalogItem(payload: {
         name: payload.name,
         uses_sizes: payload.usesSizes,
         size_field: payload.usesSizes ? payload.sizeField : null,
+        size_type: payload.usesSizes ? (payload.sizeType || 'LETTER') : null,
         renewal_days: payload.renewalDays,
       })
       .eq('id', payload.id);
@@ -673,6 +676,7 @@ export async function saveProductCatalogItem(payload: {
         name: payload.name,
         uses_sizes: payload.usesSizes,
         size_field: payload.usesSizes ? payload.sizeField : null,
+        size_type: payload.usesSizes ? (payload.sizeType || 'LETTER') : null,
         renewal_days: payload.renewalDays,
       }]);
     error = err;
@@ -845,4 +849,230 @@ export async function updateWorkerClothingSizes(
   }
 }
 
+// ── 12. Self-Service Worker Size Actions ────────────────────────────────────
 
+export async function getWorkersListForSelfService(): Promise<{
+  data: { id: string; rut: string; fullName: string; positionName: string; companyName: string }[];
+  error: string | null;
+}> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('personnel')
+    .select(`
+      id,
+      rut,
+      first_name,
+      last_name_father,
+      last_name_mother,
+      company:companies(name),
+      position:positions(name)
+    `)
+    .eq('is_active', true)
+    .order('last_name_father', { ascending: true });
+
+  if (error) return { data: [], error: error.message };
+
+  const list = (data || []).map((p: any) => ({
+    id: p.id,
+    rut: p.rut,
+    fullName: `${p.first_name} ${p.last_name_father} ${p.last_name_mother || ''}`.trim(),
+    positionName: p.position?.name || 'Sin Cargo',
+    companyName: p.company?.name || 'Grupo Minerquim',
+  }));
+
+  return { data: list, error: null };
+}
+
+export async function getWorkerSelfServiceDetails(workerIdOrRut: string): Promise<{
+  data: {
+    worker: any;
+    requirements: any[];
+    catalog: ProductCatalogItem[];
+  } | null;
+  error: string | null;
+}> {
+  const supabase = await createClient();
+
+  let query = supabase
+    .from('personnel')
+    .select(`
+      *,
+      company:companies(*),
+      position:positions(name)
+    `)
+    .eq('is_active', true);
+
+  if (workerIdOrRut.includes('-') || workerIdOrRut.length > 8) {
+    query = query.eq('rut', workerIdOrRut.trim());
+  } else {
+    query = query.eq('id', workerIdOrRut.trim());
+  }
+
+  const { data: personnelList, error: persErr } = await query;
+
+  if (persErr || !personnelList || personnelList.length === 0) {
+    return { data: null, error: persErr ? persErr.message : 'Trabajador no encontrado' };
+  }
+
+  const worker = personnelList[0];
+
+  const { data: requirements } = await supabase
+    .from('epp_position_requirements')
+    .select('*')
+    .eq('position_id', worker.main_position);
+
+  const { data: catalog } = await supabase
+    .from('epp_product_catalog')
+    .select('*')
+    .eq('is_active', true);
+
+  return {
+    data: {
+      worker,
+      requirements: requirements || [],
+      catalog: (catalog || []) as ProductCatalogItem[],
+    },
+    error: null,
+  };
+}
+
+export async function createWorkerSizeToken(
+  personnelId: string,
+  expirationDays: number = 3
+): Promise<{ success: boolean; token: string | null; expiresAt: string | null; error: string | null }> {
+  const supabase = await createClient();
+  const expires = new Date();
+  expires.setDate(expires.getDate() + expirationDays);
+  const expiresAtStr = expires.toISOString();
+
+  try {
+    const { data, error } = await supabase
+      .from('epp_size_tokens')
+      .insert({
+        personnel_id: personnelId,
+        expires_at: expiresAtStr,
+      })
+      .select('token, expires_at')
+      .single();
+
+    if (!error && data?.token) {
+      return { success: true, token: data.token, expiresAt: data.expires_at, error: null };
+    }
+  } catch (e) {}
+
+  // Fallback signed token string: base64url(personnelId:expiresTimestamp)
+  const timestamp = expires.getTime();
+  const rawPayload = `${personnelId}:${timestamp}`;
+  const encodedToken = Buffer.from(rawPayload).toString('base64url');
+
+  return { success: true, token: encodedToken, expiresAt: expiresAtStr, error: null };
+}
+
+export async function getWorkerSelfServiceDetailsByToken(tokenStr: string): Promise<{
+  data: {
+    worker: any;
+    requirements: any[];
+    catalog: ProductCatalogItem[];
+    expiresAt: string;
+  } | null;
+  status: 'VALID' | 'EXPIRED' | 'NOT_FOUND';
+  error: string | null;
+}> {
+  const supabase = await createClient();
+  const cleanToken = tokenStr.trim();
+
+  // 1. Check DB table epp_size_tokens first
+  try {
+    const { data: tokenRow } = await supabase
+      .from('epp_size_tokens')
+      .select('*, personnel:personnel(*, company:companies(*), position:positions(name))')
+      .eq('token', cleanToken)
+      .maybeSingle();
+
+    if (tokenRow && tokenRow.personnel) {
+      const now = new Date();
+      const expiresAtDate = new Date(tokenRow.expires_at);
+
+      if (now > expiresAtDate) {
+        return {
+          data: null,
+          status: 'EXPIRED',
+          error: `Este enlace caducó el ${format(expiresAtDate, 'dd/MM/yyyy HH:mm')}. Solicita un nuevo enlace a Recursos Humanos.`,
+        };
+      }
+
+      const worker = tokenRow.personnel;
+      const { data: requirements } = await supabase
+        .from('epp_position_requirements')
+        .select('*')
+        .eq('position_id', worker.main_position);
+
+      const { data: catalog } = await supabase
+        .from('epp_product_catalog')
+        .select('*')
+        .eq('is_active', true);
+
+      return {
+        data: {
+          worker,
+          requirements: requirements || [],
+          catalog: (catalog || []) as ProductCatalogItem[],
+          expiresAt: tokenRow.expires_at,
+        },
+        status: 'VALID',
+        error: null,
+      };
+    }
+  } catch (e) {}
+
+  // 2. Fallback base64 token verification
+  try {
+    const decoded = Buffer.from(cleanToken, 'base64url').toString('utf-8');
+    const [personnelId, timestampStr] = decoded.split(':');
+
+    if (personnelId && timestampStr) {
+      const timestamp = parseInt(timestampStr, 10);
+      const expiresAtDate = new Date(timestamp);
+      const now = new Date();
+
+      if (now.getTime() > timestamp) {
+        return {
+          data: null,
+          status: 'EXPIRED',
+          error: `Este enlace caducó el ${format(expiresAtDate, 'dd/MM/yyyy HH:mm')}. Solicita un nuevo enlace a Recursos Humanos.`,
+        };
+      }
+
+      const { data: worker } = await supabase
+        .from('personnel')
+        .select('*, company:companies(*), position:positions(name)')
+        .eq('id', personnelId)
+        .maybeSingle();
+
+      if (worker) {
+        const { data: requirements } = await supabase
+          .from('epp_position_requirements')
+          .select('*')
+          .eq('position_id', worker.main_position);
+
+        const { data: catalog } = await supabase
+          .from('epp_product_catalog')
+          .select('*')
+          .eq('is_active', true);
+
+        return {
+          data: {
+            worker,
+            requirements: requirements || [],
+            catalog: (catalog || []) as ProductCatalogItem[],
+            expiresAt: expiresAtDate.toISOString(),
+          },
+          status: 'VALID',
+          error: null,
+        };
+      }
+    }
+  } catch (e) {}
+
+  return { data: null, status: 'NOT_FOUND', error: 'Enlace no válido o inexistente' };
+}

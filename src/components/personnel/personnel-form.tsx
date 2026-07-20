@@ -208,7 +208,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
     };
   });
 
-  const [allCustomSizeFields, setAllCustomSizeFields] = useState<{ key: string; label: string }[]>([]);
+  const [allCustomSizeFields, setAllCustomSizeFields] = useState<{ key: string; label: string; sizeType: string }[]>([]);
 
   useEffect(() => {
     const fetchCatalogCustomSizes = async () => {
@@ -216,19 +216,20 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
         const supabase = createClient();
         const { data } = await supabase
           .from('epp_product_catalog')
-          .select('size_field')
+          .select('size_field, size_type')
           .not('size_field', 'is', null)
           .like('size_field', 'clothing_custom_%');
 
-        const catalogKeys = (data || []).map(d => d.size_field).filter((k): k is string => !!k);
+        const catalogMap = new Map((data || []).map((d: any) => [d.size_field, d.size_type || 'LETTER']));
         const existingWorkerKeys = Object.keys(initialValues.custom_clothing_sizes || {});
 
-        const combinedKeys = Array.from(new Set([...catalogKeys, ...existingWorkerKeys]));
+        const combinedKeys = Array.from(new Set([...Array.from(catalogMap.keys()), ...existingWorkerKeys]));
 
         const formatted = combinedKeys.map(k => {
           const clean = k.replace('clothing_custom_', '').replace(/_/g, ' ');
           const label = 'Talla: ' + clean.charAt(0).toUpperCase() + clean.slice(1);
-          return { key: k, label };
+          const sizeType = catalogMap.get(k) || 'LETTER';
+          return { key: k, label, sizeType };
         });
 
         setAllCustomSizeFields(formatted);
@@ -628,17 +629,21 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
                 Tallas Personalizadas Adicionales (Catálogo EPP)
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {allCustomSizeFields.map(({ key, label }) => {
+                {allCustomSizeFields.map(({ key, label, sizeType }) => {
                   const val = initialValues.custom_clothing_sizes?.[key] || '';
+                  const options = sizeType === 'NUMBER' ? PANTS_SIZES_NUMBER : sizeType === 'SHOE' ? SHOE_SIZES : CLOTHING_SIZES_LETTER;
                   return (
                     <div key={key} className="space-y-2">
                       <Label htmlFor={key}>{label}</Label>
-                      <Input
+                      <select
                         id={key}
                         name={key}
                         defaultValue={val}
-                        placeholder="Ej: S, M, L, XL, 42..."
-                      />
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <option value="">Seleccionar talla</option>
+                        {options.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
                     </div>
                   );
                 })}
