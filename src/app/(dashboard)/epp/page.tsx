@@ -81,6 +81,8 @@ import {
   getProductCatalog,
   saveProductCatalogItem,
   deleteProductCatalogItem,
+  getAllPositionsWithAreas,
+  bulkSaveRequirementsMatrix,
   updateWorkerClothingSizes,
   createWorkerSizeToken,
   ProductCatalogItem
