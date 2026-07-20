@@ -15,7 +15,7 @@ function safeRevalidatePath(path: string) {
   }
 }
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// --- Types ---
 
 export interface InventoryItem {
   id: string;
@@ -66,7 +66,7 @@ export interface DeliveryItemInput {
   renewalDays: number;
 }
 
-// ── 1. Inventory Actions ─────────────────────────────────────────────────────
+// --- 1. Inventory Actions ---
 
 export async function getEPPInventory(): Promise<{ data: InventoryItem[]; error: string | null }> {
   const supabase = await createClient();
@@ -107,7 +107,7 @@ export async function addInventoryBatch(payload: {
   return { success: true, error: null };
 }
 
-// ── 2. Position Requirements Actions ─────────────────────────────────────────
+// --- 2. Position Requirements Actions ---
 
 export async function getEPPRequirements(): Promise<{ data: PositionRequirement[]; error: string | null }> {
   const supabase = await createClient();
@@ -181,7 +181,7 @@ export async function deleteEPPRequirement(id: string): Promise<{ success: boole
   return { success: true, error: null };
 }
 
-// ── 3. Personnel, Requirements & Delivery Status ─────────────────────────────
+// --- 3. Personnel, Requirements & Delivery Status ---
 
 export async function getEPPPersonnelData(): Promise<{
   data: {
@@ -357,7 +357,7 @@ export async function getEPPPersonnelData(): Promise<{
   };
 }
 
-// ── 4. Delivery Actions & FIFO Stock Discount ───────────────────────────────
+// --- 4. Delivery Actions & FIFO Stock Discount ---
 
 export async function registerDeliveryEvent(
   personnelId: string,
@@ -471,7 +471,7 @@ export async function registerDeliveryEvent(
   return { success: true, eventId: event.id, error: null };
 }
 
-// ── 5. Return Item Action ────────────────────────────────────────────────────
+// --- 5. Return Item Action ---
 
 export async function returnDeliveryItem(
   deliveryItemId: string,
@@ -532,7 +532,7 @@ export async function returnDeliveryItem(
   return { success: true, error: null };
 }
 
-// ── 6. Scanned PDF Upload Receipt ────────────────────────────────────────────
+// --- 6. Scanned PDF Upload Receipt ---
 
 export async function uploadSignedFormUrl(
   eventId: string,
@@ -549,7 +549,7 @@ export async function uploadSignedFormUrl(
   return { success: true, error: null };
 }
 
-// ── 7. Monthly Forecast / Purchase Report ───────────────────────────────────
+// --- 7. Monthly Forecast / Purchase Report ---
 
 export interface ForecastReportItem {
   productName: string;
@@ -628,7 +628,7 @@ export async function getMonthlyEPPForecastReport(
   return { data: report, error: null };
 }
 
-// ── 8. Product Catalog Actions ───────────────────────────────────────────────
+// --- 8. Product Catalog Actions ---
 
 export async function getProductCatalog(): Promise<{ data: ProductCatalogItem[]; error: string | null }> {
   const supabase = await createClient();
@@ -699,7 +699,7 @@ export async function deleteProductCatalogItem(id: string): Promise<{ success: b
   return { success: true, error: null };
 }
 
-// ── 9. Positions for Matrix ─────────────────────────────────────────────────
+// --- 9. Positions for Matrix ---
 
 export async function getAllPositionsWithAreas(): Promise<{ data: any[]; error: string | null }> {
   const supabase = await createClient();
@@ -716,9 +716,9 @@ export async function getAllPositionsWithAreas(): Promise<{ data: any[]; error: 
   return { data: data || [], error: null };
 }
 
-// ── 10. Bulk Save Requirements Matrix ───────────────────────────────────────
+// --- 10. Bulk Save Requirements Matrix ---
 
-// ── 10. Bulk Save Requirements Matrix ───────────────────────────────────────
+// --- 10. Bulk Save Requirements Matrix ---
 
 export async function bulkSaveRequirementsMatrix(
   entries: { positionId: string; productCatalogId: string; quantity: number }[],
@@ -788,7 +788,7 @@ export async function bulkSaveRequirementsMatrix(
   }
 }
 
-// ── 11. Quick Update Worker Clothing Sizes ───────────────────────────────
+// --- 11. Quick Update Worker Clothing Sizes ---
 
 export async function updateWorkerClothingSizes(
   personnelId: string,
@@ -849,7 +849,7 @@ export async function updateWorkerClothingSizes(
   }
 }
 
-// ── 12. Self-Service Worker Size Actions ────────────────────────────────────
+// --- 12. Self-Service Worker Size Actions ---
 
 export async function getWorkersListForSelfService(): Promise<{
   data: { id: string; rut: string; fullName: string; positionName: string; companyName: string }[];

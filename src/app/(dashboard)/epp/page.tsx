@@ -382,7 +382,7 @@ export default function EPPPage() {
     return sizeField;
   };
 
-  // ── Handlers ───────────────────────────────────────────────────────────────
+  // --- Handlers ---
 
   // Add Stock handler
   const handleAddStockSubmit = async (e: React.FormEvent) => {
@@ -790,7 +790,7 @@ export default function EPPPage() {
 
     let y = 15;
 
-    // ── PAGE 1: RESUMEN EJECUTIVO (TOTALES POR IMPLEMENTO) ─────────────────
+    // --- PAGE 1: RESUMEN EJECUTIVO (TOTALES POR IMPLEMENTO) ---
 
     // Header Banner
     doc.setFillColor(26, 54, 93);
@@ -890,7 +890,7 @@ export default function EPPPage() {
       doc.text(`Consulte el desglose detallado por talla en la siguiente página y registre las tallas faltantes en el sistema.`, margin + 3, y + 9.5);
     }
 
-    // ── PAGE 2: DESGLOSE DETALLADO POR TALLA ───────────────────────────────
+    // --- PAGE 2: DESGLOSE DETALLADO POR TALLA ---
     doc.addPage();
     y = 15;
 
@@ -1030,7 +1030,7 @@ export default function EPPPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* ── TAB 1: DELIVERIES ──────────────────────────────────────────────── */}
+        {/* --- TAB 1: DELIVERIES --- */}
         <TabsContent value="deliveries" className="space-y-4">
           <Card className="border-slate-200/60 dark:border-slate-800 shadow-md">
             <CardHeader className="pb-3">
@@ -1357,7 +1357,7 @@ export default function EPPPage() {
           </Card>
         </TabsContent>
 
-        {/* ── TAB 2: INVENTORY ───────────────────────────────────────────────── */}
+        {/* --- TAB 2: INVENTORY --- */}
         <TabsContent value="stock" className="space-y-4">
           <Card className="border-slate-200/60 dark:border-slate-800 shadow-md">
             <CardHeader>
@@ -1433,10 +1433,10 @@ export default function EPPPage() {
           </Card>
         </TabsContent>
 
-        {/* ── TAB 3: CATALOG + MATRIX ─────────────────────────────────────── */}
+        {/* --- TAB 3: CATALOG + MATRIX --- */}
         <TabsContent value="config" className="space-y-6">
 
-          {/* ── Section 1: Product Catalog ──────────────────────────────────── */}
+          {/* --- Section 1: Product Catalog --- */}
           <Card className="border-slate-200/60 dark:border-slate-800 shadow-md">
             <CardHeader>
               <CardTitle className="text-lg flex items-center justify-between">
@@ -1536,7 +1536,7 @@ export default function EPPPage() {
             </CardContent>
           </Card>
 
-          {/* ── Section 2: Requirements Matrix ─────────────────────────────── */}
+          {/* --- Section 2: Requirements Matrix --- */}
           <Card className="border-slate-200/60 dark:border-slate-800 shadow-md relative">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -1666,7 +1666,7 @@ export default function EPPPage() {
           </Card>
         </TabsContent>
 
-        {/* ── TAB 4: REPORTS & HISTORY ───────────────────────────────────────── */}
+        {/* --- TAB 4: REPORTS & HISTORY --- */}
         <TabsContent value="reports" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
@@ -1938,7 +1938,7 @@ export default function EPPPage() {
         </TabsContent>
       </Tabs>
 
-      {/* ── DIALOG 1: ADD STOCK ────────────────────────────────────────────── */}
+      {/* --- DIALOG 1: ADD STOCK --- */}
       <Dialog open={isAddStockOpen} onOpenChange={setIsAddStockOpen}>
         <DialogContent className="sm:max-w-[460px]">
           <DialogHeader>
@@ -2058,7 +2058,7 @@ export default function EPPPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── DIALOG 2: ADD/EDIT CATALOG ITEM ────────────────────────────────── */}
+      {/* --- DIALOG 2: ADD/EDIT CATALOG ITEM --- */}
       <Dialog open={isCatalogDialogOpen} onOpenChange={(open) => { if (!open) resetCatalogForm(); setIsCatalogDialogOpen(open); }}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
@@ -2227,7 +2227,7 @@ export default function EPPPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── DIALOG 3: DELIVER ITEMS ───────────────────────────────────────── */}
+      {/* --- DIALOG 3: DELIVER ITEMS --- */}
       <Dialog open={isDeliverOpen} onOpenChange={setIsDeliverOpen}>
         <DialogContent className="sm:max-w-[620px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -2331,7 +2331,7 @@ export default function EPPPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── DIALOG 4: RETURN ITEM ─────────────────────────────────────────── */}
+      {/* --- DIALOG 4: RETURN ITEM --- */}
       <Dialog open={isReturnOpen} onOpenChange={setIsReturnOpen}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
@@ -2376,7 +2376,7 @@ export default function EPPPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── DIALOG 6: QUICK EDIT WORKER SIZES ───────────────────────────── */}
+      {/* --- DIALOG 6: QUICK EDIT WORKER SIZES --- */}
       <Dialog open={isEditSizesOpen} onOpenChange={setIsEditSizesOpen}>
         <DialogContent className="sm:max-w-[550px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -2517,7 +2517,7 @@ export default function EPPPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── DIALOG 7: WORKERS MISSING SIZES LIST ────────────────────────── */}
+      {/* --- DIALOG 7: WORKERS MISSING SIZES LIST --- */}
       <Dialog open={isMissingSizesDialogOpen} onOpenChange={setIsMissingSizesDialogOpen}>
         <DialogContent className="sm:max-w-[680px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
