@@ -1125,31 +1125,29 @@ export default function EPPPage() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopyWorkerSelfServiceLink(worker.id, `${worker.first_name} ${worker.last_name_father}`);
+                            }}
+                            className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 h-8 text-xs gap-1 font-semibold dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 shadow-sm"
+                            title="Generar enlace único con vencimiento de 3 días para WhatsApp"
+                          >
+                            <Link2 className="h-3.5 w-3.5 text-orange-600" />
+                            Link WhatsApp
+                          </Button>
                           {hasMissingSizes && (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleCopyWorkerSelfServiceLink(worker.id, `${worker.first_name} ${worker.last_name_father}`);
-                                }}
-                                className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-900 h-8 text-xs gap-1 font-semibold dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800"
-                                title="Generar enlace único con vencimiento de 3 días para WhatsApp"
-                              >
-                                <Link2 className="h-3.5 w-3.5 text-orange-600" />
-                                Link WhatsApp
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => { e.stopPropagation(); openQuickEditSizes(worker); }}
-                                className="border-amber-300 bg-amber-100/70 hover:bg-amber-200 text-amber-950 h-8 text-xs gap-1 font-semibold"
-                              >
-                                <Edit className="h-3.5 w-3.5 text-amber-700" />
-                                Registrar Tallas
-                              </Button>
-                            </>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => { e.stopPropagation(); openQuickEditSizes(worker); }}
+                              className="border-amber-300 bg-amber-100/70 hover:bg-amber-200 text-amber-950 h-8 text-xs gap-1 font-semibold"
+                            >
+                              <Edit className="h-3.5 w-3.5 text-amber-700" />
+                              Registrar Tallas
+                            </Button>
                           )}
                           <Badge variant="outline" className={overallStatusBadge}>
                             {worker.overallStatus === 'RED' ? 'Pendiente / Vencido' :
