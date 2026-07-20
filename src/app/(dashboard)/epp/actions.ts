@@ -710,60 +710,73 @@ export async function getAllPositionsWithAreas(): Promise<{ data: any[]; error: 
 
 // ── 10. Bulk Save Requirements Matrix ───────────────────────────────────────
 
+// ── 10. Bulk Save Requirements Matrix ───────────────────────────────────────
+
 export async function bulkSaveRequirementsMatrix(
   entries: { positionId: string; productCatalogId: string; quantity: number }[],
   allPositionIds: string[],
   allCatalogItemIds: string[]
 ): Promise<{ success: boolean; error: string | null }> {
-  const supabase = await createClient();
+  try {
+    const supabase = await createClient();
 
-  // 1. Fetch catalog items to get denormalized fields
-  const { data: catalogItems, error: catErr } = await supabase
-    .from('epp_product_catalog')
-    .select('*')
-    .in('id', allCatalogItemIds);
+    if (allPositionIds.length === 0) {
+      return { success: true, error: null };
+    }
 
-  if (catErr) return { success: false, error: catErr.message };
+    // 1. Fetch catalog items to get denormalized fields
+    const { data: catalogItems, error: catErr } = await supabase
+      .from('epp_product_catalog')
+      .select('*')
+      .in('id', allCatalogItemIds);
 
-  const catalogMap = new Map((catalogItems || []).map(c => [c.id, c]));
+    if (catErr) return { success: false, error: catErr.message };
 
-  // 2. Delete existing requirements for the positions and catalog items involved
-  for (const posId of allPositionIds) {
+    const catalogMap = new Map((catalogItems || []).map(c => [c.id, c]));
+
+    // 2. Delete existing requirements for all positions in a single batch query
     const { error: delErr } = await supabase
       .from('epp_position_requirements')
       .delete()
-      .eq('position_id', posId)
-      .in('product_catalog_id', allCatalogItemIds);
+      .in('position_id', allPositionIds);
 
     if (delErr) {
-      console.error(`Error deleting requirements for position ${posId}:`, delErr.message);
+      console.error('Error deleting old position requirements:', delErr.message);
+      return { success: false, error: delErr.message };
     }
+
+    // 3. Insert new requirements for entries with quantity > 0
+    const nonZeroEntries = entries.filter(e => e.quantity > 0);
+
+    if (nonZeroEntries.length > 0) {
+      const insertRows = nonZeroEntries.map(entry => {
+        const cat = catalogMap.get(entry.productCatalogId);
+        return {
+          position_id: entry.positionId,
+          product_catalog_id: entry.productCatalogId,
+          product_type: cat?.product_type || 'EPP',
+          product_name: cat?.name || '',
+          quantity: entry.quantity,
+          renewal_days: cat?.renewal_days || 180,
+          size_field: cat?.uses_sizes ? cat?.size_field : null,
+        };
+      });
+
+      const { error: insertErr } = await supabase
+        .from('epp_position_requirements')
+        .insert(insertRows);
+
+      if (insertErr) {
+        console.error('Error inserting position requirements:', insertErr.message);
+        return { success: false, error: insertErr.message };
+      }
+    }
+
+    safeRevalidatePath('/epp');
+    return { success: true, error: null };
+  } catch (err: any) {
+    console.error('Unexpected error in bulkSaveRequirementsMatrix:', err);
+    return { success: false, error: err?.message || 'Error inesperado en el servidor' };
   }
-
-  // 3. Insert new requirements for entries with quantity > 0
-  const nonZeroEntries = entries.filter(e => e.quantity > 0);
-
-  if (nonZeroEntries.length > 0) {
-    const insertRows = nonZeroEntries.map(entry => {
-      const cat = catalogMap.get(entry.productCatalogId);
-      return {
-        position_id: entry.positionId,
-        product_catalog_id: entry.productCatalogId,
-        product_type: cat?.product_type || 'EPP',
-        product_name: cat?.name || '',
-        quantity: entry.quantity,
-        renewal_days: cat?.renewal_days || 180,
-        size_field: cat?.uses_sizes ? cat?.size_field : null,
-      };
-    });
-
-    const { error: insertErr } = await supabase
-      .from('epp_position_requirements')
-      .insert(insertRows);
-
-    if (insertErr) return { success: false, error: insertErr.message };
-  }
-
-  safeRevalidatePath('/epp');
-  return { success: true, error: null };
 }
+

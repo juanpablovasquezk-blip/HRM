@@ -352,28 +352,33 @@ export default function EPPPage() {
   // Save Matrix
   const handleSaveMatrix = async () => {
     setSavingMatrix(true);
-    const entries: { positionId: string; productCatalogId: string; quantity: number }[] = [];
-    const allPosIds = allPositions.map(p => p.id);
-    const allCatIds = catalog.map(c => c.id);
+    try {
+      const entries: { positionId: string; productCatalogId: string; quantity: number }[] = [];
+      const allPosIds = allPositions.map(p => p.id);
+      const allCatIds = catalog.map(c => c.id);
 
-    for (const posId of allPosIds) {
-      for (const catId of allCatIds) {
-        const qty = matrixData[posId]?.[catId] || 0;
-        if (qty > 0) {
-          entries.push({ positionId: posId, productCatalogId: catId, quantity: qty });
+      for (const posId of allPosIds) {
+        for (const catId of allCatIds) {
+          const qty = matrixData[posId]?.[catId] || 0;
+          if (qty > 0) {
+            entries.push({ positionId: posId, productCatalogId: catId, quantity: qty });
+          }
         }
       }
-    }
 
-    const res = await bulkSaveRequirementsMatrix(entries, allPosIds, allCatIds);
-    if (res.success) {
-      toast.success('Matriz de requerimientos guardada exitosamente');
-      setOriginalMatrixData(JSON.parse(JSON.stringify(matrixData)));
-      fetchData();
-    } else {
-      toast.error('Error al guardar: ' + res.error);
+      const res = await bulkSaveRequirementsMatrix(entries, allPosIds, allCatIds);
+      if (res.success) {
+        toast.success('Matriz de requerimientos guardada exitosamente');
+        setOriginalMatrixData(JSON.parse(JSON.stringify(matrixData)));
+        fetchData();
+      } else {
+        toast.error('Error al guardar: ' + res.error);
+      }
+    } catch (err: any) {
+      toast.error('Error al guardar matriz: ' + (err?.message || err));
+    } finally {
+      setSavingMatrix(false);
     }
-    setSavingMatrix(false);
   };
 
   // Group positions by area for matrix display
