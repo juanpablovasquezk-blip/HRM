@@ -2314,6 +2314,8 @@ export default function EPPPage() {
             </DialogFooter>
           </form>
         </DialogContent>
+      </Dialog>
+
       {/* ── DIALOG 6: QUICK EDIT WORKER SIZES ───────────────────────────── */}
       <Dialog open={isEditSizesOpen} onOpenChange={setIsEditSizesOpen}>
         <DialogContent className="sm:max-w-[550px] max-h-[85vh] overflow-y-auto">
