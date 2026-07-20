@@ -877,9 +877,7 @@ export default function EPPPage() {
     doc.setTextColor(totalSumPurchase > 0 ? 220 : 30, totalSumPurchase > 0 ? 38 : 30, totalSumPurchase > 0 ? 38 : 30);
     doc.text(totalSumPurchase.toString(), margin + 175, y + 4.5, { align: 'center' });
 
-    // Warning note if missing sizes exist
-    const totalMissing = forecastData.filter(i => i.size === 'No ingresada').reduce((acc, i) => acc + i.qtyNeeded, 0);
-    if (totalMissing > 0) {
+    if (workersMissingSizes.length > 0) {
       y += 12;
       doc.setFillColor(254, 243, 199);
       doc.setDrawColor(245, 158, 11);
@@ -887,9 +885,9 @@ export default function EPPPage() {
       doc.setTextColor(180, 83, 9);
       doc.setFontSize(8);
       doc.setFont('helvetica', 'bold');
-      doc.text(`* ATENCIÓN: Se detectaron ${totalMissing} requerimientos asignados a trabajadores sin talla en su ficha.`, margin + 3, y + 5);
+      doc.text(`* ATENCIÓN: Se detectaron ${workersMissingSizes.length} trabajadores con requerimientos sin talla registrada.`, margin + 3, y + 5);
       doc.setFont('helvetica', 'normal');
-      doc.text(`Consulte el desglose detallado por talla en la siguiente página y registre las tallas faltantes en el sistema.`, margin + 3, y + 9.5);
+      doc.text(`Las prendas sin talla se omiten de este informe de compras hasta que el funcionario registre su talla.`, margin + 3, y + 9.5);
     }
 
     // --- PAGE 2: DESGLOSE DETALLADO POR TALLA ---
@@ -1737,14 +1735,13 @@ export default function EPPPage() {
               <CardContent className="flex-1">
                 {forecastData.length > 0 ? (
                   <div className="space-y-6">
-                    {/* Warning alert if missing sizes exist */}
-                    {forecastData.some(i => i.size === 'No ingresada') && (
+                    {workersMissingSizes.length > 0 && (
                       <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300 rounded-lg p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="flex items-center gap-2.5">
                           <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
                           <div>
-                            <p className="font-semibold text-xs sm:text-sm">Se detectaron requerimientos para trabajadores sin talla registrada en su ficha</p>
-                            <p className="text-[11px] text-amber-700 dark:text-amber-400">Registra las tallas pendientes para optimizar las compras y evitar prendas sin asignar.</p>
+                            <p className="font-semibold text-xs sm:text-sm">Se detectaron {workersMissingSizes.length} trabajador(es) con requerimientos sin talla registrada</p>
+                            <p className="text-[11px] text-amber-700 dark:text-amber-400">Estas prendas no se incluyen en las sumatorias ni compras hasta que el funcionario registre su talla.</p>
                           </div>
                         </div>
                         <Button
@@ -1754,7 +1751,7 @@ export default function EPPPage() {
                           className="border-amber-300 bg-amber-100/70 hover:bg-amber-200 text-amber-900 gap-1.5 h-8 text-xs font-semibold shrink-0"
                         >
                           <Search className="h-3.5 w-3.5" />
-                          Ver Trabajadores Sin Talla ({forecastData.filter(i => i.size === 'No ingresada').reduce((acc, i) => acc + i.qtyNeeded, 0)})
+                          Ver Trabajadores Sin Talla ({workersMissingSizes.length})
                         </Button>
                       </div>
                     )}

@@ -589,6 +589,11 @@ export async function getMonthlyEPPForecastReport(
       }
 
       if (isRequiredThisMonth) {
+        // Exclude 'No ingresada' sizes from the purchase forecast report and breakdown
+        if (req.size === 'No ingresada') {
+          return;
+        }
+
         const key = `${req.productName}_${req.size}`;
         if (!requiredGroup[key]) {
           requiredGroup[key] = {
