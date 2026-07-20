@@ -11,8 +11,8 @@ import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Loader2, CheckCircle2, XCircle, Phone, Mail } from 'lucide-react';
-import { toast } from 'sonner';
 import { createPersonnel, updatePersonnel } from '@/app/(dashboard)/personnel/actions';
+import { createClient } from '@/lib/supabase/client';
 import type { Personnel } from '@/types/database';
 
 interface PersonnelFormProps {
@@ -205,9 +205,38 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
       bank_name: personnel?.bank_name || '',
       bank_account_number: personnel?.bank_account_number || '',
     };
-
-
   });
+
+  const [allCustomSizeFields, setAllCustomSizeFields] = useState<{ key: string; label: string }[]>([]);
+
+  useEffect(() => {
+    const fetchCatalogCustomSizes = async () => {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase
+          .from('epp_product_catalog')
+          .select('size_field')
+          .not('size_field', 'is', null)
+          .like('size_field', 'clothing_custom_%');
+
+        const catalogKeys = (data || []).map(d => d.size_field).filter((k): k is string => !!k);
+        const existingWorkerKeys = Object.keys(initialValues.custom_clothing_sizes || {});
+
+        const combinedKeys = Array.from(new Set([...catalogKeys, ...existingWorkerKeys]));
+
+        const formatted = combinedKeys.map(k => {
+          const clean = k.replace('clothing_custom_', '').replace(/_/g, ' ');
+          const label = 'Talla: ' + clean.charAt(0).toUpperCase() + clean.slice(1);
+          return { key: k, label };
+        });
+
+        setAllCustomSizeFields(formatted);
+      } catch (e) {
+        console.error('Error fetching catalog custom sizes:', e);
+      }
+    };
+    fetchCatalogCustomSizes();
+  }, [initialValues.custom_clothing_sizes]);
 
   const address = (personnel?.address as { street?: string; city?: string; region?: string; comuna?: string }) || {};
 
@@ -592,13 +621,14 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
           </div>
 
           {/* Custom Clothing Sizes */}
-          {initialValues.custom_clothing_sizes && Object.keys(initialValues.custom_clothing_sizes).length > 0 && (
+          {allCustomSizeFields.length > 0 && (
             <div className="md:col-span-2 pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tallas Personalizadas Adicionales</p>
+              <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wider font-mono">
+                Tallas Personalizadas Adicionales (Catálogo EPP)
+              </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {Object.entries(initialValues.custom_clothing_sizes).map(([key, val]) => {
-                  const cleanLabel = key.replace('clothing_custom_', '').replace(/_/g, ' ');
-                  const label = 'Talla: ' + cleanLabel.charAt(0).toUpperCase() + cleanLabel.slice(1);
+                {allCustomSizeFields.map(({ key, label }) => {
+                  const val = initialValues.custom_clothing_sizes?.[key] || '';
                   return (
                     <div key={key} className="space-y-2">
                       <Label htmlFor={key}>{label}</Label>
