@@ -281,9 +281,9 @@ export async function getEPPPersonnelData(): Promise<{
         latestDelivery = activeDeliveries[0];
       }
 
-      // Determine size from profile
+      // Determine size from profile (checking built-in or custom_clothing_sizes jsonb)
       const sizeKey = req.size_field;
-      const sizeValue = sizeKey ? (p[sizeKey] || 'No ingresada') : 'Única';
+      const sizeValue = sizeKey ? (p[sizeKey] || (p.custom_clothing_sizes && p.custom_clothing_sizes[sizeKey]) || 'No ingresada') : 'Única';
 
       if (!latestDelivery) {
         return {

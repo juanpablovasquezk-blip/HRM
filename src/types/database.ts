@@ -70,6 +70,7 @@ export interface Personnel {
   clothing_shoe_size?: string | null;
   clothing_parka_size?: string | null;
   clothing_overall_size?: string | null;
+  custom_clothing_sizes?: Record<string, string> | null;
 
   // Onboarding status
   onboarding_status?: 'pending' | 'approved' | 'rejected' | null;

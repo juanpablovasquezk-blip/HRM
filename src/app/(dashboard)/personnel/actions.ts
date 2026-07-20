@@ -135,6 +135,15 @@ export async function createPersonnel(
     clothing_shoe_size: toUpper(formData.get('clothing_shoe_size')) || null,
     clothing_parka_size: toUpper(formData.get('clothing_parka_size')) || null,
     clothing_overall_size: toUpper(formData.get('clothing_overall_size')) || null,
+    custom_clothing_sizes: (() => {
+      const custom: Record<string, string> = {};
+      for (const [key, val] of formData.entries()) {
+        if (key.startsWith('clothing_custom_') && typeof val === 'string' && val.trim()) {
+          custom[key] = val.trim().toUpperCase();
+        }
+      }
+      return custom;
+    })(),
 
     // Social Security (AFP & Health)
     afp: toUpper(formData.get('afp')) || null,
@@ -224,6 +233,15 @@ export async function updatePersonnel(
     clothing_shoe_size: toUpper(formData.get('clothing_shoe_size')) || null,
     clothing_parka_size: toUpper(formData.get('clothing_parka_size')) || null,
     clothing_overall_size: toUpper(formData.get('clothing_overall_size')) || null,
+    custom_clothing_sizes: (() => {
+      const custom: Record<string, string> = {};
+      for (const [key, val] of formData.entries()) {
+        if (key.startsWith('clothing_custom_') && typeof val === 'string' && val.trim()) {
+          custom[key] = val.trim().toUpperCase();
+        }
+      }
+      return custom;
+    })(),
 
     // Social Security (AFP & Health)
     afp: toUpper(formData.get('afp')) || null,

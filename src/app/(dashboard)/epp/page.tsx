@@ -110,6 +110,7 @@ export default function EPPPage() {
   const [catName, setCatName] = useState('');
   const [catUsesSizes, setCatUsesSizes] = useState(false);
   const [catSizeField, setCatSizeField] = useState('');
+  const [customSizeFieldName, setCustomSizeFieldName] = useState('');
   const [catRenewalDays, setCatRenewalDays] = useState(180);
 
   // Catalog & Matrix Data
@@ -225,8 +226,8 @@ export default function EPPPage() {
     personnel.filter(p => p.position).map(p => [p.main_position, p.position])
   ).values());
 
-  // Size field list options
-  const sizeFieldOptions = [
+  // Standard Size field list options
+  const standardSizeFields = [
     { label: 'Talla de Polera (Letra)', value: 'clothing_tshirt_size' },
     { label: 'Talla de Polar (Letra)', value: 'clothing_polar_size' },
     { label: 'Talla de Pantalón (Letra)', value: 'clothing_pants_size_letter' },
@@ -234,8 +235,35 @@ export default function EPPPage() {
     { label: 'Talla de Zapatos (Número)', value: 'clothing_shoe_size' },
     { label: 'Talla de Parka (Letra)', value: 'clothing_parka_size' },
     { label: 'Talla de Jardinera Térmica (Letra)', value: 'clothing_overall_size' },
-    { label: 'Ninguno (Talla Única)', value: '' }
   ];
+
+  // Dynamically collect custom size fields from catalog
+  const customFieldsFromCatalog = catalog
+    .map(c => c.size_field)
+    .filter((f): f is string => !!f && f.startsWith('clothing_custom_'))
+    .filter((value, index, self) => self.indexOf(value) === index)
+    .map(f => {
+      const cleanLabel = f.replace('clothing_custom_', '').replace(/_/g, ' ');
+      const label = cleanLabel.charAt(0).toUpperCase() + cleanLabel.slice(1);
+      return { label: `Talla: ${label}`, value: f };
+    });
+
+  const sizeFieldOptions = [
+    ...standardSizeFields,
+    ...customFieldsFromCatalog,
+    { label: '✨ + Crear nueva talla para la ficha...', value: '__NEW_CUSTOM__' }
+  ];
+
+  const formatSizeFieldLabel = (sizeField: string | null) => {
+    if (!sizeField) return '—';
+    const found = standardSizeFields.find(o => o.value === sizeField);
+    if (found) return found.label;
+    if (sizeField.startsWith('clothing_custom_')) {
+      const raw = sizeField.replace('clothing_custom_', '').replace(/_/g, ' ');
+      return 'Talla: ' + raw.charAt(0).toUpperCase() + raw.slice(1);
+    }
+    return sizeField;
+  };
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -281,13 +309,29 @@ export default function EPPPage() {
       return;
     }
 
+    let finalSizeField = catUsesSizes ? catSizeField || null : null;
+
+    if (catUsesSizes && catSizeField === '__NEW_CUSTOM__') {
+      if (!customSizeFieldName.trim()) {
+        toast.error('Ingresa el nombre de la nueva talla para la ficha');
+        return;
+      }
+      const slug = customSizeFieldName
+        .trim()
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      finalSizeField = `clothing_custom_${slug}`;
+    }
+
     startTransition(async () => {
       const res = await saveProductCatalogItem({
         id: editingCatalogItem?.id,
         productType: catType,
         name: catName,
         usesSizes: catUsesSizes,
-        sizeField: catUsesSizes ? catSizeField || null : null,
+        sizeField: finalSizeField,
         renewalDays: catRenewalDays,
       });
 
@@ -308,6 +352,7 @@ export default function EPPPage() {
     setCatName('');
     setCatUsesSizes(false);
     setCatSizeField('');
+    setCustomSizeFieldName('');
     setCatRenewalDays(180);
   };
 
@@ -317,6 +362,7 @@ export default function EPPPage() {
     setCatName(item.name);
     setCatUsesSizes(item.uses_sizes);
     setCatSizeField(item.size_field || '');
+    setCustomSizeFieldName('');
     setCatRenewalDays(item.renewal_days);
     setIsCatalogDialogOpen(true);
   };
@@ -1147,9 +1193,8 @@ export default function EPPPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {catalog.map((item) => {
                     const sizeLabel = item.uses_sizes
-                      ? (sizeFieldOptions.find(o => o.value === item.size_field)?.label || item.size_field || 'No definido')
+                      ? formatSizeFieldLabel(item.size_field)
                       : '—';
                     const renewalLabel = item.renewal_days >= 30
                       ? `${Math.round(item.renewal_days / 30)} mes${Math.round(item.renewal_days / 30) !== 1 ? 'es' : ''}`
@@ -1735,17 +1780,38 @@ export default function EPPPage() {
               </div>
 
               {catUsesSizes && (
-                <div className="space-y-2 col-span-2">
-                  <Label htmlFor="cat_size_field">Campo de Talla de la Ficha Personal</Label>
-                  <select 
-                    id="cat_size_field"
-                    value={catSizeField}
-                    onChange={(e) => setCatSizeField(e.target.value)}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <option value="">Seleccionar campo de talla</option>
-                    {sizeFieldOptions.filter(o => o.value !== '').map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+                <div className="space-y-3 col-span-2 bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
+                  <div className="space-y-2">
+                    <Label htmlFor="cat_size_field">Campo de Talla de la Ficha Personal</Label>
+                    <select 
+                      id="cat_size_field"
+                      value={catSizeField}
+                      onChange={(e) => setCatSizeField(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <option value="">Seleccionar campo de talla</option>
+                      {sizeFieldOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+
+                  {catSizeField === '__NEW_CUSTOM__' && (
+                    <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                      <Label htmlFor="custom_size_name" className="text-orange-700 dark:text-orange-400 font-semibold text-xs">
+                        Nombre de la Nueva Talla para la Ficha *
+                      </Label>
+                      <Input
+                        id="custom_size_name"
+                        placeholder="Ej: Talla de Guantes, Talla de Casco, Talla de Arnés..."
+                        value={customSizeFieldName}
+                        onChange={(e) => setCustomSizeFieldName(e.target.value)}
+                        required
+                        className="border-orange-300 focus:ring-orange-500"
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Esta nueva talla estará disponible automáticamente en la ficha del trabajador para ser rellenada.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 

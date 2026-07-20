@@ -589,6 +589,30 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
               {CLOTHING_SIZES_LETTER.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
+
+          {/* Custom Clothing Sizes */}
+          {initialValues.custom_clothing_sizes && Object.keys(initialValues.custom_clothing_sizes).length > 0 && (
+            <div className="md:col-span-2 pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tallas Personalizadas Adicionales</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {Object.entries(initialValues.custom_clothing_sizes).map(([key, val]) => {
+                  const cleanLabel = key.replace('clothing_custom_', '').replace(/_/g, ' ');
+                  const label = 'Talla: ' + cleanLabel.charAt(0).toUpperCase() + cleanLabel.slice(1);
+                  return (
+                    <div key={key} className="space-y-2">
+                      <Label htmlFor={key}>{label}</Label>
+                      <Input
+                        id={key}
+                        name={key}
+                        defaultValue={val}
+                        placeholder="Ej: S, M, L, XL, 42..."
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
