@@ -196,6 +196,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
       clothing_shoe_size: personnel?.clothing_shoe_size || '',
       clothing_parka_size: personnel?.clothing_parka_size || '',
       clothing_overall_size: personnel?.clothing_overall_size || '',
+      custom_clothing_sizes: (personnel?.custom_clothing_sizes as Record<string, string>) || {},
       afp: personnel?.afp || '',
       health_system: personnel?.health_system || '',
       isapre: personnel?.isapre || '',
