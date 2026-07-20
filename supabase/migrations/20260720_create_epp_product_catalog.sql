@@ -3,6 +3,10 @@
 -- Description: Creates a centralized product catalog for EPP/Uniform items.
 --   If epp_position_requirements already exists, migrates data and adds FK.
 
+-- 0. Ensure companies table has rut and giro columns
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS rut TEXT;
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS giro TEXT;
+
 -- 1. Create epp_product_catalog table (no company_id — company is assigned at delivery time)
 CREATE TABLE IF NOT EXISTS public.epp_product_catalog (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

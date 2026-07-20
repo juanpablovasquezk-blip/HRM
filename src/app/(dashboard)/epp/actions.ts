@@ -198,7 +198,7 @@ export async function getEPPPersonnelData(): Promise<{
     .from('personnel')
     .select(`
       *,
-      company:companies(name, rut, giro),
+      company:companies(*),
       position:positions(name, area:areas(name))
     `)
     .eq('is_active', true)
