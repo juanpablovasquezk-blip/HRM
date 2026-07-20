@@ -11,7 +11,7 @@ import PersonnelTableClient from './personnel-table-client';
 export default async function PersonnelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'all' }>;
+  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' }>;
 }) {
   const params = await searchParams;
   const supabase = await createClient();

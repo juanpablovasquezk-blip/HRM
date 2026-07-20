@@ -20,7 +20,7 @@ interface PersonnelFiltersProps {
   initialSearch?: string;
   initialCompanyId?: string;
   initialPositionId?: string;
-  initialStatus?: 'active' | 'inactive' | 'pending' | 'all';
+  initialStatus?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all';
   companies: Company[];
   positions: Position[];
 }
