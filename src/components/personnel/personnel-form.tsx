@@ -11,6 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Loader2, CheckCircle2, XCircle, Phone, Mail } from 'lucide-react';
+import { toast } from 'sonner';
 import { createPersonnel, updatePersonnel } from '@/app/(dashboard)/personnel/actions';
 import { createClient } from '@/lib/supabase/client';
 import type { Personnel } from '@/types/database';
