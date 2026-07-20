@@ -68,6 +68,14 @@ interface Personnel {
   driver_licenses?: string[];
   company: { name: string } | null;
   onboarding_status?: string | null;
+  clothing_tshirt_size?: string | null;
+  clothing_polar_size?: string | null;
+  clothing_pants_size_letter?: string | null;
+  clothing_pants_size_number?: string | null;
+  clothing_shoe_size?: string | null;
+  clothing_parka_size?: string | null;
+  clothing_overall_size?: string | null;
+  custom_clothing_sizes?: Record<string, string> | null;
 }
 
 
