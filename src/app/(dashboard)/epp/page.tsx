@@ -186,6 +186,58 @@ export default function EPPPage() {
   const [isUploadingHistForm, setIsUploadingHistForm] = useState(false);
   const defaultHistDate = format(new Date(), 'yyyy-MM-dd');
 
+  // Helper to get size options for a given product
+  const getProductSizeOptions = (productName: string) => {
+    if (!productName) return CLOTHING_SIZES_LETTER;
+    const catItem = catalog.find(c => c.name === productName);
+    const reqItem = requirements.find(r => r.product_name === productName);
+    const sizeField = catItem?.size_field || reqItem?.size_field;
+    const sizeType = catItem?.size_type;
+
+    if (sizeType === 'NUMBER' || sizeField === 'clothing_pants_size_number') {
+      return PANTS_SIZES_NUMBER;
+    }
+    if (sizeType === 'SHOE' || sizeField === 'clothing_shoe_size') {
+      return SHOE_SIZES;
+    }
+    if (catItem?.uses_sizes === false) {
+      return ['Única'];
+    }
+    return CLOTHING_SIZES_LETTER;
+  };
+
+  const handleHistProductChange = (index: number, productName: string) => {
+    const worker = personnel.find(p => p.id === histWorkerId);
+    const req = worker?.requirements?.find((r: any) => r.productName === productName) || requirements.find(r => r.product_name === productName);
+    const catItem = catalog.find(c => c.name === productName);
+
+    let suggestedSize = '';
+    if (req?.size && req.size !== 'No ingresada' && req.size !== 'Única') {
+      suggestedSize = req.size;
+    } else if (catItem?.size_field && worker) {
+      suggestedSize = worker[catItem.size_field] || worker.custom_clothing_sizes?.[catItem.size_field] || '';
+    }
+    if (!suggestedSize && catItem?.uses_sizes === false) {
+      suggestedSize = 'Única';
+    }
+    if (!suggestedSize) {
+      const options = getProductSizeOptions(productName);
+      suggestedSize = options[0] || 'M';
+    }
+
+    setHistItems(prev => prev.map((item, i) => {
+      if (i !== index) return item;
+      return {
+        ...item,
+        productName,
+        productType: (catItem?.product_type || req?.product_type || 'EPP') as any,
+        size: suggestedSize,
+        quantity: req?.quantity || 1,
+        renewalDays: req?.renewalDays || req?.renewal_days || catItem?.renewal_days || 365,
+      };
+    }));
+  };
+
   const addHistItem = () => setHistItems(prev => [...prev, {
     productName: '',
     productType: 'EPP' as 'UNIFORM' | 'EPP',
@@ -1983,30 +2035,54 @@ export default function EPPPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {histItems.map((item, idx) => (
-                              <tr key={idx} className="border-b last:border-0 hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
-                                <td className="px-1 py-1">
-                                  <Input
-                                    list={`hist-products-${idx}`}
-                                    placeholder="Nombre implemento..."
-                                    value={item.productName}
-                                    onChange={e => updateHistItem(idx, 'productName', e.target.value)}
-                                    className="h-7 text-xs"
-                                  />
-                                  <datalist id={`hist-products-${idx}`}>
-                                    {requirements
-                                      .filter((r: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.product_name === r.product_name) === i)
-                                      .map((r: any) => <option key={r.product_name} value={r.product_name} />)}
-                                  </datalist>
-                                </td>
-                                <td className="px-1 py-1">
-                                  <Input
-                                    placeholder="L, M, 42..."
-                                    value={item.size}
-                                    onChange={e => updateHistItem(idx, 'size', e.target.value)}
-                                    className="h-7 text-xs w-[78px]"
-                                  />
-                                </td>
+                            {histItems.map((item, idx) => {
+                              const selectedWorker = personnel.find(p => p.id === histWorkerId);
+                              // Get products list for dropdown: position requirements first, then catalog items
+                              const workerReqProducts = selectedWorker?.requirements?.map((r: any) => r.productName) || [];
+                              const catalogProducts = catalog.map(c => c.name);
+                              const allProducts = Array.from(new Set([...workerReqProducts, ...catalogProducts]));
+                              const sizeOptions = getProductSizeOptions(item.productName);
+
+                              return (
+                                <tr key={idx} className="border-b last:border-0 hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
+                                  <td className="px-1 py-1">
+                                    <select
+                                      value={item.productName}
+                                      onChange={e => handleHistProductChange(idx, e.target.value)}
+                                      className="flex h-7 w-full rounded-md border border-input bg-background px-2 py-0 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring font-semibold"
+                                    >
+                                      <option value="">Seleccionar implemento...</option>
+                                      {workerReqProducts.length > 0 && (
+                                        <optgroup label="Requeridos por Cargo">
+                                          {workerReqProducts.map((pName: string) => (
+                                            <option key={pName} value={pName}>{pName}</option>
+                                          ))}
+                                        </optgroup>
+                                      )}
+                                      <optgroup label="Todos los Implementos">
+                                        {allProducts
+                                          .filter(pName => !workerReqProducts.includes(pName))
+                                          .map(pName => (
+                                            <option key={pName} value={pName}>{pName}</option>
+                                          ))}
+                                      </optgroup>
+                                    </select>
+                                  </td>
+                                  <td className="px-1 py-1">
+                                    <select
+                                      value={item.size}
+                                      onChange={e => updateHistItem(idx, 'size', e.target.value)}
+                                      className="flex h-7 w-[85px] rounded-md border border-input bg-background px-2 py-0 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring font-medium"
+                                    >
+                                      {!item.size && <option value="">Talla...</option>}
+                                      {item.size && !sizeOptions.includes(item.size) && (
+                                        <option value={item.size}>{item.size}</option>
+                                      )}
+                                      {sizeOptions.map(s => (
+                                        <option key={s} value={s}>{s}</option>
+                                      ))}
+                                    </select>
+                                  </td>
                                 <td className="px-1 py-1">
                                   <input type="number" min="1" value={item.quantity}
                                     onChange={e => updateHistItem(idx, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
@@ -2029,7 +2105,7 @@ export default function EPPPage() {
                                   </button>
                                 </td>
                               </tr>
-                            ))}
+                            )})}
                           </tbody>
                         </table>
                       </div>
