@@ -1109,6 +1109,131 @@ export default function EPPPage() {
     doc.save(`Informe_EPP_${monthName}.pdf`);
   };
 
+  // Generate Quotation Request PDF (Simplified: Implement, Size, Qty to Purchase)
+  const downloadQuotationPDF = () => {
+    if (forecastData.length === 0) return;
+
+    // Filter items that actually need to be purchased
+    const itemsToQuote = forecastData.filter(i => i.qtyToPurchase > 0);
+
+    if (itemsToQuote.length === 0) {
+      toast.info('No hay implementos con déficit de stock requeridos para comprar en este mes.');
+      return;
+    }
+
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
+
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const usableW = pageW - margin * 2;
+
+    let y = 15;
+
+    // Header Banner
+    doc.setFillColor(26, 54, 93);
+    doc.rect(margin, y, usableW, 10, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('SOLICITUD DE COTIZACIÓN - EPP Y UNIFORMES', margin + usableW / 2, y + 6.5, { align: 'center' });
+
+    y += 14;
+    doc.setTextColor(50, 50, 50);
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text('DETALLE DE ELEMENTOS Y CANTIDADES A COTIZAR', margin, y);
+
+    y += 5;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Período Requerido: ${forecastMonth}`, margin, y);
+    doc.text(`Fecha Emisión: ${format(new Date(), 'dd/MM/yyyy')}`, pageW - margin, y, { align: 'right' });
+
+    y += 6;
+
+    // Table Header
+    doc.setFillColor(241, 245, 249);
+    doc.rect(margin, y, usableW, 7, 'F');
+    doc.setDrawColor(200, 200, 200);
+    doc.rect(margin, y, usableW, 7);
+
+    doc.setTextColor(26, 54, 93);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+
+    doc.text('IMPLEMENTO', margin + 5, y + 4.8);
+    doc.text('TALLA', margin + 110, y + 4.8, { align: 'center' });
+    doc.text('CANTIDAD A COMPRAR', margin + 160, y + 4.8, { align: 'center' });
+
+    y += 7;
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(30, 30, 30);
+
+    let totalUnitsToPurchase = 0;
+
+    itemsToQuote.forEach((item, index) => {
+      if (y > 270) {
+        doc.addPage();
+        y = 15;
+
+        doc.setFillColor(241, 245, 249);
+        doc.rect(margin, y, usableW, 7, 'F');
+        doc.setDrawColor(200, 200, 200);
+        doc.rect(margin, y, usableW, 7);
+
+        doc.setTextColor(26, 54, 93);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+
+        doc.text('IMPLEMENTO', margin + 5, y + 4.8);
+        doc.text('TALLA', margin + 110, y + 4.8, { align: 'center' });
+        doc.text('CANTIDAD A COMPRAR', margin + 160, y + 4.8, { align: 'center' });
+
+        y += 7;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(30, 30, 30);
+      }
+
+      totalUnitsToPurchase += item.qtyToPurchase;
+
+      if (index % 2 === 0) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(margin, y, usableW, 6.5, 'F');
+      }
+      doc.rect(margin, y, usableW, 6.5);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(item.productName, margin + 5, y + 4.3);
+      doc.setFont('helvetica', 'normal');
+      doc.text(item.size, margin + 110, y + 4.3, { align: 'center' });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(220, 38, 38);
+      doc.text(item.qtyToPurchase.toString(), margin + 160, y + 4.3, { align: 'center' });
+      doc.setTextColor(30, 30, 30);
+
+      y += 6.5;
+    });
+
+    // Total Row
+    doc.setFillColor(226, 232, 240);
+    doc.rect(margin, y, usableW, 7.5, 'F');
+    doc.rect(margin, y, usableW, 7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('TOTAL UNIDADES A COMPRAR', margin + 5, y + 5);
+    doc.setTextColor(220, 38, 38);
+    doc.text(totalUnitsToPurchase.toString(), margin + 160, y + 5, { align: 'center' });
+
+    const parsedMonth = parseISO(`${forecastMonth}-01`);
+    const monthName = format(parsedMonth, 'MMMM_yyyy', { locale: es });
+    doc.save(`Cotizacion_EPP_${monthName}.pdf`);
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -1849,8 +1974,8 @@ export default function EPPPage() {
                 <CardDescription>
                   Calcula qué elementos vencen o deben entregarse por primera vez en un mes para estimar compras requeridas.
                 </CardDescription>
-                <div className="flex gap-3 mt-4 max-w-md">
-                  <div className="flex-1">
+                <div className="flex flex-wrap items-center gap-3 mt-4">
+                  <div className="w-[180px]">
                     <Input 
                       type="month" 
                       value={forecastMonth}
@@ -1865,14 +1990,26 @@ export default function EPPPage() {
                     {generatingForecast ? 'Calculando...' : 'Calcular'}
                   </Button>
                   {forecastData.length > 0 && (
-                    <Button 
-                      variant="outline" 
-                      onClick={downloadForecastPDF}
-                      className="border-slate-300 dark:border-slate-800 gap-1.5"
-                    >
-                      <FileDown className="h-4 w-4" />
-                      Descargar PDF
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button 
+                        variant="outline" 
+                        onClick={downloadForecastPDF}
+                        className="border-slate-300 dark:border-slate-800 text-xs font-semibold gap-1.5"
+                        title="Descargar informe completo con stock y desglose por talla"
+                      >
+                        <FileDown className="h-4 w-4 text-blue-600" />
+                        Informe Completo PDF
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        onClick={downloadQuotationPDF}
+                        className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 text-xs font-semibold gap-1.5 shadow-sm"
+                        title="Descargar versión simplificada (Implemento, Talla, Cantidad) para cotizar con proveedores"
+                      >
+                        <FileDown className="h-4 w-4 text-orange-600" />
+                        PDF Cotización Proveedores
+                      </Button>
+                    </div>
                   )}
                 </div>
               </CardHeader>
