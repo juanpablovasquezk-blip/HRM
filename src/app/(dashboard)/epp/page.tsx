@@ -85,7 +85,9 @@ import {
   bulkSaveRequirementsMatrix,
   updateWorkerClothingSizes,
   createWorkerSizeToken,
-  ProductCatalogItem
+  ProductCatalogItem,
+  registerBulkHistoricalDelivery,
+  HistoricalItemInput
 } from './actions';
 import { generateDeliveryFormPDF } from './generate-delivery-pdf';
 
@@ -175,13 +177,38 @@ export default function EPPPage() {
   const [activeReturnItem, setActiveReturnItem] = useState<any | null>(null);
   const [returnQty, setReturnQty] = useState(1);
 
-  // Form States - Past Delivery (Bootstrap)
-  const [pastWorkerId, setPastWorkerId] = useState('');
-  const [pastProductName, setPastProductName] = useState('');
-  const [pastQty, setPastQty] = useState(1);
-  const [pastSize, setPastSize] = useState('');
-  const [pastDate, setPastDate] = useState('');
-  const [pastRenewal, setPastRenewal] = useState(180);
+  // Form States - Historical Bulk Delivery
+  const [histWorkerId, setHistWorkerId] = useState('');
+  const [histWorkerSearch, setHistWorkerSearch] = useState('');
+  const [histShowSearch, setHistShowSearch] = useState(false);
+  const [histItems, setHistItems] = useState<HistoricalItemInput[]>([]);
+  const [histFormFile, setHistFormFile] = useState<File | null>(null);
+  const [isUploadingHistForm, setIsUploadingHistForm] = useState(false);
+  const defaultHistDate = format(new Date(), 'yyyy-MM-dd');
+
+  const addHistItem = () => setHistItems(prev => [...prev, {
+    productName: '',
+    productType: 'EPP' as 'UNIFORM' | 'EPP',
+    size: '',
+    quantity: 1,
+    renewalDays: 365,
+    deliveryDate: defaultHistDate,
+  }]);
+
+  const updateHistItem = (index: number, field: keyof HistoricalItemInput, value: any) => {
+    setHistItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
+  };
+
+  const removeHistItem = (index: number) => {
+    setHistItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const resetHistForm = () => {
+    setHistWorkerId('');
+    setHistWorkerSearch('');
+    setHistItems([]);
+    setHistFormFile(null);
+  };
 
   // Forecast Report States
   const [forecastMonth, setForecastMonth] = useState(format(new Date(), 'yyyy-MM'));
@@ -565,10 +592,12 @@ export default function EPPPage() {
     // Populate checklist with requirements of their position
     const checklist: Record<string, any> = {};
     worker.requirements.forEach((req: any) => {
+      // For PARTIAL items, default to pendingQty (remaining units), not total
+      const qtyToDeliver = req.status === 'PARTIAL' ? (req.pendingQty ?? req.quantity) : req.quantity;
       checklist[req.productName] = {
         selected: false,
-        reason: req.status === 'PENDING_FIRST' ? 'FIRST_TIME' : 'EXPIRATION',
-        quantity: req.quantity,
+        reason: (req.status === 'PENDING_FIRST' || req.status === 'PARTIAL') ? 'FIRST_TIME' : 'EXPIRATION',
+        quantity: qtyToDeliver,
         renewalDays: req.renewalDays,
         size: req.size,
       };
@@ -652,6 +681,7 @@ export default function EPPPage() {
             reason: i.reason,
           })),
           delivererName: deliverer,
+          formNumber: res.formNumber,
         });
 
         toast.dismiss();
@@ -723,44 +753,44 @@ export default function EPPPage() {
     }
   };
 
-  // Past Delivery Bootstrap handler
-  const handlePastDeliverySubmit = async (e: React.FormEvent) => {
+  // Bulk Historical Delivery Submit
+  const handleBulkHistoricalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pastWorkerId || !pastProductName || !pastQty || !pastDate) {
-      toast.error('Faltan campos obligatorios');
+    if (!histWorkerId) { toast.error('Selecciona un trabajador'); return; }
+    if (histItems.length === 0) { toast.error('Agrega al menos un implemento'); return; }
+    if (histItems.some(i => !i.productName || !i.deliveryDate)) {
+      toast.error('Completa todos los campos de implemento y fecha');
       return;
     }
 
+    setIsUploadingHistForm(true);
+
     startTransition(async () => {
-      const selectedWorker = personnel.find(p => p.id === pastWorkerId);
-      const requirement = requirements.find(
-        r => r.position_id === selectedWorker?.main_position && r.product_name === pastProductName
-      );
+      let signedFormUrl: string | undefined;
 
-      const itemsInput = [{
-        productName: pastProductName,
-        productType: (requirement?.product_type || 'EPP') as 'UNIFORM' | 'EPP',
-        size: pastSize || 'Única',
-        quantity: pastQty,
-        reason: 'PAST_DELIVERY' as const,
-        renewalDays: pastRenewal,
-      }];
+      // Upload the scanned form first if provided
+      if (histFormFile) {
+        const fileExt = histFormFile.name.split('.').pop();
+        const fileName = `hist-form-${histWorkerId}-${Date.now()}.${fileExt}`;
+        const { data: uploadData, error: uploadErr } = await supabase.storage
+          .from('documents')
+          .upload(`signed-epp-receipts/${fileName}`, histFormFile, { upsert: true });
+        if (!uploadErr && uploadData) {
+          const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(`signed-epp-receipts/${fileName}`);
+          signedFormUrl = publicUrl;
+        }
+      }
 
-      const res = await registerDeliveryEvent(
-        pastWorkerId,
-        pastDate,
-        itemsInput
-      );
+      const res = await registerBulkHistoricalDelivery(histWorkerId, histItems, signedFormUrl);
 
       if (res.success) {
-        toast.success('Carga histórica registrada con éxito');
-        setPastDate('');
-        setPastQty(1);
-        setPastSize('');
+        toast.success(`Carga histórica registrada: ${res.eventCount} acta(s) creada(s)`);
+        resetHistForm();
         fetchData();
       } else {
-        toast.error('Error al registrar carga histórica: ' + res.error);
+        toast.error('Error al registrar: ' + res.error);
       }
+      setIsUploadingHistForm(false);
     });
   };
 
@@ -1241,22 +1271,28 @@ export default function EPPPage() {
                                     const reqBadgeColor = {
                                       PENDING_FIRST: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-400',
                                       PENDING_RENEWAL: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-400',
+                                      PARTIAL: 'bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-400',
                                       WARNING: 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400',
                                       OK: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400',
-                                    }[req.status as 'PENDING_FIRST' | 'PENDING_RENEWAL' | 'WARNING' | 'OK'];
+                                    }[req.status as 'PENDING_FIRST' | 'PENDING_RENEWAL' | 'PARTIAL' | 'WARNING' | 'OK'];
 
                                     const reqStatusText = {
                                       PENDING_FIRST: 'Pendiente (1ra vez)',
                                       PENDING_RENEWAL: 'Vencido',
+                                      PARTIAL: `Parcial (${req.deliveredQty ?? 0}/${req.quantity} entregados)`,
                                       WARNING: `Por vencer (${req.daysRemaining} d)`,
                                       OK: 'Vigente',
-                                    }[req.status as 'PENDING_FIRST' | 'PENDING_RENEWAL' | 'WARNING' | 'OK'];
+                                    }[req.status as 'PENDING_FIRST' | 'PENDING_RENEWAL' | 'PARTIAL' | 'WARNING' | 'OK'];
 
                                     return (
                                       <TableRow key={ri}>
                                         <TableCell className="font-semibold text-xs py-2">{req.productName}</TableCell>
                                         <TableCell className="text-xs py-2">{req.size}</TableCell>
-                                        <TableCell className="text-xs text-center py-2">{req.quantity}</TableCell>
+                                        <TableCell className="text-xs text-center py-2">
+                                          {req.status === 'PARTIAL' ? (
+                                            <span className="font-bold text-orange-700 dark:text-orange-400">{req.deliveredQty ?? 0}/{req.quantity}</span>
+                                          ) : req.quantity}
+                                        </TableCell>
                                         <TableCell className="text-xs text-center py-2">{req.renewalDays} días</TableCell>
                                         <TableCell className="text-xs py-2">
                                           {req.lastDeliveryDate ? format(parseISO(req.lastDeliveryDate), 'dd/MM/yyyy') : 'Nunca'}
@@ -1277,98 +1313,101 @@ export default function EPPPage() {
                             )}
                           </div>
 
-                          {/* Historical delivery records */}
+                          {/* Historical delivery records — grouped by event */}
                           <div className="space-y-2">
                             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Historial de Entregas y Respaldos</h4>
                             {worker.deliveries.length === 0 ? (
                               <p className="text-xs text-muted-foreground italic p-3 bg-white dark:bg-slate-900 border rounded-lg">
                                 Sin registros de entregas para este trabajador.
                               </p>
-                            ) : (
-                              <Table className="bg-white dark:bg-slate-900 border rounded-lg">
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead className="h-9">Fecha</TableHead>
-                                    <TableHead className="h-9">Implemento</TableHead>
-                                    <TableHead className="h-9">Talla</TableHead>
-                                    <TableHead className="h-9 text-center">Entregado</TableHead>
-                                    <TableHead className="h-9 text-center">Devuelto</TableHead>
-                                    <TableHead className="h-9">Motivo</TableHead>
-                                    <TableHead className="h-9 text-center">Acta Firmada</TableHead>
-                                    <TableHead className="h-9 text-right">Acción</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {worker.deliveries.map((item: any) => (
-                                    <TableRow key={item.id}>
-                                      <TableCell className="text-xs py-2">{format(parseISO(item.deliveryDate), 'dd/MM/yyyy')}</TableCell>
-                                      <TableCell className="font-semibold text-xs py-2">{item.productName}</TableCell>
-                                      <TableCell className="text-xs py-2">{item.size}</TableCell>
-                                      <TableCell className="text-xs text-center py-2">{item.quantity}</TableCell>
-                                      <TableCell className="text-xs text-center py-2 text-orange-600 font-semibold">{item.returnedQty || 0}</TableCell>
-                                      <TableCell className="text-xs py-2">
-                                        {item.reason === 'FIRST_TIME' && 'Primera Vez'}
-                                        {item.reason === 'EXPIRATION' && 'Renovación'}
-                                        {item.reason === 'DAMAGE' && 'Deterioro'}
-                                        {item.reason === 'PAST_DELIVERY' && 'Histórico'}
-                                      </TableCell>
-                                      <TableCell className="text-center py-2">
-                                        {item.signedFormUrl ? (
-                                          <a 
-                                            href={item.signedFormUrl} 
-                                            target="_blank" 
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline gap-0.5"
-                                          >
+                            ) : (() => {
+                              // Group deliveries by event
+                              const eventMap = new Map<string, any[]>();
+                              worker.deliveries.forEach((item: any) => {
+                                const key = item.deliveryEventId;
+                                if (!eventMap.has(key)) eventMap.set(key, []);
+                                eventMap.get(key)!.push(item);
+                              });
+
+                              return Array.from(eventMap.entries()).map(([eventId, eventItems]) => {
+                                const firstItem = eventItems[0];
+                                const formNum = firstItem.formNumber;
+                                const eventDate = firstItem.deliveryDate;
+                                const signedUrl = firstItem.signedFormUrl;
+
+                                return (
+                                  <div key={eventId} className="border rounded-lg overflow-hidden bg-white dark:bg-slate-900">
+                                    {/* Event header row */}
+                                    <div className="flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-slate-800 border-b">
+                                      <div className="flex items-center gap-3">
+                                        <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider">
+                                          {eventDate ? format(parseISO(eventDate), 'dd/MM/yyyy') : '—'}
+                                        </span>
+                                        {formNum && (
+                                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-orange-300 text-orange-700 dark:text-orange-400 font-bold">
+                                            N° EPP-{formNum}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <div>
+                                        {signedUrl ? (
+                                          <a href={signedUrl} target="_blank" rel="noopener noreferrer"
+                                            className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline gap-1">
                                             <ExternalLink className="h-3 w-3" />
-                                            Ver PDF
+                                            Ver Acta PDF
                                           </a>
                                         ) : (
-                                          <div className="flex items-center justify-center gap-1.5">
-                                            <Label 
-                                              htmlFor={`file-upload-${item.deliveryEventId}`}
-                                              className="inline-flex items-center justify-center rounded-md text-[10px] font-bold border border-slate-300 dark:border-slate-800 h-6 px-2 hover:bg-slate-50 dark:hover:bg-slate-900 cursor-pointer gap-1 text-slate-600"
-                                            >
-                                              {uploadingEventId === item.deliveryEventId ? (
+                                          <div className="flex items-center gap-1">
+                                            <Label htmlFor={`file-upload-${eventId}`}
+                                              className="inline-flex items-center justify-center rounded-md text-[10px] font-bold border border-slate-300 dark:border-slate-700 h-6 px-2 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer gap-1 text-slate-600 dark:text-slate-300">
+                                              {uploadingEventId === eventId ? (
                                                 <span className="animate-spin text-xs">🌀</span>
                                               ) : (
                                                 <Upload className="h-3 w-3" />
                                               )}
-                                              Subir
+                                              Subir Acta
                                             </Label>
-                                            <input 
-                                              id={`file-upload-${item.deliveryEventId}`}
-                                              type="file" 
-                                              accept=".pdf,image/*"
-                                              className="hidden" 
-                                              onChange={(e) => {
-                                                if (e.target.files && e.target.files[0]) {
-                                                  handleFileUpload(item.deliveryEventId, e.target.files[0]);
-                                                }
-                                              }}
-                                            />
+                                            <input id={`file-upload-${eventId}`} type="file" accept=".pdf,image/*" className="hidden"
+                                              onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(eventId, e.target.files[0]); }} />
                                           </div>
                                         )}
-                                      </TableCell>
-                                      <TableCell className="text-right py-2">
-                                        {item.quantity > item.returnedQty && (
-                                          <Button 
-                                            size="sm" 
-                                            variant="ghost" 
-                                            className="h-6 text-[10px] text-orange-600 hover:text-orange-800 gap-0.5"
-                                            onClick={() => openReturnDialog(item)}
-                                          >
-                                            <Undo2 className="h-3 w-3" />
-                                            Devolver
-                                          </Button>
-                                        )}
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            )}
+                                      </div>
+                                    </div>
+                                    {/* Items for this event */}
+                                    <Table>
+                                      <TableBody>
+                                        {eventItems.map((item: any) => (
+                                          <TableRow key={item.id} className="text-xs">
+                                            <TableCell className="font-semibold py-1.5 w-[35%]">{item.productName}</TableCell>
+                                            <TableCell className="py-1.5 w-[12%]">{item.size}</TableCell>
+                                            <TableCell className="text-center py-1.5 w-[10%]">{item.quantity}</TableCell>
+                                            <TableCell className="text-center py-1.5 w-[10%] text-orange-600 font-semibold">{item.returnedQty || 0}</TableCell>
+                                            <TableCell className="py-1.5 w-[15%] text-slate-500">
+                                              {item.reason === 'FIRST_TIME' && 'Primera Vez'}
+                                              {item.reason === 'EXPIRATION' && 'Renovación'}
+                                              {item.reason === 'DAMAGE' && 'Deterioro'}
+                                              {item.reason === 'PAST_DELIVERY' && 'Histórico'}
+                                            </TableCell>
+                                            <TableCell className="text-right py-1.5">
+                                              {item.quantity > item.returnedQty && (
+                                                <Button size="sm" variant="ghost"
+                                                  className="h-6 text-[10px] text-orange-600 hover:text-orange-800 gap-0.5"
+                                                  onClick={() => openReturnDialog(item)}>
+                                                  <Undo2 className="h-3 w-3" />
+                                                  Devolver
+                                                </Button>
+                                              )}
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                );
+                              });
+                            })()}
                           </div>
+
                         </div>
                       )}
                     </div>
@@ -1845,121 +1884,189 @@ export default function EPPPage() {
               </CardContent>
             </Card>
 
-            {/* Historical Upload Bootstrap Form */}
+            {/* Historical Upload Bootstrap Form — Multi-item */}
             <Card className="border-slate-200/60 dark:border-slate-800 shadow-md">
               <CardHeader>
-                <CardTitle className="text-lg">Carga Histórica de Entregas Pasadas</CardTitle>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <History className="h-5 w-5 text-slate-600" />
+                  Carga Histórica de Entregas Pasadas
+                </CardTitle>
                 <CardDescription>
-                  Ingresa las entregas anteriores que ya fueron entregadas físicamente para inicializar el cálculo de renovaciones (esto no altera el stock de inventario).
+                  Ingresa múltiples implementos de un mismo formulario físico. Cada ítem puede tener su propia fecha. No altera el stock de inventario.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handlePastDeliverySubmit} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="past_worker">Trabajador *</Label>
-                      <select 
-                        id="past_worker"
-                        required
-                        value={pastWorkerId}
+                <form onSubmit={handleBulkHistoricalSubmit} className="space-y-5">
+
+                  {/* Worker Search */}
+                  <div className="space-y-1.5">
+                    <Label>Trabajador *</Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Buscar por nombre o RUT..."
+                        className="pl-9"
+                        value={histWorkerSearch}
                         onChange={(e) => {
-                          setPastWorkerId(e.target.value);
-                          setPastProductName(''); // reset
+                          setHistWorkerSearch(e.target.value);
+                          setHistShowSearch(true);
+                          if (!e.target.value) { setHistWorkerId(''); }
                         }}
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <option value="">Seleccionar trabajador</option>
-                        {personnel.map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.first_name} {p.last_name_father} ({p.position?.name || 'Sin Cargo'})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="past_product">Implemento / Prenda *</Label>
-                      <select 
-                        id="past_product"
-                        required
-                        disabled={!pastWorkerId}
-                        value={pastProductName}
-                        onChange={(e) => {
-                          setPastProductName(e.target.value);
-                          // Auto fill suggested sizing
-                          const worker = personnel.find(p => p.id === pastWorkerId);
-                          const req = worker?.requirements?.find((r: any) => r.productName === e.target.value);
-                          if (req) {
-                            setPastSize(req.size !== 'Única' && req.size !== 'No ingresada' ? req.size : '');
-                            setPastRenewal(req.renewalDays);
-                            setPastQty(req.quantity);
-                          }
-                        }}
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <option value="">Seleccionar implemento</option>
-                        {pastWorkerId && personnel.find(p => p.id === pastWorkerId)?.requirements?.map((req: any) => (
-                          <option key={req.productName} value={req.productName}>{req.productName}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="past_qty">Cantidad Entregada *</Label>
-                      <Input 
-                        id="past_qty" 
-                        type="number" 
-                        min="1" 
-                        required
-                        value={pastQty}
-                        onChange={(e) => setPastQty(Number(e.target.value))}
+                        onFocus={() => setHistShowSearch(true)}
+                        onBlur={() => setTimeout(() => setHistShowSearch(false), 200)}
                       />
+                      {/* Dropdown results */}
+                      {histShowSearch && histWorkerSearch.length >= 1 && (
+                        <div className="absolute z-50 w-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                          {personnel
+                            .filter(p => {
+                              const q = histWorkerSearch.toLowerCase();
+                              const fullName = `${p.first_name} ${p.last_name_father} ${p.last_name_mother || ''}`.toLowerCase();
+                              const rut = (p.rut || '').toLowerCase();
+                              return fullName.includes(q) || rut.includes(q);
+                            })
+                            .slice(0, 10)
+                            .map(p => (
+                              <button key={p.id} type="button"
+                                className="w-full text-left px-3 py-2.5 text-sm hover:bg-orange-50 dark:hover:bg-orange-950/20 border-b border-slate-100 dark:border-slate-800 last:border-0"
+                                onClick={() => {
+                                  setHistWorkerId(p.id);
+                                  setHistWorkerSearch(`${p.first_name} ${p.last_name_father} — ${p.rut}`);
+                                  setHistShowSearch(false);
+                                }}>
+                                <span className="font-semibold">{p.first_name} {p.last_name_father} {p.last_name_mother || ''}</span>
+                                <span className="text-slate-500 text-xs ml-2">{p.rut} · {p.position?.name || 'Sin Cargo'}</span>
+                              </button>
+                            ))}
+                          {personnel.filter(p => {
+                            const q = histWorkerSearch.toLowerCase();
+                            return `${p.first_name} ${p.last_name_father}`.toLowerCase().includes(q) || (p.rut || '').toLowerCase().includes(q);
+                          }).length === 0 && (
+                            <p className="px-3 py-2 text-xs text-muted-foreground">Sin resultados</p>
+                          )}
+                        </div>
+                      )}
                     </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="past_size">Talla / Detalles</Label>
-                      <Input 
-                        id="past_size" 
-                        placeholder="Ej: M, L, 42..." 
-                        value={pastSize}
-                        onChange={(e) => setPastSize(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="past_date">Fecha de Entrega Pasada *</Label>
-                      <Input 
-                        id="past_date" 
-                        type="date" 
-                        required
-                        value={pastDate}
-                        onChange={(e) => setPastDate(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="past_renewal">Días de Renovación *</Label>
-                      <Input 
-                        id="past_renewal" 
-                        type="number" 
-                        min="1"
-                        required
-                        value={pastRenewal}
-                        onChange={(e) => setPastRenewal(Number(e.target.value))}
-                      />
-                    </div>
+                    {histWorkerId && (
+                      <p className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Trabajador seleccionado
+                      </p>
+                    )}
                   </div>
 
-                  <Button 
-                    type="submit" 
-                    disabled={isPending}
-                    className="w-full bg-slate-800 hover:bg-slate-900 text-white mt-2"
-                  >
-                    {isPending ? 'Cargando...' : 'Registrar Entrega Histórica'}
-                  </Button>
+                  {/* Items Table */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Implementos Entregados *</Label>
+                      <Button type="button" size="sm" variant="outline"
+                        className="h-7 text-xs gap-1 border-orange-300 text-orange-700 hover:bg-orange-50"
+                        onClick={addHistItem}>
+                        <Plus className="h-3.5 w-3.5" /> Agregar Ítem
+                      </Button>
+                    </div>
+
+                    {histItems.length === 0 ? (
+                      <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-lg py-8 text-center text-sm text-muted-foreground">
+                        Haz clic en "Agregar Ítem" para comenzar
+                      </div>
+                    ) : (
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead className="bg-slate-50 dark:bg-slate-900 border-b">
+                            <tr>
+                              <th className="text-left px-2 py-2 font-semibold text-slate-600">Implemento</th>
+                              <th className="text-left px-2 py-2 font-semibold text-slate-600 w-[80px]">Talla</th>
+                              <th className="text-center px-2 py-2 font-semibold text-slate-600 w-[60px]">Cant.</th>
+                              <th className="text-center px-2 py-2 font-semibold text-slate-600 w-[70px]">Renov.(d)</th>
+                              <th className="text-left px-2 py-2 font-semibold text-slate-600 w-[130px]">Fecha Entrega</th>
+                              <th className="w-[30px]"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {histItems.map((item, idx) => (
+                              <tr key={idx} className="border-b last:border-0 hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
+                                <td className="px-1 py-1">
+                                  <Input
+                                    list={`hist-products-${idx}`}
+                                    placeholder="Nombre implemento..."
+                                    value={item.productName}
+                                    onChange={e => updateHistItem(idx, 'productName', e.target.value)}
+                                    className="h-7 text-xs"
+                                  />
+                                  <datalist id={`hist-products-${idx}`}>
+                                    {requirements
+                                      .filter((r: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.product_name === r.product_name) === i)
+                                      .map((r: any) => <option key={r.product_name} value={r.product_name} />)}
+                                  </datalist>
+                                </td>
+                                <td className="px-1 py-1">
+                                  <Input
+                                    placeholder="L, M, 42..."
+                                    value={item.size}
+                                    onChange={e => updateHistItem(idx, 'size', e.target.value)}
+                                    className="h-7 text-xs w-[78px]"
+                                  />
+                                </td>
+                                <td className="px-1 py-1">
+                                  <input type="number" min="1" value={item.quantity}
+                                    onChange={e => updateHistItem(idx, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                                    className="w-[56px] h-7 text-xs text-center border border-input rounded-md bg-background px-1 focus:outline-none focus:ring-1 focus:ring-ring" />
+                                </td>
+                                <td className="px-1 py-1">
+                                  <input type="number" min="1" value={item.renewalDays}
+                                    onChange={e => updateHistItem(idx, 'renewalDays', Math.max(1, parseInt(e.target.value) || 180))}
+                                    className="w-[66px] h-7 text-xs text-center border border-input rounded-md bg-background px-1 focus:outline-none focus:ring-1 focus:ring-ring" />
+                                </td>
+                                <td className="px-1 py-1">
+                                  <input type="date" value={item.deliveryDate}
+                                    onChange={e => updateHistItem(idx, 'deliveryDate', e.target.value)}
+                                    className="h-7 text-xs border border-input rounded-md bg-background px-2 focus:outline-none focus:ring-1 focus:ring-ring w-[128px]" />
+                                </td>
+                                <td className="px-1 py-1 text-center">
+                                  <button type="button" onClick={() => removeHistItem(idx)}
+                                    className="text-red-400 hover:text-red-600 p-1 rounded">
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Scanned Form Upload */}
+                  <div className="space-y-1.5">
+                    <Label>Acta Firmada (opcional)</Label>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-slate-300 dark:border-slate-600 rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 text-xs text-slate-600 dark:text-slate-400">
+                        <Upload className="h-4 w-4" />
+                        {histFormFile ? histFormFile.name : 'Subir acta escaneada (PDF o imagen)'}
+                        <input type="file" accept=".pdf,image/*" className="hidden"
+                          onChange={e => setHistFormFile(e.target.files?.[0] || null)} />
+                      </label>
+                      {histFormFile && (
+                        <button type="button" onClick={() => setHistFormFile(null)}
+                          className="text-red-400 hover:text-red-600 text-xs">✕ Quitar</button>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Si tienes un formulario físico firmado, súbelo aquí. Se vinculará a todas las entregas registradas de este formulario.</p>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <Button type="button" variant="outline" onClick={resetHistForm} className="flex-1">
+                      Limpiar
+                    </Button>
+                    <Button type="submit" disabled={isPending || isUploadingHistForm || !histWorkerId || histItems.length === 0}
+                      className="flex-1 bg-slate-800 hover:bg-slate-900 text-white">
+                      {isPending || isUploadingHistForm ? 'Registrando...' : `Registrar ${histItems.length > 0 ? `(${histItems.length} ítem${histItems.length !== 1 ? 's' : ''})` : ''}`}
+                    </Button>
+                  </div>
                 </form>
               </CardContent>
             </Card>
+
 
           </div>
         </TabsContent>
@@ -2283,7 +2390,7 @@ export default function EPPPage() {
                       <TableHead className="w-12 text-center">Entregar</TableHead>
                       <TableHead>Implemento</TableHead>
                       <TableHead>Talla</TableHead>
-                      <TableHead className="text-center">Cant.</TableHead>
+                      <TableHead className="text-center">Cant. a entregar</TableHead>
                       <TableHead className="text-center">En Bodega</TableHead>
                       <TableHead>Motivo</TableHead>
                     </TableRow>
@@ -2292,6 +2399,9 @@ export default function EPPPage() {
                     {Object.entries(selectedDeliverItems).map(([name, item]) => {
                       const stockQtyInBodega = checkStock(name, item.size);
                       const isOutOfStock = stockQtyInBodega < item.quantity;
+                      // Find original req to check if partial
+                      const origReq = activeWorker?.requirements?.find((r: any) => r.productName === name);
+                      const isPartial = origReq?.status === 'PARTIAL';
                       
                       return (
                         <TableRow key={name} className={isOutOfStock ? 'opacity-60 bg-red-50/10' : ''}>
@@ -2310,9 +2420,39 @@ export default function EPPPage() {
                               className="h-4.5 w-4.5 accent-orange-600 cursor-pointer disabled:cursor-not-allowed"
                             />
                           </TableCell>
-                          <TableCell className="font-semibold text-xs">{name}</TableCell>
-                          <TableCell className="text-xs">{item.size}</TableCell>
-                          <TableCell className="text-center text-xs font-bold">{item.quantity}</TableCell>
+                          <TableCell className="font-semibold text-xs">
+                            {name}
+                            {isPartial && (
+                              <span className="ml-1.5 text-[10px] text-orange-600 font-bold">
+                                ({origReq.deliveredQty}/{origReq.quantity} entregados)
+                              </span>
+                            )}
+                          </TableCell>
+                          {/* Editable size */}
+                          <TableCell className="text-xs">
+                            <Input
+                              value={item.size}
+                              placeholder="Talla..."
+                              onChange={(e) => setSelectedDeliverItems(prev => ({
+                                ...prev,
+                                [name]: { ...prev[name], size: e.target.value }
+                              }))}
+                              className="h-7 text-xs w-[70px] px-2"
+                            />
+                          </TableCell>
+                          {/* Editable quantity */}
+                          <TableCell className="text-center text-xs">
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => setSelectedDeliverItems(prev => ({
+                                ...prev,
+                                [name]: { ...prev[name], quantity: Math.max(1, parseInt(e.target.value) || 1) }
+                              }))}
+                              className="w-[52px] h-7 text-xs text-center border border-input rounded-md bg-background px-1 focus:outline-none focus:ring-1 focus:ring-ring font-bold"
+                            />
+                          </TableCell>
                           <TableCell className="text-center text-xs">
                             <span className={`font-bold ${isOutOfStock ? 'text-red-500' : 'text-slate-600'}`}>
                               {stockQtyInBodega}

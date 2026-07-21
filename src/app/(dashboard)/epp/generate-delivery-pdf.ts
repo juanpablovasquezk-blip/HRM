@@ -33,6 +33,7 @@ export interface DeliveryPDFParams {
   deliveryDate: string;
   items: DeliveryItemPDF[];
   delivererName: string;
+  formNumber?: number;
 }
 
 // Helper to load image
@@ -46,7 +47,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 export async function generateDeliveryFormPDF(params: DeliveryPDFParams) {
-  const { company, worker, deliveryDate, items, delivererName } = params;
+  const { company, worker, deliveryDate, items, delivererName, formNumber } = params;
 
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -116,6 +117,13 @@ export async function generateDeliveryFormPDF(params: DeliveryPDFParams) {
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.text('ENTREGA DE EPP Y UNIFORMES', margin + usableW / 2, currentY + 5.2, { align: 'center' });
+
+  // Form number badge on right side of title
+  if (formNumber) {
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`N° EPP-${formNumber}`, pageW - margin - 2, currentY + 5.2, { align: 'right' });
+  }
 
   doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');

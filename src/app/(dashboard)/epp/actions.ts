@@ -266,6 +266,7 @@ export async function getEPPPersonnelData(): Promise<{
         returnedAt: item.returned_at,
         deliveryDate: item.event?.delivery_date,
         signedFormUrl: item.event?.signed_form_url,
+        formNumber: item.event?.form_number,
       })) || [];
 
     // Calculate dynamic delivery status for each requirement
@@ -275,7 +276,13 @@ export async function getEPPPersonnelData(): Promise<{
         d => d.productName === req.product_name && d.quantity > d.returnedQty
       );
 
-      // Get latest active delivery by date
+      // Sum total active (non-returned) units delivered for this product
+      const totalActiveDelivered = activeDeliveries.reduce(
+        (sum, d) => sum + (d.quantity - d.returnedQty),
+        0
+      );
+
+      // Get latest active delivery by date (for renewal date reference)
       let latestDelivery = null;
       if (activeDeliveries.length > 0) {
         activeDeliveries.sort((a, b) => new Date(b.deliveryDate).getTime() - new Date(a.deliveryDate).getTime());
@@ -286,21 +293,45 @@ export async function getEPPPersonnelData(): Promise<{
       const sizeKey = req.size_field;
       const sizeValue = sizeKey ? (p[sizeKey] || (p.custom_clothing_sizes && p.custom_clothing_sizes[sizeKey]) || 'No ingresada') : 'Única';
 
-      if (!latestDelivery) {
+      // Pending quantity = how many more units still need to be delivered
+      const pendingQty = Math.max(0, req.quantity - totalActiveDelivered);
+
+      if (!latestDelivery || totalActiveDelivered === 0) {
+        // Nothing delivered yet
         return {
           productName: req.product_name,
           productType: req.product_type,
           quantity: req.quantity,
+          deliveredQty: 0,
+          pendingQty: req.quantity,
           renewalDays: req.renewal_days,
           size: sizeValue,
           lastDeliveryDate: null,
           nextDeliveryDate: null,
-          status: 'PENDING_FIRST', // First time delivery needed
+          status: 'PENDING_FIRST' as const, // First time delivery needed
           daysRemaining: 0,
         };
       }
 
-      // Calculate days remaining
+      // Something delivered — check if quantity is fully covered
+      if (pendingQty > 0) {
+        // Partially delivered: still needs more units
+        return {
+          productName: req.product_name,
+          productType: req.product_type,
+          quantity: req.quantity,
+          deliveredQty: totalActiveDelivered,
+          pendingQty,
+          renewalDays: req.renewal_days,
+          size: sizeValue,
+          lastDeliveryDate: latestDelivery.deliveryDate,
+          nextDeliveryDate: latestDelivery.nextDeliveryDate,
+          status: 'PARTIAL' as const,
+          daysRemaining: 0,
+        };
+      }
+
+      // Fully delivered — calculate days remaining for renewal
       const nextDate = parseISO(latestDelivery.nextDeliveryDate);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -318,6 +349,8 @@ export async function getEPPPersonnelData(): Promise<{
         productName: req.product_name,
         productType: req.product_type,
         quantity: req.quantity,
+        deliveredQty: totalActiveDelivered,
+        pendingQty: 0,
         renewalDays: req.renewal_days,
         size: sizeValue,
         lastDeliveryDate: latestDelivery.deliveryDate,
@@ -328,11 +361,11 @@ export async function getEPPPersonnelData(): Promise<{
     });
 
     // Overall color status for the worker list:
-    // Red if any requirement is expired or pending
+    // Red if any requirement is expired, pending first delivery, or partially delivered
     // Orange if any warning and no expired
     // Green if all OK
     let overallStatus: 'RED' | 'ORANGE' | 'GREEN' = 'GREEN';
-    if (reqStatuses.some(rs => rs.status === 'PENDING_FIRST' || rs.status === 'PENDING_RENEWAL')) {
+    if (reqStatuses.some(rs => rs.status === 'PENDING_FIRST' || rs.status === 'PENDING_RENEWAL' || rs.status === 'PARTIAL')) {
       overallStatus = 'RED';
     } else if (reqStatuses.some(rs => rs.status === 'WARNING')) {
       overallStatus = 'ORANGE';
@@ -362,8 +395,9 @@ export async function getEPPPersonnelData(): Promise<{
 export async function registerDeliveryEvent(
   personnelId: string,
   deliveryDate: string,
-  items: DeliveryItemInput[]
-): Promise<{ success: boolean; eventId?: string; error: string | null }> {
+  items: DeliveryItemInput[],
+  signedFormUrl?: string
+): Promise<{ success: boolean; eventId?: string; formNumber?: number; error: string | null }> {
   const supabase = await createClient();
 
   // Get logged-in user
@@ -389,13 +423,25 @@ export async function registerDeliveryEvent(
     }
   }
 
-  // 2. Insert Delivery Event
+  // 2. Get next form_number (max existing + 1, minimum 300)
+  const { data: maxFormData } = await supabase
+    .from('epp_delivery_events')
+    .select('form_number')
+    .not('form_number', 'is', null)
+    .order('form_number', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextFormNumber = Math.max(300, (maxFormData?.form_number ?? 299) + 1);
+
+  // 3. Insert Delivery Event
   const { data: event, error: eventErr } = await supabase
     .from('epp_delivery_events')
     .insert([{
       personnel_id: personnelId,
       delivery_date: deliveryDate,
-      created_by: user?.id || null
+      created_by: user?.id || null,
+      form_number: nextFormNumber,
+      ...(signedFormUrl ? { signed_form_url: signedFormUrl } : {}),
     }])
     .select()
     .single();
@@ -468,7 +514,7 @@ export async function registerDeliveryEvent(
   }
 
   safeRevalidatePath('/epp');
-  return { success: true, eventId: event.id, error: null };
+  return { success: true, eventId: event.id, formNumber: nextFormNumber, error: null };
 }
 
 // --- 5. Return Item Action ---
@@ -581,6 +627,8 @@ export async function getMonthlyEPPForecastReport(
 
       if (req.status === 'PENDING_FIRST') {
         isRequiredThisMonth = true; // Needs first-time delivery
+      } else if (req.status === 'PARTIAL') {
+        isRequiredThisMonth = true; // Partially delivered — still needs remaining units
       } else if (req.nextDeliveryDate) {
         const nextYM = req.nextDeliveryDate.substring(0, 7); // "yyyy-MM"
         if (nextYM === targetYearMonth || req.nextDeliveryDate < `${targetYearMonth}-01`) {
@@ -594,6 +642,9 @@ export async function getMonthlyEPPForecastReport(
           return;
         }
 
+        // For PARTIAL deliveries, only count the pending (undelivered) quantity
+        const qtyToCount = req.status === 'PARTIAL' ? (req.pendingQty ?? req.quantity) : req.quantity;
+
         const key = `${req.productName}_${req.size}`;
         if (!requiredGroup[key]) {
           requiredGroup[key] = {
@@ -603,7 +654,7 @@ export async function getMonthlyEPPForecastReport(
             qty: 0,
           };
         }
-        requiredGroup[key].qty += req.quantity;
+        requiredGroup[key].qty += qtyToCount;
       }
     });
   });
@@ -1080,4 +1131,97 @@ export async function getWorkerSelfServiceDetailsByToken(tokenStr: string): Prom
   } catch (e) {}
 
   return { data: null, status: 'NOT_FOUND', error: 'Enlace no válido o inexistente' };
+}
+
+// ── 11. Bulk Historical Delivery (multi-item, per-item dates, one scanned form) ──────────────
+
+export interface HistoricalItemInput {
+  productName: string;
+  productType: 'UNIFORM' | 'EPP';
+  size: string;
+  quantity: number;
+  renewalDays: number;
+  deliveryDate: string; // Each item can have its own date
+}
+
+export async function registerBulkHistoricalDelivery(
+  personnelId: string,
+  items: HistoricalItemInput[],
+  signedFormUrl?: string
+): Promise<{ success: boolean; eventCount: number; error: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (items.length === 0) {
+    return { success: false, eventCount: 0, error: 'Debe ingresar al menos un ítem' };
+  }
+
+  // Group items by delivery date → one event per date
+  const byDate: Record<string, HistoricalItemInput[]> = {};
+  items.forEach(item => {
+    if (!byDate[item.deliveryDate]) byDate[item.deliveryDate] = [];
+    byDate[item.deliveryDate].push(item);
+  });
+
+  let eventCount = 0;
+
+  for (const [dateStr, dateItems] of Object.entries(byDate)) {
+    // Get next form_number
+    const { data: maxFormData } = await supabase
+      .from('epp_delivery_events')
+      .select('form_number')
+      .not('form_number', 'is', null)
+      .order('form_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextFormNumber = Math.max(300, (maxFormData?.form_number ?? 299) + 1);
+
+    // Create delivery event for this date
+    const { data: event, error: eventErr } = await supabase
+      .from('epp_delivery_events')
+      .insert([{
+        personnel_id: personnelId,
+        delivery_date: dateStr,
+        created_by: user?.id || null,
+        form_number: nextFormNumber,
+        ...(signedFormUrl ? { signed_form_url: signedFormUrl } : {}),
+      }])
+      .select()
+      .single();
+
+    if (eventErr || !event) {
+      console.error(`Error creating event for date ${dateStr}:`, eventErr?.message);
+      continue;
+    }
+
+    // Insert all items for this date (PAST_DELIVERY → no stock deduction)
+    for (const item of dateItems) {
+      const parsedDate = parseISO(dateStr);
+      const nextDate = addDays(parsedDate, item.renewalDays);
+      const nextDeliveryDateStr = format(nextDate, 'yyyy-MM-dd');
+
+      const { error: itemErr } = await supabase
+        .from('epp_delivery_items')
+        .insert([{
+          delivery_event_id: event.id,
+          inventory_id: null,
+          product_name: item.productName,
+          product_type: item.productType,
+          size: item.size || 'Única',
+          quantity: item.quantity,
+          reason: 'PAST_DELIVERY',
+          renewal_days: item.renewalDays,
+          next_delivery_date: nextDeliveryDateStr,
+        }]);
+
+      if (itemErr) {
+        console.error(`Error inserting historical item ${item.productName}:`, itemErr.message);
+      }
+    }
+
+    eventCount++;
+  }
+
+  safeRevalidatePath('/epp');
+  return { success: eventCount > 0, eventCount, error: eventCount === 0 ? 'No se pudo registrar ningún evento' : null };
 }
