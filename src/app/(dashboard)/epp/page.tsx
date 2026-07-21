@@ -87,7 +87,8 @@ import {
   createWorkerSizeToken,
   ProductCatalogItem,
   registerBulkHistoricalDelivery,
-  HistoricalItemInput
+  HistoricalItemInput,
+  deleteDeliveryEvent
 } from './actions';
 import { generateDeliveryFormPDF } from './generate-delivery-pdf';
 
@@ -248,9 +249,46 @@ export default function EPPPage() {
     productType: 'EPP' as 'UNIFORM' | 'EPP',
     size: '',
     quantity: 1,
-    renewalDays: 365,
+    renewalDays: 180,
     deliveryDate: defaultHistDate,
   }]);
+
+  const loadWorkerRequirementsIntoHistTable = (workerId: string) => {
+    const worker = personnel.find(p => p.id === workerId);
+    if (worker?.requirements && worker.requirements.length > 0) {
+      setHistItems(worker.requirements.map((r: any) => {
+        const catItem = catalog.find(c => c.name.toLowerCase().trim() === (r.productName || '').toLowerCase().trim());
+        return {
+          productName: r.productName,
+          productType: r.productType || 'EPP',
+          size: (r.size && r.size !== 'No ingresada') ? r.size : 'Única',
+          quantity: r.quantity || 1,
+          renewalDays: r.renewalDays ?? r.renewal_days ?? catItem?.renewal_days ?? 180,
+          deliveryDate: defaultHistDate,
+        };
+      }));
+      toast.success(`Se cargaron los ${worker.requirements.length} implementos del cargo`);
+    } else {
+      toast.error('Este trabajador no tiene requerimientos de cargo configurados');
+    }
+  };
+
+  const handleDeleteDeliveryEvent = async (eventId: string, formNum?: number) => {
+    const label = formNum ? `N° EPP-${formNum}` : 'este registro';
+    if (!confirm(`¿Estás seguro de eliminar el formulario ${label}? Se anularán todas las entregas registradas en este evento.`)) {
+      return;
+    }
+
+    startTransition(async () => {
+      const res = await deleteDeliveryEvent(eventId);
+      if (res.success) {
+        toast.success(`Formulario ${label} eliminado exitosamente`);
+        fetchData();
+      } else {
+        toast.error('Error al eliminar: ' + res.error);
+      }
+    });
+  };
 
   const updateHistItem = (index: number, field: keyof HistoricalItemInput, value: any) => {
     setHistItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
@@ -1406,15 +1444,15 @@ export default function EPPPage() {
                                           </Badge>
                                         )}
                                       </div>
-                                      <div>
+                                      <div className="flex items-center gap-2">
                                         {signedUrl ? (
                                           <a href={signedUrl} target="_blank" rel="noopener noreferrer"
-                                            className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline gap-1">
+                                            className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline gap-1 mr-2">
                                             <ExternalLink className="h-3 w-3" />
                                             Ver Acta PDF
                                           </a>
                                         ) : (
-                                          <div className="flex items-center gap-1">
+                                          <div className="flex items-center gap-1 mr-2">
                                             <Label htmlFor={`file-upload-${eventId}`}
                                               className="inline-flex items-center justify-center rounded-md text-[10px] font-bold border border-slate-300 dark:border-slate-700 h-6 px-2 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer gap-1 text-slate-600 dark:text-slate-300">
                                               {uploadingEventId === eventId ? (
@@ -1428,6 +1466,16 @@ export default function EPPPage() {
                                               onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(eventId, e.target.files[0]); }} />
                                           </div>
                                         )}
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-6 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 gap-1 px-1.5"
+                                          onClick={() => handleDeleteDeliveryEvent(eventId, formNum)}
+                                          title="Eliminar este formulario de entrega"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                          Eliminar Acta
+                                        </Button>
                                       </div>
                                     </div>
                                     {/* Items for this event */}
@@ -1991,19 +2039,9 @@ export default function EPPPage() {
                                   setHistWorkerSearch(`${p.first_name} ${p.last_name_father} — ${p.rut}`);
                                   setHistShowSearch(false);
 
-                                  // Auto-populate required items for this worker's position if table is empty
-                                  if (p.requirements && p.requirements.length > 0 && histItems.length === 0) {
-                                    setHistItems(p.requirements.map((r: any) => {
-                                      const catItem = catalog.find(c => c.name.toLowerCase().trim() === (r.productName || '').toLowerCase().trim());
-                                      return {
-                                        productName: r.productName,
-                                        productType: r.productType || 'EPP',
-                                        size: (r.size && r.size !== 'No ingresada') ? r.size : 'Única',
-                                        quantity: r.quantity || 1,
-                                        renewalDays: r.renewalDays ?? r.renewal_days ?? catItem?.renewal_days ?? 180,
-                                        deliveryDate: defaultHistDate,
-                                      };
-                                    }));
+                                  // Start with 1 empty item if empty
+                                  if (histItems.length === 0) {
+                                    addHistItem();
                                   }
                                 }}>
                                 <span className="font-semibold">{p.first_name} {p.last_name_father} {p.last_name_mother || ''}</span>
@@ -2028,13 +2066,22 @@ export default function EPPPage() {
 
                   {/* Items Table */}
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <Label>Implementos Entregados *</Label>
-                      <Button type="button" size="sm" variant="outline"
-                        className="h-7 text-xs gap-1 border-orange-300 text-orange-700 hover:bg-orange-50"
-                        onClick={addHistItem}>
-                        <Plus className="h-3.5 w-3.5" /> Agregar Ítem
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        {histWorkerId && (
+                          <Button type="button" size="sm" variant="outline"
+                            className="h-7 text-xs gap-1 border-slate-300 text-slate-700 hover:bg-slate-50"
+                            onClick={() => loadWorkerRequirementsIntoHistTable(histWorkerId)}>
+                            <Boxes className="h-3.5 w-3.5" /> Cargar Requerimientos del Cargo
+                          </Button>
+                        )}
+                        <Button type="button" size="sm" variant="outline"
+                          className="h-7 text-xs gap-1 border-orange-300 text-orange-700 hover:bg-orange-50"
+                          onClick={addHistItem}>
+                          <Plus className="h-3.5 w-3.5" /> Agregar Ítem
+                        </Button>
+                      </div>
                     </div>
 
                     {histItems.length === 0 ? (

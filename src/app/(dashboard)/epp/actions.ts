@@ -499,6 +499,46 @@ export async function registerDeliveryEvent(
   return { success: true, eventId: event.id, formNumber: nextFormNumber, error: null };
 }
 
+export async function deleteDeliveryEvent(eventId: string): Promise<{ success: boolean; error: string | null }> {
+  const supabase = await createClient();
+
+  // Restore inventory stock if any non-past delivery items are linked to inventory
+  const { data: items } = await supabase
+    .from('epp_delivery_items')
+    .select('*')
+    .eq('delivery_event_id', eventId);
+
+  if (items && items.length > 0) {
+    for (const item of items) {
+      if (item.inventory_id && item.quantity > item.returned_qty) {
+        const unreturned = item.quantity - item.returned_qty;
+        const { data: inv } = await supabase
+          .from('epp_inventory')
+          .select('stock_qty')
+          .eq('id', item.inventory_id)
+          .maybeSingle();
+
+        if (inv) {
+          await supabase
+            .from('epp_inventory')
+            .update({ stock_qty: inv.stock_qty + unreturned })
+            .eq('id', item.inventory_id);
+        }
+      }
+    }
+  }
+
+  // Delete event (ON DELETE CASCADE removes items automatically)
+  const { error } = await supabase
+    .from('epp_delivery_events')
+    .delete()
+    .eq('id', eventId);
+
+  if (error) return { success: false, error: error.message };
+  safeRevalidatePath('/epp');
+  return { success: true, error: null };
+}
+
 // --- 5. Return Item Action ---
 
 export async function returnDeliveryItem(
