@@ -1462,7 +1462,7 @@ export default function EPPPage() {
         </TabsContent>
 
         {/* --- TAB 3: CATALOG + MATRIX --- */}
-        <TabsContent value="config" className="space-y-6">
+        <TabsContent value="requirements" className="space-y-6">
 
           {/* --- Section 1: Product Catalog --- */}
           <Card className="border-slate-200/60 dark:border-slate-800 shadow-md">
