@@ -207,9 +207,11 @@ export default function EPPPage() {
   };
 
   const handleHistProductChange = (index: number, productName: string) => {
+    const pNameLower = (productName || '').toLowerCase().trim();
     const worker = personnel.find(p => p.id === histWorkerId);
-    const req = worker?.requirements?.find((r: any) => r.productName === productName) || requirements.find(r => r.product_name === productName);
-    const catItem = catalog.find(c => c.name === productName);
+    const req = worker?.requirements?.find((r: any) => (r.productName || '').toLowerCase().trim() === pNameLower) 
+      || requirements.find(r => (r.product_name || '').toLowerCase().trim() === pNameLower);
+    const catItem = catalog.find(c => (c.name || '').toLowerCase().trim() === pNameLower);
 
     let suggestedSize = '';
     if (req?.size && req.size !== 'No ingresada' && req.size !== 'Única') {
@@ -225,6 +227,9 @@ export default function EPPPage() {
       suggestedSize = options[0] || 'M';
     }
 
+    const autoRenewal = req?.renewalDays ?? req?.renewal_days ?? catItem?.renewal_days ?? 180;
+    const autoQty = req?.quantity ?? 1;
+
     setHistItems(prev => prev.map((item, i) => {
       if (i !== index) return item;
       return {
@@ -232,8 +237,8 @@ export default function EPPPage() {
         productName,
         productType: (catItem?.product_type || req?.product_type || 'EPP') as any,
         size: suggestedSize,
-        quantity: req?.quantity || 1,
-        renewalDays: req?.renewalDays || req?.renewal_days || catItem?.renewal_days || 365,
+        quantity: autoQty,
+        renewalDays: autoRenewal,
       };
     }));
   };
@@ -1985,6 +1990,21 @@ export default function EPPPage() {
                                   setHistWorkerId(p.id);
                                   setHistWorkerSearch(`${p.first_name} ${p.last_name_father} — ${p.rut}`);
                                   setHistShowSearch(false);
+
+                                  // Auto-populate required items for this worker's position if table is empty
+                                  if (p.requirements && p.requirements.length > 0 && histItems.length === 0) {
+                                    setHistItems(p.requirements.map((r: any) => {
+                                      const catItem = catalog.find(c => c.name.toLowerCase().trim() === (r.productName || '').toLowerCase().trim());
+                                      return {
+                                        productName: r.productName,
+                                        productType: r.productType || 'EPP',
+                                        size: (r.size && r.size !== 'No ingresada') ? r.size : 'Única',
+                                        quantity: r.quantity || 1,
+                                        renewalDays: r.renewalDays ?? r.renewal_days ?? catItem?.renewal_days ?? 180,
+                                        deliveryDate: defaultHistDate,
+                                      };
+                                    }));
+                                  }
                                 }}>
                                 <span className="font-semibold">{p.first_name} {p.last_name_father} {p.last_name_mother || ''}</span>
                                 <span className="text-slate-500 text-xs ml-2">{p.rut} · {p.position?.name || 'Sin Cargo'}</span>
