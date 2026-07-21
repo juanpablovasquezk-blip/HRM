@@ -2363,7 +2363,7 @@ export default function EPPPage() {
 
       {/* --- DIALOG 3: DELIVER ITEMS --- */}
       <Dialog open={isDeliverOpen} onOpenChange={setIsDeliverOpen}>
-        <DialogContent className="sm:max-w-[620px] max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[880px] max-h-[88vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Registrar Entrega de EPP y Uniformes</DialogTitle>
             <DialogDescription>
@@ -2404,12 +2404,11 @@ export default function EPPPage() {
                       const isPartial = origReq?.status === 'PARTIAL';
                       
                       return (
-                        <TableRow key={name} className={isOutOfStock ? 'opacity-60 bg-red-50/10' : ''}>
+                        <TableRow key={name} className={isOutOfStock ? 'bg-amber-50/20 dark:bg-amber-950/10' : ''}>
                           <TableCell className="text-center">
                             <input 
                               type="checkbox" 
                               checked={item.selected}
-                              disabled={isOutOfStock}
                               onChange={(e) => {
                                 const checked = e.target.checked;
                                 setSelectedDeliverItems(prev => ({
@@ -2417,7 +2416,7 @@ export default function EPPPage() {
                                   [name]: { ...prev[name], selected: checked }
                                 }));
                               }}
-                              className="h-4.5 w-4.5 accent-orange-600 cursor-pointer disabled:cursor-not-allowed"
+                              className="h-4.5 w-4.5 accent-orange-600 cursor-pointer"
                             />
                           </TableCell>
                           <TableCell className="font-semibold text-xs">
@@ -2457,6 +2456,9 @@ export default function EPPPage() {
                             <span className={`font-bold ${isOutOfStock ? 'text-red-500' : 'text-slate-600'}`}>
                               {stockQtyInBodega}
                             </span>
+                            {isOutOfStock && (
+                              <span className="block text-[9px] text-red-500 font-medium">Sin stock</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-xs">
                             <select 

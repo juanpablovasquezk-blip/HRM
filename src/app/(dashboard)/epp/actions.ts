@@ -403,25 +403,7 @@ export async function registerDeliveryEvent(
   // Get logged-in user
   const { data: { user } } = await supabase.auth.getUser();
 
-  // Begin database transaction simulation by doing sequential checks
-  // 1. Validate stock is available for each item
-  for (const item of items) {
-    if (item.reason === 'PAST_DELIVERY') continue; // Past deliveries do not check or discount stock
-
-    const { data: stockItems } = await supabase
-      .from('epp_inventory')
-      .select('stock_qty')
-      .eq('name', item.productName)
-      .eq('size', item.size);
-
-    const totalStock = (stockItems || []).reduce((sum, current) => sum + current.stock_qty, 0);
-    if (totalStock < item.quantity) {
-      return {
-        success: false,
-        error: `Stock insuficiente para "${item.productName}" (Talla: ${item.size}). Requerido: ${item.quantity}, Disponible: ${totalStock}`,
-      };
-    }
-  }
+  // 1. (Optional stock check removed to allow delivery registration even if inventory hasn't been logged in software)
 
   // 2. Get next form_number (max existing + 1, minimum 300)
   const { data: maxFormData } = await supabase
