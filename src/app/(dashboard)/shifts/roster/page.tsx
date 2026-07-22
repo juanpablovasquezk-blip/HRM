@@ -49,6 +49,14 @@ export default async function RosterPage({
       .order('date', { ascending: true })
   ]);
 
+  // Debug Matias assignments retrieved by the server
+  const matiasId = 'd2dd0000-0000-0000-0000-000000000000';
+  const matiasAsgns = (assignments || []).filter(a => a.personnel_id === matiasId);
+  console.log(`[SERVER-ROSTER-DEBUG] Total assignments fetched: ${assignments?.length || 0}. Matias has ${matiasAsgns.length} assignments in page.tsx server-side.`);
+  if (matiasAsgns.length > 0) {
+    console.log(`[SERVER-ROSTER-DEBUG] Matias dates fetched: ${matiasAsgns.map(a => a.date).join(', ')}`);
+  }
+
   // Deduplicate shifts: one DB row per company exists due to NOT NULL constraint,
   // but the roster selector should only show each logical shift once.
   const seenShifts = new Set<string>();
