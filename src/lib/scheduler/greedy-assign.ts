@@ -39,7 +39,8 @@ export function greedyAssign(
   }>,
   startDateStr?: string,
   endDateStr?: string,
-  allShifts?: any[]
+  allShifts?: any[],
+  blueAreaIdParam?: string
 ): GreedyResult {
   const assignments: AssignmentCandidate[] = [];
   const allViolations: ConstraintViolation[] = [];
@@ -251,21 +252,9 @@ export function greedyAssign(
     
     console.log(`[BLUE-DEBUG] shift08=${shift08?.id} (${shift08?.name}), shift11=${shift11?.id} (${shift11?.name}), shift00=${shift00?.id} (${shift00?.name})`);
     
-    // Try to find Blue area from slots, then from personnel, then from existing assignments
-    let validBlueAreaId = slots.find(s => normStr(s.area_name).includes('BLUE'))?.area_id || '';
-    if (!validBlueAreaId) {
-      // Fallback: get area from Blue personnel's own area_id
-      const bluePerson = personnelPool.find(p => (p.rotation_pattern || '').toUpperCase().includes('BLUE_'));
-      if (bluePerson?.area_id) validBlueAreaId = bluePerson.area_id;
-    }
-    if (!validBlueAreaId) {
-      // Fallback 2: get area from existing Blue assignments
-      const blueAssignment = existingAssignments.find(a => {
-        const person = personnelPool.find(p => p.personnel_id === a.personnel_id);
-        return person && (person.rotation_pattern || '').toUpperCase().includes('BLUE_');
-      });
-      if (blueAssignment) validBlueAreaId = (blueAssignment as any).area_id || '';
-    }
+    // Use the Blue area ID passed from the caller (queried from areas table), with slots fallback
+    let validBlueAreaId = blueAreaIdParam || slots.find(s => normStr(s.area_name).includes('BLUE'))?.area_id || '';
+    console.log(`[BLUE-DEBUG] validBlueAreaId=${validBlueAreaId} (param=${blueAreaIdParam || 'none'})`);
 
     if (validBlueAreaId) {
       const bluePersonnelList = personnelPool.filter(p => (p.rotation_pattern || '').toUpperCase().includes('BLUE_'));

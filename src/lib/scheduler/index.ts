@@ -116,6 +116,10 @@ export async function generateSchedule(
   
   const { data: allShifts } = await supabase.from('shifts').select('*');
 
+  // Query the Blue Express area ID for Blue injection
+  const { data: blueAreaData } = await supabase.from('areas').select('id').ilike('name', '%blue%').limit(1).maybeSingle();
+  const blueAreaId = blueAreaData?.id || '';
+
   const { data: existingAssignments, error: dbErr } = await supabase
     .from('shift_assignments')
     .select('*, shift:shifts!shift_id(name, start_time, end_time, duration_hours), area:areas(name)')
@@ -316,7 +320,8 @@ export async function generateSchedule(
       existingForConstraints, 
       startDateStr,
       endDateStr,
-      allShifts || []
+      allShifts || [],
+      blueAreaId
     );
     const tGreedy = performance.now();
     const coverageInt = slots.length > 0 ? Math.round((result.assignments.length / slots.length) * 100) : 100;
