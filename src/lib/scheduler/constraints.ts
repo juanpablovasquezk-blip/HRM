@@ -555,12 +555,12 @@ export function checkRotationPattern(
     }
 
     if (activeBlock === 'A') {
-      // Block A: Mon-Fri WORK (PM 12). Sat-Sun OFF.
+      // Block A: Mon-Fri WORK (AM 11). Sat-Sun OFF.
       if (dayOfWeek >= 5) {
         return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (A): Descanso Fines de Semana', severity: 'error' };
       }
-      if (!shiftSlot.shift_start.includes('12:00') && !shiftSlot.shift_start.includes('13:30')) {
-        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (A): Requiere turno de Tarde (12:00)', severity: 'error' };
+      if (!shiftSlot.shift_start.includes('11:00')) {
+        return { type: 'rotation_violation', personnel_id: personnel.personnel_id, date: shiftSlot.date, message: 'BLUE_DIA (A): Requiere turno AM 11 (11:00)', severity: 'error' };
       }
     } else if (activeBlock === 'B') {
       // Block B: Mon-Tue AM 08. Wed-Thu OFF. Fri AM 00. Sat-Sun AM 08.

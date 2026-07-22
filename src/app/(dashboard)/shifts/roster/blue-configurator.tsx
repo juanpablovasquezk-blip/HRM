@@ -21,7 +21,7 @@ import { bulkUpdateBlueRotations } from '@/app/(dashboard)/shifts/actions';
 
 const BLUE_DIA_BLOCKS = {
   'Secuencia 1': {
-    days: ['PM 12', 'PM 12', 'PM 12', 'PM 12', 'PM 12', '', ''],
+    days: ['AM 11', 'AM 11', 'AM 11', 'AM 11', 'AM 11', '', ''],
     next: 'Secuencia 2',
     suffix: '-1',
     fingerprint: { thu: true, fri: true, sat: false, sun: false },

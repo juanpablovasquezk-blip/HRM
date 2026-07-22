@@ -245,7 +245,7 @@ export function greedyAssign(
   // =========================================================================
   if (startDateStr && endDateStr && allShifts && allShifts.length > 0) {
     const shift08 = allShifts.find(s => s.id === 'ef6b7b41-1725-4bb7-ba77-6d9fb58ea034');
-    const shift12 = allShifts.find(s => s.id === '2f486675-d704-46cd-87ea-4e7d02722385');
+    const shift11 = allShifts.find(s => s.id === '3d3ce492-110e-4155-9f9f-bc9c8992278e');
     const shift00 = allShifts.find(s => s.id === '2647633b-6e10-4c1a-bd39-35facb3409ac');
     
     let validBlueAreaId = slots.find(s => normStr(s.area_name).includes('BLUE'))?.area_id || '';
@@ -273,8 +273,8 @@ export function greedyAssign(
                let dummySlot = { date: dStr, shift_start: '08:00', shift_name: '' } as ShiftSlot;
                if (!checkRotationPattern(p, dummySlot)) targetShift = shift08;
                else {
-                 dummySlot = { date: dStr, shift_start: '12:00', shift_name: '' } as ShiftSlot;
-                 if (!checkRotationPattern(p, dummySlot)) targetShift = shift12;
+                 dummySlot = { date: dStr, shift_start: '11:00', shift_name: '' } as ShiftSlot;
+                 if (!checkRotationPattern(p, dummySlot)) targetShift = shift11;
                  else {
                    dummySlot = { date: dStr, shift_start: '00:00', shift_name: '' } as ShiftSlot;
                    if (!checkRotationPattern(p, dummySlot)) targetShift = shift00;
