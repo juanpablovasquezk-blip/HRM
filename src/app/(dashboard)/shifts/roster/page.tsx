@@ -38,7 +38,7 @@ export default async function RosterPage({
     supabase.from('personnel').select('*, company:companies!personnel_company_id_fkey(name)').eq('is_active', true).order('last_name_father'),
     supabase.from('shifts').select('*').order('start_time'),
     supabase.from('areas').select('*, positions(*)').order('name'),
-    supabase.from('shift_assignments').select('*').gte('date', startDate).lte('date', endDate),
+    supabase.from('shift_assignments').select('*').gte('date', startDate).lte('date', endDate).limit(10000),
     supabase.from('leaves').select('*').eq('status', 'approved').lte('start_date', endDate).gte('end_date', startDate),
     supabase.from('positions').select('*').order('name'),
     supabase
