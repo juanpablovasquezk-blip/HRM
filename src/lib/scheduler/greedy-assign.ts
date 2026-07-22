@@ -325,7 +325,9 @@ export function greedyAssign(
                };
                
                const violations = validateAllConstraints(p, virtualSlot, state.assignments);
-               if (!hasHardViolation(violations)) {
+               if (hasHardViolation(violations)) {
+                 console.log(`[BLUE-REJECT] ${p.first_name} ${dStr}: violations=[${violations.map(v => `${v.type}:${v.message}`).join(', ')}]`);
+               } else {
                  assignments.push({
                     personnel_id: p.personnel_id,
                     shift_id: virtualSlot.shift_id,
