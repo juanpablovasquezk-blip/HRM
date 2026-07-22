@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import nodemailer from 'nodemailer';
 
+export const runtime = 'nodejs';
+
 export async function GET(request: Request) {
   // 1. Authorization check (skip if CRON_SECRET not configured)
   const cronSecret = process.env.CRON_SECRET;
