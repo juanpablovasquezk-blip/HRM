@@ -244,9 +244,12 @@ export function greedyAssign(
   // PASS -1: EXPLICIT BLUE EXPRESS INJECTION
   // =========================================================================
   if (startDateStr && endDateStr && allShifts && allShifts.length > 0) {
-    const shift08 = allShifts.find(s => s.id === 'ef6b7b41-1725-4bb7-ba77-6d9fb58ea034');
-    const shift11 = allShifts.find(s => s.id === '3d3ce492-110e-4155-9f9f-bc9c8992278e');
-    const shift00 = allShifts.find(s => s.id === '2647633b-6e10-4c1a-bd39-35facb3409ac');
+    // Find shifts by start_time (more robust than hardcoded UUIDs which differ per company)
+    const shift08 = allShifts.find(s => s.start_time === '08:00:00' && s.name === 'AM 08');
+    const shift11 = allShifts.find(s => s.start_time === '11:00:00' && s.name === 'AM 11');
+    const shift00 = allShifts.find(s => s.start_time === '00:00:00' && s.name === 'AM 00');
+    
+    console.log(`[BLUE-DEBUG] shift08=${shift08?.id} (${shift08?.name}), shift11=${shift11?.id} (${shift11?.name}), shift00=${shift00?.id} (${shift00?.name})`);
     
     let validBlueAreaId = slots.find(s => normStr(s.area_name).includes('BLUE'))?.area_id || '';
 
