@@ -202,6 +202,8 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
       health_system: personnel?.health_system || '',
       isapre: personnel?.isapre || '',
       gender: personnel?.gender || '',
+      nationality: personnel?.nationality || 'CHILENA',
+      marital_status: personnel?.marital_status || '',
       bank_account_type: personnel?.bank_account_type || '',
       bank_name: personnel?.bank_name || '',
       bank_account_number: personnel?.bank_account_number || '',
@@ -399,6 +401,24 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
               <option value="MASCULINO">MASCULINO</option>
               <option value="FEMENINO">FEMENINO</option>
               <option value="OTRO">OTRO</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="nationality">Nacionalidad</Label>
+            <Input id="nationality" name="nationality" defaultValue={initialValues.nationality} placeholder="CHILENA" />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="marital_status">Estado Civil</Label>
+            <select id="marital_status" name="marital_status" defaultValue={initialValues.marital_status}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Seleccionar estado civil</option>
+              <option value="SOLTERO/A">SOLTERO/A</option>
+              <option value="CASADO/A">CASADO/A</option>
+              <option value="DIVORCIADO/A">DIVORCIADO/A</option>
+              <option value="VIUDO/A">VIUDO/A</option>
+              <option value="UNIÓN CIVIL">UNIÓN CIVIL</option>
             </select>
           </div>
 

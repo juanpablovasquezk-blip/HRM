@@ -390,7 +390,7 @@ export async function generateDeliveryFormPDF(params: DeliveryPDFParams) {
   doc.setFont('helvetica', 'bold');
   doc.text('Firma Entregado Por', margin + colW + sigBoxW / 2, currentY + sigBoxH + 3.5, { align: 'center' });
   doc.setFont('helvetica', 'normal');
-  doc.text(`Nombre: ${delivererName.toUpperCase()}`, margin + colW + 5, currentY + sigBoxH + 7);
+  doc.text('Nombre:', margin + colW + 5, currentY + sigBoxH + 7);
   doc.text('Cargo: Prevencionista / Representante', margin + colW + 5, currentY + sigBoxH + 10);
 
   // Footer page/legal markers

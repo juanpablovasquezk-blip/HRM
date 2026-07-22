@@ -166,6 +166,8 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   const [bankAccountType, setBankAccountType] = useState('');
   const [bankName, setBankName] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [nationality, setNationality] = useState('CHILENA');
+  const [maritalStatus, setMaritalStatus] = useState('');
 
   // Consentimiento de datos
   const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -294,7 +296,11 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
               gender,
               bank_account_type: bankAccountType,
               bank_name: bankName,
-              bank_account_number: bankAccountNumber
+              bank_account_number: bankAccountNumber,
+
+              // Contract fields
+              nationality,
+              marital_status: maritalStatus,
             }
 
           }),
@@ -460,6 +466,33 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
                   <SelectItem value="MASCULINO">MASCULINO</SelectItem>
                   <SelectItem value="FEMENINO">FEMENINO</SelectItem>
                   <SelectItem value="OTRO">OTRO</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="nationality">Nacionalidad *</Label>
+              <Input
+                id="nationality"
+                value={nationality}
+                onChange={e => setNationality(e.target.value)}
+                placeholder="CHILENA"
+                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="marital_status">Estado Civil *</Label>
+              <Select value={maritalStatus} onValueChange={(val) => setMaritalStatus(val || '')} required>
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar estado civil" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="SOLTERO/A">SOLTERO/A</SelectItem>
+                  <SelectItem value="CASADO/A">CASADO/A</SelectItem>
+                  <SelectItem value="DIVORCIADO/A">DIVORCIADO/A</SelectItem>
+                  <SelectItem value="VIUDO/A">VIUDO/A</SelectItem>
+                  <SelectItem value="UNIÓN CIVIL">UNIÓN CIVIL</SelectItem>
                 </SelectContent>
               </Select>
             </div>

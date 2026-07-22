@@ -85,6 +85,10 @@ export interface Personnel {
   bank_account_type?: string | null;
   bank_name?: string | null;
   bank_account_number?: string | null;
+
+  // Contract fields
+  nationality?: string | null;
+  marital_status?: string | null;
 }
 
 

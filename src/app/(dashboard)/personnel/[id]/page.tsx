@@ -22,6 +22,7 @@ import { calculateDynamicExpiration, calculateIntervalExpiration } from '@/lib/u
 import { AccessActions } from './access-actions';
 import { LettersCard } from '@/components/personnel/letters-card';
 import { getUserRole } from '@/app/role-actions';
+import { ContractDownloadButton } from './contract-download-button';
 
 export default async function PersonnelDetailPage({
   params,
@@ -100,6 +101,7 @@ export default async function PersonnelDetailPage({
           )}
         </div>
         <div className="flex gap-2">
+          <ContractDownloadButton person={person} />
           <Link href={`/personnel-print/${id}`} target="_blank">
             <Button variant="outline" className="border-orange-200 text-orange-700 hover:bg-orange-50 gap-1.5">
               <Printer className="h-4 w-4" />

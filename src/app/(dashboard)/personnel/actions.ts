@@ -155,6 +155,10 @@ export async function createPersonnel(
     bank_account_type: toUpper(formData.get('bank_account_type')) || null,
     bank_name: toUpper(formData.get('bank_name')) || null,
     bank_account_number: toUpper(formData.get('bank_account_number')) || null,
+
+    // Contract fields
+    nationality: toUpper(formData.get('nationality')) || 'CHILENA',
+    marital_status: toUpper(formData.get('marital_status')) || null,
   };
 
 
@@ -253,6 +257,10 @@ export async function updatePersonnel(
     bank_account_type: toUpper(formData.get('bank_account_type')) || null,
     bank_name: toUpper(formData.get('bank_name')) || null,
     bank_account_number: toUpper(formData.get('bank_account_number')) || null,
+
+    // Contract fields
+    nationality: toUpper(formData.get('nationality')) || 'CHILENA',
+    marital_status: toUpper(formData.get('marital_status')) || null,
   };
 
 

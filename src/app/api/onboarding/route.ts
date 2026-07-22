@@ -69,7 +69,9 @@ export async function POST(request: NextRequest) {
       gender,
       bank_account_type,
       bank_name,
-      bank_account_number
+      bank_account_number,
+      nationality,
+      marital_status
     } = personalData;
 
     if (!first_name || !last_name_father || !last_name_mother || !rut || !birth_date || !email || !phone || !afp || !health_system || !gender || !bank_account_type || !bank_name || !bank_account_number) {
@@ -173,7 +175,11 @@ export async function POST(request: NextRequest) {
       gender: toUpper(personalData.gender),
       bank_account_type: toUpper(personalData.bank_account_type),
       bank_name: toUpper(personalData.bank_name),
-      bank_account_number: toUpper(personalData.bank_account_number)
+      bank_account_number: toUpper(personalData.bank_account_number),
+
+      // Contract fields
+      nationality: toUpper(personalData.nationality) || 'CHILENA',
+      marital_status: toUpper(personalData.marital_status),
     };
 
 
