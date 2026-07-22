@@ -36,13 +36,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, message: 'No recipients configured' });
     }
 
-    // 3. Determine YESTERDAY's date in Chile (YYYY-MM-DD)
-    const now = new Date();
-    const chileNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }));
-    chileNow.setDate(chileNow.getDate() - 1);
-    const chileYesterdayStr = chileNow.toISOString().split('T')[0];
+    // 3. Determine target date: use ?date= query param for testing, otherwise yesterday in Chile
+    const url = new URL(request.url);
+    const dateParam = url.searchParams.get('date');
+    let targetDateStr: string;
+    
+    if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      targetDateStr = dateParam;
+    } else {
+      const now = new Date();
+      const chileNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+      chileNow.setDate(chileNow.getDate() - 1);
+      targetDateStr = chileNow.toISOString().split('T')[0];
+    }
 
-    // 4. Fetch absent assignments for today in Chile
+    // 4. Fetch absent assignments (excluding extra shifts)
     const { data: absences, error: queryError } = await supabase
       .from('shift_assignments')
       .select(`
@@ -60,14 +68,15 @@ export async function GET(request: Request) {
         area:areas(name),
         position:positions(name)
       `)
-      .eq('date', chileYesterdayStr)
-      .eq('attendance_status', 'absent');
+      .eq('date', targetDateStr)
+      .eq('attendance_status', 'absent')
+      .eq('is_extra', false);
 
     if (queryError) throw queryError;
 
     if (!absences || absences.length === 0) {
-      console.log(`No absences reported for ${chileYesterdayStr}. Skipping email.`);
-      return NextResponse.json({ success: true, message: `No absences yesterday (${chileYesterdayStr})` });
+      console.log(`No absences reported for ${targetDateStr}. Skipping email.`);
+      return NextResponse.json({ success: true, message: `No absences for ${targetDateStr}` });
     }
 
     // 5. Fetch names of supervisors who updated the attendance
@@ -93,7 +102,7 @@ export async function GET(request: Request) {
     const formattedDate = new Intl.DateTimeFormat('es-CL', {
       timeZone: 'America/Santiago',
       dateStyle: 'long'
-    }).format(chileNow);
+    }).format(new Date(targetDateStr + 'T12:00:00'));
 
     const tableRows = absences.map(a => {
       const p = a.personnel as any;
@@ -186,7 +195,7 @@ export async function GET(request: Request) {
     const info = await transporter.sendMail({
       from: '"HRM Roster Manager" <no-reply@minerquim.cl>',
       to: emailRecipients,
-      subject: `[Ausencias] Reporte de Inasistencias - ${chileYesterdayStr}`,
+      subject: `[Ausencias] Reporte de Inasistencias - ${targetDateStr}`,
       html: emailHtml,
     });
 
