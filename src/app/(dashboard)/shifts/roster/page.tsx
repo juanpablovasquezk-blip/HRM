@@ -3,12 +3,14 @@ export const dynamic = 'force-dynamic';
 import { RosterGridClient } from './roster-grid-client';
 import { startOfMonth, endOfMonth, format, startOfWeek, endOfWeek } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { unstable_noStore as noStore } from 'next/cache';
 
 export default async function RosterPage({
   searchParams,
 }: {
   searchParams: Promise<{ month?: string }>;
 }) {
+  noStore();
   const params = await searchParams;
   const supabase = await createClient();
   const { data: { user: authUser } } = await supabase.auth.getUser();
