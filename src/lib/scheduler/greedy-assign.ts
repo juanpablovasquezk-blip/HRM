@@ -266,7 +266,7 @@ export function greedyAssign(
         
         if (!state) {
           console.log(`[BLUE-DEBUG] ${p.first_name}: NO STATE FOUND - skipping entirely`);
-          simDate = addDays(endSim, 1); // skip loop
+          continue;
         } else {
           console.log(`[BLUE-DEBUG] ${p.first_name}: leave_dates=${[...p.leave_dates].join(',') || 'NONE'}, assigned_dates=${p.assigned_dates.size}, hire=${p.hire_date || 'N/A'}, term=${p.termination_date || 'N/A'}`);
         }
