@@ -253,6 +253,15 @@ export function RosterGridClient({
   // INDEXING: Create fast lookup maps for performance
   const assignmentsMap = useMemo(() => {
     const map: Record<string, Record<string, Assignment>> = {};
+    
+    // Debug for Matias
+    const matiasId = 'd2dd0000-0000-0000-0000-000000000000';
+    const matiasAsgns = assignments.filter(a => a.personnel_id === matiasId);
+    console.log(`[CLIENT-DEBUG] Received ${assignments.length} assignments total. Matias has ${matiasAsgns.length} assignments in client prop.`);
+    if (matiasAsgns.length > 0) {
+      console.log(`[CLIENT-DEBUG] Matias sample dates: ${matiasAsgns.slice(0, 5).map(a => a.date).join(', ')}`);
+    }
+
     assignments.forEach(a => {
       if (!map[a.personnel_id]) map[a.personnel_id] = {};
       map[a.personnel_id][a.date] = a;
