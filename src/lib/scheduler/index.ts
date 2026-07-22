@@ -400,6 +400,17 @@ export async function generateSchedule(
     });
 
     if (toInsert.length > 0) {
+      // Debug: log what we're about to save for Blue personnel
+      const blueSaves = toInsert.filter(a => {
+        const person = personnelAvailability.find(p => p.personnel_id === a.personnel_id);
+        return person && (person.rotation_pattern || '').toUpperCase().includes('BLUE_');
+      });
+      console.log(`[SAVE-DEBUG] Total to insert: ${toInsert.length}, Blue inserts: ${blueSaves.length}`);
+      blueSaves.slice(0, 5).forEach(a => {
+        const person = personnelAvailability.find(p => p.personnel_id === a.personnel_id);
+        console.log(`[SAVE-DEBUG] ${person?.first_name} ${a.date}: shift=${a.shift_id}, area=${a.area_id}, pos=${a.position_id}`);
+      });
+
       const CHUNK_SIZE = 50;
       for (let i = 0; i < toInsert.length; i += CHUNK_SIZE) {
         const chunk = toInsert.slice(i, i + CHUNK_SIZE);
@@ -408,19 +419,21 @@ export async function generateSchedule(
 
         while (retries > 0 && !success) {
           try {
-            const { error: insErr } = await supabaseAdmin
+            const { data: upsertResult, error: insErr } = await supabaseAdmin
               .from('shift_assignments')
               .upsert(chunk, { 
                 onConflict: 'personnel_id,date,shift_id,is_extra',
                 ignoreDuplicates: false 
-              });
+              })
+              .select('id');
             if (insErr) throw insErr;
+            console.log(`[SAVE-DEBUG] Chunk ${i/CHUNK_SIZE + 1} saved: ${upsertResult?.length || 0} rows`);
             success = true;
           } catch (err: any) {
             retries--;
             console.warn(`[RETRY] Error guardando bloque ${i/CHUNK_SIZE + 1}. Reintentos restantes: ${retries}. Error: ${err.message || err}`);
             if (retries === 0) throw new Error(`DB Error: No se pudo guardar el bloque ${i/CHUNK_SIZE + 1}: ${err.message || err}`);
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Esperar 1s antes de reintentar
+            await new Promise(resolve => setTimeout(resolve, 1000));
           }
         }
       }
