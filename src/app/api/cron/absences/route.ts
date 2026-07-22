@@ -87,13 +87,13 @@ export async function GET(request: Request) {
     const supervisorMap = new Map<string, string>();
     if (supervisorIds.length > 0) {
       const { data: supervisors, error: supError } = await supabase
-        .from('users')
-        .select('id, full_name')
+        .from('personnel')
+        .select('id, first_name, last_name_father')
         .in('id', supervisorIds);
       
       if (!supError && supervisors) {
         supervisors.forEach(s => {
-          supervisorMap.set(s.id, s.full_name || 'Desconocido');
+          supervisorMap.set(s.id, `${s.first_name} ${s.last_name_father}`.trim() || 'Desconocido');
         });
       }
     }
