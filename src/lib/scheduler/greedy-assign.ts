@@ -269,10 +269,18 @@ export function greedyAssign(
 
     if (validBlueAreaId) {
       const bluePersonnelList = personnelPool.filter(p => (p.rotation_pattern || '').toUpperCase().includes('BLUE_'));
+      console.log(`[BLUE-DEBUG] validBlueAreaId=${validBlueAreaId}, bluePersonnel=${bluePersonnelList.length}: ${bluePersonnelList.map(p => `${p.first_name}(${p.rotation_pattern})`).join(', ')}`);
       for (const p of bluePersonnelList) {
         let simDate = parseISO(startDateStr);
         let endSim = parseISO(endDateStr);
-        const state = personnelState.get(p.personnel_id)!;
+        const state = personnelState.get(p.personnel_id);
+        
+        if (!state) {
+          console.log(`[BLUE-DEBUG] ${p.first_name}: NO STATE FOUND - skipping entirely`);
+          simDate = addDays(endSim, 1); // skip loop
+        } else {
+          console.log(`[BLUE-DEBUG] ${p.first_name}: leave_dates=${[...p.leave_dates].join(',') || 'NONE'}, assigned_dates=${p.assigned_dates.size}, hire=${p.hire_date || 'N/A'}, term=${p.termination_date || 'N/A'}`);
+        }
         
         while (simDate <= endSim) {
           const dStr = format(simDate, 'yyyy-MM-dd');
@@ -280,6 +288,16 @@ export function greedyAssign(
           // VALIDACIÓN DE CONTRATO (HIRE/TERMINATION)
           const isHired = !p.hire_date || dStr >= p.hire_date;
           const isTerminated = p.termination_date && dStr > p.termination_date;
+
+          if (p.assigned_dates.has(dStr)) {
+            // skip silently - already assigned
+          } else if (p.leave_dates.has(dStr)) {
+            console.log(`[BLUE-SKIP] ${p.first_name} ${dStr}: LEAVE DAY`);
+          } else if (!isHired) {
+            console.log(`[BLUE-SKIP] ${p.first_name} ${dStr}: NOT HIRED YET (hire=${p.hire_date})`);
+          } else if (isTerminated) {
+            console.log(`[BLUE-SKIP] ${p.first_name} ${dStr}: TERMINATED (term=${p.termination_date})`);
+          }
 
           if (!p.assigned_dates.has(dStr) && !p.leave_dates.has(dStr) && isHired && !isTerminated) {
             let targetShift = null;
