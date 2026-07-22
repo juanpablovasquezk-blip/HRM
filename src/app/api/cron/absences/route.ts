@@ -31,13 +31,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, message: 'No recipients configured' });
     }
 
-    // 3. Determine current Chile local date (YYYY-MM-DD)
-    const chileTodayStr = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Santiago',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    }).format(new Date());
+    // 3. Determine YESTERDAY's date in Chile (YYYY-MM-DD)
+    const now = new Date();
+    const chileNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+    chileNow.setDate(chileNow.getDate() - 1);
+    const chileYesterdayStr = chileNow.toISOString().split('T')[0];
 
     // 4. Fetch absent assignments for today in Chile
     const { data: absences, error: queryError } = await supabase
@@ -57,14 +55,14 @@ export async function GET(request: Request) {
         area:areas(name),
         position:positions(name)
       `)
-      .eq('date', chileTodayStr)
+      .eq('date', chileYesterdayStr)
       .eq('attendance_status', 'absent');
 
     if (queryError) throw queryError;
 
     if (!absences || absences.length === 0) {
-      console.log(`No absences reported for ${chileTodayStr}. Skipping email.`);
-      return NextResponse.json({ success: true, message: `No absences today (${chileTodayStr})` });
+      console.log(`No absences reported for ${chileYesterdayStr}. Skipping email.`);
+      return NextResponse.json({ success: true, message: `No absences yesterday (${chileYesterdayStr})` });
     }
 
     // 5. Fetch names of supervisors who updated the attendance
@@ -90,7 +88,7 @@ export async function GET(request: Request) {
     const formattedDate = new Intl.DateTimeFormat('es-CL', {
       timeZone: 'America/Santiago',
       dateStyle: 'long'
-    }).format(new Date());
+    }).format(chileNow);
 
     const tableRows = absences.map(a => {
       const p = a.personnel as any;
@@ -137,7 +135,7 @@ export async function GET(request: Request) {
           <!-- Body -->
           <div style="padding: 32px 24px;">
             <p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6; color: #475569;">
-              Se han reportado las siguientes inasistencias en la planificación operativa de hoy:
+              Se reportaron las siguientes inasistencias el día <strong>${formattedDate}</strong>:
             </p>
             
             <div style="overflow-x: auto;">
@@ -183,7 +181,7 @@ export async function GET(request: Request) {
     const info = await transporter.sendMail({
       from: '"HRM Roster Manager" <no-reply@minerquim.cl>',
       to: emailRecipients,
-      subject: `[Ausencias] Reporte Diario de Inasistencias - ${chileTodayStr}`,
+      subject: `[Ausencias] Reporte de Inasistencias - ${chileYesterdayStr}`,
       html: emailHtml,
     });
 
