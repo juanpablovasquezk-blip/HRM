@@ -3,10 +3,13 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import nodemailer from 'nodemailer';
 
 export async function GET(request: Request) {
-  // 1. Authorization check
-  const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new NextResponse('Unauthorized', { status: 401 });
+  // 1. Authorization check (skip if CRON_SECRET not configured)
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret) {
+    const authHeader = request.headers.get('authorization');
+    if (authHeader !== `Bearer ${cronSecret}`) {
+      return new NextResponse('Unauthorized', { status: 401 });
+    }
   }
 
   const supabase = createAdminClient();
