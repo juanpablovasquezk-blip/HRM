@@ -30,7 +30,6 @@ export default async function RosterPage({
     { data: personnel },
     { data: shifts },
     { data: areas },
-    { data: assignments },
     { data: leaves },
     { data: positions },
     { data: requirements }
@@ -38,7 +37,6 @@ export default async function RosterPage({
     supabase.from('personnel').select('*, company:companies!personnel_company_id_fkey(name)').eq('is_active', true).order('last_name_father'),
     supabase.from('shifts').select('*').order('start_time'),
     supabase.from('areas').select('*, positions(*)').order('name'),
-    supabase.from('shift_assignments').select('*').gte('date', startDate).lte('date', endDate).limit(10000),
     supabase.from('leaves').select('*').eq('status', 'approved').lte('start_date', endDate).gte('end_date', startDate),
     supabase.from('positions').select('*').order('name'),
     supabase
@@ -49,10 +47,40 @@ export default async function RosterPage({
       .order('date', { ascending: true })
   ]);
 
+  // Load all shift assignments paginated in chunks of 1000 to bypass Supabase hard limit
+  let assignments: any[] = [];
+  let from = 0;
+  let to = 999;
+  let keepFetching = true;
+
+  while (keepFetching) {
+    const { data: chunk, error: fetchErr } = await supabase
+      .from('shift_assignments')
+      .select('*')
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .range(from, to);
+
+    if (fetchErr) {
+      console.error(`[ROSTER-FETCH-ERROR] Failed to fetch assignments chunk [${from}-${to}]:`, fetchErr.message);
+      keepFetching = false;
+    } else if (chunk && chunk.length > 0) {
+      assignments = [...assignments, ...chunk];
+      if (chunk.length < 1000) {
+        keepFetching = false;
+      } else {
+        from += 1000;
+        to += 1000;
+      }
+    } else {
+      keepFetching = false;
+    }
+  }
+
   // Debug Matias assignments retrieved by the server
   const matiasId = 'd2dd0000-0000-0000-0000-000000000000';
   const matiasAsgns = (assignments || []).filter(a => a.personnel_id === matiasId);
-  console.log(`[SERVER-ROSTER-DEBUG] Total assignments fetched: ${assignments?.length || 0}. Matias has ${matiasAsgns.length} assignments in page.tsx server-side.`);
+  console.log(`[SERVER-ROSTER-DEBUG] Total assignments fetched: ${assignments.length}. Matias has ${matiasAsgns.length} assignments in page.tsx server-side.`);
   if (matiasAsgns.length > 0) {
     console.log(`[SERVER-ROSTER-DEBUG] Matias dates fetched: ${matiasAsgns.map(a => a.date).join(', ')}`);
   }
