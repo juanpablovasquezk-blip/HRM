@@ -184,6 +184,7 @@ export interface ShiftAssignment {
   frozen_by_rule: boolean;
   is_extra?: boolean;
   is_confirmed?: boolean;
+  paid_month?: string | null;
   original_shift_id?: string | null;
   override_by: string | null;
   override_reason: string | null;
@@ -235,6 +236,7 @@ export interface TransportRequest {
   status: TransportStatus;
   observations: string | null;
   cost: number | null;
+  paid_month: string | null;
   created_at: string;
 }
 

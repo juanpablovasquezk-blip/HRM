@@ -14,6 +14,7 @@ export default function ReportsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {[
+          { title: 'Liquidación de Bonos', desc: 'Reporte de pago por persona de turnos y transportes nocturnos con mes de liquidación', href: '/reports/bonos' },
           { title: 'Extra Shifts Detail', desc: 'Summary of extra shifts grouped by personnel', href: '/reports/extras' },
           { title: 'Shift Coverage Report', desc: 'Weekly coverage by area and position', href: '/reports/coverage' },
           { title: 'Personnel Hours Report', desc: 'Hours worked per person per week', href: '/reports/hours' },
