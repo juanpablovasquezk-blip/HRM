@@ -127,6 +127,14 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const [bankAccountType, setBankAccountType] = useState(personnel?.bank_account_type || '');
   const [bankName, setBankName] = useState(personnel?.bank_name || '');
   const [bankAccountNumber, setBankAccountNumber] = useState(personnel?.bank_account_number || '');
+  const [nationalitySelect, setNationalitySelect] = useState(() => {
+    const nat = (personnel?.nationality || 'CHILENA').toUpperCase();
+    return ['CHILENA', 'ARGENTINA', 'BOLIVIANA', 'PERUANA', 'COLOMBIANA', 'VENEZOLANA'].includes(nat) ? nat : 'OTRA';
+  });
+  const [customNationality, setCustomNationality] = useState(() => {
+    const nat = (personnel?.nationality || 'CHILENA').toUpperCase();
+    return ['CHILENA', 'ARGENTINA', 'BOLIVIANA', 'PERUANA', 'COLOMBIANA', 'VENEZOLANA'].includes(nat) ? '' : nat;
+  });
 
   useEffect(() => {
     if (bankAccountType === 'RUT') {
@@ -405,8 +413,40 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="nationality">Nacionalidad</Label>
-            <Input id="nationality" name="nationality" defaultValue={initialValues.nationality} placeholder="CHILENA" />
+            <Label htmlFor="nationality_select">Nacionalidad</Label>
+            <select
+              id="nationality_select"
+              value={nationalitySelect}
+              onChange={(e) => setNationalitySelect(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="CHILENA">CHILENA</option>
+              <option value="ARGENTINA">ARGENTINA</option>
+              <option value="BOLIVIANA">BOLIVIANA</option>
+              <option value="PERUANA">PERUANA</option>
+              <option value="COLOMBIANA">COLOMBIANA</option>
+              <option value="VENEZOLANA">VENEZOLANA</option>
+              <option value="OTRA">OTRA</option>
+            </select>
+            {nationalitySelect === 'OTRA' ? (
+              <div className="mt-1.5 animate-in fade-in duration-200">
+                <Input
+                  id="nationality"
+                  name="nationality"
+                  value={customNationality}
+                  onChange={(e) => setCustomNationality(e.target.value.toUpperCase())}
+                  placeholder="Especificar nacionalidad (ej: ECUATORIANA)"
+                  required
+                />
+              </div>
+            ) : (
+              <input
+                type="hidden"
+                id="nationality"
+                name="nationality"
+                value={nationalitySelect}
+              />
+            )}
           </div>
 
           <div className="space-y-2">

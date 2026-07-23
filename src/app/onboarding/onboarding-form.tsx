@@ -167,6 +167,8 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   const [bankName, setBankName] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
   const [nationality, setNationality] = useState('CHILENA');
+  const [nationalitySelect, setNationalitySelect] = useState('CHILENA');
+  const [customNationality, setCustomNationality] = useState('');
   const [maritalStatus, setMaritalStatus] = useState('');
 
   // Consentimiento de datos
@@ -472,13 +474,47 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
 
             <div className="space-y-1.5">
               <Label htmlFor="nationality">Nacionalidad *</Label>
-              <Input
-                id="nationality"
-                value={nationality}
-                onChange={e => setNationality(e.target.value)}
-                placeholder="CHILENA"
-                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
-              />
+              <Select 
+                value={nationalitySelect} 
+                onValueChange={(val) => {
+                  setNationalitySelect(val || '');
+                  if (val === 'OTRA') {
+                    setNationality(customNationality);
+                  } else {
+                    setNationality(val || '');
+                  }
+                }} 
+                required
+              >
+                <SelectTrigger className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="Seleccionar nacionalidad" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CHILENA">CHILENA</SelectItem>
+                  <SelectItem value="ARGENTINA">ARGENTINA</SelectItem>
+                  <SelectItem value="BOLIVIANA">BOLIVIANA</SelectItem>
+                  <SelectItem value="PERUANA">PERUANA</SelectItem>
+                  <SelectItem value="COLOMBIANA">COLOMBIANA</SelectItem>
+                  <SelectItem value="VENEZOLANA">VENEZOLANA</SelectItem>
+                  <SelectItem value="OTRA">OTRA</SelectItem>
+                </SelectContent>
+              </Select>
+              {nationalitySelect === 'OTRA' && (
+                <div className="mt-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <Input
+                    id="nationality_custom"
+                    value={customNationality}
+                    onChange={e => {
+                      const val = e.target.value.toUpperCase();
+                      setCustomNationality(val);
+                      setNationality(val);
+                    }}
+                    placeholder="Especificar nacionalidad"
+                    className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
+                    required
+                  />
+                </div>
+              )}
             </div>
 
             <div className="space-y-1.5">

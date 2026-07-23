@@ -18,7 +18,9 @@ import {
   Copy,
   UserCheck,
   UserX,
-  Printer
+  Printer,
+  Send,
+  ClipboardCopy
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -44,6 +46,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { createOnboardingToken, approveOnboarding, rejectOnboarding } from './actions';
 import { createWorkerSizeToken } from '../epp/actions';
+import { createPersonnelUpdateToken, sendFichaUpdateWhatsApp } from './update-actions';
 
 
 interface Personnel {
@@ -77,8 +80,26 @@ interface Personnel {
   clothing_parka_size?: string | null;
   clothing_overall_size?: string | null;
   custom_clothing_sizes?: Record<string, string> | null;
+  afp?: string | null;
+  health_system?: string | null;
+  bank_account_number?: string | null;
+  emergency_contact_phone?: string | null;
+  gender?: string | null;
+  marital_status?: string | null;
 }
 
+
+const isFichaIncompleta = (person: Personnel) => {
+  return (
+    !person.afp ||
+    !person.health_system ||
+    !person.bank_account_number ||
+    !person.emergency_contact_phone ||
+    !person.gender ||
+    !person.marital_status ||
+    !person.phone
+  );
+};
 
 interface PersonnelTableClientProps {
   personnel: Personnel[];
@@ -258,6 +279,44 @@ export default function PersonnelTableClient({
       }
     } catch (e) {
       toast.error('Error de conexión');
+    }
+  };
+
+  const handleCopyUpdateFichaLink = async (person: Personnel) => {
+    try {
+      const res = await createPersonnelUpdateToken(person.id, 7);
+      if (res.success && res.token) {
+        const link = `${window.location.origin}/actualizar-ficha?token=${res.token}`;
+        navigator.clipboard.writeText(link);
+        toast.success(`¡Enlace de actualización de ficha para ${person.first_name} ${person.last_name_father} copiado! (Válido 7 días)`);
+      } else {
+        toast.error('Error al generar el enlace de actualización');
+      }
+    } catch (e) {
+      toast.error('Error de conexión');
+    }
+  };
+
+  const handleSendUpdateFichaWhatsApp = async (person: Personnel) => {
+    if (!person.phone || person.phone.trim().length < 8) {
+      toast.error('El trabajador no tiene un teléfono válido registrado.');
+      return;
+    }
+
+    if (!confirm(`¿Enviar enlace de actualización de ficha a ${person.first_name} ${person.last_name_father} por WhatsApp?`)) {
+      return;
+    }
+
+    const toastId = toast.loading(`Enviando enlace a ${person.first_name}...`);
+    try {
+      const res = await sendFichaUpdateWhatsApp(person.id, window.location.origin);
+      if (res.success) {
+        toast.success(`✅ Enlace de actualización enviado a ${person.first_name} por WhatsApp.`, { id: toastId });
+      } else {
+        toast.error(`Error: ${res.error}`, { id: toastId });
+      }
+    } catch (e) {
+      toast.error('Error de conexión al enviar WhatsApp', { id: toastId });
     }
   };
 
@@ -470,7 +529,7 @@ export default function PersonnelTableClient({
                     {/* Full Name Cell */}
                     {visibleColumns.fullName && (
                       <TableCell>
-                        <div className="flex flex-col gap-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <Link
                             href={`/personnel/${person.id}`}
                             className="font-medium text-orange-600 hover:text-orange-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1.5"
@@ -480,6 +539,15 @@ export default function PersonnelTableClient({
                               <ShieldCheck className="h-3.5 w-3.5 text-blue-500 fill-blue-50" />
                             )}
                           </Link>
+                          {isFichaIncompleta(person) && (
+                            <Badge 
+                              variant="outline" 
+                              className="bg-amber-50/80 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30 text-[10px] py-0 px-1.5 font-bold uppercase tracking-wider h-5 flex items-center"
+                              title="Falta completar datos en su ficha (AFP, Salud, Contacto de Emergencia, Banco, etc.)"
+                            >
+                              Ficha Incompleta
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
                     )}
@@ -683,6 +751,25 @@ export default function PersonnelTableClient({
                           <Button
                             variant="ghost"
                             size="icon"
+                            onClick={() => handleCopyUpdateFichaLink(person)}
+                            className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/20"
+                            title="Copiar Enlace de Actualización de Ficha (Válido 7 días)"
+                          >
+                            <ClipboardCopy className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            disabled={!person.phone}
+                            onClick={() => handleSendUpdateFichaWhatsApp(person)}
+                            className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                            title={person.phone ? "Enviar Enlace de Ficha por WhatsApp" : "No tiene teléfono registrado"}
+                          >
+                            <Send className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             onClick={() => handleCopyWorkerSizeTokenLink(person)}
                             className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/20"
                             title="Copiar Link WhatsApp exclusivo de tallas (Válido 3 días)"
@@ -705,6 +792,25 @@ export default function PersonnelTableClient({
                           <Button
                             variant="ghost"
                             size="icon"
+                            onClick={() => handleCopyUpdateFichaLink(person)}
+                            className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/20"
+                            title="Copiar Enlace de Actualización de Ficha (Válido 7 días)"
+                          >
+                            <ClipboardCopy className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            disabled={!person.phone}
+                            onClick={() => handleSendUpdateFichaWhatsApp(person)}
+                            className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                            title={person.phone ? "Enviar Enlace de Ficha por WhatsApp" : "No tiene teléfono registrado"}
+                          >
+                            <Send className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             onClick={() => handleCopyWorkerSizeTokenLink(person)}
                             className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/20"
                             title="Copiar Link WhatsApp exclusivo de tallas (Válido 3 días)"
@@ -722,7 +828,6 @@ export default function PersonnelTableClient({
                             </Button>
                           </Link>
                         </div>
-
                       )}
                     </TableCell>
 
