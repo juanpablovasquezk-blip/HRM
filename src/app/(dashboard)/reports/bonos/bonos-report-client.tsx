@@ -52,6 +52,10 @@ export function BonosReportClient({
   // Local state for bulk month input per personnel ID
   const [bulkMonths, setBulkMonths] = useState<Record<string, string>>({});
 
+  // Local state for selected items per personnel ID
+  const [selectedShifts, setSelectedShifts] = useState<Record<string, string[]>>({});
+  const [selectedTransports, setSelectedTransports] = useState<Record<string, string[]>>({});
+
   const fetchData = async (currentFrom: string, currentTo: string, currentCompanyId: string) => {
     setLoading(true);
     try {
@@ -66,6 +70,9 @@ export function BonosReportClient({
       } else {
         setShifts(res.shifts || []);
         setTransports(res.transports || []);
+        // Reset selections on new search
+        setSelectedShifts({});
+        setSelectedTransports({});
       }
     } catch (error: any) {
       toast.error(`Error inesperado: ${error.message}`);
@@ -124,18 +131,58 @@ export function BonosReportClient({
     }
   };
 
-  const handleBulkUpdate = async (personnelId: string, personShifts: any[], personTransports: any[]) => {
+  const toggleShiftSelection = (personnelId: string, shiftId: string) => {
+    setSelectedShifts(prev => {
+      const current = prev[personnelId] || [];
+      const updated = current.includes(shiftId)
+        ? current.filter(id => id !== shiftId)
+        : [...current, shiftId];
+      return { ...prev, [personnelId]: updated };
+    });
+  };
+
+  const toggleTransportSelection = (personnelId: string, transportId: string) => {
+    setSelectedTransports(prev => {
+      const current = prev[personnelId] || [];
+      const updated = current.includes(transportId)
+        ? current.filter(id => id !== transportId)
+        : [...current, transportId];
+      return { ...prev, [personnelId]: updated };
+    });
+  };
+
+  const toggleAllShifts = (personnelId: string, personShifts: any[]) => {
+    const allIds = personShifts.map(s => s.id);
+    setSelectedShifts(prev => {
+      const current = prev[personnelId] || [];
+      const areAllSelected = allIds.length > 0 && allIds.every(id => current.includes(id));
+      const updated = areAllSelected ? [] : allIds;
+      return { ...prev, [personnelId]: updated };
+    });
+  };
+
+  const toggleAllTransports = (personnelId: string, personTransports: any[]) => {
+    const allIds = personTransports.map(t => t.id);
+    setSelectedTransports(prev => {
+      const current = prev[personnelId] || [];
+      const areAllSelected = allIds.length > 0 && allIds.every(id => current.includes(id));
+      const updated = areAllSelected ? [] : allIds;
+      return { ...prev, [personnelId]: updated };
+    });
+  };
+
+  const handleBulkUpdate = async (personnelId: string) => {
     const month = bulkMonths[personnelId];
     if (!month) {
       toast.error('Por favor, selecciona un mes para aplicar.');
       return;
     }
 
-    const shiftIds = personShifts.map(s => s.id);
-    const transportIds = personTransports.map(t => t.id);
+    const shiftIds = selectedShifts[personnelId] || [];
+    const transportIds = selectedTransports[personnelId] || [];
 
     if (shiftIds.length === 0 && transportIds.length === 0) {
-      toast.error('No hay registros para actualizar.');
+      toast.error('No has seleccionado ningún turno o transporte para actualizar.');
       return;
     }
 
@@ -155,7 +202,12 @@ export function BonosReportClient({
         setTransports(prev =>
           prev.map(t => (transportIds.includes(t.id) ? { ...t, paid_month: month } : t))
         );
-        toast.success(`Se aplicó el mes de pago "${month}" a todos los registros del período.`);
+        
+        // Clear selection after update
+        setSelectedShifts(prev => ({ ...prev, [personnelId]: [] }));
+        setSelectedTransports(prev => ({ ...prev, [personnelId]: [] }));
+        
+        toast.success(`Se aplicó el mes de pago "${month}" a los registros seleccionados.`);
       } else {
         toast.error(`Error al guardar en lote: ${res.error}`);
       }
@@ -481,6 +533,10 @@ export function BonosReportClient({
             const transportVal = person.transportsCount * 14000;
             const totalVal = shiftVal + transportVal;
 
+            const selectedShiftsCount = (selectedShifts[person.id] || []).length;
+            const selectedTransportsCount = (selectedTransports[person.id] || []).length;
+            const totalSelected = selectedShiftsCount + selectedTransportsCount;
+
             return (
               <div
                 key={person.id}
@@ -556,11 +612,15 @@ export function BonosReportClient({
                 </div>
 
                 {/* 3. Bulk Month Update (no-print) */}
-                <div className="no-print bg-slate-50 dark:bg-slate-900/40 border border-slate-150 dark:border-slate-800/80 p-3 rounded-lg flex flex-wrap items-center justify-between gap-4 mb-6">
+                <div className="no-print bg-slate-50 dark:bg-slate-900/40 border border-slate-150 dark:border-slate-800/80 p-3 rounded-lg flex flex-wrap items-center justify-between gap-4 mb-6 transition-all">
                   <div className="flex items-center gap-2">
                     <Landmark className="w-4 h-4 text-slate-400" />
                     <span className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Acción en lote:</span>
-                    <span className="text-xs text-slate-500">Marcar todo el periodo para esta persona en el mes seleccionado</span>
+                    <span className="text-xs text-slate-500">
+                      {totalSelected > 0 
+                        ? `Aplicar mes a los ${totalSelected} registros seleccionados (${selectedShiftsCount} turnos, ${selectedTransportsCount} transportes)` 
+                        : 'Selecciona registros con las casillas de la tabla para aplicar acción en lote'}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Input
@@ -571,10 +631,11 @@ export function BonosReportClient({
                     />
                     <Button
                       size="sm"
-                      onClick={() => handleBulkUpdate(person.id, person.shifts, person.transports)}
-                      className="h-8 text-xs bg-slate-800 text-white hover:bg-slate-900"
+                      onClick={() => handleBulkUpdate(person.id)}
+                      disabled={totalSelected === 0}
+                      className="h-8 text-xs bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-40"
                     >
-                      Aplicar en Lote
+                      Aplicar a Seleccionados
                     </Button>
                   </div>
                 </div>
@@ -589,6 +650,14 @@ export function BonosReportClient({
                       <table className="w-full text-left border-collapse">
                         <thead>
                           <tr className="bg-slate-50 dark:bg-slate-900 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                            <th className="px-3 py-2 w-[40px] text-center no-print border-r border-slate-200 dark:border-slate-800">
+                              <input
+                                type="checkbox"
+                                checked={person.shifts.length > 0 && (selectedShifts[person.id] || []).length === person.shifts.length}
+                                onChange={() => toggleAllShifts(person.id, person.shifts)}
+                                className="rounded border-slate-350 focus:ring-0 cursor-pointer h-3.5 w-3.5 text-orange-600"
+                              />
+                            </th>
                             <th className="px-4 py-2 border-r border-slate-200 dark:border-slate-800">Fecha</th>
                             <th className="px-4 py-2 border-r border-slate-200 dark:border-slate-800">Turno</th>
                             <th className="px-4 py-2 border-r border-slate-200 dark:border-slate-800">Horario</th>
@@ -599,8 +668,21 @@ export function BonosReportClient({
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-900 text-xs">
                           {person.shifts.map((s: any) => {
                             const isSaving = savingRows[s.id];
+                            const isSelected = (selectedShifts[person.id] || []).includes(s.id);
                             return (
-                              <tr key={s.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/10">
+                              <tr key={s.id} className={cn(
+                                "hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-colors",
+                                isSelected && "bg-orange-50/20 dark:bg-orange-950/5"
+                              )}>
+                                <td className="px-3 py-2 text-center no-print border-r border-slate-100 dark:border-slate-900">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleShiftSelection(person.id, s.id)}
+                                    disabled={isSaving}
+                                    className="rounded border-slate-350 focus:ring-0 cursor-pointer h-3.5 w-3.5 text-orange-600"
+                                  />
+                                </td>
                                 <td className="px-4 py-2 font-medium capitalize border-r border-slate-100 dark:border-slate-900">
                                   {format(parseISO(s.date), "eeee dd/MM/yyyy", { locale: es })}
                                 </td>
@@ -656,6 +738,14 @@ export function BonosReportClient({
                       <table className="w-full text-left border-collapse">
                         <thead>
                           <tr className="bg-slate-50 dark:bg-slate-900 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                            <th className="px-3 py-2 w-[40px] text-center no-print border-r border-slate-200 dark:border-slate-800">
+                              <input
+                                type="checkbox"
+                                checked={person.transports.length > 0 && (selectedTransports[person.id] || []).length === person.transports.length}
+                                onChange={() => toggleAllTransports(person.id, person.transports)}
+                                className="rounded border-slate-350 focus:ring-0 cursor-pointer h-3.5 w-3.5 text-orange-600"
+                              />
+                            </th>
                             <th className="px-4 py-2 border-r border-slate-200 dark:border-slate-800">Fecha</th>
                             <th className="px-4 py-2 border-r border-slate-200 dark:border-slate-800">Concepto</th>
                             <th className="px-4 py-2 border-r border-slate-200 dark:border-slate-800">Tipo</th>
@@ -666,9 +756,22 @@ export function BonosReportClient({
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-900 text-xs">
                           {person.transports.map((t: any) => {
                             const isSaving = savingRows[t.id];
+                            const isSelected = (selectedTransports[person.id] || []).includes(t.id);
                             const asg = t.assignment || {};
                             return (
-                              <tr key={t.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/10">
+                              <tr key={t.id} className={cn(
+                                "hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-colors",
+                                isSelected && "bg-indigo-50/20 dark:bg-indigo-950/5"
+                              )}>
+                                <td className="px-3 py-2 text-center no-print border-r border-slate-100 dark:border-slate-900">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleTransportSelection(person.id, t.id)}
+                                    disabled={isSaving}
+                                    className="rounded border-slate-350 focus:ring-0 cursor-pointer h-3.5 w-3.5 text-orange-600"
+                                  />
+                                </td>
                                 <td className="px-4 py-2 font-medium capitalize border-r border-slate-100 dark:border-slate-900">
                                   {format(parseISO(t.date), "eeee dd/MM/yyyy", { locale: es })}
                                 </td>
