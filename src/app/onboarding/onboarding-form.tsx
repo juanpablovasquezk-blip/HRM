@@ -1203,7 +1203,9 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-950/40 text-xs font-bold text-orange-600">
                 {selectedLicenses.length > 0 ? '4' : '3'}
               </span>
-              <h3 className="text-sm font-bold uppercase tracking-wider">Certificado de Antecedentes *</h3>
+              <h3 className="text-sm font-bold uppercase tracking-wider">
+                Certificado de Antecedentes <strong className="font-extrabold text-orange-600 dark:text-orange-400">Para Fines Especiales</strong> *
+              </h3>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
