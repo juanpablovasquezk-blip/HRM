@@ -271,8 +271,11 @@ export async function updatePersonnel(
   }
 
 
-  // Check previous state for user ban logic
+  // Check previous state for user revocation logic
   const { data: previousPerson } = await supabase.from('personnel').select('user_id, is_active').eq('id', id).single();
+
+  const shouldRevoke = previousPerson?.user_id && previousPerson.is_active !== updateData.is_active && !updateData.is_active;
+  const updatePayload = shouldRevoke ? { ...updateData, user_id: null } : updateData;
 
   // Use adminClient for the update to bypass RLS on is_active column
   let updateError: any = null;
@@ -280,7 +283,7 @@ export async function updatePersonnel(
     const adminForUpdate = createAdminClient();
     const { error } = await adminForUpdate
       .from('personnel')
-      .update(updateData)
+      .update(updatePayload)
       .eq('id', id);
     updateError = error;
   } catch (adminErr) {
@@ -288,27 +291,25 @@ export async function updatePersonnel(
     console.warn('[updatePersonnel] Admin client unavailable, falling back to regular client:', adminErr);
     const { error } = await supabase
       .from('personnel')
-      .update(updateData)
+      .update(updatePayload)
       .eq('id', id);
     updateError = error;
   }
 
   if (updateError) return { success: false, error: updateError.message };
 
-  // Handle banning/unbanning user if active status changed
-  if (previousPerson?.user_id && previousPerson.is_active !== updateData.is_active) {
+  // Handle deleting/revoking user account if deactivated
+  if (shouldRevoke && previousPerson?.user_id) {
     try {
+      const userId = previousPerson.user_id;
+      // Delete from custom 'users' table
+      await supabase.from('users').delete().eq('id', userId);
+
+      // Delete from Supabase Auth
       const adminClient = createAdminClient();
-      if (!updateData.is_active) {
-        // Ban user for 10 years
-        await adminClient.auth.admin.updateUserById(previousPerson.user_id, { ban_duration: '87600h' });
-      } else {
-        // Lift the ban
-        await adminClient.auth.admin.updateUserById(previousPerson.user_id, { ban_duration: 'none' });
-      }
-    } catch (banError) {
-      console.error('Error updating ban status:', banError);
-      // Non-fatal: personnel is_active is already updated in the DB
+      await adminClient.auth.admin.deleteUser(userId);
+    } catch (revokeError) {
+      console.error('Error revoking user auth on deactivation:', revokeError);
     }
   }
 

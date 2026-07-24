@@ -23,20 +23,27 @@ export async function deactivateExpiredPersonnel(): Promise<void> {
     if (error || !expired || expired.length === 0) return;
 
     for (const person of expired) {
-      // 1. Mark as inactive
+      // 1. Mark as inactive and unlink user
       await admin
         .from('personnel')
-        .update({ is_active: false })
+        .update({ is_active: false, user_id: null })
         .eq('id', person.id);
 
-      // 2. Ban user account if linked
+      // 2. Revoke and delete user account if linked
       if (person.user_id) {
         try {
-          await admin.auth.admin.updateUserById(person.user_id, {
-            ban_duration: '87600h', // 10 years
-          });
-        } catch (banErr) {
-          console.error(`[DEACTIVATE-EXPIRED] Error banning user ${person.user_id}:`, banErr);
+          const userId = person.user_id;
+
+          // Delete from custom 'users' table
+          await admin.from('users').delete().eq('id', userId);
+
+          // Delete from Supabase Auth
+          const { error: authDeleteError } = await admin.auth.admin.deleteUser(userId);
+          if (authDeleteError) {
+            console.error(`[DEACTIVATE-EXPIRED] Error deleting user in Auth: ${authDeleteError.message}`);
+          }
+        } catch (revokeErr: any) {
+          console.error(`[DEACTIVATE-EXPIRED] Error revoking access for user ${person.user_id}:`, revokeErr);
         }
       }
 
