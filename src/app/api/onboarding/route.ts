@@ -116,12 +116,26 @@ export async function POST(request: NextRequest) {
     // Check if RUT already exists
     const { data: existingPerson } = await supabase
       .from('personnel')
-      .select('id')
+      .select('id, onboarding_status')
       .eq('rut', cleanRut)
       .maybeSingle();
 
     if (existingPerson) {
-      return NextResponse.json({ success: false, error: `Ya existe un registro o postulación con el RUT ${cleanRut}` }, { status: 400 });
+      if (existingPerson.onboarding_status === 'rejected') {
+        // Si la postulación fue rechazada previamente por el administrador,
+        // eliminamos el registro antiguo para permitir una nueva postulación limpia.
+        const { error: deleteError } = await supabase
+          .from('personnel')
+          .delete()
+          .eq('id', existingPerson.id);
+
+        if (deleteError) {
+          console.error('[API-ONBOARDING] Error al eliminar postulación rechazada:', deleteError);
+          return NextResponse.json({ success: false, error: 'Error al procesar el reintento de postulación' }, { status: 500 });
+        }
+      } else {
+        return NextResponse.json({ success: false, error: `Ya existe un registro o postulación con el RUT ${cleanRut}` }, { status: 400 });
+      }
     }
 
     // Clean email (always lowercase for standard compatibility)
