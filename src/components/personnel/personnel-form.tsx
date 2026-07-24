@@ -471,7 +471,6 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
             <Switch 
               checked={enableAccess} 
               onCheckedChange={setEnableAccess} 
-              disabled={!!personnel?.user_id} // Disable if already has access
             />
           </div>
         </CardContent>

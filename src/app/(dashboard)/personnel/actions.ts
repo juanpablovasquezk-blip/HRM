@@ -312,11 +312,11 @@ export async function updatePersonnel(
     }
   }
 
-  // Handle system access if requested and not already enabled
+  // Handle system access
   const enableRequested = formData.get('enable_access') === 'true';
+  const { data: existing } = await supabase.from('personnel').select('user_id').eq('id', id).single();
+  
   if (enableRequested && updateData.email) {
-    // Check if user already linked
-    const { data: existing } = await supabase.from('personnel').select('user_id').eq('id', id).single();
     if (!existing?.user_id) {
       let role: 'SUPERVISOR' | 'USER' = 'USER';
       if (updateData.main_position) {
@@ -327,6 +327,9 @@ export async function updatePersonnel(
       }
       await enablePersonnelAccess(id, updateData.email, role);
     }
+  } else if (!enableRequested && existing?.user_id) {
+    // If access was previously enabled but now requested to be disabled, revoke access!
+    await disablePersonnelAccess(id);
   }
 
   // Clean up shift assignments and transport requests if deactivated or terminated
@@ -549,6 +552,52 @@ export async function enablePersonnelAccess(
     return { success: false, error: error.message };
   }
 }
+
+export async function disablePersonnelAccess(
+  personnelId: string
+): Promise<{ success: boolean; error: string | null }> {
+  const supabase = await createClient();
+  const adminClient = createAdminClient();
+
+  try {
+    // 1. Get personnel record to find the user_id
+    const { data: person, error: fetchError } = await supabase
+      .from('personnel')
+      .select('user_id')
+      .eq('id', personnelId)
+      .single();
+
+    if (fetchError || !person) throw new Error('No se encontró la ficha del trabajador');
+    if (!person.user_id) return { success: true, error: null }; // Already no access
+
+    const userId = person.user_id;
+
+    // 2. Unlink from Personnel record (set user_id to null)
+    const { error: unlinkError } = await supabase
+      .from('personnel')
+      .update({ user_id: null })
+      .eq('id', personnelId);
+
+    if (unlinkError) throw new Error(`Error desvinculación: ${unlinkError.message}`);
+
+    // 3. Delete from custom 'users' table
+    await supabase.from('users').delete().eq('id', userId);
+
+    // 4. Delete from Supabase Auth
+    const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(userId);
+    if (authDeleteError) {
+      console.warn('Warning: Auth user not deleted, but unlinked in database:', authDeleteError.message);
+    }
+
+    safeRevalidatePath('/personnel');
+    safeRevalidatePath(`/personnel/${personnelId}`);
+    return { success: true, error: null };
+  } catch (error: any) {
+    console.error('Error disabling access:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 
 export async function resetPasswordToRut(
   personnelId: string
