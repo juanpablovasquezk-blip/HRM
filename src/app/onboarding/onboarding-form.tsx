@@ -17,10 +17,14 @@ import {
   SelectValue 
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, CheckCircle2, XCircle, Phone, Mail, User, ShieldAlert, Award, Shirt, HelpCircle, ShieldCheck, CreditCard } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Phone, Mail, User, ShieldAlert, Award, Shirt, HelpCircle, ShieldCheck, CreditCard, FileDown, CalendarDays, FileText, AlertCircle } from 'lucide-react';
 
 
 import { toast } from 'sonner';
+
+import DocumentCapture from '@/components/onboarding/document-capture';
+import { compileFrontBackPdf } from '@/lib/documents/pdf-compiler';
+import { labelSelfie } from '@/lib/documents/selfie-labeler';
 
 interface OnboardingFormProps {
   token: string;
@@ -175,6 +179,44 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [showTermsDetail, setShowTermsDetail] = useState(false);
 
+  // Documentos obligatorios
+  const [cedulaExpiration, setCedulaExpiration] = useState('');
+  const [cedulaFront, setCedulaFront] = useState<string | null>(null);
+  const [cedulaBack, setCedulaBack] = useState<string | null>(null);
+
+  const [licenciaExpiration, setLicenciaExpiration] = useState('');
+  const [licenciaFront, setLicenciaFront] = useState<string | null>(null);
+  const [licenciaBack, setLicenciaBack] = useState<string | null>(null);
+
+  const [selfie, setSelfie] = useState<string | null>(null);
+
+  const [antecedentesPdf, setAntecedentesPdf] = useState<string | null>(null);
+  const [antecedentesIssueDate, setAntecedentesIssueDate] = useState('');
+
+  const [hojaVidaPdf, setHojaVidaPdf] = useState<string | null>(null);
+  const [hojaVidaIssueDate, setHojaVidaIssueDate] = useState('');
+
+  // Auxiliares de validación de fechas
+  const isDateOlderThanDays = (dateStr: string, maxDays: number): boolean => {
+    if (!dateStr) return false;
+    const issueDate = new Date(dateStr);
+    const today = new Date();
+    issueDate.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    const diffTime = today.getTime() - issueDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays > maxDays;
+  };
+
+  const isFutureDate = (dateStr: string): boolean => {
+    if (!dateStr) return false;
+    const targetDate = new Date(dateStr);
+    const today = new Date();
+    targetDate.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    return targetDate > today;
+  };
+
 
   useEffect(() => {
     if (bankAccountType === 'RUT') {
@@ -229,7 +271,6 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
       return;
     }
 
-
     if (healthSystem === 'ISAPRE' && !isapre) {
       toast.error('Por favor, selecciona tu Isapre');
       return;
@@ -247,14 +288,94 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
       return;
     }
 
-
     if (emergencyPhone && !isValidChileanPhone(emergencyPhone)) {
       toast.error('El teléfono de contacto de emergencia no es válido');
       return;
     }
 
+    // --- Validaciones de Documentos ---
+    if (!cedulaExpiration) {
+      toast.error('Por favor, ingresa la fecha de vencimiento de tu cédula.');
+      return;
+    }
+    if (!cedulaFront || !cedulaBack) {
+      toast.error('Por favor, captura o sube el frontis y reverso de tu cédula de identidad.');
+      return;
+    }
+
+    const hasDriverLicense = selectedLicenses.length > 0;
+    if (hasDriverLicense) {
+      if (!licenciaExpiration) {
+        toast.error('Por favor, ingresa la fecha de vencimiento de tu licencia de conducir.');
+        return;
+      }
+      if (!licenciaFront || !licenciaBack) {
+        toast.error('Por favor, captura o sube el frontis y reverso de tu licencia de conducir.');
+        return;
+      }
+    }
+
+    if (!selfie) {
+      toast.error('Por favor, tómate una foto de perfil (selfie) con fondo blanco.');
+      return;
+    }
+
+    if (!antecedentesPdf) {
+      toast.error('Por favor, sube el Certificado de Antecedentes en PDF.');
+      return;
+    }
+    if (!antecedentesIssueDate) {
+      toast.error('Por favor, ingresa la fecha de emisión de tu certificado de antecedentes.');
+      return;
+    }
+    if (isFutureDate(antecedentesIssueDate)) {
+      toast.error('La fecha de emisión del certificado de antecedentes no puede estar en el futuro.');
+      return;
+    }
+    if (isDateOlderThanDays(antecedentesIssueDate, 25)) {
+      toast.error('El certificado de antecedentes no puede tener más de 25 días desde su fecha de emisión.');
+      return;
+    }
+
+    if (hasDriverLicense) {
+      if (!hojaVidaPdf) {
+        toast.error('Por favor, sube la Hoja de Vida del Conductor en PDF.');
+        return;
+      }
+      if (!hojaVidaIssueDate) {
+        toast.error('Por favor, ingresa la fecha de emisión de la hoja de vida del conductor.');
+        return;
+      }
+      if (isFutureDate(hojaVidaIssueDate)) {
+        toast.error('La fecha de emisión de la hoja de vida del conductor no puede estar en el futuro.');
+        return;
+      }
+      if (isDateOlderThanDays(hojaVidaIssueDate, 25)) {
+        toast.error('La hoja de vida del conductor no puede tener más de 25 días desde su fecha de emisión.');
+        return;
+      }
+    }
+
     startTransition(async () => {
       try {
+        toast.info('Procesando imágenes y compilando documentos. Por favor, espera...');
+        
+        // Generar el PDF de la cédula
+        const compiledCedula = await compileFrontBackPdf(cedulaFront, cedulaBack);
+
+        // Generar el PDF de la licencia (si aplica)
+        let compiledLicencia = null;
+        if (hasDriverLicense && licenciaFront && licenciaBack) {
+          compiledLicencia = await compileFrontBackPdf(licenciaFront, licenciaBack);
+        }
+
+        // Generar selfie etiquetada (con banner negro e información)
+        const labeledSelfieData = await labelSelfie(
+          selfie,
+          `${firstName} ${lastNameFather} ${lastNameMother}`,
+          rut
+        );
+
         const response = await fetch('/api/onboarding', {
           method: 'POST',
           headers: {
@@ -303,11 +424,25 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
               // Contract fields
               nationality,
               marital_status: maritalStatus,
+            },
+            documents: {
+              cedula_pdf_base64: compiledCedula,
+              cedula_expiration_date: cedulaExpiration,
+              
+              licencia_pdf_base64: compiledLicencia,
+              licencia_expiration_date: hasDriverLicense ? licenciaExpiration : null,
+              
+              selfie_original_base64: selfie,
+              selfie_labeled_base64: labeledSelfieData,
+              
+              antecedentes_pdf_base64: antecedentesPdf,
+              antecedentes_issue_date: antecedentesIssueDate,
+              
+              hoja_vida_pdf_base64: hasDriverLicense ? hojaVidaPdf : null,
+              hoja_vida_issue_date: hasDriverLicense ? hojaVidaIssueDate : null,
             }
-
           }),
         });
-
 
         const result = await response.json();
 
@@ -319,7 +454,7 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
         }
       } catch (err: any) {
         console.error(err);
-        toast.error('Error de red al enviar la ficha. Reintenta.');
+        toast.error('Error al procesar o enviar los documentos. Reintenta.');
       }
     });
   };
@@ -940,8 +1075,209 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
         </CardContent>
       </Card>
 
+      {/* 6. Documentación Obligatoria */}
+      <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <FileText className="h-5 w-5 text-orange-500" />
+            Documentación Obligatoria
+          </CardTitle>
+          <CardDescription>
+            Sube o captura los documentos e imágenes requeridos para tu ingreso.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Cédula de Identidad */}
+          <div className="space-y-4 p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/20 border border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-950/40 text-xs font-bold text-orange-600">1</span>
+              <h3 className="text-sm font-bold uppercase tracking-wider">Cédula de Identidad *</h3>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="cedula_exp">Fecha de Vencimiento *</Label>
+                <Input
+                  id="cedula_exp"
+                  type="date"
+                  value={cedulaExpiration}
+                  onChange={(e) => setCedulaExpiration(e.target.value)}
+                  required
+                  className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+              <DocumentCapture
+                id="cedula_front"
+                label="Parte Delantera *"
+                description="Foto frontal de la cédula."
+                type="card"
+                value={cedulaFront}
+                onChange={setCedulaFront}
+              />
+              <DocumentCapture
+                id="cedula_back"
+                label="Parte Trasera *"
+                description="Foto trasera de la cédula."
+                type="card"
+                value={cedulaBack}
+                onChange={setCedulaBack}
+              />
+            </div>
+          </div>
+
+          {/* Licencia de Conducir (si aplica) */}
+          {selectedLicenses.length > 0 && (
+            <div className="space-y-4 p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/20 border border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-950/40 text-xs font-bold text-orange-600">2</span>
+                <h3 className="text-sm font-bold uppercase tracking-wider">Licencia de Conducir (Clase {selectedLicenses.join(', ')}) *</h3>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="lic_exp">Fecha de Vencimiento *</Label>
+                  <Input
+                    id="lic_exp"
+                    type="date"
+                    value={licenciaExpiration}
+                    onChange={(e) => setLicenciaExpiration(e.target.value)}
+                    required
+                    className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <DocumentCapture
+                  id="lic_front"
+                  label="Parte Delantera *"
+                  description="Foto frontal de la licencia."
+                  type="card"
+                  value={licenciaFront}
+                  onChange={setLicenciaFront}
+                />
+                <DocumentCapture
+                  id="lic_back"
+                  label="Parte Trasera *"
+                  description="Foto trasera de la licencia."
+                  type="card"
+                  value={licenciaBack}
+                  onChange={setLicenciaBack}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Fotografía de Perfil (Selfie) */}
+          <div className="space-y-4 p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/20 border border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-950/40 text-xs font-bold text-orange-600">
+                {selectedLicenses.length > 0 ? '3' : '2'}
+              </span>
+              <h3 className="text-sm font-bold uppercase tracking-wider">Fotografía de Perfil (Selfie) *</h3>
+            </div>
+            
+            <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 rounded-xl p-3 flex items-start gap-2.5">
+              <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-[10px] text-amber-700 dark:text-amber-400 leading-normal">
+                <strong>Requisito Importante:</strong> La foto debe ser una selfie tomada de frente, con el rostro completamente visible y despejado, utilizando obligatoriamente un <strong>fondo blanco</strong>.
+              </p>
+            </div>
+
+            <DocumentCapture
+              id="selfie_pic"
+              label="Capturar Selfie *"
+              description="Sácate una foto sobre fondo blanco."
+              type="selfie"
+              value={selfie}
+              onChange={setSelfie}
+            />
+          </div>
+
+          {/* Certificado de Antecedentes */}
+          <div className="space-y-4 p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/20 border border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-950/40 text-xs font-bold text-orange-600">
+                {selectedLicenses.length > 0 ? '4' : '3'}
+              </span>
+              <h3 className="text-sm font-bold uppercase tracking-wider">Certificado de Antecedentes *</h3>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="antecedentes_date">Fecha de Emisión *</Label>
+                <Input
+                  id="antecedentes_date"
+                  type="date"
+                  value={antecedentesIssueDate}
+                  onChange={(e) => setAntecedentesIssueDate(e.target.value)}
+                  required
+                  className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+                />
+                {antecedentesIssueDate && isDateOlderThanDays(antecedentesIssueDate, 25) && (
+                  <p className="text-[10px] text-red-500 font-bold flex items-center gap-1">
+                    <XCircle className="h-3 w-3" /> Certificado emitido hace más de 25 días. No es válido.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <DocumentCapture
+              id="antecedentes_pdf"
+              label="Certificado en formato PDF *"
+              description="Sube el archivo PDF oficial del Registro Civil."
+              type="pdf"
+              value={antecedentesPdf}
+              onChange={setAntecedentesPdf}
+            />
+          </div>
+
+          {/* Hoja de Vida del Conductor (si aplica) */}
+          {selectedLicenses.length > 0 && (
+            <div className="space-y-4 p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/20 border border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-950/40 text-xs font-bold text-orange-600">5</span>
+                <h3 className="text-sm font-bold uppercase tracking-wider">Hoja de Vida del Conductor *</h3>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="hoja_vida_date">Fecha de Emisión *</Label>
+                  <Input
+                    id="hoja_vida_date"
+                    type="date"
+                    value={hojaVidaIssueDate}
+                    onChange={(e) => setHojaVidaIssueDate(e.target.value)}
+                    required
+                    className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+                  />
+                  {hojaVidaIssueDate && isDateOlderThanDays(hojaVidaIssueDate, 25) && (
+                    <p className="text-[10px] text-red-500 font-bold flex items-center gap-1">
+                      <XCircle className="h-3 w-3" /> Certificado emitido hace más de 25 días. No es válido.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <DocumentCapture
+                id="hoja_vida_pdf"
+                label="Hoja de Vida en formato PDF *"
+                description="Sube el archivo PDF oficial del Registro Civil."
+                type="pdf"
+                value={hojaVidaPdf}
+                onChange={setHojaVidaPdf}
+              />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Consentimiento y Términos */}
       <Card className="border-none shadow-xl rounded-3xl bg-white dark:bg-slate-900">
+
         <CardContent className="p-6 space-y-4">
           <div className="flex items-start gap-3">
             <Checkbox 

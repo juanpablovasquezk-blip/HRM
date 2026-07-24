@@ -184,23 +184,187 @@ export async function POST(request: NextRequest) {
 
 
 
-    // Insert new personnel
-    const { error: insertError } = await supabase
+    // Insert new personnel and select its id
+    const { data: newPerson, error: insertError } = await supabase
       .from('personnel')
-      .insert(personnelPayload);
+      .insert(personnelPayload)
+      .select('id')
+      .single();
 
-    if (insertError) {
+    if (insertError || !newPerson) {
       console.error('[API-ONBOARDING] Insert error:', insertError);
-      return NextResponse.json({ success: false, error: insertError.message }, { status: 500 });
+      return NextResponse.json({ success: false, error: insertError?.message || 'Error al guardar los datos de personal' }, { status: 500 });
     }
 
-    // Mark token as used if it's one-time (optional, here we set used_at)
+    const personnelId = newPerson.id;
+
+    // Guardar los documentos en storage y base de datos
+    if (body.documents) {
+      const docs = body.documents;
+
+      // Limpiar nombres para el sufijo (ej: JEREMY_REYES)
+      const cleanFirstName = first_name.trim().split(' ')[0].normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const cleanLastName = last_name_father.trim().split(' ')[0].normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const fileSuffix = `${cleanFirstName}_${cleanLastName}`;
+
+      // Consultar definiciones de documentos de la compañía para enlazar definition_id si existen
+      const { data: defs } = await supabase
+        .from('document_definitions')
+        .select('id, name')
+        .eq('company_id', tokenData.company_id)
+        .eq('is_active', true);
+
+      const findDefId = (keywords: string[]) => {
+        if (!defs) return null;
+        const match = defs.find(d => {
+          const nameLower = d.name.toLowerCase();
+          return keywords.some(k => nameLower.includes(k));
+        });
+        return match ? match.id : null;
+      };
+
+      const cedulaDefId = findDefId(['cedula', 'cédula', 'identidad']);
+      const licenciaDefId = findDefId(['licencia', 'conducir']);
+      const antecedentesDefId = findDefId(['antecedentes']);
+      const hojaVidaDefId = findDefId(['hoja de vida', 'hoja', 'conductor']);
+      const fotoDefId = findDefId(['perfil', 'foto', 'selfie']);
+
+      const base64ToBuffer = (base64Str: string) => {
+        const matches = base64Str.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (!matches || matches.length !== 3) {
+          return Buffer.from(base64Str, 'base64');
+        }
+        return Buffer.from(matches[2], 'base64');
+      };
+
+      const uploadAndRegister = async (
+        base64Data: string,
+        fileName: string,
+        contentType: string,
+        docType: string,
+        definitionId: string | null,
+        dates?: { issue_date?: string | null; expiration_date?: string | null }
+      ) => {
+        try {
+          const buffer = base64ToBuffer(base64Data);
+
+          // Subir archivo a Supabase Storage
+          const { error: uploadError } = await supabase.storage
+            .from('documents')
+            .upload(fileName, buffer, {
+              contentType,
+              upsert: true
+            });
+
+          if (uploadError) {
+            console.error(`[API-ONBOARDING] Error al subir archivo a Storage (${docType}):`, uploadError);
+            return;
+          }
+
+          // Obtener URL pública del archivo
+          const { data: urlData } = supabase.storage
+            .from('documents')
+            .getPublicUrl(fileName);
+
+          // Insertar registro en la tabla documents
+          const { error: docInsertError } = await supabase
+            .from('documents')
+            .insert({
+              personnel_id: personnelId,
+              type: docType,
+              file_url: urlData.publicUrl,
+              definition_id: definitionId,
+              issue_date: dates?.issue_date || null,
+              expiration_date: dates?.expiration_date || null,
+              status: 'PENDING',
+            });
+
+          if (docInsertError) {
+            console.error(`[API-ONBOARDING] Error al insertar fila en documents (${docType}):`, docInsertError);
+          }
+        } catch (err) {
+          console.error(`[API-ONBOARDING] Error inesperado procesando documento (${docType}):`, err);
+        }
+      };
+
+      // 1. Cédula de Identidad PDF
+      if (docs.cedula_pdf_base64) {
+        await uploadAndRegister(
+          docs.cedula_pdf_base64,
+          `${personnelId}/CI_${fileSuffix}.pdf`,
+          'application/pdf',
+          'CEDULA',
+          cedulaDefId,
+          { expiration_date: docs.cedula_expiration_date }
+        );
+      }
+
+      // 2. Licencia de Conducir PDF
+      if (docs.licencia_pdf_base64) {
+        await uploadAndRegister(
+          docs.licencia_pdf_base64,
+          `${personnelId}/LIC_${fileSuffix}.pdf`,
+          'application/pdf',
+          'LICENCIA',
+          licenciaDefId,
+          { expiration_date: docs.licencia_expiration_date }
+        );
+      }
+
+      // 3. Selfie Original (FOTO_JEREMY_REYES.jpg)
+      if (docs.selfie_original_base64) {
+        await uploadAndRegister(
+          docs.selfie_original_base64,
+          `${personnelId}/FOTO_${fileSuffix}.jpg`,
+          'image/jpeg',
+          'SELFIE_ORIGINAL',
+          null
+        );
+      }
+
+      // 4. Selfie con Banner (FOTO_NOMBRE_JEREMY_REYES.jpg)
+      if (docs.selfie_labeled_base64) {
+        await uploadAndRegister(
+          docs.selfie_labeled_base64,
+          `${personnelId}/FOTO_NOMBRE_${fileSuffix}.jpg`,
+          'image/jpeg',
+          'FOTO_PERFIL',
+          fotoDefId
+        );
+      }
+
+      // 5. Certificado de Antecedentes PDF
+      if (docs.antecedentes_pdf_base64) {
+        await uploadAndRegister(
+          docs.antecedentes_pdf_base64,
+          `${personnelId}/ANTECEDENTES_${fileSuffix}.pdf`,
+          'application/pdf',
+          'CERTIFICADO_ANTECEDENTES',
+          antecedentesDefId,
+          { issue_date: docs.antecedentes_issue_date }
+        );
+      }
+
+      // 6. Hoja de Vida del Conductor PDF
+      if (docs.hoja_vida_pdf_base64) {
+        await uploadAndRegister(
+          docs.hoja_vida_pdf_base64,
+          `${personnelId}/HOJA_VIDA_${fileSuffix}.pdf`,
+          'application/pdf',
+          'HOJA_VIDA_CONDUCTOR',
+          hojaVidaDefId,
+          { issue_date: docs.hoja_vida_issue_date }
+        );
+      }
+    }
+
+    // Marcar token de onboarding como usado
     await supabase
       .from('onboarding_tokens')
       .update({ used_at: now })
       .eq('id', tokenData.id);
 
-    return NextResponse.json({ success: true, message: 'Datos personales enviados correctamente. Quedan pendientes de aprobación.' });
+    return NextResponse.json({ success: true, message: 'Datos personales y documentos cargados con éxito. Quedan pendientes de aprobación.' });
   } catch (err: any) {
     console.error('[API-ONBOARDING] Unexpected POST error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
