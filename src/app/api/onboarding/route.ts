@@ -230,11 +230,12 @@ export async function POST(request: NextRequest) {
       const fotoDefId = findDefId(['perfil', 'foto', 'selfie']);
 
       const base64ToBuffer = (base64Str: string) => {
-        const matches = base64Str.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-        if (!matches || matches.length !== 3) {
+        const marker = ';base64,';
+        const markerIndex = base64Str.indexOf(marker);
+        if (markerIndex === -1) {
           return Buffer.from(base64Str, 'base64');
         }
-        return Buffer.from(matches[2], 'base64');
+        return Buffer.from(base64Str.substring(markerIndex + marker.length), 'base64');
       };
 
       const uploadAndRegister = async (
