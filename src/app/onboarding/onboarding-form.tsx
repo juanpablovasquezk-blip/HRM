@@ -74,6 +74,24 @@ const BANK_LIST = [
   'PREPAGO MACH'
 ];
 
+const METROPOLITANA_PROVINCES = {
+  'SANTIAGO': [
+    'CERRILLOS', 'CERRO NAVIA', 'CONCHALÍ', 'EL BOSQUE', 'ESTACIÓN CENTRAL',
+    'HUECHURABA', 'INDEPENDENCIA', 'LA CISTERNA', 'LA FLORIDA', 'LA GRANJA',
+    'LA PINTANA', 'LA REINA', 'LAS CONDES', 'LO BARNECHEA', 'LO ESPEJO',
+    'LO PRADO', 'MACUL', 'MAIPÚ', 'ÑUÑOA', 'PEDRO AGUIRRE CERDA',
+    'PEÑALOLÉN', 'PROVIDENCIA', 'PUDAHUEL', 'QUILICURA', 'QUINTA NORMAL',
+    'RECOLETA', 'RENCA', 'SAN JOAQUÍN', 'SAN MIGUEL', 'SAN RAMÓN',
+    'SANTIAGO', 'VITACURA'
+  ],
+  'CHACABUCO': ['COLINA', 'LAMPA', 'TIL TIL'],
+  'CORDILLERA': ['PIRQUE', 'PUENTE ALTO', 'SAN JOSÉ DE MAIPO'],
+  'MAIPO': ['BUIN', 'CALERA DE TANGO', 'PAINE', 'SAN BERNARDO'],
+  'MELIPILLA': ['ALHUÉ', 'CURACAVÍ', 'MARÍA PINTO', 'MELIPILLA', 'SAN PEDRO'],
+  'TALAGANTE': ['EL MONTE', 'ISLA DE MAIPO', 'PADRE HURTADO', 'PEÑAFLOR', 'TALAGANTE']
+} as const;
+
+
 
 
 // Chilean RUT formatter
@@ -140,8 +158,9 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
   // Address
   const [addressStreet, setAddressStreet] = useState('');
   const [addressCity, setAddressCity] = useState('');
-  const [addressRegion, setAddressRegion] = useState('');
+  const [addressRegion, setAddressRegion] = useState('METROPOLITANA');
   const [addressComuna, setAddressComuna] = useState('');
+
 
   // Emergency contact
   const [emergencyName, setEmergencyName] = useState('');
@@ -696,36 +715,46 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="address_comuna">Comuna *</Label>
-              <Input 
-                id="address_comuna" 
-                value={addressComuna} 
-                onChange={e => setAddressComuna(e.target.value)} 
-                required
-                placeholder="PROVIDENCIA" 
-                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
-              />
+              <Label htmlFor="address_city">Ciudad / Provincia *</Label>
+              <Select value={addressCity} onValueChange={(val) => { setAddressCity(val || ''); setAddressComuna(''); }} required>
+                <SelectTrigger id="address_city" className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder="SELECCIONAR PROVINCIA" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.keys(METROPOLITANA_PROVINCES).map(province => (
+                    <SelectItem key={province} value={province}>{province}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+            
             <div className="space-y-1.5">
-              <Label htmlFor="address_city">Ciudad *</Label>
-              <Input 
-                id="address_city" 
-                value={addressCity} 
-                onChange={e => setAddressCity(e.target.value)} 
+              <Label htmlFor="address_comuna">Comuna *</Label>
+              <Select 
+                value={addressComuna} 
+                onValueChange={(val) => setAddressComuna(val || '')} 
                 required
-                placeholder="SANTIAGO" 
-                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
-              />
+                disabled={!addressCity}
+              >
+                <SelectTrigger id="address_comuna" className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700">
+                  <SelectValue placeholder={addressCity ? "SELECCIONAR COMUNA" : "SELECCIONE PROVINCIA PRIMERO"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {addressCity && METROPOLITANA_PROVINCES[addressCity as keyof typeof METROPOLITANA_PROVINCES]?.map(comuna => (
+                    <SelectItem key={comuna} value={comuna}>{comuna}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+            
             <div className="space-y-1.5">
               <Label htmlFor="address_region">Región *</Label>
               <Input 
                 id="address_region" 
                 value={addressRegion} 
-                onChange={e => setAddressRegion(e.target.value)} 
-                required
-                placeholder="METROPOLITANA" 
-                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+                readOnly
+                disabled
+                className="h-11 rounded-xl bg-slate-100 dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 text-slate-500 font-semibold cursor-not-allowed"
               />
             </div>
           </div>
