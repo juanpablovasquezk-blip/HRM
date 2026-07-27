@@ -9,6 +9,7 @@ import { TodoList } from '@/components/dashboard/todo-list';
 import { ActiveLeavesCard } from '@/components/dashboard/active-leaves-card';
 import { BirthdaysCard } from '@/components/dashboard/birthdays-card';
 import { MonthlyFinalAbsencesCard } from '@/components/dashboard/monthly-final-absences-card';
+import { PendingTransportsCard } from '@/components/dashboard/pending-transports-card';
 
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/server';
@@ -42,6 +43,7 @@ export default async function DashboardPage() {
   let ownTransport = 0;
   let companyTransport = 0;
   let pendingTransports = 0;
+  let pendingDates: string[] = [];
   let manualChanges = 0;
   let pendingRequests = 0;
   let absencePercent = 0;
@@ -214,7 +216,8 @@ export default async function DashboardPage() {
       const [
         { count: ownCount },
         { count: companyCount },
-        { count: pendingTransCount }
+        { count: pendingTransCount },
+        { data: pendingDatesData }
       ] = await Promise.all([
         supabase.from('transport_requests').select('id', { count: 'exact', head: true })
           .eq('transport_type', 'PROPIO')
@@ -224,12 +227,17 @@ export default async function DashboardPage() {
           .neq('transport_type', 'PENDIENTE')
           .eq('date', todayStr),
         supabase.from('transport_requests').select('id', { count: 'exact', head: true })
+          .eq('transport_type', 'PENDIENTE'),
+        supabase.from('transport_requests')
+          .select('date')
           .eq('transport_type', 'PENDIENTE')
+          .order('date', { ascending: false })
       ]);
 
       ownTransport = ownCount || 0;
       companyTransport = companyCount || 0;
       pendingTransports = pendingTransCount || 0;
+      pendingDates = Array.from(new Set(pendingDatesData?.map(d => d.date) || [])) as string[];
 
       // ── 7. Cambios manuales de turno (mes actual) ──────────────────────────
       const { count: manualCount } = await supabase
@@ -376,12 +384,9 @@ export default async function DashboardPage() {
             icon={Bus}
             iconClassName="bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400"
           />
-          <StatCard
-            title="Transp. Pendientes"
-            value={pendingTransports}
-            subtitle="Por asignar / confirmar"
-            icon={AlertCircle}
-            iconClassName={`${pendingTransports > 0 ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 animate-pulse' : 'bg-slate-100 text-slate-500'}`}
+          <PendingTransportsCard
+            count={pendingTransports}
+            dates={pendingDates}
           />
           <StatCard
             title="Cambios de Turno"
