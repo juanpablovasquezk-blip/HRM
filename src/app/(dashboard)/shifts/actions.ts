@@ -758,10 +758,15 @@ export async function publishAssignments(input: string | string[], endDate?: str
       if (latestAuditMap.size > 0) {
         // Primary path: only assignments whose audit log shows was_published = true
         // AND the shift actually changed (previous_shift_id !== current shift_id)
+        // Skip past or today's dates in Santiago time to prevent sending WhatsApp notifications.
+        const chileTime = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" }));
+        const todayStr = format(chileTime, 'yyyy-MM-dd');
+
         changedAssignments = assignmentsToPublish.filter(a => {
           const key = `${a.personnel_id}_${a.date}`;
           const log = latestAuditMap.get(key);
-          return log && log.was_published === true && log.previous_shift_id !== a.shift_id;
+          const isPastOrToday = a.date <= todayStr;
+          return log && log.was_published === true && log.previous_shift_id !== a.shift_id && !isPastOrToday;
         });
       } else {
         // Fallback: audit logs unavailable → do not send any notifications
@@ -1179,6 +1184,15 @@ export async function moveAssignment(assignmentId: string, newDate: string, reas
   if (current.is_published && current.personnel?.phone) {
     (async () => {
       try {
+        const chileTime = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" }));
+        const todayStr = format(chileTime, 'yyyy-MM-dd');
+
+        // Skip notification if the old date or new date is in the past or today
+        if (current.date <= todayStr || newDate <= todayStr) {
+          console.log(`[moveAssignment] Skipping WhatsApp notification for date move (${current.date} -> ${newDate}) because it is past or today.`);
+          return;
+        }
+
         const person = current.personnel;
         let phone = person.phone.replace(/[^\d+]/g, '');
         if (!phone.startsWith('+') && phone.startsWith('56')) {
@@ -1244,6 +1258,15 @@ export async function deleteAssignment(id: string) {
   if (current && current.is_published && current.personnel?.phone) {
     (async () => {
       try {
+        const chileTime = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" }));
+        const todayStr = format(chileTime, 'yyyy-MM-dd');
+
+        // Skip notification if the deleted assignment date is in the past or today
+        if (current.date <= todayStr) {
+          console.log(`[deleteAssignment] Skipping WhatsApp notification for deleted assignment on ${current.date} because it is past or today.`);
+          return;
+        }
+
         const person = current.personnel;
         let phone = person.phone.replace(/[^\d+]/g, '');
         if (!phone.startsWith('+') && phone.startsWith('56')) {
