@@ -87,6 +87,15 @@ export async function sendTransportNotification(requestId: string, isTimePending
 
     if (trErr || !tr) throw new Error('No se encontró la solicitud de transporte');
 
+    // Prevent notifications for past transport dates
+    const todayStr = format(
+      new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" })),
+      'yyyy-MM-dd'
+    );
+    if (tr.date < todayStr) {
+      return { success: false, error: 'No se envían notificaciones por WhatsApp para transportes de fechas pasadas' };
+    }
+
     // 2. Get Personnel (Direct)
     const { data: pData } = await supabase
       .from('personnel')

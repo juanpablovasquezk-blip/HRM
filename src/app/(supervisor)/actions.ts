@@ -344,6 +344,15 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
   // 4. WhatsApp Notification for PROPIO
   if (!dbError && mobilization === 'PROPIO' && personnel) {
+    const todayStr = format(
+      new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" })),
+      'yyyy-MM-dd'
+    );
+    if (date < todayStr) {
+      revalidatePath('/supervisor/transport');
+      return { success: true, whatsapp: { group: false, worker: false, debug: 'Omitido: Fecha pasada' } };
+    }
+
     let debugInfo = 'Iniciando';
     try {
       const pData = personnel;
