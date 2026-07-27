@@ -354,6 +354,10 @@ export function BonosReportClient({
       
       {/* Dynamic CSS Print Overrides */}
       <style dangerouslySetInnerHTML={{ __html: `
+        @page {
+          size: ${reportView === 'summary' ? 'landscape' : 'portrait'};
+          margin: 8mm;
+        }
         @media print {
           /* Hide standard dashboard chrome */
           aside, nav, header, [data-sidebar], .no-print {
@@ -401,6 +405,13 @@ export function BonosReportClient({
             background-color: #f1f5f9 !important;
             color: #0f172a !important;
             font-weight: 700 !important;
+          }
+          .print-card-flat {
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: transparent !important;
           }
         }
       ` }} />
@@ -559,7 +570,7 @@ export function BonosReportClient({
       ) : (
         <div className="space-y-10">
           {reportView === 'summary' ? (
-            <Card className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-all duration-200">
+            <Card className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-all duration-200 print-card-flat">
               <CardHeader className="px-0 pt-0 pb-4 border-b border-slate-100 dark:border-slate-850 flex flex-row items-center justify-between">
                 <div>
                   <CardTitle className="text-base font-black text-slate-900 dark:text-slate-100 uppercase tracking-tight leading-tight">
