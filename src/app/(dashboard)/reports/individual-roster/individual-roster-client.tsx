@@ -518,7 +518,11 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
 
                         // Label: VAC for vacation, LIC for other leaves, shift name, or LIBRE
                         let content: string;
-                        if (leave) content = leave.type === 'vacation' ? 'VAC' : 'LIC';
+                        if (leave) {
+                          if (leave.type === 'vacation') content = 'VAC';
+                          else if (leave.type === 'sick') content = 'LIC';
+                          else content = 'PER';
+                        }
                         else if (asg) content = asg.shift?.name || 'OT';
                         else content = 'LIBRE';
 
@@ -554,7 +558,11 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const isChanged = isManual || isPostLeave;
 
                         let content = '';
-                        if (leave) content = leave.type === 'vacation' ? 'VACACIONES' : 'LICENCIA';
+                        if (leave) {
+                          if (leave.type === 'vacation') content = 'VACACIONES';
+                          else if (leave.type === 'sick') content = 'LICENCIA';
+                          else content = 'PERMISO';
+                        }
                         else if (asg) {
                           const areaName = asg.area?.name || '';
                           const posName = asg.position?.name || '';
