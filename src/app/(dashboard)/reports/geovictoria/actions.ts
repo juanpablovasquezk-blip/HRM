@@ -24,6 +24,7 @@ export async function getPersonnelForFilter(): Promise<{ data: PersonnelFilterIt
     .from('personnel')
     .select('id, first_name, last_name_father')
     .eq('is_active', true)
+    .is('termination_date', null)
     .order('first_name');
   return { data: (data as PersonnelFilterItem[]) || [] };
 }
@@ -44,7 +45,8 @@ export async function getGeoVictoriaData(filters: {
     let personnelQuery = supabase
       .from('personnel')
       .select('id, rut')
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .is('termination_date', null);
 
     if (filters.personnelIds && filters.personnelIds.length > 0) {
       personnelQuery = personnelQuery.in('id', filters.personnelIds);
