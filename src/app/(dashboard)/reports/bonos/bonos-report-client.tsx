@@ -12,9 +12,10 @@ import {
   endOfMonth,
 } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Printer, Search, Loader2, Check, DollarSign, Calendar, Landmark, AlertCircle, RefreshCw } from 'lucide-react';
+import { Printer, Search, Loader2, Check, DollarSign, Calendar, Landmark, AlertCircle, RefreshCw, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import * as XLSX from 'xlsx';
 import {
   getBonosReportData,
   updateShiftPaidMonth,
@@ -241,6 +242,68 @@ export function BonosReportClient({
       return format(date, 'MMMM yyyy', { locale: es }).toUpperCase();
     } catch (_) {
       return monthStr;
+    }
+  };
+
+  const handleDownloadExcel = () => {
+    try {
+      const excelData = groupedList.map(person => {
+        const shiftVal = person.shiftsCount * 40000;
+        const transportVal = person.transportsCount * 14000;
+        const totalVal = shiftVal + transportVal;
+
+        return {
+          'Colaborador': `${person.first_name} ${person.last_name_father} ${person.last_name_mother}`.toUpperCase(),
+          'RUT': person.rut,
+          'Empresa': person.companyName,
+          'Cant. Turnos': person.shiftsCount,
+          'Valor Turnos': shiftVal,
+          'Cant. Transportes': person.transportsCount,
+          'Valor Transportes': transportVal,
+          'Total Líquido': totalVal
+        };
+      });
+
+      // Add Grand Totals row
+      const totalShifts = groupedList.reduce((acc, p) => acc + p.shiftsCount, 0);
+      const totalShiftVal = totalShifts * 40000;
+      const totalTransports = groupedList.reduce((acc, p) => acc + p.transportsCount, 0);
+      const totalTransportVal = totalTransports * 14000;
+      const grandTotal = totalShiftVal + totalTransportVal;
+
+      excelData.push({
+        'Colaborador': 'TOTAL GENERAL',
+        'RUT': '',
+        'Empresa': '',
+        'Cant. Turnos': totalShifts,
+        'Valor Turnos': totalShiftVal,
+        'Cant. Transportes': totalTransports,
+        'Valor Transportes': totalTransportVal,
+        'Total Líquido': grandTotal
+      });
+
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Liquidación Bonos');
+
+      // Adjust column widths automatically
+      const maxColWidths = [
+        { wch: 35 }, // Colaborador
+        { wch: 15 }, // RUT
+        { wch: 20 }, // Empresa
+        { wch: 12 }, // Cant. Turnos
+        { wch: 15 }, // Valor Turnos
+        { wch: 16 }, // Cant. Transportes
+        { wch: 18 }, // Valor Transportes
+        { wch: 18 }  // Total Líquido
+      ];
+      ws['!cols'] = maxColWidths;
+
+      const fileName = `Reporte_Liquidacion_Bonos_${from}_al_${to}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      toast.success('Excel descargado con éxito.');
+    } catch (err: any) {
+      toast.error(`Error al exportar Excel: ${err.message}`);
     }
   };
 
@@ -547,6 +610,16 @@ export function BonosReportClient({
               >
                 <Printer className="h-4 w-4 mr-2" />
                 Imprimir Reporte
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={handleDownloadExcel}
+                disabled={groupedList.length === 0}
+                className="h-9 bg-emerald-600 text-white hover:bg-emerald-700 no-print"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Descargar Excel
               </Button>
             </div>
           </div>
