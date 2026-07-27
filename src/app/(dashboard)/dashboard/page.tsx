@@ -10,6 +10,7 @@ import { ActiveLeavesCard } from '@/components/dashboard/active-leaves-card';
 import { BirthdaysCard } from '@/components/dashboard/birthdays-card';
 import { MonthlyFinalAbsencesCard } from '@/components/dashboard/monthly-final-absences-card';
 
+import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/server';
 import { deactivateExpiredPersonnel } from '@/lib/deactivate-expired';
 
@@ -40,6 +41,7 @@ export default async function DashboardPage() {
   let onLeaveToday = 0;
   let ownTransport = 0;
   let companyTransport = 0;
+  let pendingTransports = 0;
   let manualChanges = 0;
   let pendingRequests = 0;
   let absencePercent = 0;
@@ -203,20 +205,31 @@ export default async function DashboardPage() {
           .sort((a, b) => b.count - a.count);
       }
 
-      // ── 6. Transportes (mes actual) ────────────────────────────────────────
-      const [{ count: ownCount }, { data: allTransport }] = await Promise.all([
+      // ── 6. Transportes (diarios y pendientes acumulados) ───────────────────
+      const todayStr = format(
+        new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" })),
+        'yyyy-MM-dd'
+      );
+
+      const [
+        { count: ownCount },
+        { count: companyCount },
+        { count: pendingTransCount }
+      ] = await Promise.all([
         supabase.from('transport_requests').select('id', { count: 'exact', head: true })
-          .eq('transport_type', 'PROPIO').gte('date', monthStart).lte('date', monthEnd),
+          .eq('transport_type', 'PROPIO')
+          .eq('date', todayStr),
         supabase.from('transport_requests').select('id', { count: 'exact', head: true })
-          .neq('transport_type', 'PROPIO').neq('transport_type', 'PENDIENTE')
-          .gte('date', monthStart).lte('date', monthEnd),
+          .neq('transport_type', 'PROPIO')
+          .neq('transport_type', 'PENDIENTE')
+          .eq('date', todayStr),
+        supabase.from('transport_requests').select('id', { count: 'exact', head: true })
+          .eq('transport_type', 'PENDIENTE')
       ]);
+
       ownTransport = ownCount || 0;
-      // For company transport, count = total - own - pending
-      const { count: totalTransport } = await supabase
-        .from('transport_requests').select('id', { count: 'exact', head: true })
-        .gte('date', monthStart).lte('date', monthEnd);
-      companyTransport = Math.max(0, (totalTransport || 0) - ownTransport);
+      companyTransport = companyCount || 0;
+      pendingTransports = pendingTransCount || 0;
 
       // ── 7. Cambios manuales de turno (mes actual) ──────────────────────────
       const { count: manualCount } = await supabase
@@ -348,20 +361,27 @@ export default async function DashboardPage() {
       {/* ── Fila 2: KPIs secundarios ── */}
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Operaciones</p>
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <StatCard
             title="Transporte Propio"
             value={ownTransport}
-            subtitle="Solicitudes mes actual"
+            subtitle="Solicitudes hoy"
             icon={Car}
             iconClassName="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
           />
           <StatCard
             title="Transporte Empresa"
             value={companyTransport}
-            subtitle="Solicitudes mes actual"
+            subtitle="Solicitudes hoy"
             icon={Bus}
             iconClassName="bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400"
+          />
+          <StatCard
+            title="Transp. Pendientes"
+            value={pendingTransports}
+            subtitle="Por asignar / confirmar"
+            icon={AlertCircle}
+            iconClassName={`${pendingTransports > 0 ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 animate-pulse' : 'bg-slate-100 text-slate-500'}`}
           />
           <StatCard
             title="Cambios de Turno"
@@ -371,11 +391,11 @@ export default async function DashboardPage() {
             iconClassName="bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400"
           />
           <StatCard
-            title="Solicitudes Pendientes"
+            title="Solicitudes Ausencia"
             value={pendingRequests}
-            subtitle="Ausencias por aprobar"
-            icon={AlertCircle}
-            iconClassName={`${pendingRequests > 0 ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-slate-100 text-slate-500'}`}
+            subtitle="Por aprobar"
+            icon={CalendarOff}
+            iconClassName={`${pendingRequests > 0 ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-slate-100 text-slate-500'}`}
           />
         </div>
       </div>
