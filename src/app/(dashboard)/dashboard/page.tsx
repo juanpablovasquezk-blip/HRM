@@ -315,7 +315,8 @@ export default async function DashboardPage() {
   };
 
   // ── Greeting ──────────────────────────────────────────────────────────────────
-  const greeting = now.getHours() < 12 ? 'Buenos Días' : now.getHours() < 18 ? 'Buenas Tardes' : 'Buenas Noches';
+  const santiagoHour = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" })).getHours();
+  const greeting = santiagoHour < 12 ? 'Buenos Días' : santiagoHour < 18 ? 'Buenas Tardes' : 'Buenas Noches';
   const dateStr = now.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   return (
