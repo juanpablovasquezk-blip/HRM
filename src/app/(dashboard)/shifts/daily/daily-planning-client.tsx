@@ -733,7 +733,19 @@ export default function DailyPlanningClient({
                     {dhl.map(a => (
                       <div key={a.id} className="flex flex-col relative group">
                         <span className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>{formatName(a.personnel)}</span>
-                        <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
+                        {!readOnly ? (
+                          <select 
+                            className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
+                            value={a.shift_id}
+                            onChange={(e) => handleUpdateShift(a.id, e.target.value)}
+                          >
+                            {shifts.map(s => (
+                              <option key={s.id} value={s.id}>{s.name} ({s.start_time.substring(0,5)})</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
+                        )}
                         <button onClick={() => handleDeleteAssignment(a.id)} className="absolute -top-1 -right-2 opacity-0 group-hover:opacity-100 text-red-400 p-1 no-print">
                            <AlertTriangle className="w-3 h-3" />
                         </button>
@@ -752,7 +764,19 @@ export default function DailyPlanningClient({
                     {fedex.map(a => (
                       <div key={a.id} className="flex flex-col relative group">
                         <span className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>{formatName(a.personnel)}</span>
-                        <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
+                        {!readOnly ? (
+                          <select 
+                            className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
+                            value={a.shift_id}
+                            onChange={(e) => handleUpdateShift(a.id, e.target.value)}
+                          >
+                            {shifts.map(s => (
+                              <option key={s.id} value={s.id}>{s.name} ({s.start_time.substring(0,5)})</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
+                        )}
                         <button onClick={() => handleDeleteAssignment(a.id)} className="absolute -top-1 -right-2 opacity-0 group-hover:opacity-100 text-red-400 p-1 no-print">
                            <AlertTriangle className="w-3 h-3" />
                         </button>
