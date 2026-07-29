@@ -557,8 +557,11 @@ export async function swapAssignments(id1: string, id2: string) {
     return { success: false, error: 'Las asignaciones deben tener el mismo horario para ser intercambiadas' };
   }
 
-  // 5. Swap the personnel sequentially to bypass unique(personnel_id, date, shift_id) constraint
+  // 5. Swap the personnel (and is_extra) sequentially to bypass unique(personnel_id, date, shift_id) constraint
+  // is_extra follows the PERSON, not the assignment row
   const originalDate = ass1.date;
+  const isExtra1 = ass1.is_extra ?? false;
+  const isExtra2 = ass2.is_extra ?? false;
   
   // Step 1: Temporarily move assignment 1 to a dummy date to free up its personnel_id on TODAY
   const { error: step1Err } = await supabase
@@ -571,10 +574,10 @@ export async function swapAssignments(id1: string, id2: string) {
     return { success: false, error: 'Error al iniciar el intercambio de personal' };
   }
 
-  // Step 2: Assign personnel 1 to assignment 2
+  // Step 2: Assign personnel 1 to assignment 2 (with its is_extra flag)
   const { error: step2Err } = await supabase
     .from('shift_assignments')
-    .update({ personnel_id: ass1.personnel_id, is_manual: true })
+    .update({ personnel_id: ass1.personnel_id, is_extra: isExtra1, is_manual: true })
     .eq('id', id2);
 
   if (step2Err) {
@@ -584,16 +587,16 @@ export async function swapAssignments(id1: string, id2: string) {
     return { success: false, error: 'Error al completar el paso 2 del intercambio' };
   }
 
-  // Step 3: Assign personnel 2 to assignment 1 and restore its date
+  // Step 3: Assign personnel 2 to assignment 1 (with its is_extra flag) and restore its date
   const { error: step3Err } = await supabase
     .from('shift_assignments')
-    .update({ personnel_id: ass2.personnel_id, date: originalDate, is_manual: true })
+    .update({ personnel_id: ass2.personnel_id, is_extra: isExtra2, date: originalDate, is_manual: true })
     .eq('id', id1);
 
   if (step3Err) {
     console.error('Error in swap step 3:', step3Err);
     // Rollback step 2 & 1
-    await supabase.from('shift_assignments').update({ personnel_id: ass2.personnel_id }).eq('id', id2);
+    await supabase.from('shift_assignments').update({ personnel_id: ass2.personnel_id, is_extra: isExtra2 }).eq('id', id2);
     await supabase.from('shift_assignments').update({ date: originalDate }).eq('id', id1);
     return { success: false, error: 'Error al finalizar el intercambio de personal' };
   }
