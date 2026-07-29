@@ -133,7 +133,7 @@ export default function DailyPlanningClient({
     const isValidTarget = isDragActive && !isThisDragged && isSameSchedule(draggedAssignment, assignment);
     const isHovered = dragOverAssignmentId === assignment.id;
 
-    let styles = ' transition-all duration-150 cursor-grab active:cursor-grabbing rounded px-1.5 py-0.5 select-none ';
+    let styles = ' inline-block transition-all duration-150 cursor-grab active:cursor-grabbing rounded px-2 py-0.5 select-none border border-transparent hover:bg-slate-100/80 hover:border-slate-200 ';
     if (isThisDragged) {
       styles += ' opacity-30 border border-dashed border-slate-400 bg-slate-100 ';
     } else if (isHovered && isValidTarget) {
