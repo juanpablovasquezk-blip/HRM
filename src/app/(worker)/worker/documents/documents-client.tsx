@@ -33,6 +33,7 @@ import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 import { createClient } from '@/lib/supabase/client';
+import DocumentCapture from '@/components/onboarding/document-capture';
 
 interface WorkerDocumentsClientProps {
   definitions: DocumentDefinition[];
@@ -40,12 +41,35 @@ interface WorkerDocumentsClientProps {
   userId: string;
 }
 
+const getCaptureType = (defName: string): 'card' | 'selfie' | 'pdf' => {
+  const name = defName.toLowerCase();
+  if (name.includes('cedula') || name.includes('cédula') || name.includes('licencia') || name.includes('credencial') || name.includes('carnet') || name.includes('tarjeta')) {
+    return 'card';
+  }
+  if (name.includes('foto') || name.includes('selfie') || name.includes('rostro')) {
+    return 'selfie';
+  }
+  return 'pdf';
+};
+
+const base64ToFile = (base64String: string, filename: string): File => {
+  const arr = base64String.split(',');
+  const mime = arr[0].match(/:(.*?);/)?.[1] || '';
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new File([u8arr], filename, { type: mime });
+};
+
 export default function WorkerDocumentsClient({ definitions, existingDocuments, userId }: WorkerDocumentsClientProps) {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedDef, setSelectedDef] = useState<DocumentDefinition | null>(null);
   const [expiryDate, setExpiryDate] = useState<string>('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [capturedValue, setCapturedValue] = useState<string | null>(null);
   
   const supabase = createClient();
 
@@ -63,24 +87,13 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
   const handleOpenUpload = (def: DocumentDefinition) => {
     setSelectedDef(def);
     setExpiryDate('');
-    setSelectedFile(null);
+    setCapturedValue(null);
     setIsDialogOpen(true);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error('El archivo es demasiado grande (máx 5MB)');
-        return;
-      }
-      setSelectedFile(file);
-    }
-  };
-
   const processUpload = async () => {
-    if (!selectedDef || !selectedFile) {
-      toast.error('Selecciona un archivo');
+    if (!selectedDef || !capturedValue) {
+      toast.error('Selecciona o toma una foto del documento');
       return;
     }
 
@@ -93,14 +106,17 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
     const loadingToast = toast.loading('Subiendo documento...');
 
     try {
-      const fileExt = selectedFile.name.split('.').pop();
-      const fileName = `${selectedDef.id}-${Date.now()}.${fileExt}`;
+      const mimeType = capturedValue.split(';')[0].split(':')[1];
+      const ext = mimeType === 'application/pdf' ? 'pdf' : 'jpg';
+      const fileName = `${selectedDef.id}-${Date.now()}.${ext}`;
       const filePath = `${userId}/${fileName}`;
+
+      const fileToUpload = base64ToFile(capturedValue, fileName);
 
       // 1. Upload to Storage
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('documents')
-        .upload(filePath, selectedFile, { upsert: true });
+        .upload(filePath, fileToUpload, { upsert: true });
 
       if (uploadError) throw uploadError;
 
@@ -321,33 +337,16 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label className="text-xs font-black uppercase text-slate-400 ml-1">Archivo del Documento</Label>
-              <div className="relative group cursor-pointer">
-                <input 
-                  type="file" 
-                  accept="image/*,application/pdf"
-                  onChange={handleFileChange}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                />
-                <div className={cn(
-                  "h-24 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center transition-all gap-1",
-                  selectedFile ? "bg-emerald-50 border-emerald-200" : "bg-slate-50 border-slate-200 group-hover:border-orange-300 group-hover:bg-orange-50/30"
-                )}>
-                  {selectedFile ? (
-                    <>
-                      <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-                      <p className="text-[10px] font-bold text-emerald-700 truncate max-w-[200px]">{selectedFile.name}</p>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="h-6 w-6 text-slate-300 group-hover:text-orange-400" />
-                      <p className="text-[10px] font-bold text-slate-400 uppercase group-hover:text-orange-500">Haz clic para elegir archivo</p>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
+            {selectedDef && (
+              <DocumentCapture
+                id={selectedDef.id}
+                label="Archivo del Documento"
+                description="Selecciona un archivo PDF o toma una foto del documento."
+                type={getCaptureType(selectedDef.name)}
+                value={capturedValue}
+                onChange={setCapturedValue}
+              />
+            )}
           </div>
 
           <DialogFooter className="mt-8 gap-2 sm:gap-0 flex-col sm:flex-row">
@@ -356,7 +355,7 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
             </Button>
             <Button 
               onClick={processUpload} 
-              disabled={uploadingId !== null || !selectedFile} 
+              disabled={uploadingId !== null || !capturedValue} 
               className="bg-slate-900 hover:bg-slate-800 text-white rounded-2xl px-8 font-black uppercase text-xs tracking-widest flex-1"
             >
               {uploadingId ? 'Subiendo...' : 'Confirmar y Subir'}
