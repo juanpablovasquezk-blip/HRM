@@ -34,6 +34,7 @@ import { es } from 'date-fns/locale';
 
 import { createClient } from '@/lib/supabase/client';
 import DocumentCapture from '@/components/onboarding/document-capture';
+import { compileFrontBackPdf } from '@/lib/documents/pdf-compiler';
 
 interface WorkerDocumentsClientProps {
   definitions: DocumentDefinition[];
@@ -70,6 +71,8 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
   const [selectedDef, setSelectedDef] = useState<DocumentDefinition | null>(null);
   const [expiryDate, setExpiryDate] = useState<string>('');
   const [capturedValue, setCapturedValue] = useState<string | null>(null);
+  const [capturedFront, setCapturedFront] = useState<string | null>(null);
+  const [capturedBack, setCapturedBack] = useState<string | null>(null);
   
   const supabase = createClient();
 
@@ -88,13 +91,26 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
     setSelectedDef(def);
     setExpiryDate('');
     setCapturedValue(null);
+    setCapturedFront(null);
+    setCapturedBack(null);
     setIsDialogOpen(true);
   };
 
   const processUpload = async () => {
-    if (!selectedDef || !capturedValue) {
-      toast.error('Selecciona o toma una foto del documento');
-      return;
+    if (!selectedDef) return;
+
+    const captureType = getCaptureType(selectedDef.name);
+
+    if (captureType === 'card') {
+      if (!capturedFront || !capturedBack) {
+        toast.error('Por favor, captura ambas partes (delantera y trasera)');
+        return;
+      }
+    } else {
+      if (!capturedValue) {
+        toast.error('Selecciona o toma una foto del documento');
+        return;
+      }
     }
 
     if (selectedDef.requires_expiration && !selectedDef.depends_on_definition_id && !expiryDate) {
@@ -106,17 +122,25 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
     const loadingToast = toast.loading('Subiendo documento...');
 
     try {
-      const mimeType = capturedValue.split(';')[0].split(':')[1];
-      const ext = mimeType === 'application/pdf' ? 'pdf' : 'jpg';
-      const fileName = `${selectedDef.id}-${Date.now()}.${ext}`;
-      const filePath = `${userId}/${fileName}`;
+      let finalFile: File;
 
-      const fileToUpload = base64ToFile(capturedValue, fileName);
+      if (captureType === 'card') {
+        const compiledPdfBase64 = await compileFrontBackPdf(capturedFront!, capturedBack!);
+        const fileName = `${selectedDef.id}-${Date.now()}.pdf`;
+        finalFile = base64ToFile(compiledPdfBase64, fileName);
+      } else {
+        const mimeType = capturedValue!.split(';')[0].split(':')[1];
+        const ext = mimeType === 'application/pdf' ? 'pdf' : 'jpg';
+        const fileName = `${selectedDef.id}-${Date.now()}.${ext}`;
+        finalFile = base64ToFile(capturedValue!, fileName);
+      }
+
+      const filePath = `${userId}/${finalFile.name}`;
 
       // 1. Upload to Storage
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('documents')
-        .upload(filePath, fileToUpload, { upsert: true });
+        .upload(filePath, finalFile, { upsert: true });
 
       if (uploadError) throw uploadError;
 
@@ -308,7 +332,12 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
 
       {/* Upload Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[400px] rounded-3xl p-6 overflow-hidden border-none shadow-2xl bg-white">
+        <DialogContent className={cn(
+          "rounded-3xl p-6 overflow-hidden border-none shadow-2xl bg-white transition-all duration-300",
+          selectedDef && getCaptureType(selectedDef.name) === 'card' 
+            ? "sm:max-w-[650px] w-full" 
+            : "sm:max-w-[400px]"
+        )}>
           <DialogHeader className="p-0 mb-6">
             <DialogTitle className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
               <Upload className="h-5 w-5 text-orange-500" />
@@ -337,15 +366,36 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
               </div>
             )}
 
-            {selectedDef && (
-              <DocumentCapture
-                id={selectedDef.id}
-                label="Archivo del Documento"
-                description="Selecciona un archivo PDF o toma una foto del documento."
-                type={getCaptureType(selectedDef.name)}
-                value={capturedValue}
-                onChange={setCapturedValue}
-              />
+            {selectedDef && getCaptureType(selectedDef.name) === 'card' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <DocumentCapture
+                  id={`${selectedDef.id}_front`}
+                  label="Parte Delantera *"
+                  description="Foto frontal de la cédula/licencia."
+                  type="card"
+                  value={capturedFront}
+                  onChange={setCapturedFront}
+                />
+                <DocumentCapture
+                  id={`${selectedDef.id}_back`}
+                  label="Parte Trasera *"
+                  description="Foto trasera de la cédula/licencia."
+                  type="card"
+                  value={capturedBack}
+                  onChange={setCapturedBack}
+                />
+              </div>
+            ) : (
+              selectedDef && (
+                <DocumentCapture
+                  id={selectedDef.id}
+                  label="Archivo del Documento"
+                  description="Selecciona un archivo PDF o toma una foto del documento."
+                  type={getCaptureType(selectedDef.name)}
+                  value={capturedValue}
+                  onChange={setCapturedValue}
+                />
+              )
             )}
           </div>
 
@@ -355,7 +405,12 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
             </Button>
             <Button 
               onClick={processUpload} 
-              disabled={uploadingId !== null || !capturedValue} 
+              disabled={
+                uploadingId !== null || 
+                (selectedDef && getCaptureType(selectedDef.name) === 'card' 
+                  ? (!capturedFront || !capturedBack) 
+                  : !capturedValue)
+              } 
               className="bg-slate-900 hover:bg-slate-800 text-white rounded-2xl px-8 font-black uppercase text-xs tracking-widest flex-1"
             >
               {uploadingId ? 'Subiendo...' : 'Confirmar y Subir'}
