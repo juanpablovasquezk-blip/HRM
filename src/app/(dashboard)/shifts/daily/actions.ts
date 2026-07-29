@@ -515,3 +515,72 @@ export async function confirmPlan(date: string) {
   revalidatePath('/shifts/daily');
   return transportRes;
 }
+
+export async function swapAssignments(id1: string, id2: string) {
+  const supabase = createAdminClient();
+
+  // 1. Fetch both assignments with shift details
+  const { data: ass1, error: err1 } = await supabase
+    .from('shift_assignments')
+    .select('*, shift:shifts(*)')
+    .eq('id', id1)
+    .single();
+
+  const { data: ass2, error: err2 } = await supabase
+    .from('shift_assignments')
+    .select('*, shift:shifts(*)')
+    .eq('id', id2)
+    .single();
+
+  if (err1 || err2 || !ass1 || !ass2) {
+    return { success: false, error: 'No se encontraron las asignaciones' };
+  }
+
+  // 2. Validate same date
+  if (ass1.date !== ass2.date) {
+    return { success: false, error: 'Las asignaciones deben ser de la misma fecha' };
+  }
+
+  // 3. Validate same schedule (shift_id must be the same, or start and end times must match)
+  const shift1 = Array.isArray(ass1.shift) ? ass1.shift[0] : ass1.shift;
+  const shift2 = Array.isArray(ass2.shift) ? ass2.shift[0] : ass2.shift;
+
+  const sameShift = ass1.shift_id === ass2.shift_id || 
+    (shift1 && shift2 && shift1.start_time === shift2.start_time && shift1.end_time === shift2.end_time);
+
+  if (!sameShift) {
+    return { success: false, error: 'Las asignaciones deben tener el mismo horario para ser intercambiadas' };
+  }
+
+  // 4. Swap the personnel
+  const update1 = supabase
+    .from('shift_assignments')
+    .update({ personnel_id: ass2.personnel_id, is_manual: true })
+    .eq('id', id1);
+
+  const update2 = supabase
+    .from('shift_assignments')
+    .update({ personnel_id: ass1.personnel_id, is_manual: true })
+    .eq('id', id2);
+
+  const [res1, res2] = await Promise.all([update1, update2]);
+
+  if (res1.error || res2.error) {
+    console.error('Error swapping assignments:', res1.error || res2.error);
+    return { success: false, error: 'Error al intercambiar el personal' };
+  }
+
+  // 5. Clean up transport requests for these assignments (if confirmed)
+  if (ass1.is_confirmed || ass2.is_confirmed) {
+    await supabase
+      .from('transport_requests')
+      .delete()
+      .in('assignment_id', [id1, id2]);
+      
+    // Regenerate transport requests for this date
+    await generateTransportRequests(ass1.date);
+  }
+
+  revalidatePath('/shifts/daily');
+  return { success: true };
+}

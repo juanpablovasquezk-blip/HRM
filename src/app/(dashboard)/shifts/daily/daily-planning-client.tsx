@@ -32,7 +32,7 @@ import type {
   Shift 
 } from '@/types/database';
 import { deleteAssignment, deleteRequirement } from '../actions';
-import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, resetDailyPlan, updateAssignmentShift } from './actions';
+import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, resetDailyPlan, updateAssignmentShift, swapAssignments } from './actions';
 import { sendDailyPlanScreenshotAction } from './publish-actions';
 import { RotateCcw, Mail, Copy, Camera } from 'lucide-react';
 
@@ -62,6 +62,87 @@ export default function DailyPlanningClient({
   const [availablePersonnel, setAvailablePersonnel] = useState<Record<string, any[]>>({});
   const [isConfirmed, setIsConfirmed] = useState(initialAssignments.some(a => a.is_confirmed));
   const [isConfirming, setIsConfirming] = useState(false);
+  
+  const [draggedAssignment, setDraggedAssignment] = useState<ShiftAssignmentWithDetails | null>(null);
+  const [dragOverAssignmentId, setDragOverAssignmentId] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, assignment: ShiftAssignmentWithDetails) => {
+    if (readOnly) return;
+    e.dataTransfer.setData('text/plain', assignment.id);
+    setDraggedAssignment(assignment);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedAssignment(null);
+    setDragOverAssignmentId(null);
+  };
+
+  const isSameSchedule = (a: ShiftAssignmentWithDetails, b: ShiftAssignmentWithDetails) => {
+    if (a.date !== b.date) return false;
+    return a.shift_id === b.shift_id || 
+      (a.shift?.start_time === b.shift?.start_time && a.shift?.end_time === b.shift?.end_time);
+  };
+
+  const handleDragOver = (e: React.DragEvent, target: ShiftAssignmentWithDetails) => {
+    if (draggedAssignment && draggedAssignment.id !== target.id && isSameSchedule(draggedAssignment, target)) {
+      e.preventDefault();
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent, target: ShiftAssignmentWithDetails) => {
+    if (draggedAssignment && draggedAssignment.id !== target.id && isSameSchedule(draggedAssignment, target)) {
+      setDragOverAssignmentId(target.id);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverAssignmentId(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, target: ShiftAssignmentWithDetails) => {
+    e.preventDefault();
+    if (!draggedAssignment || draggedAssignment.id === target.id || !isSameSchedule(draggedAssignment, target)) {
+      return;
+    }
+
+    const source = draggedAssignment;
+    setDraggedAssignment(null);
+    setDragOverAssignmentId(null);
+
+    const sourceName = formatName(source.personnel);
+    const targetName = formatName(target.personnel);
+
+    const toastId = toast.loading(`Intercambiando a ${sourceName} con ${targetName}...`);
+    try {
+      const res = await swapAssignments(source.id, target.id);
+      if (res.success) {
+        toast.success(`Intercambio exitoso: ${sourceName} ↔ ${targetName}`, { id: toastId });
+        router.refresh();
+      } else {
+        toast.error(`Error al intercambiar: ${res.error}`, { id: toastId });
+      }
+    } catch (err: any) {
+      toast.error(`Error: ${err.message || String(err)}`, { id: toastId });
+    }
+  };
+
+  const getDragStyles = (assignment: ShiftAssignmentWithDetails) => {
+    if (readOnly) return '';
+    const isThisDragged = draggedAssignment?.id === assignment.id;
+    const isDragActive = draggedAssignment !== null;
+    const isValidTarget = isDragActive && !isThisDragged && isSameSchedule(draggedAssignment, assignment);
+    const isHovered = dragOverAssignmentId === assignment.id;
+
+    let styles = ' transition-all duration-150 cursor-grab active:cursor-grabbing rounded px-1.5 py-0.5 select-none ';
+    if (isThisDragged) {
+      styles += ' opacity-30 border border-dashed border-slate-400 bg-slate-100 ';
+    } else if (isHovered && isValidTarget) {
+      styles += ' bg-emerald-100 border-2 border-emerald-500 text-emerald-800 scale-105 font-bold shadow-md z-10 ';
+    } else if (isValidTarget) {
+      styles += ' bg-indigo-50 border-2 border-dashed border-indigo-400 text-indigo-900 animate-pulse ring-2 ring-indigo-200 ring-opacity-40 ';
+    }
+    return styles;
+  };
   
   // Update local state if date or assignments change
   // Initial redirect ONLY if no date in URL
@@ -626,7 +707,18 @@ export default function DailyPlanningClient({
                 <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
-                      <span className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>{formatName(a.personnel)}</span>
+                      <span 
+                        draggable={!readOnly}
+                        onDragStart={(e) => handleDragStart(e, a)}
+                        onDragEnd={handleDragEnd}
+                        onDragOver={(e) => handleDragOver(e, a)}
+                        onDragEnter={(e) => handleDragEnter(e, a)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, a)}
+                        className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                      >
+                        {formatName(a.personnel)}
+                      </span>
                       {!readOnly && (
                         <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print">
                           <AlertTriangle className="w-3 h-3" />
@@ -652,7 +744,16 @@ export default function DailyPlanningClient({
                 <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
-                      <span className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>
+                      <span 
+                        draggable={!readOnly}
+                        onDragStart={(e) => handleDragStart(e, a)}
+                        onDragEnd={handleDragEnd}
+                        onDragOver={(e) => handleDragOver(e, a)}
+                        onDragEnter={(e) => handleDragEnter(e, a)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, a)}
+                        className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                      >
                         {formatName(a.personnel)}
                       </span>
                       {!readOnly && (
@@ -682,7 +783,16 @@ export default function DailyPlanningClient({
                   {group.map(a => (
                     <div key={a.id} className="flex flex-col relative group">
                       <div className="flex items-center gap-1">
-                        <span className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>
+                        <span 
+                          draggable={!readOnly}
+                          onDragStart={(e) => handleDragStart(e, a)}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleDragOver(e, a)}
+                          onDragEnter={(e) => handleDragEnter(e, a)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, a)}
+                          className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                        >
                           {formatName(a.personnel)}
                         </span>
                         <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print"><AlertTriangle className="w-3 h-3" /></button>
@@ -709,7 +819,18 @@ export default function DailyPlanningClient({
                 <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
-                      <span className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>{formatName(a.personnel)}</span>
+                      <span 
+                        draggable={!readOnly}
+                        onDragStart={(e) => handleDragStart(e, a)}
+                        onDragEnd={handleDragEnd}
+                        onDragOver={(e) => handleDragOver(e, a)}
+                        onDragEnter={(e) => handleDragEnter(e, a)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, a)}
+                        className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                      >
+                        {formatName(a.personnel)}
+                      </span>
                       <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print"><AlertTriangle className="w-3 h-3" /></button>
                     </div>
                   ))}
@@ -732,7 +853,18 @@ export default function DailyPlanningClient({
                  <div className="grid grid-cols-4 gap-x-4 gap-y-1.5 pl-1">
                     {dhl.map(a => (
                       <div key={a.id} className="flex flex-col relative group">
-                        <span className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>{formatName(a.personnel)}</span>
+                        <span 
+                          draggable={!readOnly}
+                          onDragStart={(e) => handleDragStart(e, a)}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleDragOver(e, a)}
+                          onDragEnter={(e) => handleDragEnter(e, a)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, a)}
+                          className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                        >
+                          {formatName(a.personnel)}
+                        </span>
                         {!readOnly ? (
                           <select 
                             className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
@@ -763,7 +895,18 @@ export default function DailyPlanningClient({
                  <div className="grid grid-cols-4 gap-x-4 gap-y-2 pl-2">
                     {fedex.map(a => (
                       <div key={a.id} className="flex flex-col relative group">
-                        <span className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>{formatName(a.personnel)}</span>
+                        <span 
+                          draggable={!readOnly}
+                          onDragStart={(e) => handleDragStart(e, a)}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleDragOver(e, a)}
+                          onDragEnter={(e) => handleDragEnter(e, a)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, a)}
+                          className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                        >
+                          {formatName(a.personnel)}
+                        </span>
                         {!readOnly ? (
                           <select 
                             className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
@@ -794,7 +937,16 @@ export default function DailyPlanningClient({
                  <div className="grid grid-cols-4 gap-x-4 gap-y-1.5 pl-1">
                     {bodegasOthers.map(a => (
                       <div key={a.id} className="flex flex-col">
-                        <span className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}`}>
+                        <span 
+                          draggable={!readOnly}
+                          onDragStart={(e) => handleDragStart(e, a)}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleDragOver(e, a)}
+                          onDragEnter={(e) => handleDragEnter(e, a)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, a)}
+                          className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                        >
                           {formatName(a.personnel)}
                         </span>
                         <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
@@ -821,9 +973,22 @@ export default function DailyPlanningClient({
                   <td className="py-1 font-mono text-[10px] text-slate-500">{pair.time}</td>
                   <td className="py-1 font-bold uppercase text-[12px] relative">
                     <div className="flex flex-col gap-0.5">
-                      <span className={pair.conductor?.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}>
-                        {pair.conductor ? formatName(pair.conductor.personnel) : '-'}
-                      </span>
+                      {pair.conductor ? (
+                        <span 
+                          draggable={!readOnly}
+                          onDragStart={(e) => handleDragStart(e, pair.conductor)}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleDragOver(e, pair.conductor)}
+                          onDragEnter={(e) => handleDragEnter(e, pair.conductor)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, pair.conductor)}
+                          className={`${pair.conductor.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(pair.conductor)}`}
+                        >
+                          {formatName(pair.conductor.personnel)}
+                        </span>
+                      ) : (
+                        <span>-</span>
+                      )}
                       {pair.conductor && !readOnly && (
                         <select 
                           className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
@@ -844,9 +1009,22 @@ export default function DailyPlanningClient({
                   </td>
                   <td className="py-1 font-bold uppercase text-[12px] relative">
                     <div className="flex flex-col gap-0.5">
-                      <span className={pair.ayudante?.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''}>
-                        {pair.ayudante ? formatName(pair.ayudante.personnel) : '-'}
-                      </span>
+                      {pair.ayudante ? (
+                        <span 
+                          draggable={!readOnly}
+                          onDragStart={(e) => handleDragStart(e, pair.ayudante)}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleDragOver(e, pair.ayudante)}
+                          onDragEnter={(e) => handleDragEnter(e, pair.ayudante)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, pair.ayudante)}
+                          className={`${pair.ayudante.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(pair.ayudante)}`}
+                        >
+                          {formatName(pair.ayudante.personnel)}
+                        </span>
+                      ) : (
+                        <span>-</span>
+                      )}
                       {pair.ayudante && !readOnly && (
                         <select 
                           className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
