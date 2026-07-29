@@ -34,7 +34,7 @@ import { es } from 'date-fns/locale';
 
 import { createClient } from '@/lib/supabase/client';
 import DocumentCapture from '@/components/onboarding/document-capture';
-import { compileFrontBackPdf } from '@/lib/documents/pdf-compiler';
+import { compileFrontBackPdf, compileSingleCardPdf } from '@/lib/documents/pdf-compiler';
 
 interface WorkerDocumentsClientProps {
   definitions: DocumentDefinition[];
@@ -44,13 +44,27 @@ interface WorkerDocumentsClientProps {
 
 const getCaptureType = (defName: string): 'card' | 'selfie' | 'pdf' => {
   const name = defName.toLowerCase();
-  if (name.includes('cedula') || name.includes('cédula') || name.includes('licencia') || name.includes('credencial') || name.includes('carnet') || name.includes('tarjeta')) {
+  if (
+    name.includes('cedula') ||
+    name.includes('cédula') ||
+    name.includes('licencia') ||
+    name.includes('credencial') ||
+    name.includes('carnet') ||
+    name.includes('tarjeta') ||
+    name.includes('pcp') ||
+    name.includes('tica')
+  ) {
     return 'card';
   }
   if (name.includes('foto') || name.includes('selfie') || name.includes('rostro')) {
     return 'selfie';
   }
   return 'pdf';
+};
+
+const isSingleCard = (defName: string): boolean => {
+  const name = defName.toLowerCase();
+  return name.includes('pcp') || name.includes('tica');
 };
 
 const base64ToFile = (base64String: string, filename: string): File => {
@@ -100,8 +114,9 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
     if (!selectedDef) return;
 
     const captureType = getCaptureType(selectedDef.name);
+    const isSingle = isSingleCard(selectedDef.name);
 
-    if (captureType === 'card') {
+    if (captureType === 'card' && !isSingle) {
       if (!capturedFront || !capturedBack) {
         toast.error('Por favor, captura ambas partes (delantera y trasera)');
         return;
@@ -125,9 +140,15 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
       let finalFile: File;
 
       if (captureType === 'card') {
-        const compiledPdfBase64 = await compileFrontBackPdf(capturedFront!, capturedBack!);
-        const fileName = `${selectedDef.id}-${Date.now()}.pdf`;
-        finalFile = base64ToFile(compiledPdfBase64, fileName);
+        if (isSingle) {
+          const compiledPdfBase64 = await compileSingleCardPdf(capturedValue!);
+          const fileName = `${selectedDef.id}-${Date.now()}.pdf`;
+          finalFile = base64ToFile(compiledPdfBase64, fileName);
+        } else {
+          const compiledPdfBase64 = await compileFrontBackPdf(capturedFront!, capturedBack!);
+          const fileName = `${selectedDef.id}-${Date.now()}.pdf`;
+          finalFile = base64ToFile(compiledPdfBase64, fileName);
+        }
       } else {
         const mimeType = capturedValue!.split(';')[0].split(':')[1];
         const ext = mimeType === 'application/pdf' ? 'pdf' : 'jpg';
@@ -334,7 +355,7 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className={cn(
           "rounded-3xl p-6 overflow-hidden border-none shadow-2xl bg-white transition-all duration-300",
-          selectedDef && getCaptureType(selectedDef.name) === 'card' 
+          selectedDef && getCaptureType(selectedDef.name) === 'card' && !isSingleCard(selectedDef.name)
             ? "sm:max-w-[650px] w-full" 
             : "sm:max-w-[400px]"
         )}>
@@ -367,24 +388,35 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
             )}
 
             {selectedDef && getCaptureType(selectedDef.name) === 'card' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+              isSingleCard(selectedDef.name) ? (
                 <DocumentCapture
-                  id={`${selectedDef.id}_front`}
+                  id={selectedDef.id}
                   label="Parte Delantera *"
-                  description="Foto frontal de la cédula/licencia."
+                  description={`Foto frontal de tu ${selectedDef.name}.`}
                   type="card"
-                  value={capturedFront}
-                  onChange={setCapturedFront}
+                  value={capturedValue}
+                  onChange={setCapturedValue}
                 />
-                <DocumentCapture
-                  id={`${selectedDef.id}_back`}
-                  label="Parte Trasera *"
-                  description="Foto trasera de la cédula/licencia."
-                  type="card"
-                  value={capturedBack}
-                  onChange={setCapturedBack}
-                />
-              </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  <DocumentCapture
+                    id={`${selectedDef.id}_front`}
+                    label="Parte Delantera *"
+                    description="Foto frontal de la cédula/licencia."
+                    type="card"
+                    value={capturedFront}
+                    onChange={setCapturedFront}
+                  />
+                  <DocumentCapture
+                    id={`${selectedDef.id}_back`}
+                    label="Parte Trasera *"
+                    description="Foto trasera de la cédula/licencia."
+                    type="card"
+                    value={capturedBack}
+                    onChange={setCapturedBack}
+                  />
+                </div>
+              )
             ) : (
               selectedDef && (
                 <DocumentCapture
@@ -407,7 +439,7 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
               onClick={processUpload} 
               disabled={
                 uploadingId !== null || 
-                (selectedDef && getCaptureType(selectedDef.name) === 'card' 
+                (selectedDef && getCaptureType(selectedDef.name) === 'card' && !isSingleCard(selectedDef.name)
                   ? (!capturedFront || !capturedBack) 
                   : !capturedValue)
               } 
