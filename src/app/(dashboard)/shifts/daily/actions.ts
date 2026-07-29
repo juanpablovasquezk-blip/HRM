@@ -541,7 +541,12 @@ export async function swapAssignments(id1: string, id2: string) {
     return { success: false, error: 'Las asignaciones deben ser de la misma fecha' };
   }
 
-  // 3. Validate same schedule (shift_id must be the same, or start and end times must match)
+  // 3. Validate same position (role)
+  if (ass1.position_id !== ass2.position_id) {
+    return { success: false, error: 'Las asignaciones deben tener el mismo cargo o puesto para ser intercambiadas' };
+  }
+
+  // 4. Validate same schedule (shift_id must be the same, or start and end times must match)
   const shift1 = Array.isArray(ass1.shift) ? ass1.shift[0] : ass1.shift;
   const shift2 = Array.isArray(ass2.shift) ? ass2.shift[0] : ass2.shift;
 
@@ -552,22 +557,45 @@ export async function swapAssignments(id1: string, id2: string) {
     return { success: false, error: 'Las asignaciones deben tener el mismo horario para ser intercambiadas' };
   }
 
-  // 4. Swap the personnel
-  const update1 = supabase
+  // 5. Swap the personnel sequentially to bypass unique(personnel_id, date, shift_id) constraint
+  const originalDate = ass1.date;
+  
+  // Step 1: Temporarily move assignment 1 to a dummy date to free up its personnel_id on TODAY
+  const { error: step1Err } = await supabase
     .from('shift_assignments')
-    .update({ personnel_id: ass2.personnel_id, is_manual: true })
+    .update({ date: '1970-01-01', is_manual: true })
     .eq('id', id1);
 
-  const update2 = supabase
+  if (step1Err) {
+    console.error('Error in swap step 1:', step1Err);
+    return { success: false, error: 'Error al iniciar el intercambio de personal' };
+  }
+
+  // Step 2: Assign personnel 1 to assignment 2
+  const { error: step2Err } = await supabase
     .from('shift_assignments')
     .update({ personnel_id: ass1.personnel_id, is_manual: true })
     .eq('id', id2);
 
-  const [res1, res2] = await Promise.all([update1, update2]);
+  if (step2Err) {
+    console.error('Error in swap step 2:', step2Err);
+    // Rollback step 1
+    await supabase.from('shift_assignments').update({ date: originalDate }).eq('id', id1);
+    return { success: false, error: 'Error al completar el paso 2 del intercambio' };
+  }
 
-  if (res1.error || res2.error) {
-    console.error('Error swapping assignments:', res1.error || res2.error);
-    return { success: false, error: 'Error al intercambiar el personal' };
+  // Step 3: Assign personnel 2 to assignment 1 and restore its date
+  const { error: step3Err } = await supabase
+    .from('shift_assignments')
+    .update({ personnel_id: ass2.personnel_id, date: originalDate, is_manual: true })
+    .eq('id', id1);
+
+  if (step3Err) {
+    console.error('Error in swap step 3:', step3Err);
+    // Rollback step 2 & 1
+    await supabase.from('shift_assignments').update({ personnel_id: ass2.personnel_id }).eq('id', id2);
+    await supabase.from('shift_assignments').update({ date: originalDate }).eq('id', id1);
+    return { success: false, error: 'Error al finalizar el intercambio de personal' };
   }
 
   // 5. Clean up transport requests for these assignments (if confirmed)

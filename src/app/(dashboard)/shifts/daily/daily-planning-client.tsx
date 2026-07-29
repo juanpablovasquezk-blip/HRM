@@ -77,20 +77,23 @@ export default function DailyPlanningClient({
     setDragOverAssignmentId(null);
   };
 
-  const isSameSchedule = (a: ShiftAssignmentWithDetails, b: ShiftAssignmentWithDetails) => {
+  const canSwap = (a: ShiftAssignmentWithDetails, b: ShiftAssignmentWithDetails) => {
     if (a.date !== b.date) return false;
+    // Must be the same position (role)
+    if (a.position_id !== b.position_id) return false;
+    // Must share schedule (same shift_id or same start/end times)
     return a.shift_id === b.shift_id || 
       (a.shift?.start_time === b.shift?.start_time && a.shift?.end_time === b.shift?.end_time);
   };
 
   const handleDragOver = (e: React.DragEvent, target: ShiftAssignmentWithDetails) => {
-    if (draggedAssignment && draggedAssignment.id !== target.id && isSameSchedule(draggedAssignment, target)) {
+    if (draggedAssignment && draggedAssignment.id !== target.id && canSwap(draggedAssignment, target)) {
       e.preventDefault();
     }
   };
 
   const handleDragEnter = (e: React.DragEvent, target: ShiftAssignmentWithDetails) => {
-    if (draggedAssignment && draggedAssignment.id !== target.id && isSameSchedule(draggedAssignment, target)) {
+    if (draggedAssignment && draggedAssignment.id !== target.id && canSwap(draggedAssignment, target)) {
       setDragOverAssignmentId(target.id);
     }
   };
@@ -101,7 +104,7 @@ export default function DailyPlanningClient({
 
   const handleDrop = async (e: React.DragEvent, target: ShiftAssignmentWithDetails) => {
     e.preventDefault();
-    if (!draggedAssignment || draggedAssignment.id === target.id || !isSameSchedule(draggedAssignment, target)) {
+    if (!draggedAssignment || draggedAssignment.id === target.id || !canSwap(draggedAssignment, target)) {
       return;
     }
 
@@ -126,20 +129,37 @@ export default function DailyPlanningClient({
     }
   };
 
-  const getDragStyles = (assignment: ShiftAssignmentWithDetails) => {
-    if (readOnly) return '';
+  const getPersonnelStyles = (assignment: ShiftAssignmentWithDetails) => {
+    const isExtra = assignment.is_extra;
+    
+    // Read-only styling
+    if (readOnly) {
+      return isExtra 
+        ? ' bg-rose-100 border border-rose-300 text-rose-950 font-bold px-2 py-0.5 rounded inline-block shadow-sm '
+        : ' inline-block px-2 py-0.5 ';
+    }
+
+    // Draggable styling
     const isThisDragged = draggedAssignment?.id === assignment.id;
     const isDragActive = draggedAssignment !== null;
-    const isValidTarget = isDragActive && !isThisDragged && isSameSchedule(draggedAssignment, assignment);
+    const isValidTarget = isDragActive && !isThisDragged && canSwap(draggedAssignment, assignment);
     const isHovered = dragOverAssignmentId === assignment.id;
 
-    let styles = ' inline-block transition-all duration-150 cursor-grab active:cursor-grabbing rounded px-2 py-0.5 select-none border border-transparent hover:bg-slate-100/80 hover:border-slate-200 ';
+    let styles = ' inline-block transition-all duration-150 cursor-grab active:cursor-grabbing rounded px-2 py-0.5 select-none ';
+
     if (isThisDragged) {
       styles += ' opacity-30 border border-dashed border-slate-400 bg-slate-100 ';
     } else if (isHovered && isValidTarget) {
       styles += ' bg-emerald-100 border-2 border-emerald-500 text-emerald-800 scale-105 font-bold shadow-md z-10 ';
     } else if (isValidTarget) {
       styles += ' bg-indigo-50 border-2 border-dashed border-indigo-400 text-indigo-900 animate-pulse ring-2 ring-indigo-200 ring-opacity-40 ';
+    } else {
+      // Normal state when not dragging or when dragging something else
+      if (isExtra) {
+        styles += ' bg-rose-100 border border-rose-300 text-rose-950 font-bold hover:bg-rose-200/80 hover:border-rose-400 shadow-sm ';
+      } else {
+        styles += ' border border-transparent hover:bg-slate-100 hover:border-slate-200 ';
+      }
     }
     return styles;
   };
@@ -715,7 +735,7 @@ export default function DailyPlanningClient({
                         onDragEnter={(e) => handleDragEnter(e, a)}
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, a)}
-                        className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                        className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
                       >
                         {formatName(a.personnel)}
                       </span>
@@ -752,7 +772,7 @@ export default function DailyPlanningClient({
                         onDragEnter={(e) => handleDragEnter(e, a)}
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, a)}
-                        className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                        className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
                       >
                         {formatName(a.personnel)}
                       </span>
@@ -791,7 +811,7 @@ export default function DailyPlanningClient({
                           onDragEnter={(e) => handleDragEnter(e, a)}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => handleDrop(e, a)}
-                          className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                          className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
                         >
                           {formatName(a.personnel)}
                         </span>
@@ -827,7 +847,7 @@ export default function DailyPlanningClient({
                         onDragEnter={(e) => handleDragEnter(e, a)}
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, a)}
-                        className={`font-bold uppercase text-[12px] ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                        className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
                       >
                         {formatName(a.personnel)}
                       </span>
@@ -861,7 +881,7 @@ export default function DailyPlanningClient({
                           onDragEnter={(e) => handleDragEnter(e, a)}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => handleDrop(e, a)}
-                          className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                          className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
                         >
                           {formatName(a.personnel)}
                         </span>
@@ -903,7 +923,7 @@ export default function DailyPlanningClient({
                           onDragEnter={(e) => handleDragEnter(e, a)}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => handleDrop(e, a)}
-                          className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                          className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
                         >
                           {formatName(a.personnel)}
                         </span>
@@ -945,7 +965,7 @@ export default function DailyPlanningClient({
                           onDragEnter={(e) => handleDragEnter(e, a)}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => handleDrop(e, a)}
-                          className={`font-bold uppercase text-[12px] leading-tight ${a.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(a)}`}
+                          className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
                         >
                           {formatName(a.personnel)}
                         </span>
@@ -982,7 +1002,7 @@ export default function DailyPlanningClient({
                           onDragEnter={(e) => handleDragEnter(e, pair.conductor)}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => handleDrop(e, pair.conductor)}
-                          className={`${pair.conductor.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(pair.conductor)}`}
+                          className={getPersonnelStyles(pair.conductor)}
                         >
                           {formatName(pair.conductor.personnel)}
                         </span>
@@ -1018,7 +1038,7 @@ export default function DailyPlanningClient({
                           onDragEnter={(e) => handleDragEnter(e, pair.ayudante)}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => handleDrop(e, pair.ayudante)}
-                          className={`${pair.ayudante.is_extra ? 'border-2 border-red-500 px-1 rounded-sm bg-red-50/50' : ''} ${getDragStyles(pair.ayudante)}`}
+                          className={getPersonnelStyles(pair.ayudante)}
                         >
                           {formatName(pair.ayudante.personnel)}
                         </span>
