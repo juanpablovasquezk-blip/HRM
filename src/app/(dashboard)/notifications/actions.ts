@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { calculateDynamicExpiration } from '@/lib/utils/document-calc';
 
 // Get notifications for the current user
 export async function getNotifications(limit: number = 20) {
@@ -82,15 +83,46 @@ export async function getDashboardAlerts() {
     data?: any;
   }> = [];
 
-  // 1. Documents expired
-  const { data: expiredDocs, count: expiredCount } = await adminClient
-    .from('documents')
-    .select('*, personnel!inner(id, first_name, last_name_father, is_active)', { count: 'exact' })
-    .eq('personnel.is_active', true)
-    .lt('expiration_date', today)
-    .not('expiration_date', 'is', null);
+  // Fetch document definitions and documents
+  const [{ data: definitions }, { data: allDocs }] = await Promise.all([
+    adminClient.from('document_definitions').select('*'),
+    adminClient
+      .from('documents')
+      .select('*, personnel!inner(id, first_name, last_name_father, is_active)')
+      .eq('personnel.is_active', true)
+  ]);
 
-  if (expiredCount && expiredCount > 0) {
+  const defs = definitions || [];
+  const docs = allDocs || [];
+
+  // Compute resolved expiration dates in memory
+  const resolvedDocs = docs.map(doc => {
+    const def = defs.find(d => d.id === doc.definition_id);
+    let expirationDateStr = doc.expiration_date;
+
+    if (def?.requires_expiration && def.depends_on_definition_id) {
+      const anchorDoc = docs.find(d => d.personnel_id === doc.personnel_id && d.definition_id === def.depends_on_definition_id);
+      if (anchorDoc?.expiration_date) {
+        const calcDate = calculateDynamicExpiration(
+          new Date(anchorDoc.expiration_date + 'T12:00:00'),
+          def.cycle_months || 6,
+          def.anchor_days_offset || 30
+        );
+        expirationDateStr = calcDate.toISOString().split('T')[0];
+      }
+    }
+
+    return {
+      ...doc,
+      real_expiration_date: expirationDateStr,
+    };
+  });
+
+  // 1. Documents expired
+  const expiredDocsFiltered = resolvedDocs.filter(d => d.real_expiration_date && d.real_expiration_date < today);
+  const expiredCount = expiredDocsFiltered.length;
+
+  if (expiredCount > 0) {
     alerts.push({
       id: 'docs-expired',
       type: 'danger',
@@ -98,19 +130,17 @@ export async function getDashboardAlerts() {
       title: 'Documentos Vencidos',
       message: `${expiredCount} documento(s) han expirado y requieren atención inmediata.`,
       count: expiredCount,
-      data: expiredDocs?.slice(0, 5),
+      data: expiredDocsFiltered.slice(0, 5),
     });
   }
 
   // 2. Documents expiring within 30 days
-  const { count: expiringCount } = await adminClient
-    .from('documents')
-    .select('*, personnel!inner(id, first_name, last_name_father, is_active)', { count: 'exact', head: true })
-    .eq('personnel.is_active', true)
-    .gte('expiration_date', today)
-    .lte('expiration_date', in30DaysStr);
+  const expiringDocsFiltered = resolvedDocs.filter(
+    d => d.real_expiration_date && d.real_expiration_date >= today && d.real_expiration_date <= in30DaysStr
+  );
+  const expiringCount = expiringDocsFiltered.length;
 
-  if (expiringCount && expiringCount > 0) {
+  if (expiringCount > 0) {
     alerts.push({
       id: 'docs-expiring',
       type: 'warning',
@@ -118,6 +148,7 @@ export async function getDashboardAlerts() {
       title: 'Documentos Por Vencer',
       message: `${expiringCount} documento(s) vencen en los próximos 30 días.`,
       count: expiringCount,
+      data: expiringDocsFiltered.slice(0, 5),
     });
   }
 
