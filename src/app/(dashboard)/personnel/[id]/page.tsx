@@ -313,8 +313,9 @@ export default async function PersonnelDetailPage({
                     : null;
                   let isCalculated = false;
 
-                  // If no manual expiry, check for dynamic calculation
-                  if (!displayExpiry && def?.requires_expiration) {
+                  // If definition requires expiration, calculate it dynamically if there's a dependency,
+                  // or if there's no manual expiry stored.
+                  if (def?.requires_expiration) {
                     if (def.depends_on_definition_id) {
                       const anchorDoc = documents.find(d => d.definition_id === def.depends_on_definition_id);
                       if (anchorDoc?.expiration_date) {
@@ -325,7 +326,7 @@ export default async function PersonnelDetailPage({
                         );
                         isCalculated = true;
                       }
-                    } else if (doc.uploaded_at) {
+                    } else if (!displayExpiry && doc.uploaded_at) {
                       displayExpiry = calculateIntervalExpiration(
                         parseISO(doc.uploaded_at),
                         def.cycle_months || 6

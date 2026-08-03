@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation';
 import { parseISO, format, addMonths, startOfMonth, endOfMonth, addDays } from 'date-fns';
 import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { calculateDynamicExpiration } from '@/lib/utils/document-calc';
 
 export async function loginAsWorker(email: string) {
   const supabase = await createClient();
@@ -502,6 +503,29 @@ export async function uploadDocumentRecord(record: any) {
     return { success: false, error: error.message };
   }
 
+  // Notify admins about the document upload
+  try {
+    const { data: adminUsers } = await adminClient
+      .from('users')
+      .select('id')
+      .in('role', ['ADMIN', 'HR']);
+    
+    if (adminUsers && adminUsers.length > 0) {
+      const workerName = `${session.first_name} ${session.last_name_father}`;
+      const notifications = adminUsers.map((admin: any) => ({
+        user_id: admin.id,
+        type: 'general' as const,
+        title: 'Documento por Validar',
+        message: `${workerName} (${session.rut}) ha subido un nuevo documento (${record.type || 'Documento'}) que requiere validación.`,
+        data: { personnel_id: session.id, document_type: record.type, action: 'document_pending' },
+      }));
+      
+      await adminClient.from('notifications').insert(notifications);
+    }
+  } catch (e) {
+    console.warn('Failed to notify admins about document upload:', e);
+  }
+
   revalidatePath('/worker/documents');
   return { success: true };
 }
@@ -687,7 +711,20 @@ export async function getWorkerDocsStatus() {
     }
     
     // 3. Expired
-    if (doc.expiration_date && doc.expiration_date < todayStr) {
+    let expirationDate = doc.expiration_date;
+    if (def.depends_on_definition_id) {
+      const anchorDoc = existingDocuments.find(d => d.definition_id === def.depends_on_definition_id);
+      if (anchorDoc?.expiration_date) {
+        const calcDate = calculateDynamicExpiration(
+          new Date(anchorDoc.expiration_date),
+          def.cycle_months || 6,
+          def.anchor_days_offset || 30
+        );
+        expirationDate = calcDate.toISOString().split('T')[0];
+      }
+    }
+
+    if (expirationDate && expirationDate < todayStr) {
       return true;
     }
     

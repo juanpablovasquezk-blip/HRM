@@ -225,15 +225,6 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
                         </p>
                         
                         {(() => {
-                          // Prioritize manual expiration date if already uploaded and present
-                          if (doc?.expiration_date) {
-                            return (
-                              <p className={cn("text-xs font-bold", def.depends_on_definition_id ? "text-indigo-700" : "text-slate-700")}>
-                                {format(parseISO(doc.expiration_date), "dd 'de' MMMM, yyyy", { locale: es })}
-                              </p>
-                            );
-                          }
-
                           // Calculation Logic for dependencies
                           if (def.depends_on_definition_id) {
                             const anchorDoc = existingDocuments.find(d => d.definition_id === def.depends_on_definition_id);
@@ -249,6 +240,15 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
                                 </p>
                               );
                             }
+                          }
+
+                          // Prioritize manual expiration date if already uploaded and present (for non-dependent docs)
+                          if (doc?.expiration_date) {
+                            return (
+                              <p className={cn("text-xs font-bold", def.depends_on_definition_id ? "text-indigo-700" : "text-slate-700")}>
+                                {format(parseISO(doc.expiration_date), "dd 'de' MMMM, yyyy", { locale: es })}
+                              </p>
+                            );
                           }
 
                           // Fallback for non-dependent or interval-based

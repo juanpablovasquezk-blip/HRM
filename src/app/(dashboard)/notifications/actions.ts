@@ -162,5 +162,24 @@ export async function getDashboardAlerts() {
     });
   }
 
+  // 5. Documents pending validation
+  const { data: pendingDocs, count: pendingDocsCount } = await adminClient
+    .from('documents')
+    .select('*, personnel!inner(id, first_name, last_name_father, is_active)', { count: 'exact' })
+    .eq('personnel.is_active', true)
+    .eq('status', 'PENDING');
+
+  if (pendingDocsCount && pendingDocsCount > 0) {
+    alerts.push({
+      id: 'docs-pending',
+      type: 'warning',
+      category: 'Documentos',
+      title: 'Documentos por Validar',
+      message: `Tienes ${pendingDocsCount} documento(s) pendiente(s) de aprobación.`,
+      count: pendingDocsCount,
+      data: pendingDocs?.slice(0, 5),
+    });
+  }
+
   return { alerts };
 }
