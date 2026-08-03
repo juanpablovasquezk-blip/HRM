@@ -11,7 +11,7 @@ import PersonnelTableClient from './personnel-table-client';
 export default async function PersonnelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' }>;
+  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' }>;
 }) {
   const params = await searchParams;
   const supabase = await createClient();
@@ -48,6 +48,9 @@ export default async function PersonnelPage({
   } else if (status === 'missing_sizes') {
     query = query.eq('is_active', true)
       .or('clothing_tshirt_size.is.null,clothing_shoe_size.is.null,clothing_pants_size_letter.is.null,clothing_pants_size_number.is.null');
+  } else if (status === 'incomplete') {
+    query = query.eq('is_active', true)
+      .or('afp.is.null,health_system.is.null,bank_account_number.is.null,emergency_contact_phone.is.null,gender.is.null,marital_status.is.null,phone.is.null,afp.eq.,health_system.eq.,bank_account_number.eq.,emergency_contact_phone.eq.,gender.eq.,marital_status.eq.,phone.eq.');
   } else if (status === 'inactive') {
     query = query.eq('is_active', false).or('onboarding_status.is.null,onboarding_status.eq.approved,onboarding_status.eq.rejected');
   } else if (status === 'pending') {

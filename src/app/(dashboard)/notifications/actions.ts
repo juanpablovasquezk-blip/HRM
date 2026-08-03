@@ -136,6 +136,7 @@ export async function getDashboardAlerts() {
       title: 'Fichas Incompletas',
       message: `${incompleteCount} trabajador(es) tienen fichas con datos faltantes.`,
       count: incompleteCount,
+      data: incompletePersonnel?.slice(0, 5),
     });
   }
 

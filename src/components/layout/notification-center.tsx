@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
 import {
   getNotifications,
   markNotificationRead,
@@ -43,12 +44,32 @@ function formatRelativeTime(dateString: string) {
 }
 
 export function NotificationCenter() {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const handleAlertClick = (alertId: string) => {
+    setIsOpen(false);
+    switch (alertId) {
+      case 'docs-expired':
+      case 'docs-expiring':
+      case 'docs-pending':
+        router.push('/documents');
+        break;
+      case 'fichas-incomplete':
+        router.push('/personnel?status=incomplete');
+        break;
+      case 'fichas-updated':
+        router.push('/personnel');
+        break;
+      default:
+        break;
+    }
+  };
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -106,18 +127,19 @@ export function NotificationCenter() {
   };
 
   const totalAlertsCount = alerts.reduce((acc, alert) => acc + (alert.count || 1), 0);
-  const hasUnread = unreadCount > 0;
+  const totalBadgeCount = unreadCount + totalAlertsCount;
+  const hasAlertsOrUnread = totalBadgeCount > 0;
 
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
-      <SheetTrigger render={<Button variant="ghost" size="icon" className={cn("relative h-9 w-9 rounded-xl transition-all", hasUnread && "animate-pulse-slow")} id="notifications-btn" />}>
-        {hasUnread ? <BellRing className="h-[18px] w-[18px] text-blue-500" /> : <Bell className="h-[18px] w-[18px]" />}
-        {hasUnread && (
+      <SheetTrigger render={<Button variant="ghost" size="icon" className={cn("relative h-9 w-9 rounded-xl transition-all", hasAlertsOrUnread && "animate-pulse-slow")} id="notifications-btn" />}>
+        {hasAlertsOrUnread ? <BellRing className="h-[18px] w-[18px] text-orange-500" /> : <Bell className="h-[18px] w-[18px]" />}
+        {hasAlertsOrUnread && (
           <Badge
             variant="destructive"
-            className="absolute -top-1 -right-1 h-5 min-w-[20px] px-1 text-[10px] font-bold border-2 border-white dark:border-slate-950"
+            className="absolute -top-1 -right-1 h-5 min-w-[20px] px-1 text-[10px] font-bold border-2 border-white dark:border-slate-950 bg-red-500 text-white hover:bg-red-600 flex items-center justify-center rounded-full"
           >
-            {unreadCount > 99 ? '99+' : unreadCount}
+            {totalBadgeCount > 99 ? '99+' : totalBadgeCount}
           </Badge>
         )}
       </SheetTrigger>
@@ -179,34 +201,68 @@ export function NotificationCenter() {
                   <p className="text-xs text-slate-500 mt-1 max-w-[200px]">No hay alertas pendientes en tu panel.</p>
                 </div>
               ) : (
-                alerts.map(alert => (
-                  <div 
-                    key={alert.id} 
-                    className={cn(
-                      "bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm relative overflow-hidden group",
-                      "border-l-4", getAlertBorder(alert.type)
-                    )}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 p-1.5 rounded-full bg-slate-50 dark:bg-slate-800 shrink-0">
-                        {getAlertIcon(alert.type, alert.id)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                            {alert.category}
-                          </span>
+                alerts.map(alert => {
+                  const hasDataItems = alert.data && Array.isArray(alert.data) && alert.data.length > 0;
+                  
+                  return (
+                    <div 
+                      key={alert.id} 
+                      onClick={() => handleAlertClick(alert.id)}
+                      className={cn(
+                        "bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm relative overflow-hidden group",
+                        "border-l-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all", 
+                        getAlertBorder(alert.type)
+                      )}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 p-1.5 rounded-full bg-slate-50 dark:bg-slate-800 shrink-0">
+                          {getAlertIcon(alert.type, alert.id)}
                         </div>
-                        <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">
-                          {alert.title}
-                        </h4>
-                        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                          {alert.message}
-                        </p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                              {alert.category}
+                            </span>
+                          </div>
+                          <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">
+                            {alert.title}
+                          </h4>
+                          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                            {alert.message}
+                          </p>
+
+                          {hasDataItems && (
+                            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/50 flex flex-col gap-1.5">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Casos que requieren atención:</p>
+                              <div className="flex flex-col gap-1">
+                                {alert.data.map((item: any) => {
+                                  const p = item.personnel || item;
+                                  if (!p || !p.id) return null;
+                                  return (
+                                    <button
+                                      key={item.id || p.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setIsOpen(false);
+                                        router.push(`/personnel/${p.id}`);
+                                      }}
+                                      className="text-left text-xs text-blue-600 dark:text-blue-400 hover:underline font-semibold flex justify-between items-center bg-blue-50/50 dark:bg-blue-900/10 px-2.5 py-1.5 rounded-lg group/btn hover:bg-blue-100 dark:hover:bg-blue-900/20 transition-all"
+                                    >
+                                      <span>{p.first_name} {p.last_name_father}</span>
+                                      <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 px-1.5 py-0.5 rounded text-blue-700 dark:text-blue-300 font-semibold max-w-[150px] truncate">
+                                        {item.type || 'Ver Ficha'}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </TabsContent>
 
