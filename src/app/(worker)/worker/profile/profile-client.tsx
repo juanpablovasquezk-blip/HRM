@@ -112,39 +112,6 @@ export default function ProfileClient({ profile }: { profile: any }) {
     );
   };
 
-  const SectionCard = ({ id, title, icon: Icon, children }: any) => {
-    const isEditing = editSection === id;
-    return (
-      <Card className="border-slate-200 shadow-sm overflow-hidden mb-4">
-        <CardHeader className="bg-slate-50/50 border-b border-slate-100 py-3 px-4 flex flex-row items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-white rounded-lg shadow-sm border border-slate-100">
-              <Icon className="h-4 w-4 text-orange-500" />
-            </div>
-            <CardTitle className="text-base font-bold text-slate-800">{title}</CardTitle>
-          </div>
-          {isEditing ? (
-            <div className="flex gap-2">
-              <Button size="icon" variant="ghost" onClick={() => setEditSection(null)} className="h-7 w-7 text-slate-500">
-                <X className="h-4 w-4" />
-              </Button>
-              <Button size="icon" onClick={() => handleSave(id)} disabled={isSubmitting} className="h-7 w-7 bg-emerald-500 hover:bg-emerald-600">
-                <Save className="h-4 w-4" />
-              </Button>
-            </div>
-          ) : (
-            <Button size="icon" variant="ghost" onClick={() => setEditSection(id)} className="h-7 w-7 text-slate-400 hover:text-orange-600">
-              <Edit2 className="h-4 w-4" />
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent className="p-4 space-y-4">
-          {children(isEditing)}
-        </CardContent>
-      </Card>
-    );
-  };
-
   return (
     <div className="max-w-3xl mx-auto p-4 space-y-6 pb-12">
       {/* Header */}
@@ -190,7 +157,15 @@ export default function ProfileClient({ profile }: { profile: any }) {
       )}
 
       <div className="space-y-2">
-        <SectionCard id="personal" title="Datos Personales" icon={User}>
+        <SectionCard 
+          id="personal" 
+          title="Datos Personales" 
+          icon={User}
+          editSection={editSection}
+          setEditSection={setEditSection}
+          handleSave={handleSave}
+          isSubmitting={isSubmitting}
+        >
           {(isEditing: boolean) => (
             <div className="grid grid-cols-2 gap-4">
               {renderField('RUT', profile.rut, false, 'rut')}
@@ -202,7 +177,15 @@ export default function ProfileClient({ profile }: { profile: any }) {
           )}
         </SectionCard>
 
-        <SectionCard id="contact" title="Contacto" icon={Phone}>
+        <SectionCard 
+          id="contact" 
+          title="Contacto" 
+          icon={Phone}
+          editSection={editSection}
+          setEditSection={setEditSection}
+          handleSave={handleSave}
+          isSubmitting={isSubmitting}
+        >
           {(isEditing: boolean) => (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -221,7 +204,15 @@ export default function ProfileClient({ profile }: { profile: any }) {
           )}
         </SectionCard>
 
-        <SectionCard id="emergency" title="Contacto de Emergencia" icon={AlertCircle}>
+        <SectionCard 
+          id="emergency" 
+          title="Contacto de Emergencia" 
+          icon={AlertCircle}
+          editSection={editSection}
+          setEditSection={setEditSection}
+          handleSave={handleSave}
+          isSubmitting={isSubmitting}
+        >
           {(isEditing: boolean) => (
             <div className="space-y-4">
               {renderField('Nombre Completo', formData.emergency_contact_name, isEditing, 'emergency_contact_name')}
@@ -233,7 +224,15 @@ export default function ProfileClient({ profile }: { profile: any }) {
           )}
         </SectionCard>
 
-        <SectionCard id="social" title="Previsión Social" icon={Activity}>
+        <SectionCard 
+          id="social" 
+          title="Previsión Social" 
+          icon={Activity}
+          editSection={editSection}
+          setEditSection={setEditSection}
+          handleSave={handleSave}
+          isSubmitting={isSubmitting}
+        >
           {(isEditing: boolean) => (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -247,7 +246,15 @@ export default function ProfileClient({ profile }: { profile: any }) {
           )}
         </SectionCard>
 
-        <SectionCard id="bank" title="Datos Bancarios" icon={CreditCard}>
+        <SectionCard 
+          id="bank" 
+          title="Datos Bancarios" 
+          icon={CreditCard}
+          editSection={editSection}
+          setEditSection={setEditSection}
+          handleSave={handleSave}
+          isSubmitting={isSubmitting}
+        >
           {(isEditing: boolean) => (
             <div className="space-y-4">
               {renderField('Banco', formData.bank_name, isEditing, 'bank_name', 'select', BANK_LIST)}
@@ -259,7 +266,15 @@ export default function ProfileClient({ profile }: { profile: any }) {
           )}
         </SectionCard>
 
-        <SectionCard id="clothing" title="Tallas EPP" icon={Shirt}>
+        <SectionCard 
+          id="clothing" 
+          title="Tallas EPP" 
+          icon={Shirt}
+          editSection={editSection}
+          setEditSection={setEditSection}
+          handleSave={handleSave}
+          isSubmitting={isSubmitting}
+        >
           {(isEditing: boolean) => (
             <div className="grid grid-cols-2 gap-4">
               {renderField('Polera', formData.clothing_tshirt_size, isEditing, 'clothing_tshirt_size', 'select', CLOTHING_SIZES_LETTER)}
@@ -274,5 +289,56 @@ export default function ProfileClient({ profile }: { profile: any }) {
         </SectionCard>
       </div>
     </div>
+  );
+}
+
+function SectionCard({
+  id,
+  title,
+  icon: Icon,
+  editSection,
+  setEditSection,
+  handleSave,
+  isSubmitting,
+  children,
+}: {
+  id: string;
+  title: string;
+  icon: any;
+  editSection: string | null;
+  setEditSection: (section: string | null) => void;
+  handleSave: (section: string) => void;
+  isSubmitting: boolean;
+  children: (isEditing: boolean) => React.ReactNode;
+}) {
+  const isEditing = editSection === id;
+  return (
+    <Card className="border-slate-200 shadow-sm overflow-hidden mb-4">
+      <CardHeader className="bg-slate-50/50 border-b border-slate-100 py-3 px-4 flex flex-row items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 bg-white rounded-lg shadow-sm border border-slate-100">
+            <Icon className="h-4 w-4 text-orange-500" />
+          </div>
+          <CardTitle className="text-base font-bold text-slate-800">{title}</CardTitle>
+        </div>
+        {isEditing ? (
+          <div className="flex gap-2">
+            <Button size="icon" variant="ghost" onClick={() => setEditSection(null)} className="h-7 w-7 text-slate-500">
+              <X className="h-4 w-4" />
+            </Button>
+            <Button size="icon" onClick={() => handleSave(id)} disabled={isSubmitting} className="h-7 w-7 bg-emerald-500 hover:bg-emerald-600">
+              <Save className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
+          <Button size="icon" variant="ghost" onClick={() => setEditSection(id)} className="h-7 w-7 text-slate-400 hover:text-orange-600">
+            <Edit2 className="h-4 w-4" />
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="p-4 space-y-4">
+        {children(isEditing)}
+      </CardContent>
+    </Card>
   );
 }
