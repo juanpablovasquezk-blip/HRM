@@ -47,7 +47,8 @@ export default function ProfileClient({ profile }: { profile: any }) {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData((prev: any) => ({ ...prev, [name]: value }));
+    const val = name === 'email' ? value : value.toUpperCase();
+    setFormData((prev: any) => ({ ...prev, [name]: val }));
   };
 
   const handleSelectChange = (name: string, value: string) => {

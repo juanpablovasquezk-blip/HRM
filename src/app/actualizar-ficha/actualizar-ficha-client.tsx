@@ -292,7 +292,7 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
               <Input 
                 id="first_name" 
                 value={firstName} 
-                onChange={e => setFirstName(e.target.value)} 
+                onChange={e => setFirstName(e.target.value.toUpperCase())} 
                 required
                 className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
               />
@@ -303,7 +303,7 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
               <Input 
                 id="last_name_father" 
                 value={lastNameFather} 
-                onChange={e => setLastNameFather(e.target.value)} 
+                onChange={e => setLastNameFather(e.target.value.toUpperCase())} 
                 required
                 className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
               />
@@ -314,7 +314,7 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
               <Input 
                 id="last_name_mother" 
                 value={lastNameMother} 
-                onChange={e => setLastNameMother(e.target.value)} 
+                onChange={e => setLastNameMother(e.target.value.toUpperCase())} 
                 className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
               />
             </div>
@@ -470,7 +470,7 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
             <Input 
               id="address_street" 
               value={addressStreet} 
-              onChange={e => setAddressStreet(e.target.value)} 
+              onChange={e => setAddressStreet(e.target.value.toUpperCase())} 
               required
               className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
             />
@@ -482,7 +482,7 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
               <Input 
                 id="address_comuna" 
                 value={addressComuna} 
-                onChange={e => setAddressComuna(e.target.value)} 
+                onChange={e => setAddressComuna(e.target.value.toUpperCase())} 
                 required
                 className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
               />
@@ -493,7 +493,7 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
               <Input 
                 id="address_city" 
                 value={addressCity} 
-                onChange={e => setAddressCity(e.target.value)} 
+                onChange={e => setAddressCity(e.target.value.toUpperCase())} 
                 required
                 className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
               />
@@ -504,7 +504,7 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
               <Input 
                 id="address_region" 
                 value={addressRegion} 
-                onChange={e => setAddressRegion(e.target.value)} 
+                onChange={e => setAddressRegion(e.target.value.toUpperCase())} 
                 required
                 className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
               />
@@ -621,7 +621,7 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
               <Input 
                 id="bank_account_number" 
                 value={bankAccountNumber} 
-                onChange={e => setBankAccountNumber(e.target.value)} 
+                onChange={e => setBankAccountNumber(e.target.value.toUpperCase())} 
                 disabled={bankAccountType === 'RUT'}
                 required
                 className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
@@ -649,7 +649,7 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
               <Input 
                 id="emergency_name" 
                 value={emergencyName} 
-                onChange={e => setEmergencyName(e.target.value)} 
+                onChange={e => setEmergencyName(e.target.value.toUpperCase())} 
                 required
                 className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
               />
@@ -660,7 +660,7 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
               <Input 
                 id="emergency_relationship" 
                 value={emergencyRelationship} 
-                onChange={e => setEmergencyRelationship(e.target.value)} 
+                onChange={e => setEmergencyRelationship(e.target.value.toUpperCase())} 
                 required
                 placeholder="Ej: Cónyuge, Madre, Hermano"
                 className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
