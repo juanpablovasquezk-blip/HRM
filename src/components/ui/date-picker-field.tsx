@@ -64,6 +64,37 @@ export function DatePickerField({
     }
   }, [initialValue]);
 
+  const parseAndSyncDate = (str: string): boolean => {
+    const clean = str.trim().replace(/[^\d-]/g, "");
+    const dateRegex = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/;
+    const match = clean.match(dateRegex);
+    
+    if (match) {
+      let [_, dayStr, monthStr, yearStr] = match;
+      let year = parseInt(yearStr, 10);
+      if (yearStr.length === 2) {
+        year = year < 50 ? 2000 + year : 1900 + year;
+      }
+      const day = parseInt(dayStr, 10);
+      const month = parseInt(monthStr, 10) - 1;
+      const parsedDate = new Date(year, month, day);
+      
+      if (
+        parsedDate.getFullYear() === year &&
+        parsedDate.getMonth() === month &&
+        parsedDate.getDate() === day &&
+        year >= minYear &&
+        year <= maxYear
+      ) {
+        const iso = format(parsedDate, "yyyy-MM-dd");
+        setInternalValue(iso);
+        onChange?.(iso);
+        return true;
+      }
+    }
+    return false;
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawVal = e.target.value;
     
@@ -80,14 +111,57 @@ export function DatePickerField({
 
     setInputValue(formatted);
 
-    if (formatted.length === 10) {
-      const parsedDate = parse(formatted, "dd-MM-yyyy", new Date());
-      if (isValid(parsedDate)) {
-        const iso = format(parsedDate, "yyyy-MM-dd");
-        setInternalValue(iso);
-        onChange?.(iso);
+    // Try to parse on the fly if it is a complete match
+    if (!parseAndSyncDate(formatted)) {
+      if (formatted === "") {
+        setInternalValue("");
+        onChange?.("");
+      } else {
+        // Clear parent value if incomplete so it fails validation
+        setInternalValue("");
+        onChange?.("");
       }
-    } else if (formatted === "") {
+    }
+  };
+
+  const handleBlur = () => {
+    const clean = inputValue.trim().replace(/[^\d-]/g, "");
+    const dateRegex = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/;
+    const match = clean.match(dateRegex);
+    
+    if (match) {
+      let [_, dayStr, monthStr, yearStr] = match;
+      let year = parseInt(yearStr, 10);
+      if (yearStr.length === 2) {
+        year = year < 50 ? 2000 + year : 1900 + year;
+      }
+      const day = parseInt(dayStr, 10);
+      const month = parseInt(monthStr, 10) - 1;
+      const parsedDate = new Date(year, month, day);
+      
+      if (
+        parsedDate.getFullYear() === year &&
+        parsedDate.getMonth() === month &&
+        parsedDate.getDate() === day &&
+        year >= minYear &&
+        year <= maxYear
+      ) {
+        const iso = format(parsedDate, "yyyy-MM-dd");
+        const displayDay = dayStr.padStart(2, '0');
+        const displayMonth = monthStr.padStart(2, '0');
+        const display = `${displayDay}-${displayMonth}-${year}`;
+        
+        setInternalValue(iso);
+        setInputValue(display);
+        onChange?.(iso);
+        return;
+      }
+    }
+    
+    if (inputValue === "") {
+      setInternalValue("");
+      onChange?.("");
+    } else {
       setInternalValue("");
       onChange?.("");
     }
@@ -121,6 +195,7 @@ export function DatePickerField({
           type="text"
           value={inputValue}
           onChange={handleInputChange}
+          onBlur={handleBlur}
           placeholder={placeholder}
           required={required}
           disabled={disabled}
