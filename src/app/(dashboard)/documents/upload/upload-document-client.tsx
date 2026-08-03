@@ -11,6 +11,8 @@ import { Loader2, Upload, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { uploadDocument } from '@/app/(dashboard)/documents/actions';
 import { DocumentDefinition } from '@/types/database';
+import { labelSelfie } from '@/lib/documents/selfie-labeler';
+import { compileSingleCardPdf } from '@/lib/documents/pdf-compiler';
 
 interface Personnel {
   id: string;
@@ -19,6 +21,7 @@ interface Personnel {
   last_name_mother: string;
   main_position: string | null;
   secondary_positions: string[];
+  rut?: string;
 }
 
 interface Props {
@@ -70,6 +73,27 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
   const needsAnchorDate = selectedDef?.requires_expiration && !!selectedDef?.depends_on_definition_id;
   const needsIssueDate = selectedDef && !selectedDef.requires_expiration;
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  const base64ToFile = (base64String: string, filename: string): File => {
+    const arr = base64String.split(',');
+    const mime = arr[0].match(/:(.*?);/)![1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
+  };
+
   const handleSubmit = async (formData: FormData) => {
     if (!selectedFile) {
       toast.error('Por favor selecciona un archivo');
@@ -79,23 +103,64 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
       toast.error('Por favor selecciona el tipo de documento');
       return;
     }
-    formData.set('file', selectedFile);
-    // Use definition name as type for backward compatibility
-    formData.set('type', selectedDef.name);
-    formData.set('definition_id', selectedDef.id);
 
     startTransition(async () => {
-      const result = await uploadDocument(formData);
-      if (result.error) {
-        toast.error('Error al subir', { description: result.error });
-      } else {
-        toast.success('Documento subido correctamente');
-        const selectedId = formData.get('personnel_id');
-        if (selectedId) {
-          router.push(`/personnel/${selectedId}`);
-        } else {
-          router.push('/documents');
+      const loadingToast = toast.loading('Procesando y subiendo documento...');
+      
+      try {
+        let fileToUpload = selectedFile;
+        const isImage = selectedFile.type.startsWith('image/');
+        const docNameLower = selectedDef.name.toLowerCase();
+
+        // 1. If it's a selfie with white background, label it with name and RUT
+        if (isImage && (docNameLower.includes('foto con fondo blanco') || docNameLower === 'foto de perfil')) {
+          if (!selectedPersonnel) throw new Error('No se ha seleccionado el trabajador');
+          const base64 = await fileToBase64(selectedFile);
+          const fullName = `${selectedPersonnel.first_name} ${selectedPersonnel.last_name_father} ${selectedPersonnel.last_name_mother || ''}`;
+          const labeledBase64 = await labelSelfie(base64, fullName, selectedPersonnel.rut || '');
+          const fileSuffix = `${selectedPersonnel.first_name}_${selectedPersonnel.last_name_father}`
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-zA-Z0-9]/g, '_');
+          fileToUpload = base64ToFile(labeledBase64, `FOTO_NOMBRE_${fileSuffix}.jpg`);
         }
+
+        // 2. If it's a card (Cedula, Licencia, TICA) and it's an image, compile to PDF
+        else if (isImage && (docNameLower.includes('cedula') || docNameLower.includes('licencia') || docNameLower.includes('tica'))) {
+          if (!selectedPersonnel) throw new Error('No se ha seleccionado el trabajador');
+          const base64 = await fileToBase64(selectedFile);
+          const pdfBase64 = await compileSingleCardPdf(base64);
+          const fileSuffix = `${selectedPersonnel.first_name}_${selectedPersonnel.last_name_father}`
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-zA-Z0-9]/g, '_');
+          const sanitizedType = selectedDef.name
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-zA-Z0-9]/g, '_')
+            .toUpperCase();
+          fileToUpload = base64ToFile(pdfBase64, `${sanitizedType}_${fileSuffix}.pdf`);
+        }
+
+        formData.set('file', fileToUpload);
+        formData.set('type', selectedDef.name);
+        formData.set('definition_id', selectedDef.id);
+
+        const result = await uploadDocument(formData);
+        
+        if (result.error) {
+          toast.error('Error al subir', { description: result.error, id: loadingToast });
+        } else {
+          toast.success('Documento subido correctamente', { id: loadingToast });
+          const selectedId = formData.get('personnel_id');
+          if (selectedId) {
+            router.push(`/personnel/${selectedId}`);
+          } else {
+            router.push('/documents');
+          }
+        }
+      } catch (err: any) {
+        toast.error('Error al procesar el archivo', { description: err.message || 'Inténtalo de nuevo', id: loadingToast });
       }
     });
   };
