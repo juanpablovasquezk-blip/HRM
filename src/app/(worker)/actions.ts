@@ -7,6 +7,7 @@ import { parseISO, format, addMonths, startOfMonth, endOfMonth, addDays } from '
 import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { calculateDynamicExpiration } from '@/lib/utils/document-calc';
+import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 
 export async function loginAsWorker(email: string) {
   const supabase = await createClient();
@@ -502,6 +503,9 @@ export async function uploadDocumentRecord(record: any) {
     console.error('CRITICAL DATABASE ERROR:', error);
     return { success: false, error: error.message };
   }
+
+  // Sync dependent documents in case this is the anchor or vice versa
+  await syncDependentDocumentsExpiration(session.id, adminClient);
 
   // Notify admins about the document upload
   try {

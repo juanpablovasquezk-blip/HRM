@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { calculateDynamicExpiration } from '@/lib/utils/document-calc';
+import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 
 // Get notifications for the current user
 export async function getNotifications(limit: number = 20) {
@@ -66,6 +67,19 @@ export async function getDashboardAlerts() {
   if (!user) return { alerts: [] };
 
   const adminClient = createAdminClient();
+  
+  // Trigger background sync for all active workers to fix any old/unsynced database records
+  adminClient
+    .from('personnel')
+    .select('id')
+    .eq('is_active', true)
+    .then(({ data: workers }) => {
+      if (workers) {
+        Promise.all(workers.map(w => syncDependentDocumentsExpiration(w.id, adminClient)))
+          .catch(err => console.error('Failed to sync dependent documents in background:', err));
+      }
+    });
+
   const today = new Date().toISOString().split('T')[0];
   
   // Calculate dates

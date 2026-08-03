@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { revalidatePath } from 'next/cache';
 import { calculateExpiration } from '@/lib/documents/expiration-engine';
+import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 
 export async function uploadDocument(
   formData: FormData
@@ -127,6 +128,9 @@ export async function uploadDocument(
   if (insertError) {
     return { success: false, error: insertError.message };
   }
+
+  // Sync dependent documents in case this is the anchor or vice versa
+  await syncDependentDocumentsExpiration(personnelId, adminClient);
 
   revalidatePath('/documents');
   revalidatePath(`/personnel/${personnelId}`);
