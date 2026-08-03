@@ -660,3 +660,40 @@ export async function updateWorkerProfile(formData: Record<string, any>) {
   }
 }
 
+export async function getWorkerDocsStatus() {
+  const session = await getWorkerSession();
+  if (!session) return { hasAlert: false };
+
+  const [definitions, existingDocuments] = await Promise.all([
+    getActiveDocumentDefinitions(),
+    getWorkerDocuments()
+  ]);
+
+  if (definitions.length === 0) return { hasAlert: false };
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const hasAlert = definitions.some(def => {
+    const doc = existingDocuments.find(d => d.definition_id === def.id);
+    
+    // 1. Missing and mandatory
+    if (!doc) {
+      return def.is_mandatory;
+    }
+    
+    // 2. Rejected
+    if (doc.status === 'REJECTED') {
+      return true;
+    }
+    
+    // 3. Expired
+    if (doc.expiration_date && doc.expiration_date < todayStr) {
+      return true;
+    }
+    
+    return false;
+  });
+
+  return { hasAlert };
+}
+
