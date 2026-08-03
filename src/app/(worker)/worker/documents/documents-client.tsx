@@ -36,6 +36,8 @@ import { createClient } from '@/lib/supabase/client';
 import DocumentCapture from '@/components/onboarding/document-capture';
 import { compileFrontBackPdf, compileSingleCardPdf } from '@/lib/documents/pdf-compiler';
 
+import { DatePickerField } from '@/components/ui/date-picker-field';
+
 interface WorkerDocumentsClientProps {
   definitions: DocumentDefinition[];
   existingDocuments: Document[];
@@ -373,15 +375,15 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
             {selectedDef?.requires_expiration && !selectedDef?.depends_on_definition_id && (
               <div className="space-y-2">
                 <Label htmlFor="expiry" className="text-xs font-black uppercase text-slate-400 ml-1">Fecha de Vencimiento</Label>
-                <Input 
+                <DatePickerField 
                   id="doc-expiry-date" 
-                  type="date"
                   value={expiryDate}
-                  onChange={(e) => {
-                    console.log('Date changed:', e.target.value);
-                    setExpiryDate(e.target.value);
+                  onChange={(val: string) => {
+                    console.log('Date changed:', val);
+                    setExpiryDate(val);
                   }}
-                  className="h-12 rounded-2xl bg-slate-50 border-slate-200 focus:ring-orange-500 font-bold"
+                  minYear={2020}
+                  maxYear={2045}
                 />
                 <p className="text-[10px] text-orange-600 font-bold px-1 italic">Ingresa la fecha que aparece en tu documento físico.</p>
               </div>

@@ -85,14 +85,6 @@ export async function getPersonnelUpdateDetailsByToken(tokenStr: string): Promis
         };
       }
 
-      if (tokenRow.used_at) {
-        return {
-          data: null,
-          status: 'EXPIRED',
-          error: 'Este enlace ya fue utilizado para actualizar la ficha. Si necesitas corregir algo más, solicita un nuevo link.',
-        };
-      }
-
       return {
         data: {
           worker: tokenRow.personnel,
@@ -238,6 +230,30 @@ export async function updatePersonnelFichaByToken(
       .eq('id', worker.id);
 
     if (updateErr) throw updateErr;
+
+    // Notify admins about the ficha update
+    try {
+      // Get all ADMIN and HR users for this company
+      const { data: adminUsers } = await adminClient
+        .from('users')
+        .select('id')
+        .in('role', ['ADMIN', 'HR']);
+      
+      if (adminUsers && adminUsers.length > 0) {
+        const workerName = `${updatePayload.first_name} ${updatePayload.last_name_father}`;
+        const notifications = adminUsers.map(admin => ({
+          user_id: admin.id,
+          type: 'general' as const,
+          title: 'Ficha Actualizada',
+          message: `${workerName} (${worker.rut}) ha actualizado su ficha personal.`,
+          data: { personnel_id: worker.id, updated_by: 'worker_self_service' },
+        }));
+        
+        await adminClient.from('notifications').insert(notifications);
+      }
+    } catch (e) {
+      console.warn('Failed to notify admins about ficha update:', e);
+    }
 
     // Si es un token de la base de datos, marcarlo como usado
     try {

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DatePickerField } from '@/components/ui/date-picker-field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, Upload, Info } from 'lucide-react';
 import { toast } from 'sonner';
@@ -170,14 +171,14 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
           {needsExpirationDate && (
             <div className="space-y-2">
               <Label htmlFor="explicit_expiration_date">Fecha de Vencimiento *</Label>
-              <Input id="explicit_expiration_date" name="explicit_expiration_date" type="date" required />
+              <DatePickerField id="explicit_expiration_date" name="explicit_expiration_date" minYear={2020} maxYear={2045} required />
             </div>
           )}
 
           {needsIssueDate && (
             <div className="space-y-2">
               <Label htmlFor="issue_date">Fecha de Emisión <span className="text-muted-foreground font-normal text-xs">(Opcional)</span></Label>
-              <Input id="issue_date" name="issue_date" type="date" />
+              <DatePickerField id="issue_date" name="issue_date" minYear={2020} maxYear={2045} />
             </div>
           )}
 
@@ -189,7 +190,7 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
                   (el sistema calculará el vencimiento automáticamente)
                 </span>
               </Label>
-              <Input id="tica_date" name="tica_date" type="date" required={needsAnchorDate} />
+              <DatePickerField id="tica_date" name="tica_date" required={needsAnchorDate} minYear={2020} maxYear={2045} />
             </div>
           )}
 
@@ -197,7 +198,7 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
           {needsAnchorDate && (
             <div className="space-y-2">
               <Label htmlFor="issue_date">Fecha de Emisión</Label>
-              <Input id="issue_date" name="issue_date" type="date" />
+              <DatePickerField id="issue_date" name="issue_date" minYear={2020} maxYear={2045} />
             </div>
           )}
 

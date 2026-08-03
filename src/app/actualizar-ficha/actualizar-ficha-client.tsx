@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DatePickerField } from '@/components/ui/date-picker-field';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { 
@@ -330,13 +331,13 @@ export default function ActualizarFichaClient({ token, worker }: ActualizarFicha
 
             <div className="space-y-1.5">
               <Label htmlFor="birth_date">Fecha de Nacimiento *</Label>
-              <Input 
+              <DatePickerField 
                 id="birth_date" 
-                type="date"
                 value={birthDate} 
-                onChange={e => setBirthDate(e.target.value)} 
+                onChange={setBirthDate} 
                 required
-                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700"
+                minYear={1940}
+                maxYear={2010}
               />
             </div>
 

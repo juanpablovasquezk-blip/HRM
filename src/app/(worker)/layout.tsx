@@ -29,6 +29,7 @@ export default function WorkerLayout({
 
   const [role, setRole] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+  const [fichaIncomplete, setFichaIncomplete] = useState(false);
 
   useEffect(() => {
     const getRole = async () => {
@@ -40,6 +41,13 @@ export default function WorkerLayout({
       ]);
       setRole(currentRole || 'USER');
       setUserName(session?.first_name || '');
+      
+      if (session) {
+        setFichaIncomplete(
+          !session.afp || !session.health_system || !session.bank_account_number || 
+          !session.emergency_contact_phone || !session.gender || !session.marital_status || !session.phone
+        );
+      }
     };
     getRole();
   }, []);
@@ -48,6 +56,7 @@ export default function WorkerLayout({
     { label: 'Mañana', href: '/worker', icon: Clock },
     { label: 'Mi Mes', href: '/worker/roster', icon: CalendarDays },
     { label: 'Mis Docs', href: '/worker/documents', icon: FileText },
+    { label: 'Mi Ficha', href: '/worker/profile', icon: User },
     { label: 'Movilidad', href: '/worker/transport', icon: Bus },
   ];
 
@@ -95,12 +104,18 @@ export default function WorkerLayout({
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex flex-col items-center gap-1 py-2 px-4 rounded-2xl transition-all duration-300",
+                  "relative flex flex-col items-center gap-1 py-2 px-4 rounded-2xl transition-all duration-300",
                   isActive 
                     ? "text-orange-600 bg-orange-50 scale-110" 
                     : "text-slate-400 hover:text-slate-600"
                 )}
               >
+                {fichaIncomplete && item.href === '/worker/profile' && (
+                  <span className="absolute -top-0.5 right-2 flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                  </span>
+                )}
                 <Icon className={cn("h-6 w-6", isActive && "stroke-[2.5px]")} />
                 <span className={cn("text-[10px] font-bold uppercase tracking-wider", isActive ? "opacity-100" : "opacity-70")}>
                   {item.label}

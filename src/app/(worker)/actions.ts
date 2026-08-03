@@ -511,3 +511,104 @@ export async function deleteWorkerLeave(leaveId: string) {
   revalidatePath('/leaves');
   return { success: true };
 }
+
+export async function getWorkerProfile() {
+  const session = await getWorkerSession();
+  if (!session) return null;
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from('personnel')
+    .select('*, company:companies(id, name)')
+    .eq('id', session.id)
+    .single();
+    
+  return data;
+}
+
+export async function updateWorkerProfile(formData: Record<string, any>) {
+  const session = await getWorkerSession();
+  if (!session) return { success: false, error: 'No hay sesión activa' };
+
+  const adminClient = createAdminClient();
+  
+  const toUpper = (val: any) => {
+    if (typeof val === 'string') return val.trim().toUpperCase();
+    return val || null;
+  };
+
+  const cleanEmail = formData.email ? formData.email.trim().toLowerCase() : null;
+
+  const addressJson = {
+    street: toUpper(formData.address_street) || '',
+    city: toUpper(formData.address_city) || '',
+    region: toUpper(formData.address_region) || '',
+    comuna: toUpper(formData.address_comuna) || '',
+  };
+
+  const updatePayload: Record<string, any> = {
+    email: cleanEmail,
+    phone: formData.phone || '',
+    birth_date: formData.birth_date || session.birth_date,
+    address: addressJson,
+    emergency_contact_name: toUpper(formData.emergency_contact_name),
+    emergency_contact_relationship: toUpper(formData.emergency_contact_relationship),
+    emergency_contact_phone: formData.emergency_contact_phone || '',
+    afp: toUpper(formData.afp),
+    health_system: toUpper(formData.health_system),
+    isapre: formData.health_system === 'ISAPRE' ? toUpper(formData.isapre) : null,
+    gender: toUpper(formData.gender),
+    bank_account_type: toUpper(formData.bank_account_type),
+    bank_name: toUpper(formData.bank_name),
+    bank_account_number: toUpper(formData.bank_account_number),
+    nationality: toUpper(formData.nationality) || 'CHILENA',
+    marital_status: toUpper(formData.marital_status),
+  };
+
+  // Clothing sizes
+  if (formData.clothing_tshirt_size) updatePayload.clothing_tshirt_size = toUpper(formData.clothing_tshirt_size);
+  if (formData.clothing_polar_size) updatePayload.clothing_polar_size = toUpper(formData.clothing_polar_size);
+  if (formData.clothing_pants_size_letter) updatePayload.clothing_pants_size_letter = toUpper(formData.clothing_pants_size_letter);
+  if (formData.clothing_pants_size_number) updatePayload.clothing_pants_size_number = toUpper(formData.clothing_pants_size_number);
+  if (formData.clothing_shoe_size) updatePayload.clothing_shoe_size = toUpper(formData.clothing_shoe_size);
+  if (formData.clothing_parka_size) updatePayload.clothing_parka_size = toUpper(formData.clothing_parka_size);
+  if (formData.clothing_overall_size) updatePayload.clothing_overall_size = toUpper(formData.clothing_overall_size);
+
+  try {
+    const { error } = await adminClient
+      .from('personnel')
+      .update(updatePayload)
+      .eq('id', session.id);
+
+    if (error) throw error;
+
+    // Notify admins about the update
+    try {
+      const { data: adminUsers } = await adminClient
+        .from('users')
+        .select('id')
+        .in('role', ['ADMIN', 'HR']);
+      
+      if (adminUsers && adminUsers.length > 0) {
+        const workerName = `${session.first_name} ${session.last_name_father}`;
+        const notifications = adminUsers.map((admin: any) => ({
+          user_id: admin.id,
+          type: 'general' as const,
+          title: 'Ficha Actualizada',
+          message: `${workerName} (${session.rut}) ha actualizado su ficha personal desde la app.`,
+          data: { personnel_id: session.id, updated_by: 'worker_app' },
+        }));
+        
+        await adminClient.from('notifications').insert(notifications);
+      }
+    } catch (e) {
+      console.warn('Failed to notify admins:', e);
+    }
+
+    return { success: true, error: null };
+  } catch (error: any) {
+    console.error('Error updating worker profile:', error);
+    return { success: false, error: error.message };
+  }
+}
+

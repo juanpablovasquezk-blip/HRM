@@ -1,9 +1,8 @@
 'use client';
 
-import { Bell, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { NotificationCenter } from '@/components/layout/notification-center';
 
 interface TopbarProps {
   title?: string;
@@ -39,20 +38,7 @@ export function Topbar({ title, subtitle }: TopbarProps) {
 
       {/* Right: Actions */}
       <div className="flex items-center gap-2 ml-auto">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative h-9 w-9 rounded-xl"
-          id="notifications-btn"
-        >
-          <Bell className="h-[18px] w-[18px]" />
-          <Badge
-            variant="destructive"
-            className="absolute -top-0.5 -right-0.5 h-4 min-w-[16px] px-1 text-[10px] font-bold"
-          >
-            3
-          </Badge>
-        </Button>
+        <NotificationCenter />
       </div>
     </header>
   );

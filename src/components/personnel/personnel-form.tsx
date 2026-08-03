@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { DatePickerField } from '@/components/ui/date-picker-field';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
@@ -366,7 +367,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
           </div>
           <div className="space-y-2">
             <Label htmlFor="birth_date">Fecha de Nacimiento *</Label>
-            <Input id="birth_date" name="birth_date" type="date" defaultValue={initialValues.birth_date} required />
+            <DatePickerField id="birth_date" name="birth_date" value={initialValues.birth_date} minYear={1940} maxYear={2010} required />
           </div>
           <div className="space-y-2">
             <Label htmlFor="phone">
@@ -888,13 +889,13 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
 
             <div className="space-y-2">
               <Label htmlFor="hire_date">Fecha de Ingreso (Contratación)</Label>
-              <Input id="hire_date" name="hire_date" type="date" defaultValue={initialValues.hire_date} />
+              <DatePickerField id="hire_date" name="hire_date" value={initialValues.hire_date} />
               <p className="text-[10px] text-muted-foreground italic">No se podrán asignar turnos antes de esta fecha.</p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="termination_date">Fecha de Baja (Si renuncia)</Label>
-              <Input id="termination_date" name="termination_date" type="date" defaultValue={initialValues.termination_date} />
+              <DatePickerField id="termination_date" name="termination_date" value={initialValues.termination_date} />
               <p className="text-[10px] text-muted-foreground italic">Pasada esta fecha, el trabajador quedará bloqueado en el roster.</p>
             </div>
 

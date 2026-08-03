@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { DatePickerField } from '@/components/ui/date-picker-field';
 import { 
   Select, 
   SelectContent, 
@@ -558,13 +559,13 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="birth_date">Fecha de Nacimiento *</Label>
-              <Input 
+              <DatePickerField 
                 id="birth_date" 
-                type="date" 
                 value={birthDate} 
-                onChange={e => setBirthDate(e.target.value)} 
+                onChange={setBirthDate} 
                 required 
-                className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+                minYear={1940}
+                maxYear={2010}
               />
             </div>
             <div className="space-y-1.5">
@@ -1126,13 +1127,13 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="cedula_exp">Fecha de Vencimiento *</Label>
-                <Input
+                <DatePickerField
                   id="cedula_exp"
-                  type="date"
                   value={cedulaExpiration}
-                  onChange={(e) => setCedulaExpiration(e.target.value)}
+                  onChange={setCedulaExpiration}
                   required
-                  className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+                  minYear={2020}
+                  maxYear={2045}
                 />
               </div>
             </div>
@@ -1168,13 +1169,13 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label htmlFor="lic_exp">Fecha de Vencimiento *</Label>
-                  <Input
+                  <DatePickerField
                     id="lic_exp"
-                    type="date"
                     value={licenciaExpiration}
-                    onChange={(e) => setLicenciaExpiration(e.target.value)}
+                    onChange={setLicenciaExpiration}
                     required
-                    className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+                    minYear={2020}
+                    maxYear={2045}
                   />
                 </div>
               </div>
@@ -1240,13 +1241,13 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="antecedentes_date">Fecha de Emisión *</Label>
-                <Input
+                <DatePickerField
                   id="antecedentes_date"
-                  type="date"
                   value={antecedentesIssueDate}
-                  onChange={(e) => setAntecedentesIssueDate(e.target.value)}
+                  onChange={setAntecedentesIssueDate}
                   required
-                  className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+                  minYear={2020}
+                  maxYear={2045}
                 />
                 {antecedentesIssueDate && isDateOlderThanDays(antecedentesIssueDate, 25) && (
                   <p className="text-[10px] text-red-500 font-bold flex items-center gap-1">
@@ -1277,13 +1278,13 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label htmlFor="hoja_vida_date">Fecha de Emisión *</Label>
-                  <Input
+                  <DatePickerField
                     id="hoja_vida_date"
-                    type="date"
                     value={hojaVidaIssueDate}
-                    onChange={(e) => setHojaVidaIssueDate(e.target.value)}
+                    onChange={setHojaVidaIssueDate}
                     required
-                    className="h-11 rounded-xl bg-slate-50/50 dark:bg-slate-800/50 border-slate-200/80 dark:border-slate-700 focus:ring-orange-500"
+                    minYear={2020}
+                    maxYear={2045}
                   />
                   {hojaVidaIssueDate && isDateOlderThanDays(hojaVidaIssueDate, 25) && (
                     <p className="text-[10px] text-red-500 font-bold flex items-center gap-1">
