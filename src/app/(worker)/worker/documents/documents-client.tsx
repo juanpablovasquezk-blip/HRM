@@ -139,42 +139,22 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
     const loadingToast = toast.loading('Subiendo documento...');
 
     try {
-      let finalFile: File;
+      let base64Data: string;
 
       if (captureType === 'card') {
         if (isSingle) {
-          const compiledPdfBase64 = await compileSingleCardPdf(capturedValue!);
-          const fileName = `${selectedDef.id}-${Date.now()}.pdf`;
-          finalFile = base64ToFile(compiledPdfBase64, fileName);
+          base64Data = await compileSingleCardPdf(capturedValue!);
         } else {
-          const compiledPdfBase64 = await compileFrontBackPdf(capturedFront!, capturedBack!);
-          const fileName = `${selectedDef.id}-${Date.now()}.pdf`;
-          finalFile = base64ToFile(compiledPdfBase64, fileName);
+          base64Data = await compileFrontBackPdf(capturedFront!, capturedBack!);
         }
       } else {
-        const mimeType = capturedValue!.split(';')[0].split(':')[1];
-        const ext = mimeType === 'application/pdf' ? 'pdf' : 'jpg';
-        const fileName = `${selectedDef.id}-${Date.now()}.${ext}`;
-        finalFile = base64ToFile(capturedValue!, fileName);
+        base64Data = capturedValue!;
       }
 
-      const filePath = `${userId}/${finalFile.name}`;
-
-      // 1. Upload to Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(filePath, finalFile, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
-      
-      // 2. Save Database Record
+      // Save Database Record & Upload to Storage via Server Action
       const res = await uploadDocumentRecord({
         definition_id: selectedDef.id,
-        file_url: publicUrl,
+        base64Data: base64Data,
         type: selectedDef.name,
         expiration_date: expiryDate || null,
         status: 'PENDING'

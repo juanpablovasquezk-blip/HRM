@@ -409,6 +409,54 @@ export async function uploadDocumentRecord(record: any) {
 
   const adminClient = createAdminClient();
 
+  // 1. Upload base64 file to storage if provided
+  let fileUrl = record.file_url;
+  if (record.base64Data) {
+    try {
+      const base64Str = record.base64Data;
+      const marker = ';base64,';
+      const markerIndex = base64Str.indexOf(marker);
+      
+      let buffer: Buffer;
+      let contentType = 'application/octet-stream';
+      
+      if (markerIndex === -1) {
+        buffer = Buffer.from(base64Str, 'base64');
+      } else {
+        buffer = Buffer.from(base64Str.substring(markerIndex + marker.length), 'base64');
+        contentType = base64Str.substring(5, base64Str.indexOf(';'));
+      }
+
+      const ext = contentType === 'application/pdf' ? 'pdf' : 'jpg';
+      const fileName = `${session.id}/${record.definition_id || 'document'}-${Date.now()}.${ext}`;
+
+      const { error: uploadError } = await adminClient.storage
+        .from('documents')
+        .upload(fileName, buffer, {
+          contentType,
+          upsert: true
+        });
+
+      if (uploadError) {
+        console.error('Storage upload failed:', uploadError);
+        return { success: false, error: `Upload failed: ${uploadError.message}` };
+      }
+
+      const { data: urlData } = adminClient.storage
+        .from('documents')
+        .getPublicUrl(fileName);
+
+      fileUrl = urlData.publicUrl;
+    } catch (e: any) {
+      console.error('Storage processing failed:', e);
+      return { success: false, error: e.message || 'Error processing storage upload' };
+    }
+  }
+
+  if (!fileUrl) {
+    return { success: false, error: 'El archivo del documento es obligatorio' };
+  }
+
   // Delete previous document of same definition (upsert pattern without needing DB unique constraint)
   if (record.definition_id) {
     const { data: existing } = await adminClient
@@ -438,7 +486,7 @@ export async function uploadDocumentRecord(record: any) {
   const dataToSave: any = {
     personnel_id: session.id,
     definition_id: record.definition_id,
-    file_url: record.file_url,
+    file_url: fileUrl,
     type: record.type || 'Documento',
     status: 'PENDING',
     uploaded_at: new Date().toISOString(),
