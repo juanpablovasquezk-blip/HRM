@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     // 2. Fetch all active workers
     const { data: activeWorkers, error: fetchWorkersError } = await supabase
       .from('personnel')
-      .select('id, first_name, last_name_father, email, rut, phone, afp, health_system, bank_account_number, emergency_contact_phone, gender, marital_status')
+      .select('id, first_name, last_name_father, email, rut, phone, afp, health_system, bank_account_number, emergency_contact_phone, gender, marital_status, main_position, secondary_positions')
       .eq('is_active', true);
 
     if (fetchWorkersError) throw fetchWorkersError;
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     // 3. Fetch all active mandatory document definitions
     const { data: mandatoryDefs, error: fetchDefsError } = await supabase
       .from('document_definitions')
-      .select('id, name')
+      .select('id, name, applicable_positions')
       .eq('is_active', true)
       .eq('is_mandatory', true);
 
@@ -54,12 +54,22 @@ export async function GET(request: Request) {
       // Skip if no phone number
       if (!worker.phone || worker.phone.trim().length < 8) continue;
 
+      const positionIds: string[] = [];
+      if (worker.main_position) positionIds.push(worker.main_position);
+      if (Array.isArray(worker.secondary_positions)) {
+        positionIds.push(...worker.secondary_positions);
+      }
+
       // Check completeness
       const isProfileIncomplete = !worker.afp || !worker.health_system || !worker.bank_account_number || 
         !worker.emergency_contact_phone || !worker.gender || !worker.marital_status || !worker.phone;
 
       const workerDocs = docs.filter(d => d.personnel_id === worker.id);
       const missingForThisWorker = defs.filter(def => {
+        const applicable: string[] = def.applicable_positions || [];
+        if (applicable.length > 0 && !applicable.some((p: string) => positionIds.includes(p))) {
+          return false;
+        }
         const doc = workerDocs.find(d => d.definition_id === def.id);
         return !doc || !doc.file_url;
       });

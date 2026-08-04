@@ -303,12 +303,12 @@ export default async function DashboardPage() {
       const [{ data: activeWorkers }, { data: mandatoryDefs }] = await Promise.all([
         supabase
           .from('personnel')
-          .select('id, first_name, last_name_father, email, rut, phone, afp, health_system, bank_account_number, emergency_contact_phone, gender, marital_status')
+          .select('id, first_name, last_name_father, email, rut, phone, afp, health_system, bank_account_number, emergency_contact_phone, gender, marital_status, main_position, secondary_positions')
           .eq('company_id', profile.company_id)
           .eq('is_active', true),
         supabase
           .from('document_definitions')
-          .select('id, name')
+          .select('id, name, applicable_positions')
           .eq('is_active', true)
           .eq('is_mandatory', true)
       ]);
@@ -324,9 +324,19 @@ export default async function DashboardPage() {
         const missingList: any[] = [];
 
         for (const worker of activeWorkers) {
+          const positionIds: string[] = [];
+          if (worker.main_position) positionIds.push(worker.main_position);
+          if (Array.isArray(worker.secondary_positions)) {
+            positionIds.push(...worker.secondary_positions);
+          }
+
           // Check if missing documents
           const workerDocs = eDocs.filter(d => d.personnel_id === worker.id);
           const missingForThisWorker = mandatoryDefs.filter(def => {
+            const applicable: string[] = def.applicable_positions || [];
+            if (applicable.length > 0 && !applicable.some((p: string) => positionIds.includes(p))) {
+              return false;
+            }
             const doc = workerDocs.find(d => d.definition_id === def.id);
             return !doc || !doc.file_url;
           });
