@@ -18,6 +18,7 @@ export default async function WorkerDocumentsPage() {
         definitions={definitions} 
         existingDocuments={existingDocuments} 
         userId={session.id}
+        personnel={session}
       />
     </div>
   );

@@ -35,6 +35,7 @@ import { es } from 'date-fns/locale';
 import { createClient } from '@/lib/supabase/client';
 import DocumentCapture from '@/components/onboarding/document-capture';
 import { compileFrontBackPdf, compileSingleCardPdf } from '@/lib/documents/pdf-compiler';
+import { labelSelfie } from '@/lib/documents/selfie-labeler';
 
 import { DatePickerField } from '@/components/ui/date-picker-field';
 
@@ -42,6 +43,7 @@ interface WorkerDocumentsClientProps {
   definitions: DocumentDefinition[];
   existingDocuments: Document[];
   userId: string;
+  personnel: any;
 }
 
 const getCaptureType = (defName: string): 'card' | 'selfie' | 'pdf' => {
@@ -81,7 +83,7 @@ const base64ToFile = (base64String: string, filename: string): File => {
   return new File([u8arr], filename, { type: mime });
 };
 
-export default function WorkerDocumentsClient({ definitions, existingDocuments, userId }: WorkerDocumentsClientProps) {
+export default function WorkerDocumentsClient({ definitions, existingDocuments, userId, personnel }: WorkerDocumentsClientProps) {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedDef, setSelectedDef] = useState<DocumentDefinition | null>(null);
@@ -149,6 +151,13 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
         }
       } else {
         base64Data = capturedValue!;
+      }
+
+      // Label selfie/photo with name and RUT
+      const docNameLower = selectedDef.name.toLowerCase();
+      if (captureType === 'selfie' || docNameLower.includes('foto con fondo blanco') || docNameLower === 'foto de perfil') {
+        const fullName = `${personnel.first_name} ${personnel.last_name_father} ${personnel.last_name_mother || ''}`;
+        base64Data = await labelSelfie(base64Data, fullName, personnel.rut || '');
       }
 
       // Save Database Record & Upload to Storage via Server Action
