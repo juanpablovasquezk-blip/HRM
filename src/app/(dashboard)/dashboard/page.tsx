@@ -5,7 +5,8 @@ import {
 import { StatCard } from '@/components/dashboard/stat-card';
 import { MonthlyEvolutionChart } from '@/components/dashboard/monthly-evolution-chart';
 import { AbsenceDonut } from '@/components/dashboard/absence-donut';
-import { TodoList } from '@/components/dashboard/todo-list';
+import { PendingDocsCard } from '@/components/dashboard/pending-docs-card';
+import { IncompleteProfilesCard } from '@/components/dashboard/incomplete-profiles-card';
 import { ActiveLeavesCard } from '@/components/dashboard/active-leaves-card';
 import { BirthdaysCard } from '@/components/dashboard/birthdays-card';
 import { MonthlyFinalAbsencesCard } from '@/components/dashboard/monthly-final-absences-card';
@@ -59,6 +60,12 @@ export default async function DashboardPage() {
   let finalAbsentPeople: Array<{ name: string }> = [];
   let monthlyFinalAbsences: Array<{ name: string; count: number }> = [];
   let birthdayPeople: Array<{ name: string; birthDate: string }> = [];
+
+  // For new widgets
+  let pendingDocsCount = 0;
+  let pendingDocs: any[] = [];
+  let incompleteCount = 0;
+  let incompletePersonnel: any[] = [];
 
   if (user) {
     const { data: profile } = await supabase
@@ -263,9 +270,33 @@ export default async function DashboardPage() {
           birthDate: p.birth_date,
         }));
 
-      // ── 9. Evolución mensual (últimos 2 meses) ─────────────────────────────
+      // ── 8b. Documentos por validar ─────────────────────────────────────────
+      const { data: pDocs, count: pDocsCount } = await supabase
+        .from('documents')
+        .select('id, type, personnel!inner(id, first_name, last_name_father, is_active, company_id)', { count: 'exact' })
+        .eq('personnel.is_active', true)
+        .eq('personnel.company_id', profile.company_id)
+        .eq('status', 'PENDING')
+        .order('uploaded_at', { ascending: false })
+        .limit(5);
+      pendingDocsCount = pDocsCount || 0;
+      pendingDocs = pDocs || [];
+
+      // ── 8c. Fichas Incompletas ──────────────────────────────────────────────
+      const { data: incPers, count: incCount } = await supabase
+        .from('personnel')
+        .select('id, first_name, last_name_father, rut', { count: 'exact' })
+        .eq('company_id', profile.company_id)
+        .eq('is_active', true)
+        .or('afp.is.null,health_system.is.null,bank_account_number.is.null,emergency_contact_phone.is.null,gender.is.null,marital_status.is.null,phone.is.null,afp.eq.,health_system.eq.,bank_account_number.eq.,emergency_contact_phone.eq.,gender.eq.,marital_status.eq.,phone.eq.')
+        .order('first_name', { ascending: true })
+        .limit(5);
+      incompleteCount = incCount || 0;
+      incompletePersonnel = incPers || [];
+
+      // ── 9. Evolución mensual (últimos 6 meses) ─────────────────────────────
       const months = [];
-      for (let i = 1; i >= 0; i--) {
+      for (let i = 5; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const mStart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
         const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split('T')[0];
@@ -421,9 +452,10 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Fila: TodoList + Ausencias activas ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <TodoList />
+      {/* ── Fila: Documentos y Fichas por Validar + Ausencias activas ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <PendingDocsCard count={pendingDocsCount} docs={pendingDocs} />
+        <IncompleteProfilesCard count={incompleteCount} people={incompletePersonnel} />
         <ActiveLeavesCard people={activeLeavesPeople} finalAbsences={finalAbsentPeople} />
       </div>
 

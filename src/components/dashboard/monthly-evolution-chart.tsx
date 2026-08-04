@@ -17,7 +17,7 @@ export function MonthlyEvolutionChart({ data }: Props) {
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="text-base font-semibold">Evolución Mensual</CardTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">Últimos 2 meses — datos reales</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Últimos 6 meses — datos reales</p>
           </div>
         </div>
       </CardHeader>
