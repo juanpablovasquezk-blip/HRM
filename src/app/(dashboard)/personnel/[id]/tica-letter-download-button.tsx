@@ -168,8 +168,8 @@ export function TicaLetterDownloadButton({ person }: TicaLetterDownloadButtonPro
       doc.text('Minerquim Ltda.', 25, currentY);
 
       // 14. Save PDF file
-      const workerFileSuffix = `${person.first_name}_${person.last_name_father}`.toUpperCase().trim();
-      doc.save(`CARTA_TICA_${workerFileSuffix}.pdf`);
+      const workerFileSuffix = `${person.first_name}_${person.last_name_father}`.toUpperCase().trim().replace(/\s+/g, '_');
+      doc.save(`CARTA_TICA_5_${workerFileSuffix}.pdf`);
 
       toast.success('Carta TICA generada y descargada exitosamente en PDF');
     } catch (error: any) {
