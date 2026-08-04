@@ -116,6 +116,7 @@ export async function uploadDocument(
   // Save document record
   const { error: insertError } = await adminClient.from('documents').insert({
     personnel_id: personnelId,
+    definition_id: definitionId,
     type,
     number,
     file_url: urlData.publicUrl,
