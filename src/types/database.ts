@@ -74,6 +74,8 @@ export interface Personnel {
 
   // Onboarding status
   onboarding_status?: 'pending' | 'approved' | 'rejected' | null;
+  rejection_reason?: string | null;
+  inactive_reason?: string | null;
 
   // Social Security (AFP & Health)
   afp?: string | null;

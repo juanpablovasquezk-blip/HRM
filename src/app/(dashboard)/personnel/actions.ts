@@ -198,7 +198,7 @@ export async function updatePersonnel(
   const secondaryPositions = formData.get('secondary_positions') as string;
   const driverLicenses = formData.get('driver_licenses') as string;
 
-  const updateData = {
+  const updateData: Partial<Personnel> & Record<string, any> = {
     company_id: formData.get('company_id') as string,
     first_name: toUpper(formData.get('first_name')),
     last_name_father: toUpper(formData.get('last_name_father')),
@@ -274,6 +274,18 @@ export async function updatePersonnel(
   // Check previous state for user revocation logic
   const { data: previousPerson } = await supabase.from('personnel').select('user_id, is_active').eq('id', id).single();
 
+  const wasActive = previousPerson?.is_active ?? true;
+  const isNowActive = updateData.is_active;
+
+  if (wasActive && !isNowActive) {
+    // Transitioning from active to inactive (dar de baja)
+    updateData.inactive_reason = (formData.get('inactive_reason') as string) || null;
+  } else if (!wasActive && isNowActive) {
+    // Transitioning from inactive to active: clear reasons
+    updateData.inactive_reason = null;
+    updateData.rejection_reason = null;
+  }
+
   const shouldRevoke = previousPerson?.user_id && previousPerson.is_active !== updateData.is_active && !updateData.is_active;
   const updatePayload = shouldRevoke ? { ...updateData, user_id: null } : updateData;
 
@@ -297,6 +309,16 @@ export async function updatePersonnel(
   }
 
   if (updateError) return { success: false, error: updateError.message };
+
+  // If transitioning to inactive, delete documents to free up space
+  if (wasActive && !isNowActive) {
+    try {
+      const adminClient = createAdminClient();
+      await deletePersonnelDocumentsAndLetters(id, adminClient);
+    } catch (cleanErr) {
+      console.error('Error during automatic document deletion for inactive personnel:', cleanErr);
+    }
+  }
 
   // Handle deleting/revoking user account if deactivated
   if (shouldRevoke && previousPerson?.user_id) {
@@ -367,21 +389,25 @@ export async function updatePersonnel(
 }
 
 export async function deletePersonnel(
-  id: string
+  id: string,
+  reason?: string
 ): Promise<{ success: boolean; error: string | null }> {
   const supabase = await createClient();
+  const adminClient = createAdminClient();
 
   // Soft delete — mark as inactive
-  const { error } = await supabase
+  const { error } = await adminClient
     .from('personnel')
-    .update({ is_active: false })
+    .update({ 
+      is_active: false,
+      inactive_reason: reason || null
+    })
     .eq('id', id);
 
   if (error) return { success: false, error: error.message };
 
   // Clean up future shift assignments and transport requests starting from today
   try {
-    const adminClient = createAdminClient();
     const todayStr = new Date().toLocaleDateString('sv');
     await Promise.all([
       adminClient.from('shift_assignments').update({ status: 'cancelled' }).eq('personnel_id', id).gte('date', todayStr),
@@ -396,12 +422,14 @@ export async function deletePersonnel(
   
   if (person?.user_id) {
     try {
-      const adminClient = createAdminClient();
       await adminClient.auth.admin.updateUserById(person.user_id, { ban_duration: '87600h' });
     } catch (err) {
       console.error('Error banning user during deletion:', err);
     }
   }
+
+  // Clean up uploaded documents and warning letters to free up space
+  await deletePersonnelDocumentsAndLetters(id, adminClient);
 
   safeRevalidatePath('/personnel');
   safeRevalidatePath('/shifts/assignments');
@@ -749,7 +777,9 @@ export async function approveOnboarding(
         main_position: mainPositionId,
         rotation_pattern: rotationPattern,
         fixed_shift_id: fixedShiftId || null,
-        hire_date: new Date().toISOString().split('T')[0] // Set hire date to today
+        hire_date: new Date().toISOString().split('T')[0], // Set hire date to today
+        rejection_reason: null,
+        inactive_reason: null
       })
       .eq('id', personnelId);
 
@@ -780,9 +810,66 @@ export async function approveOnboarding(
   }
 }
 
+// Helper to delete all documents and letters of a worker to free up space
+async function deletePersonnelDocumentsAndLetters(
+  personnelId: string,
+  adminClient: any
+): Promise<void> {
+  try {
+    // 1. Delete files from storage and rows from 'documents' table
+    const { data: docs } = await adminClient
+      .from('documents')
+      .select('file_url')
+      .eq('personnel_id', personnelId);
+
+    if (docs && docs.length > 0) {
+      const paths = docs
+        .map((d: any) => {
+          if (!d.file_url) return null;
+          const marker = '/documents/';
+          const idx = d.file_url.lastIndexOf(marker);
+          return idx !== -1 ? d.file_url.substring(idx + marker.length) : null;
+        })
+        .filter(Boolean) as string[];
+
+      if (paths.length > 0) {
+        await adminClient.storage.from('documents').remove(paths);
+      }
+    }
+    await adminClient.from('documents').delete().eq('personnel_id', personnelId);
+
+    // 2. Delete files from storage and rows from 'personnel_letters' table
+    const { data: letters } = await adminClient
+      .from('personnel_letters')
+      .select('file_url')
+      .eq('personnel_id', personnelId);
+
+    if (letters && letters.length > 0) {
+      const paths = letters
+        .map((l: any) => {
+          if (!l.file_url) return null;
+          const marker = '/documents/';
+          const idx = l.file_url.lastIndexOf(marker);
+          return idx !== -1 ? l.file_url.substring(idx + marker.length) : null;
+        })
+        .filter(Boolean) as string[];
+
+      if (paths.length > 0) {
+        await adminClient.storage.from('documents').remove(paths);
+      }
+    }
+    await adminClient.from('personnel_letters').delete().eq('personnel_id', personnelId);
+
+    console.log(`[CLEANUP] Successfully deleted documents and letters for personnel ${personnelId}`);
+  } catch (err) {
+    console.error(`[CLEANUP] Error in deletePersonnelDocumentsAndLetters for ${personnelId}:`, err);
+  }
+}
+
 // Rechazar postulación
 export async function rejectOnboarding(
-  personnelId: string
+  personnelId: string,
+  reason: string
 ): Promise<{ success: boolean; error: string | null }> {
   try {
     const admin = createAdminClient();
@@ -790,11 +877,15 @@ export async function rejectOnboarding(
       .from('personnel')
       .update({
         onboarding_status: 'rejected',
-        is_active: false
+        is_active: false,
+        rejection_reason: reason
       })
       .eq('id', personnelId);
 
     if (error) throw error;
+
+    // Clean up uploaded documents to free up space
+    await deletePersonnelDocumentsAndLetters(personnelId, admin);
 
     safeRevalidatePath('/personnel');
     return { success: true, error: null };

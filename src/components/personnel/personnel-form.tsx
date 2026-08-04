@@ -115,6 +115,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const [hasSpecialContract, setHasSpecialContract] = useState(personnel?.has_special_contract ?? false);
   const [requiresTransport, setRequiresTransport] = useState((personnel as any)?.requires_transport ?? true);
   const [isActive, setIsActive] = useState(personnel?.is_active ?? true);
+  const [inactiveReason, setInactiveReason] = useState(personnel?.inactive_reason || '');
   const [selectedSecondary, setSelectedSecondary] = useState<string[]>(
     (personnel?.secondary_positions as string[]) || []
   );
@@ -264,6 +265,7 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
     formData.set('has_special_contract', String(hasSpecialContract));
     formData.set('requires_transport', String(requiresTransport));
     formData.set('is_active', String(isActive));
+    formData.set('inactive_reason', inactiveReason);
     formData.set('secondary_positions', selectedSecondary.join(','));
     formData.set('enable_access', String(enableAccess));
 
@@ -948,12 +950,39 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
             <Switch id="requires_transport" checked={requiresTransport} onCheckedChange={setRequiresTransport} />
           </div>
           <Separator />
-          <div className="flex items-center justify-between">
-            <div>
-              <Label htmlFor="is_active" className={!isActive ? 'text-red-600 font-bold' : ''}>Estado Activo</Label>
-              <p className="text-xs text-muted-foreground">Si se desactiva, el trabajador no aparecerá en el roster ni en el listado principal</p>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="is_active" className={!isActive ? 'text-red-600 font-bold' : ''}>Estado Activo</Label>
+                <p className="text-xs text-muted-foreground">Si se desactiva, el trabajador no aparecerá en el roster ni en el listado principal</p>
+              </div>
+              <Switch 
+                id="is_active" 
+                checked={isActive} 
+                onCheckedChange={(checked) => {
+                  setIsActive(checked);
+                  if (checked) {
+                    setInactiveReason('');
+                  }
+                }} 
+              />
             </div>
-            <Switch id="is_active" checked={isActive} onCheckedChange={setIsActive} />
+            {!isActive && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                <Label htmlFor="inactive_reason" className="text-red-600 font-bold">Motivo de la Baja *</Label>
+                <textarea
+                  id="inactive_reason"
+                  placeholder="Por favor, ingresa el motivo por el cual estás dando de baja a este trabajador..."
+                  value={inactiveReason}
+                  onChange={(e) => setInactiveReason(e.target.value)}
+                  className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 placeholder:text-muted-foreground"
+                  required
+                />
+                <p className="text-xs text-red-500 font-semibold mt-1">
+                  ⚠️ Al desactivar al trabajador y guardar los cambios, se eliminarán permanentemente todos sus documentos y cartas del sistema para ahorrar espacio.
+                </p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

@@ -18,6 +18,7 @@ import {
   Copy,
   UserCheck,
   UserX,
+  UserMinus,
   Printer,
   Send,
   ClipboardCopy
@@ -44,7 +45,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { createOnboardingToken, approveOnboarding, rejectOnboarding } from './actions';
+import { createOnboardingToken, approveOnboarding, rejectOnboarding, deletePersonnel } from './actions';
 import { createWorkerSizeToken } from '../epp/actions';
 import { createPersonnelUpdateToken, sendFichaUpdateWhatsApp } from './update-actions';
 
@@ -72,6 +73,8 @@ interface Personnel {
   driver_licenses?: string[];
   company: { name: string } | null;
   onboarding_status?: string | null;
+  rejection_reason?: string | null;
+  inactive_reason?: string | null;
   clothing_tshirt_size?: string | null;
   clothing_polar_size?: string | null;
   clothing_pants_size_letter?: string | null;
@@ -144,6 +147,16 @@ export default function PersonnelTableClient({
   const [approveFixedShiftId, setApproveFixedShiftId] = useState('');
   const [approveEnableAccess, setApproveEnableAccess] = useState(true);
 
+  // Rejection states
+  const [isRejectOpen, setIsRejectOpen] = useState(false);
+  const [rejectPerson, setRejectPerson] = useState<Personnel | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+
+  // Dismiss (Baja) states
+  const [isDismissOpen, setIsDismissOpen] = useState(false);
+  const [dismissPerson, setDismissPerson] = useState<Personnel | null>(null);
+  const [dismissReason, setDismissReason] = useState('');
+
   // Invite handler
   const handleGenerateInvite = async () => {
     if (!inviteCompanyId) {
@@ -196,17 +209,56 @@ export default function PersonnelTableClient({
     });
   };
 
-  // Reject handler
-  const handleReject = (person: Personnel) => {
-    if (!confirm(`¿Estás seguro de que deseas rechazar la postulación de ${person.first_name} ${person.last_name_father}?`)) return;
-    
+  // Reject handlers
+  const handleRejectClick = (person: Personnel) => {
+    setRejectPerson(person);
+    setRejectionReason('');
+    setIsRejectOpen(true);
+  };
+
+  const handleConfirmReject = () => {
+    if (!rejectPerson) return;
+    if (!rejectionReason.trim()) {
+      toast.error('Por favor, ingresa el motivo del rechazo');
+      return;
+    }
+
     startTransition(async () => {
-      const res = await rejectOnboarding(person.id);
+      const res = await rejectOnboarding(rejectPerson.id, rejectionReason);
       if (res.success) {
-        toast.success(`Postulación de ${person.first_name} rechazada`);
+        toast.success(`Postulación de ${rejectPerson.first_name} rechazada`);
+        setIsRejectOpen(false);
+        setRejectPerson(null);
         window.location.reload();
       } else {
         toast.error(res.error || 'Error al rechazar postulación');
+      }
+    });
+  };
+
+  // Dismiss (Baja) handlers
+  const handleDismissClick = (person: Personnel) => {
+    setDismissPerson(person);
+    setDismissReason('');
+    setIsDismissOpen(true);
+  };
+
+  const handleConfirmDismiss = () => {
+    if (!dismissPerson) return;
+    if (!dismissReason.trim()) {
+      toast.error('Por favor, ingresa el motivo de la baja');
+      return;
+    }
+
+    startTransition(async () => {
+      const res = await deletePersonnel(dismissPerson.id, dismissReason);
+      if (res.success) {
+        toast.success(`Trabajador ${dismissPerson.first_name} dado de baja`);
+        setIsDismissOpen(false);
+        setDismissPerson(null);
+        window.location.reload();
+      } else {
+        toast.error(res.error || 'Error al dar de baja');
       }
     });
   };
@@ -529,24 +581,44 @@ export default function PersonnelTableClient({
                     {/* Full Name Cell */}
                     {visibleColumns.fullName && (
                       <TableCell>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Link
-                            href={`/personnel/${person.id}`}
-                            className="font-medium text-orange-600 hover:text-orange-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1.5"
-                          >
-                            {person.first_name} {person.last_name_father} {person.last_name_mother}
-                            {person.user_id && (
-                              <ShieldCheck className="h-3.5 w-3.5 text-blue-500 fill-blue-50" />
-                            )}
-                          </Link>
-                          {isFichaIncompleta(person) && (
-                            <Badge 
-                              variant="outline" 
-                              className="bg-amber-50/80 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30 text-[10px] py-0 px-1.5 font-bold uppercase tracking-wider h-5 flex items-center"
-                              title="Falta completar datos en su ficha (AFP, Salud, Contacto de Emergencia, Banco, etc.)"
+                        <div className="flex flex-col gap-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Link
+                              href={`/personnel/${person.id}`}
+                              className="font-medium text-orange-600 hover:text-orange-700 dark:text-blue-400 hover:underline inline-flex items-center gap-1.5"
                             >
-                              Ficha Incompleta
-                            </Badge>
+                              {person.first_name} {person.last_name_father} {person.last_name_mother}
+                              {person.user_id && (
+                                <ShieldCheck className="h-3.5 w-3.5 text-blue-500 fill-blue-50" />
+                              )}
+                            </Link>
+                            {isFichaIncompleta(person) && (
+                              <Badge 
+                                variant="outline" 
+                                className="bg-amber-50/80 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30 text-[10px] py-0 px-1.5 font-bold uppercase tracking-wider h-5 flex items-center"
+                                title="Falta completar datos en su ficha (AFP, Salud, Contacto de Emergencia, Banco, etc.)"
+                              >
+                                Ficha Incompleta
+                              </Badge>
+                            )}
+                            {!person.is_active && (
+                              <Badge 
+                                variant="outline" 
+                                className={person.onboarding_status === 'rejected' ? "bg-red-50 text-red-700 border-red-200 text-[10px] h-5 flex items-center font-bold" : "bg-rose-50 text-rose-700 border-rose-200 text-[10px] h-5 flex items-center font-bold"}
+                              >
+                                {person.onboarding_status === 'rejected' ? 'Rechazado' : 'De baja'}
+                              </Badge>
+                            )}
+                          </div>
+                          {!person.is_active && person.onboarding_status === 'rejected' && person.rejection_reason && (
+                            <p className="text-[11px] text-red-600 font-medium italic" title={person.rejection_reason}>
+                              Motivo rechazo: {person.rejection_reason}
+                            </p>
+                          )}
+                          {!person.is_active && person.onboarding_status !== 'rejected' && person.inactive_reason && (
+                            <p className="text-[11px] text-rose-600 font-medium italic" title={person.inactive_reason}>
+                              Motivo baja: {person.inactive_reason}
+                            </p>
                           )}
                         </div>
                       </TableCell>
@@ -708,8 +780,8 @@ export default function PersonnelTableClient({
                     {/* Is Active Cell */}
                     {visibleColumns.is_active && (
                       <TableCell>
-                        <Badge variant="outline" className={person.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]' : 'bg-rose-50 text-rose-700 border-rose-200 text-[10px]'}>
-                          {person.is_active ? 'Activo' : 'De baja'}
+                        <Badge variant="outline" className={person.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]' : person.onboarding_status === 'rejected' ? 'bg-red-50 text-red-700 border-red-200 text-[10px]' : 'bg-rose-50 text-rose-700 border-rose-200 text-[10px]'}>
+                          {person.is_active ? 'Activo' : person.onboarding_status === 'rejected' ? 'Rechazado' : 'De baja'}
                         </Badge>
                       </TableCell>
                     )}
@@ -739,7 +811,7 @@ export default function PersonnelTableClient({
                             variant="ghost" 
                             size="icon" 
                             disabled={isPending}
-                            onClick={() => handleReject(person)}
+                            onClick={() => handleRejectClick(person)}
                             className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
                             title="Rechazar ficha"
                           >
@@ -781,6 +853,18 @@ export default function PersonnelTableClient({
                               <Printer className="h-4 w-4" />
                             </Button>
                           </Link>
+                          {person.is_active && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={isPending}
+                              onClick={() => handleDismissClick(person)}
+                              className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                              title="Dar de baja trabajador"
+                            >
+                              <UserMinus className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Link href={`/personnel/${person.id}/edit`}>
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Editar Ficha">
                                <Edit className="h-4 w-4" />
@@ -1000,6 +1084,96 @@ export default function PersonnelTableClient({
               className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl px-6 font-black uppercase text-xs"
             >
               {isPending ? 'Aprobando...' : 'Aprobar e Incorporar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG 3: RECHAZAR POSTULACIÓN */}
+      <Dialog open={isRejectOpen} onOpenChange={setIsRejectOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white dark:bg-slate-900 border-none shadow-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase tracking-tight flex items-center gap-2">
+              <UserX className="h-5 w-5 text-red-500" />
+              Rechazar Postulación
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Indica el motivo por el cual estás rechazando la postulación de {rejectPerson?.first_name} {rejectPerson?.last_name_father}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="rejection-reason" className="text-sm font-semibold">Motivo del Rechazo *</Label>
+              <textarea
+                id="rejection-reason"
+                placeholder="Escribe el motivo aquí..."
+                value={rejectionReason}
+                onChange={e => setRejectionReason(e.target.value)}
+                className="flex min-h-[90px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 placeholder:text-slate-400"
+                required
+              />
+              <p className="text-[11px] text-rose-500 font-medium">
+                ⚠️ Al rechazar la postulación, se eliminarán permanentemente todos sus documentos y archivos subidos del sistema para liberar espacio.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-2 gap-2 flex-col sm:flex-row">
+            <Button variant="ghost" onClick={() => { setIsRejectOpen(false); setRejectPerson(null); }} className="rounded-xl font-bold uppercase text-xs">
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleConfirmReject}
+              disabled={isPending || !rejectionReason.trim()}
+              className="bg-red-600 hover:bg-red-700 text-white rounded-xl px-6 font-black uppercase text-xs"
+            >
+              {isPending ? 'Rechazando...' : 'Confirmar Rechazo'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG 4: DAR DE BAJA */}
+      <Dialog open={isDismissOpen} onOpenChange={setIsDismissOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white dark:bg-slate-900 border-none shadow-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase tracking-tight flex items-center gap-2">
+              <UserMinus className="h-5 w-5 text-rose-500" />
+              Dar de Baja Trabajador
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Indica el motivo de la baja de {dismissPerson?.first_name} {dismissPerson?.last_name_father}. El trabajador será desactivado del sistema.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="dismiss-reason" className="text-sm font-semibold">Motivo de la Baja *</Label>
+              <textarea
+                id="dismiss-reason"
+                placeholder="Escribe el motivo de la baja aquí..."
+                value={dismissReason}
+                onChange={e => setDismissReason(e.target.value)}
+                className="flex min-h-[90px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 placeholder:text-slate-400"
+                required
+              />
+              <p className="text-[11px] text-rose-500 font-medium">
+                ⚠️ Al dar de baja, se eliminarán permanentemente todos sus documentos y cartas del sistema para liberar espacio.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-2 gap-2 flex-col sm:flex-row">
+            <Button variant="ghost" onClick={() => { setIsDismissOpen(false); setDismissPerson(null); }} className="rounded-xl font-bold uppercase text-xs">
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleConfirmDismiss}
+              disabled={isPending || !dismissReason.trim()}
+              className="bg-rose-600 hover:bg-rose-700 text-white rounded-xl px-6 font-black uppercase text-xs"
+            >
+              {isPending ? 'Procesando...' : 'Confirmar Baja'}
             </Button>
           </DialogFooter>
         </DialogContent>
