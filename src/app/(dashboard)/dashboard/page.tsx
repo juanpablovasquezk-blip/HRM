@@ -7,6 +7,7 @@ import { MonthlyEvolutionChart } from '@/components/dashboard/monthly-evolution-
 import { AbsenceDonut } from '@/components/dashboard/absence-donut';
 import { PendingDocsCard } from '@/components/dashboard/pending-docs-card';
 import { IncompleteProfilesCard } from '@/components/dashboard/incomplete-profiles-card';
+import { MissingDocsCard } from '@/components/dashboard/missing-docs-card';
 import { ActiveLeavesCard } from '@/components/dashboard/active-leaves-card';
 import { BirthdaysCard } from '@/components/dashboard/birthdays-card';
 import { MonthlyFinalAbsencesCard } from '@/components/dashboard/monthly-final-absences-card';
@@ -66,6 +67,8 @@ export default async function DashboardPage() {
   let pendingDocs: any[] = [];
   let incompleteCount = 0;
   let incompletePersonnel: any[] = [];
+  let missingDocsCount = 0;
+  let missingDocsList: any[] = [];
 
   if (user) {
     const { data: profile } = await supabase
@@ -294,6 +297,51 @@ export default async function DashboardPage() {
       incompleteCount = incCount || 0;
       incompletePersonnel = incPers || [];
 
+      // ── 8d. Documentos por subir ──────────────────────────────────────────
+      const [{ data: activeWorkers }, { data: mandatoryDefs }] = await Promise.all([
+        supabase
+          .from('personnel')
+          .select('id, first_name, last_name_father')
+          .eq('company_id', profile.company_id)
+          .eq('is_active', true),
+        supabase
+          .from('document_definitions')
+          .select('id, name')
+          .eq('is_active', true)
+          .eq('is_mandatory', true)
+      ]);
+
+      if (activeWorkers && activeWorkers.length > 0 && mandatoryDefs && mandatoryDefs.length > 0) {
+        const workerIds = activeWorkers.map(w => w.id);
+        const { data: existingDocs } = await supabase
+          .from('documents')
+          .select('definition_id, personnel_id, file_url')
+          .in('personnel_id', workerIds);
+
+        const eDocs = existingDocs || [];
+        const missingList: any[] = [];
+
+        for (const worker of activeWorkers) {
+          const workerDocs = eDocs.filter(d => d.personnel_id === worker.id);
+          const missingForThisWorker = mandatoryDefs.filter(def => {
+            const doc = workerDocs.find(d => d.definition_id === def.id);
+            return !doc || !doc.file_url;
+          });
+
+          if (missingForThisWorker.length > 0) {
+            missingList.push({
+              personnel: worker,
+              missingCount: missingForThisWorker.length,
+              documentNames: missingForThisWorker.map(def => def.name)
+            });
+          }
+        }
+
+        missingList.sort((a, b) => b.missingCount - a.missingCount);
+        missingDocsCount = missingList.length;
+        missingDocsList = missingList.slice(0, 5);
+      }
+
       // ── 9. Evolución mensual (últimos 6 meses) ─────────────────────────────
       const months = [];
       for (let i = 5; i >= 0; i--) {
@@ -452,15 +500,16 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Fila: Documentos y Fichas por Validar + Ausencias activas ── */}
+      {/* ── Fila: Documentos por Validar, Fichas Incompletas y Documentos por Subir ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <PendingDocsCard count={pendingDocsCount} docs={pendingDocs} />
         <IncompleteProfilesCard count={incompleteCount} people={incompletePersonnel} />
-        <ActiveLeavesCard people={activeLeavesPeople} finalAbsences={finalAbsentPeople} />
+        <MissingDocsCard count={missingDocsCount} people={missingDocsList} />
       </div>
 
-      {/* ── Fila: Cumpleaños + Ausentismo Final del Mes ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* ── Fila: Ausencias Hoy, Cumpleaños + Ausentismo Final del Mes ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <ActiveLeavesCard people={activeLeavesPeople} finalAbsences={finalAbsentPeople} />
         <BirthdaysCard people={birthdayPeople} />
         <MonthlyFinalAbsencesCard
           people={monthlyFinalAbsences}
