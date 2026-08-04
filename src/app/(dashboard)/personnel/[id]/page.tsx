@@ -405,6 +405,10 @@ export default async function PersonnelDetailPage({
                                documentId={doc.id} 
                                currentStatus={doc.status} 
                                personnelId={id} 
+                               fileUrl={doc.file_url}
+                               docType={def?.name || doc.type}
+                               firstName={person.first_name}
+                               lastNameFather={person.last_name_father}
                              />
                           </div>
                         ) : (

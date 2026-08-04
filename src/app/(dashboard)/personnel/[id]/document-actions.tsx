@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Check, X, Trash2, Loader2, AlertTriangle } from 'lucide-react';
+import { Check, X, Trash2, Loader2, AlertTriangle, Download } from 'lucide-react';
 import { updateDocumentStatus, deleteDocumentAction } from '../actions';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
@@ -21,14 +21,74 @@ interface DocumentActionsProps {
   documentId: string;
   currentStatus: string;
   personnelId: string;
+  fileUrl?: string;
+  docType?: string;
+  firstName?: string;
+  lastNameFather?: string;
 }
 
-export function DocumentActions({ documentId, currentStatus, personnelId }: DocumentActionsProps) {
+function getDocumentPrefix(type: string): string {
+  const t = type.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (t.includes('cedula') || t.includes('identity') || t.includes('c.i.')) return 'CI';
+  if (t.includes('licencia') || t.includes('driver')) return 'LIC';
+  if (t.includes('selfie') || t.includes('perfil') || t.includes('foto con fondo blanco')) return 'FOTO';
+  if (t.includes('antecedentes')) return 'ANTECEDENTES';
+  if (t.includes('hoja de vida') || t.includes('conductor')) return 'HOJA_VIDA';
+  if (t.includes('tica')) return 'TICA';
+  if (t.includes('pcp')) return 'PCP';
+  return t.replace(/[^a-z0-9]/g, '_').toUpperCase();
+}
+
+export function DocumentActions({ 
+  documentId, 
+  currentStatus, 
+  personnelId,
+  fileUrl,
+  docType,
+  firstName,
+  lastNameFather
+}: DocumentActionsProps) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
+
+  const handleDownload = async () => {
+    if (!fileUrl) return;
+    try {
+      const fileExt = fileUrl.split('?')[0].split('.').pop() || 'pdf';
+      
+      const cleanFirst = (firstName || 'TRABAJADOR').trim().split(' ')[0].normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const cleanLast = (lastNameFather || 'DOCS').trim().split(' ')[0].normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const fileSuffix = `${cleanFirst}_${cleanLast}`;
+      
+      const prefix = getDocumentPrefix(docType || 'DOCUMENTO');
+      const fileName = `${prefix}_${fileSuffix}.${fileExt}`;
+
+      const downloadToast = toast.loading(`Descargando ${fileName}...`);
+
+      const response = await fetch(fileUrl);
+      if (!response.ok) throw new Error('Download failed');
+      
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+      
+      toast.success('Descargado correctamente', { id: downloadToast });
+    } catch (err) {
+      console.error("Error downloading document:", err);
+      toast.error('Error al descargar el archivo. Se abrirá en una nueva pestaña.');
+      window.open(fileUrl, '_blank');
+    }
+  };
 
   const handleStatusUpdate = async (status: 'APPROVED' | 'REJECTED', reason?: string) => {
     setLoading(status);
@@ -69,6 +129,20 @@ export function DocumentActions({ documentId, currentStatus, personnelId }: Docu
 
   return (
     <div className="flex items-center gap-1 justify-end">
+      {/* ── Descargar ── */}
+      {fileUrl && (
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          disabled={!!loading}
+          onClick={handleDownload}
+          className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50 rounded-lg"
+          title="Descargar Documento con nombre estandarizado"
+        >
+          <Download className="h-4 w-4" />
+        </Button>
+      )}
+
       {/* ── Aprobar ── */}
       {currentStatus !== 'APPROVED' && (
         <Button 
