@@ -42,12 +42,14 @@ export function TicaLetterDownloadButton({ person }: TicaLetterDownloadButtonPro
       let logoBase64 = '';
       let signatureBase64 = '';
       try {
-        logoBase64 = await imageUrlToBase64('/templates/tica_image_1.jpeg');
+        // Wide Logo: tica_image_3.jpg
+        logoBase64 = await imageUrlToBase64('/templates/tica_image_3.jpg');
       } catch (err) {
         console.warn('Could not load logo image, continuing without it', err);
       }
       try {
-        signatureBase64 = await imageUrlToBase64('/templates/tica_image_3.jpg');
+        // Square-ish Signature: tica_image_1.jpeg
+        signatureBase64 = await imageUrlToBase64('/templates/tica_image_1.jpeg');
       } catch (err) {
         console.warn('Could not load signature image, continuing without it', err);
       }
@@ -58,10 +60,10 @@ export function TicaLetterDownloadButton({ person }: TicaLetterDownloadButtonPro
 
       // 3. Draw header logo if loaded
       if (logoBase64) {
-        // Logo size: 30mm width, height based on aspect ratio 1.509
-        const logoWidth = 30;
-        const logoHeight = 30 / 1.509;
-        doc.addImage(logoBase64, 'JPEG', 25, 20, logoWidth, logoHeight);
+        // Logo size: 45mm width, height based on aspect ratio 3.135
+        const logoWidth = 45;
+        const logoHeight = 45 / 3.135;
+        doc.addImage(logoBase64, 'JPEG', 25, 18, logoWidth, logoHeight);
       }
 
       // 4. Today's date (top right)
@@ -105,10 +107,10 @@ export function TicaLetterDownloadButton({ person }: TicaLetterDownloadButtonPro
       doc.text('De nuestra consideración:', 25, currentY);
       currentY += 8;
 
-      // 8. Paragraph 1
+      // 8. Paragraph 1 (Justified)
       const p1 = 'Junto con saludarles cordialmente, me dirijo a ustedes en representación de la empresa Minerquim Ltda. con el propósito de solicitar formalmente la emisión de la Tarjeta de Identificación Control de Acceso (TICA) Zona 5 para nuestro funcionario:';
+      doc.text(p1, 25, currentY, { maxWidth: 165, align: 'justify' });
       const splitP1 = doc.splitTextToSize(p1, 165);
-      doc.text(splitP1, 25, currentY);
       currentY += (splitP1.length * 5) + 6;
 
       // 9. Personnel Details (bullet points)
@@ -130,31 +132,31 @@ export function TicaLetterDownloadButton({ person }: TicaLetterDownloadButtonPro
       doc.text('Operador de Servicios', 75, currentY);
       currentY += 10;
 
-      // 10. Paragraph 2
+      // 10. Paragraph 2 (Justified)
       const p2 = 'El motivo de esta solicitud se fundamenta en que el colaborador individualizado requiere acceso a la Zona Primaria / Salas de Embarque y Check-in para el desarrollo de sus funciones operativas. Entre sus tareas principales se encuentran el servicio de retiro de mercancías prohibidas en sala de embarque, así como la atención a requerimientos esporádicos de captura e intervención de canes en las zonas de Check-in y salas de embarque del Aeropuerto.';
+      doc.text(p2, 25, currentY, { maxWidth: 165, align: 'justify' });
       const splitP2 = doc.splitTextToSize(p2, 165);
-      doc.text(splitP2, 25, currentY);
       currentY += (splitP2.length * 5) + 5;
 
-      // 11. Paragraph 3
+      // 11. Paragraph 3 (Justified)
       const p3 = 'Como empresa, reafirmamos nuestro compromiso con el cumplimiento estricto de la normativa aeronáutica y las directrices de seguridad dictadas por la DGAC, asegurando que nuestro personal desempeñe sus labores bajo los más altos estándares de control y rigurosidad.';
+      doc.text(p3, 25, currentY, { maxWidth: 165, align: 'justify' });
       const splitP3 = doc.splitTextToSize(p3, 165);
-      doc.text(splitP3, 25, currentY);
       currentY += (splitP3.length * 5) + 5;
 
-      // 12. Salutation Close
+      // 12. Salutation Close (Justified)
       const p4 = 'Agradeciendo de antemano su gestión y favorable acogida a la presente solicitud, se despide atentamente,';
+      doc.text(p4, 25, currentY, { maxWidth: 165, align: 'justify' });
       const splitP4 = doc.splitTextToSize(p4, 165);
-      doc.text(splitP4, 25, currentY);
       currentY += (splitP4.length * 5) + 8;
 
       // 13. Signature
       doc.text('Atentamente,', 25, currentY);
 
       if (signatureBase64) {
-        // Signature size: 55mm width, height based on aspect ratio 3.135
-        const sigWidth = 55;
-        const sigHeight = 55 / 3.135;
+        // Signature size: 35mm width, height based on aspect ratio 1.509
+        const sigWidth = 35;
+        const sigHeight = 35 / 1.509;
         doc.addImage(signatureBase64, 'JPEG', 25, currentY + 3, sigWidth, sigHeight);
       }
 
