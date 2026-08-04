@@ -8,6 +8,7 @@ import { AbsenceDonut } from '@/components/dashboard/absence-donut';
 import { PendingDocsCard } from '@/components/dashboard/pending-docs-card';
 import { IncompleteProfilesCard } from '@/components/dashboard/incomplete-profiles-card';
 import { MissingDocsCard } from '@/components/dashboard/missing-docs-card';
+import { BulkReminderButton } from '@/components/dashboard/bulk-reminder-button';
 import { ActiveLeavesCard } from '@/components/dashboard/active-leaves-card';
 import { BirthdaysCard } from '@/components/dashboard/birthdays-card';
 import { MonthlyFinalAbsencesCard } from '@/components/dashboard/monthly-final-absences-card';
@@ -69,6 +70,7 @@ export default async function DashboardPage() {
   let incompletePersonnel: any[] = [];
   let missingDocsCount = 0;
   let missingDocsList: any[] = [];
+  let pendingComplianceWorkers: any[] = [];
 
   if (user) {
     const { data: profile } = await supabase
@@ -301,7 +303,7 @@ export default async function DashboardPage() {
       const [{ data: activeWorkers }, { data: mandatoryDefs }] = await Promise.all([
         supabase
           .from('personnel')
-          .select('id, first_name, last_name_father')
+          .select('id, first_name, last_name_father, email, rut, phone, afp, health_system, bank_account_number, emergency_contact_phone, gender, marital_status')
           .eq('company_id', profile.company_id)
           .eq('is_active', true),
         supabase
@@ -322,6 +324,7 @@ export default async function DashboardPage() {
         const missingList: any[] = [];
 
         for (const worker of activeWorkers) {
+          // Check if missing documents
           const workerDocs = eDocs.filter(d => d.personnel_id === worker.id);
           const missingForThisWorker = mandatoryDefs.filter(def => {
             const doc = workerDocs.find(d => d.definition_id === def.id);
@@ -333,6 +336,24 @@ export default async function DashboardPage() {
               personnel: worker,
               missingCount: missingForThisWorker.length,
               documentNames: missingForThisWorker.map(def => def.name)
+            });
+          }
+
+          // Check if profile is incomplete
+          const isProfileIncomplete = !worker.afp || !worker.health_system || !worker.bank_account_number || 
+            !worker.emergency_contact_phone || !worker.gender || !worker.marital_status || !worker.phone;
+
+          // Add to consolidated compliance list if either condition is met
+          if (isProfileIncomplete || missingForThisWorker.length > 0) {
+            pendingComplianceWorkers.push({
+              id: worker.id,
+              first_name: worker.first_name,
+              last_name_father: worker.last_name_father,
+              email: worker.email || '',
+              rut: worker.rut || '',
+              phone: worker.phone || '',
+              hasIncompleteProfile: isProfileIncomplete,
+              missingDocs: missingForThisWorker.map(def => def.name)
             });
           }
         }
@@ -401,11 +422,16 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Resumen operacional — {dateStr}
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Resumen operacional — {dateStr}
+          </p>
+        </div>
+        <div className="shrink-0">
+          <BulkReminderButton people={pendingComplianceWorkers} />
+        </div>
       </div>
 
       {/* ── Fila 1: KPIs principales ── */}
