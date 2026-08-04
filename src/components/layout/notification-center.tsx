@@ -185,7 +185,7 @@ export function NotificationCenter() {
           </div>
 
           <TabsContent value="alertas" className="flex-1 m-0 data-[state=inactive]:hidden min-h-0 flex flex-col overflow-hidden">
-            <ScrollArea className="flex-1">
+            <div className="flex-1 overflow-y-auto min-h-0">
               <div className="p-4 flex flex-col gap-3">
                 {loading ? (
                   <div className="flex flex-col gap-3">
@@ -266,7 +266,7 @@ export function NotificationCenter() {
                   })
                 )}
               </div>
-            </ScrollArea>
+            </div>
           </TabsContent>
 
           <TabsContent value="notificaciones" className="flex-1 m-0 data-[state=inactive]:hidden min-h-0 flex flex-col overflow-hidden">
@@ -287,7 +287,7 @@ export function NotificationCenter() {
               )}
             </div>
             
-            <ScrollArea className="flex-1">
+            <div className="flex-1 overflow-y-auto min-h-0">
               <div className="flex flex-col">
                 {loading ? (
                   <div className="p-4 flex flex-col gap-1">
@@ -347,7 +347,7 @@ export function NotificationCenter() {
                   </div>
                 )}
               </div>
-            </ScrollArea>
+            </div>
           </TabsContent>
         </Tabs>
       </SheetContent>

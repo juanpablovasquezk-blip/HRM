@@ -103,7 +103,9 @@ export default async function DocumentsPage() {
                     <TableHead>Number</TableHead>
                     <TableHead>Expiration</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Approval</TableHead>
                     <TableHead>Uploaded</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -124,19 +126,20 @@ export default async function DocumentsPage() {
                     return (
                       <TableRow key={doc.id}>
                         <TableCell>
-                          <div>
-                            <p className="font-medium">
-                              {personnel?.first_name} {personnel?.last_name_father}
-                            </p>
-                            <p className="text-xs text-muted-foreground font-mono">
+                          <Link 
+                            href={`/personnel/${doc.personnel_id}`}
+                            className="group flex flex-col hover:underline text-blue-600 dark:text-blue-400 font-semibold"
+                          >
+                            <span>{personnel?.first_name} {personnel?.last_name_father}</span>
+                            <span className="text-xs text-muted-foreground font-mono font-normal">
                               {personnel?.rut}
-                            </p>
-                          </div>
+                            </span>
+                          </Link>
                         </TableCell>
                         <TableCell>
                           <Badge variant="secondary">{doc.type}</Badge>
                         </TableCell>
-                        <TableCell className="text-muted-foreground">
+                        <TableCell className="text-muted-foreground font-mono text-xs">
                           {doc.number || '—'}
                         </TableCell>
                         <TableCell>
@@ -161,8 +164,36 @@ export default async function DocumentsPage() {
                               : 'Valid'}
                           </Badge>
                         </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={
+                              doc.status === 'APPROVED'
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                : doc.status === 'REJECTED'
+                                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                            }
+                          >
+                            {doc.status === 'APPROVED'
+                              ? 'Aprobado'
+                              : doc.status === 'REJECTED'
+                              ? 'Rechazado'
+                              : 'Pendiente'}
+                          </Badge>
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {format(new Date(doc.uploaded_at), 'PP')}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Link href={`/personnel/${doc.personnel_id}`}>
+                            <Button 
+                              variant={doc.status === 'PENDING' ? 'default' : 'outline'} 
+                              size="sm" 
+                              className={doc.status === 'PENDING' ? "bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-sm" : "font-semibold"}
+                            >
+                              {doc.status === 'PENDING' ? 'Validar' : 'Ver Ficha'}
+                            </Button>
+                          </Link>
                         </TableCell>
                       </TableRow>
                     );
