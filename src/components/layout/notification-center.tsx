@@ -144,7 +144,7 @@ export function NotificationCenter() {
         )}
       </SheetTrigger>
       
-      <SheetContent className="w-full sm:max-w-md flex flex-col p-0 gap-0 border-l border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+      <SheetContent className="w-full sm:max-w-md h-full max-h-screen overflow-hidden flex flex-col p-0 gap-0 border-l border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
         <SheetHeader className="p-6 pb-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm z-10">
           <div className="flex items-center justify-between">
             <SheetTitle className="text-xl font-bold">Centro de Notificaciones</SheetTitle>
@@ -184,7 +184,7 @@ export function NotificationCenter() {
             </TabsList>
           </div>
 
-          <TabsContent value="alertas" className="flex-1 m-0 data-[state=inactive]:hidden min-h-0 flex flex-col">
+          <TabsContent value="alertas" className="flex-1 m-0 data-[state=inactive]:hidden min-h-0 flex flex-col overflow-hidden">
             <ScrollArea className="flex-1">
               <div className="p-4 flex flex-col gap-3">
                 {loading ? (
@@ -269,7 +269,7 @@ export function NotificationCenter() {
             </ScrollArea>
           </TabsContent>
 
-          <TabsContent value="notificaciones" className="flex-1 m-0 data-[state=inactive]:hidden min-h-0 flex flex-col">
+          <TabsContent value="notificaciones" className="flex-1 m-0 data-[state=inactive]:hidden min-h-0 flex flex-col overflow-hidden">
             <div className="px-4 py-3 flex items-center justify-between sticky top-0 bg-slate-50/90 dark:bg-slate-950/90 backdrop-blur-sm z-10 border-b border-slate-200 dark:border-slate-800">
               <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                 {unreadCount} sin leer
