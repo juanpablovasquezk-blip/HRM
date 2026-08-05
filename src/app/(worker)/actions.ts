@@ -8,6 +8,7 @@ import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { calculateDynamicExpiration } from '@/lib/utils/document-calc';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
+import { validateAntecedentesPDF } from '@/lib/documents/validation';
 
 export async function loginAsWorker(email: string) {
   const supabase = await createClient();
@@ -430,6 +431,15 @@ export async function uploadDocumentRecord(record: any) {
       }
 
       const ext = contentType === 'application/pdf' ? 'pdf' : 'jpg';
+
+      const isAntecedentes = record.type && record.type.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('antecedentes');
+      if (isAntecedentes && contentType === 'application/pdf') {
+        const valRes = await validateAntecedentesPDF(buffer);
+        if (!valRes.valid) {
+          return { success: false, error: valRes.error };
+        }
+      }
+
       const fileName = `${session.id}/${record.definition_id || 'document'}-${Date.now()}.${ext}`;
 
       const { error: uploadError } = await adminClient.storage

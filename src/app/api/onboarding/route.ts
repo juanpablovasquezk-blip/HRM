@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { validateAntecedentesPDF } from '@/lib/documents/validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -350,6 +351,11 @@ export async function POST(request: NextRequest) {
 
       // 5. Certificado de Antecedentes PDF
       if (docs.antecedentes_pdf_base64) {
+        const buffer = base64ToBuffer(docs.antecedentes_pdf_base64);
+        const valRes = await validateAntecedentesPDF(buffer);
+        if (!valRes.valid) {
+          return NextResponse.json({ success: false, error: valRes.error }, { status: 400 });
+        }
         await uploadAndRegister(
           docs.antecedentes_pdf_base64,
           `${personnelId}/ANTECEDENTES_${fileSuffix}.pdf`,

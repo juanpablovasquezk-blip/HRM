@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import type { Personnel } from '@/types/database';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createSupabaseAdminClient } from '@supabase/supabase-js';
+import { sendWhatsAppMessage } from '@/lib/ultramsg';
 
 function safeRevalidatePath(path: string) {
   try {
@@ -508,8 +509,69 @@ export async function updateDocumentStatus(
   if (error) return { success: false, error: error.message };
 
   safeRevalidatePath('/personnel');
-  // We don't have the personnel ID here easily to revalidate specific path, 
-  // but revalidatePath with a layout or the whole folder works.
+
+  if (status === 'REJECTED') {
+    try {
+      // 1. Fetch document info
+      const { data: docData, error: docFetchError } = await supabase
+        .from('documents')
+        .select('type, definition_id, personnel_id')
+        .eq('id', documentId)
+        .single();
+
+      if (!docFetchError && docData) {
+        // 2. Fetch definition name if available
+        let docName = docData.type || 'Documento';
+        if (docData.definition_id) {
+          const { data: defData } = await supabase
+            .from('document_definitions')
+            .select('name')
+            .eq('id', docData.definition_id)
+            .single();
+          if (defData?.name) {
+            docName = defData.name;
+          }
+        }
+
+        // 3. Fetch personnel info (with emergency contact to make sure we load what's needed, but phone is the goal)
+        const { data: workerData } = await supabase
+          .from('personnel')
+          .select('first_name, phone')
+          .eq('id', docData.personnel_id)
+          .single();
+
+        if (workerData && workerData.phone) {
+          const cleanPhone = workerData.phone.replace(/\D/g, '');
+          if (cleanPhone.length >= 8) {
+            let formattedPhone = cleanPhone;
+            if (formattedPhone.length === 8) formattedPhone = '569' + formattedPhone;
+            if (formattedPhone.length === 9 && !formattedPhone.startsWith('56')) formattedPhone = '56' + formattedPhone;
+            
+            if (!formattedPhone.includes('@')) {
+              formattedPhone = `${formattedPhone}@c.us`;
+            }
+
+            const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hrm-roster-manager.vercel.app';
+            
+            const message = `Hola *${workerData.first_name || 'Trabajador'}* ⚠️\n\n` +
+              `Te informamos que tu documento *${docName}* ha sido rechazado.\n\n` +
+              `*Motivo del rechazo:*\n${rejectionReason || 'No especificado'}\n\n` +
+              `Por favor, ingresa a la plataforma para volver a subir el documento corregido:\n` +
+              `🔗 ${platformUrl}/worker/documents\n\n` +
+              `¡Muchas gracias!`;
+
+            const whatsAppResult = await sendWhatsAppMessage(formattedPhone, message);
+            if (!whatsAppResult.success) {
+              console.error('Error sending WhatsApp rejection message:', whatsAppResult.error);
+            }
+          }
+        }
+      }
+    } catch (whatsAppErr) {
+      console.error('WhatsApp notification error on document rejection:', whatsAppErr);
+    }
+  }
+
   return { success: true, error: null };
 }
 

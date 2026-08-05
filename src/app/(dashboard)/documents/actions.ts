@@ -5,6 +5,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { revalidatePath } from 'next/cache';
 import { calculateExpiration } from '@/lib/documents/expiration-engine';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
+import { validateAntecedentesPDF } from '@/lib/documents/validation';
 
 export async function uploadDocument(
   formData: FormData
@@ -23,6 +24,20 @@ export async function uploadDocument(
 
   if (!file || !personnelId || !type) {
     return { success: false, error: 'Missing required fields' };
+  }
+
+  const isAntecedentes = type.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('antecedentes');
+  if (isAntecedentes && file && file.type === 'application/pdf') {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const valRes = await validateAntecedentesPDF(buffer);
+      if (!valRes.valid) {
+        return { success: false, error: valRes.error };
+      }
+    } catch (e: any) {
+      console.error('Error validating admin uploaded PDF:', e);
+    }
   }
 
   // Get current user for audit via the normal client to verify identity
