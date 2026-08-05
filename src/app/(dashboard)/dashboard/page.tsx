@@ -81,7 +81,9 @@ export default async function DashboardPage() {
       // ── 1. Personal total ──────────────────────────────────────────────────
       const { count: staffCount } = await supabase
         .from('personnel').select('id', { count: 'exact', head: true })
-        .eq('company_id', profile.company_id).eq('is_active', true);
+        .eq('company_id', profile.company_id)
+        .eq('is_active', true)
+        .or('onboarding_status.is.null,onboarding_status.eq.approved');
       totalPersonnel = staffCount || 0;
 
       // ── 2. Turnos extra (mes actual vs mes anterior) ────────────────────────
@@ -293,6 +295,7 @@ export default async function DashboardPage() {
         .select('id, first_name, last_name_father, rut', { count: 'exact' })
         .eq('company_id', profile.company_id)
         .eq('is_active', true)
+        .or('onboarding_status.is.null,onboarding_status.eq.approved')
         .or('afp.is.null,health_system.is.null,bank_account_number.is.null,emergency_contact_phone.is.null,gender.is.null,marital_status.is.null,phone.is.null,afp.eq.,health_system.eq.,bank_account_number.eq.,emergency_contact_phone.eq.,gender.eq.,marital_status.eq.,phone.eq.')
         .order('first_name', { ascending: true })
         .limit(5);
@@ -305,7 +308,8 @@ export default async function DashboardPage() {
           .from('personnel')
           .select('id, first_name, last_name_father, email, rut, phone, afp, health_system, bank_account_number, emergency_contact_phone, gender, marital_status, main_position, secondary_positions')
           .eq('company_id', profile.company_id)
-          .eq('is_active', true),
+          .eq('is_active', true)
+          .or('onboarding_status.is.null,onboarding_status.eq.approved'),
         supabase
           .from('document_definitions')
           .select('id, name, applicable_positions')

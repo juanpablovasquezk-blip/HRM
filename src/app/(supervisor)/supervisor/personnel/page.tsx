@@ -15,7 +15,7 @@ export default async function SupervisorPersonnelPage() {
     { data: documentDefs },
     { data: documents }
   ] = await Promise.all([
-    supabase.from('personnel').select('*').eq('is_active', true).order('last_name', { ascending: true }),
+    supabase.from('personnel').select('*').eq('is_active', true).or('onboarding_status.is.null,onboarding_status.eq.approved').order('last_name', { ascending: true }),
     supabase.from('document_definitions').select('*').eq('is_active', true),
     supabase.from('documents').select('*')
   ]);

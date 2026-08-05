@@ -11,7 +11,7 @@ export default async function LeaveEditPage({ params }: { params: Promise<{ id: 
 
   const [{ data: leave }, { data: personnel }] = await Promise.all([
     supabase.from('leaves').select('*').eq('id', id).single(),
-    supabase.from('personnel').select('id, first_name, last_name_father, rut').eq('is_active', true).order('last_name_father')
+    supabase.from('personnel').select('id, first_name, last_name_father, rut').eq('is_active', true).or('onboarding_status.is.null,onboarding_status.eq.approved').order('last_name_father')
   ]);
 
   if (!leave) {

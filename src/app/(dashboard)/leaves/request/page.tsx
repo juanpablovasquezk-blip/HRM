@@ -11,6 +11,7 @@ export default async function LeaveRequestPage() {
     .from('personnel')
     .select('id, first_name, last_name_father, rut')
     .eq('is_active', true)
+    .or('onboarding_status.is.null,onboarding_status.eq.approved')
     .order('last_name_father');
 
   return (

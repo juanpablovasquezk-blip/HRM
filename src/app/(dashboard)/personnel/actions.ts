@@ -32,7 +32,7 @@ export async function listPersonnel(
     .order('last_name_father', { ascending: true });
 
   if (activeOnly) {
-    query = query.eq('is_active', true);
+    query = query.eq('is_active', true).or('onboarding_status.is.null,onboarding_status.eq.approved');
   }
   if (companyId) {
     query = query.eq('company_id', companyId);

@@ -10,6 +10,7 @@ export default async function DocumentUploadPage() {
       .from('personnel')
       .select('id, first_name, last_name_father, last_name_mother, main_position, secondary_positions, rut')
       .eq('is_active', true)
+      .or('onboarding_status.is.null,onboarding_status.eq.approved')
       .order('first_name'),
     getDocumentDefinitions(),
   ]);
