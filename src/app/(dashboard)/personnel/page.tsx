@@ -11,7 +11,7 @@ import PersonnelTableClient from './personnel-table-client';
 export default async function PersonnelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' }>;
+  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' | 'missing_docs' }>;
 }) {
   const params = await searchParams;
   const supabase = await createClient();
@@ -22,18 +22,21 @@ export default async function PersonnelPage({
 
   let positionIds: string[] = [];
   if (params.position_id) {
-    const { data: posData } = await supabase
-      .from('positions')
-      .select('name')
-      .eq('id', params.position_id)
-      .single();
-
-    if (posData) {
-      const { data: shared } = await supabase
+    const ids = params.position_id.split(',').filter(Boolean);
+    if (ids.length > 0) {
+      const { data: posData } = await supabase
         .from('positions')
-        .select('id')
-        .eq('name', posData.name);
-      positionIds = shared?.map(p => p.id) || [];
+        .select('name')
+        .in('id', ids);
+
+      if (posData && posData.length > 0) {
+        const names = posData.map(p => p.name);
+        const { data: shared } = await supabase
+          .from('positions')
+          .select('id')
+          .in('name', names);
+        positionIds = shared?.map(p => p.id) || [];
+      }
     }
   }
 
@@ -43,7 +46,7 @@ export default async function PersonnelPage({
     .order('last_name_father', { ascending: true });
 
   const status = params.status || 'active';
-  if (status === 'active') {
+  if (status === 'active' || status === 'missing_docs') {
     query = query.eq('is_active', true).or('onboarding_status.is.null,onboarding_status.eq.approved');
   } else if (status === 'missing_sizes') {
     query = query.eq('is_active', true)
@@ -92,6 +95,47 @@ export default async function PersonnelPage({
     );
   }
 
+  let displayPersonnel = personnel || [];
+
+  if (status === 'missing_docs' && displayPersonnel.length > 0) {
+    const [{ data: mandatoryDefs }, { data: existingDocs }] = await Promise.all([
+      supabase
+        .from('document_definitions')
+        .select('id, name, applicable_positions')
+        .eq('is_active', true)
+        .eq('is_mandatory', true),
+      supabase
+        .from('documents')
+        .select('definition_id, personnel_id, file_url')
+        .in('personnel_id', displayPersonnel.map(w => w.id))
+    ]);
+
+    if (mandatoryDefs && mandatoryDefs.length > 0) {
+      const eDocs = existingDocs || [];
+      displayPersonnel = displayPersonnel.filter(worker => {
+        const positionIds: string[] = [];
+        if (worker.main_position) positionIds.push(worker.main_position);
+        if (Array.isArray(worker.secondary_positions)) {
+          positionIds.push(...worker.secondary_positions);
+        }
+
+        const workerDocs = eDocs.filter(d => d.personnel_id === worker.id);
+        const missingForThisWorker = mandatoryDefs.filter(def => {
+          const applicable: string[] = def.applicable_positions || [];
+          if (applicable.length > 0 && !applicable.some((p: string) => positionIds.includes(p))) {
+            return false;
+          }
+          const doc = workerDocs.find(d => d.definition_id === def.id);
+          return !doc || !doc.file_url;
+        });
+
+        return missingForThisWorker.length > 0;
+      });
+    } else {
+      displayPersonnel = [];
+    }
+  }
+
   const positionMap = Object.fromEntries((positions || []).map(p => [p.id, p.name]));
   const shiftMap = Object.fromEntries((shifts || []).map(s => [s.id, s.name]));
 
@@ -102,7 +146,12 @@ export default async function PersonnelPage({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Personal</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Gestiona tu fuerza laboral — {personnel?.length ?? 0} trabajadores {status === 'active' ? 'activos' : status === 'inactive' ? 'de baja' : 'registrados'}
+            Gestiona tu fuerza laboral — {displayPersonnel.length} trabajadores {
+              status === 'active' ? 'activos' : 
+              status === 'inactive' ? 'de baja' : 
+              status === 'missing_docs' ? 'con documentación requerida incompleta' :
+              'registrados'
+            }
           </p>
         </div>
         {canEdit && (
@@ -137,7 +186,7 @@ export default async function PersonnelPage({
         </CardHeader>
         <CardContent className="p-0">
           <PersonnelTableClient 
-            personnel={personnel as any} 
+            personnel={displayPersonnel as any} 
             positionMap={positionMap} 
             shiftMap={shiftMap}
             canEdit={canEdit}
