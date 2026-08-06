@@ -599,6 +599,34 @@ export default function DailyPlanningClient({
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
+          #print-header {
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: flex-end !important;
+            width: 100% !important;
+            border-bottom: 2px solid #0f172a !important;
+            padding-bottom: 3mm !important;
+            margin-bottom: 6mm !important;
+          }
+          #print-header h2 {
+            font-size: 18px !important;
+            line-height: 1.2 !important;
+            margin: 0 !important;
+            max-width: 60% !important;
+          }
+          #print-logo-container {
+            height: 48px !important;
+            max-height: 48px !important;
+            display: block !important;
+          }
+          #print-logo-container img {
+            height: 48px !important;
+            max-height: 48px !important;
+            width: auto !important;
+            object-fit: contain !important;
+            display: block !important;
+          }
           .flex { display: flex !important; }
           .grid { display: grid !important; }
           
@@ -703,14 +731,14 @@ export default function DailyPlanningClient({
 
       {/* REPORT */}
       <div id="daily-report-content" ref={reportRef} className="bg-white p-6 md:p-8 rounded-xl shadow-xl border border-slate-100 text-slate-900 font-sans mx-auto max-w-full md:w-[210mm]">
-        <div className="border-b-2 border-slate-900 pb-3 mb-6 flex justify-between items-end">
+        <div id="print-header" className="border-b-2 border-slate-900 pb-3 mb-6 flex justify-between items-end">
           <h2 className="text-xl font-black tracking-tight uppercase text-slate-900">
             Programación Operativa <br />
             <span className="text-slate-500 text-base font-bold">
               {format(parseISO(selectedDate), "EEEE d 'de' MMMM 'de' yyyy", { locale: es })}
             </span>
           </h2>
-          <div className="h-12 overflow-hidden rounded-lg">
+          <div id="print-logo-container" className="h-12 overflow-hidden rounded-lg">
              <img src="/logo.jpg" alt="Minerquim Logo" className="h-full object-contain" />
           </div>
         </div>
