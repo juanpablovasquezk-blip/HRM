@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { addDays, parseISO, format } from 'date-fns';
 
@@ -607,7 +608,13 @@ export async function uploadSignedFormUrl(
   fileUrl: string
 ): Promise<{ success: boolean; error: string | null }> {
   const supabase = await createClient();
-  const { error } = await supabase
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return { success: false, error: 'No autenticado' };
+  }
+
+  const adminClient = createAdminClient();
+  const { error } = await adminClient
     .from('epp_delivery_events')
     .update({ signed_form_url: fileUrl })
     .eq('id', eventId);
@@ -615,6 +622,43 @@ export async function uploadSignedFormUrl(
   if (error) return { success: false, error: error.message };
   safeRevalidatePath('/epp');
   return { success: true, error: null };
+}
+
+export async function uploadEPPReceiptFile(
+  fileName: string,
+  formData: FormData
+): Promise<{ success: boolean; publicUrl: string | null; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, publicUrl: null, error: 'No autenticado' };
+    }
+
+    const file = formData.get('file') as File | null;
+    if (!file) {
+      return { success: false, publicUrl: null, error: 'Archivo no proporcionado' };
+    }
+
+    const adminClient = createAdminClient();
+    const filePath = `signed-epp-receipts/${fileName}`;
+
+    const { error: uploadErr } = await adminClient.storage
+      .from('documents')
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadErr) {
+      return { success: false, publicUrl: null, error: uploadErr.message };
+    }
+
+    const { data: { publicUrl } } = adminClient.storage
+      .from('documents')
+      .getPublicUrl(filePath);
+
+    return { success: true, publicUrl, error: null };
+  } catch (err: any) {
+    return { success: false, publicUrl: null, error: err.message || 'Error en la subida' };
+  }
 }
 
 // --- 7. Monthly Forecast / Purchase Report ---

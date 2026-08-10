@@ -76,6 +76,7 @@ import {
   registerDeliveryEvent, 
   returnDeliveryItem, 
   uploadSignedFormUrl,
+  uploadEPPReceiptFile,
   getMonthlyEPPForecastReport,
   ForecastReportItem,
   getProductCatalog,
@@ -820,21 +821,18 @@ export default function EPPPage() {
     try {
       const fileExt = file.name.split('.').pop();
       const fileName = `signed-receipt-${eventId}-${Date.now()}.${fileExt}`;
-      const filePath = `signed-epp-receipts/${fileName}`;
 
-      // Upload file directly to Supabase storage bucket 'documents'
-      const { data: uploadData, error: uploadErr } = await supabase.storage
-        .from('documents')
-        .upload(filePath, file, { upsert: true });
+      const formData = new FormData();
+      formData.append('file', file);
 
-      if (uploadErr) throw uploadErr;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
+      // Call the server action to upload the file securely using admin client
+      const uploadRes = await uploadEPPReceiptFile(fileName, formData);
+      if (!uploadRes.success || !uploadRes.publicUrl) {
+        throw new Error(uploadRes.error || 'Error al subir el archivo');
+      }
 
       // Link URL to delivery event
-      const res = await uploadSignedFormUrl(eventId, publicUrl);
+      const res = await uploadSignedFormUrl(eventId, uploadRes.publicUrl);
       if (res.success) {
         toast.success('¡Acta firmada subida y respaldada exitosamente!', { id: loadingToast });
         fetchData();
@@ -867,12 +865,16 @@ export default function EPPPage() {
       if (histFormFile) {
         const fileExt = histFormFile.name.split('.').pop();
         const fileName = `hist-form-${histWorkerId}-${Date.now()}.${fileExt}`;
-        const { data: uploadData, error: uploadErr } = await supabase.storage
-          .from('documents')
-          .upload(`signed-epp-receipts/${fileName}`, histFormFile, { upsert: true });
-        if (!uploadErr && uploadData) {
-          const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(`signed-epp-receipts/${fileName}`);
-          signedFormUrl = publicUrl;
+        const formData = new FormData();
+        formData.append('file', histFormFile);
+
+        const uploadRes = await uploadEPPReceiptFile(fileName, formData);
+        if (uploadRes.success && uploadRes.publicUrl) {
+          signedFormUrl = uploadRes.publicUrl;
+        } else {
+          toast.error(uploadRes.error || 'Error al subir el acta histórica');
+          setIsUploadingHistForm(false);
+          return;
         }
       }
 
