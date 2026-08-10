@@ -607,25 +607,29 @@ export async function uploadSignedFormUrl(
   eventId: string,
   fileUrl: string
 ): Promise<{ success: boolean; error: string | null }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return { success: false, error: 'No autenticado' };
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: 'No autenticado' };
+    }
+
+    const adminClient = createAdminClient();
+    const { error } = await adminClient
+      .from('epp_delivery_events')
+      .update({ signed_form_url: fileUrl })
+      .eq('id', eventId);
+
+    if (error) return { success: false, error: error.message };
+    safeRevalidatePath('/epp');
+    return { success: true, error: null };
+  } catch (err: any) {
+    console.error('Error in uploadSignedFormUrl:', err);
+    return { success: false, error: err.message || 'Error al vincular el acta' };
   }
-
-  const adminClient = createAdminClient();
-  const { error } = await adminClient
-    .from('epp_delivery_events')
-    .update({ signed_form_url: fileUrl })
-    .eq('id', eventId);
-
-  if (error) return { success: false, error: error.message };
-  safeRevalidatePath('/epp');
-  return { success: true, error: null };
 }
 
 export async function uploadEPPReceiptFile(
-  fileName: string,
   formData: FormData
 ): Promise<{ success: boolean; publicUrl: string | null; error: string | null }> {
   try {
@@ -636,8 +640,9 @@ export async function uploadEPPReceiptFile(
     }
 
     const file = formData.get('file') as File | null;
-    if (!file) {
-      return { success: false, publicUrl: null, error: 'Archivo no proporcionado' };
+    const fileName = formData.get('fileName') as string | null;
+    if (!file || !fileName) {
+      return { success: false, publicUrl: null, error: 'Archivo o nombre de archivo no proporcionado' };
     }
 
     const adminClient = createAdminClient();

@@ -824,9 +824,10 @@ export default function EPPPage() {
 
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('fileName', fileName);
 
       // Call the server action to upload the file securely using admin client
-      const uploadRes = await uploadEPPReceiptFile(fileName, formData);
+      const uploadRes = await uploadEPPReceiptFile(formData);
       if (!uploadRes.success || !uploadRes.publicUrl) {
         throw new Error(uploadRes.error || 'Error al subir el archivo');
       }
@@ -867,8 +868,9 @@ export default function EPPPage() {
         const fileName = `hist-form-${histWorkerId}-${Date.now()}.${fileExt}`;
         const formData = new FormData();
         formData.append('file', histFormFile);
+        formData.append('fileName', fileName);
 
-        const uploadRes = await uploadEPPReceiptFile(fileName, formData);
+        const uploadRes = await uploadEPPReceiptFile(formData);
         if (uploadRes.success && uploadRes.publicUrl) {
           signedFormUrl = uploadRes.publicUrl;
         } else {
