@@ -60,9 +60,9 @@ function parseProviderExcel(file: File): Promise<{
           return;
         }
 
-        // Find header row — scan first 10 rows for a row that contains "reserva"
+        // Find header row — scan first 25 rows for a row that contains "reserva"
         let headerRowIdx = 0;
-        for (let i = 0; i < Math.min(10, rows.length); i++) {
+        for (let i = 0; i < Math.min(25, rows.length); i++) {
           const rowStr = rows[i].map(String).join(' ').toLowerCase();
           if (rowStr.includes('reserva')) {
             headerRowIdx = i;
@@ -82,9 +82,20 @@ function parseProviderExcel(file: File): Promise<{
           return;
         }
 
-        // Column AH = index 33 (A=0, B=1, ... H=7, Z=25, AA=26, AB=27, ..., AH=33)
-        const AH_COL_IDX = 33;
-        const colAHHeader = headerRow[AH_COL_IDX] || `Columna AH (${AH_COL_IDX + 1})`;
+        // Find the cost column dynamically (e.g. "Valor Total Servicio" or similar)
+        let costColIdx = headerRow.findIndex(h =>
+          h.toLowerCase().includes('valor total') ||
+          h.toLowerCase().includes('total servicio') ||
+          h.toLowerCase() === 'valor' ||
+          h.toLowerCase() === 'costo'
+        );
+
+        if (costColIdx === -1) {
+          // Fallback to column AH (index 33) if not found by name
+          costColIdx = 33;
+        }
+
+        const colAHHeader = headerRow[costColIdx] || `Columna ${costColIdx + 1}`;
 
         const costMap: Record<string, number> = {};
         const preview: { reservation: string; cost: number }[] = [];
@@ -93,7 +104,7 @@ function parseProviderExcel(file: File): Promise<{
         const dataRows = rows.slice(headerRowIdx + 1);
         for (const row of dataRows) {
           const rawReservation = String(row[reservaColIdx] ?? '').trim();
-          const rawCost = row[AH_COL_IDX];
+          const rawCost = row[costColIdx];
 
           if (!rawReservation) { skippedRows++; continue; }
 
