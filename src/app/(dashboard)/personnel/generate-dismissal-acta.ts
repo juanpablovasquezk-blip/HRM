@@ -12,6 +12,63 @@ async function imageUrlToBase64(url: string): Promise<string> {
   });
 }
 
+async function renderPdfPageToImage(pdfUrl: string): Promise<string> {
+  return new Promise(async (resolve, reject) => {
+    try {
+      // 1. Inject script if not loaded
+      if (!(window as any).pdfjsLib) {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js';
+        script.async = true;
+        document.head.appendChild(script);
+        
+        let loaded = false;
+        script.onload = () => { loaded = true; };
+        
+        // Wait up to 5s for the script to load
+        for (let i = 0; i < 50; i++) {
+          if (loaded && (window as any).pdfjsLib) break;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        
+        if (!(window as any).pdfjsLib) {
+          reject(new Error('No se pudo cargar la librería PDF.js desde CDN'));
+          return;
+        }
+      }
+
+      const pdfjsLib = (window as any).pdfjsLib;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+      const loadingTask = pdfjsLib.getDocument(pdfUrl);
+      const pdf = await loadingTask.promise;
+      const page = await pdf.getPage(1);
+      
+      const viewport = page.getViewport({ scale: 2.0 });
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      if (!context) {
+        reject(new Error('Canvas 2d context failed'));
+        return;
+      }
+      
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      const renderContext = {
+        canvasContext: context,
+        viewport: viewport
+      };
+      await page.render(renderContext).promise;
+      
+      const base64 = canvas.toDataURL('image/jpeg', 0.95);
+      resolve(base64);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 interface GenerateActaParams {
   first_name: string;
   last_name_father: string;
@@ -240,32 +297,33 @@ export async function generateDismissalActa(params: GenerateActaParams) {
         doc.text(`RUT: ${params.rut}`, 25, 44);
         doc.text(`Tipo de Documento: Copia de Credencial ${params.credential_type}`, 25, 50);
 
+        let cardBase64 = '';
         if (isPdf) {
-          // Render a helpful link since we cannot draw a PDF inside jsPDF directly
-          doc.setFont('Helvetica', 'bold');
-          doc.setTextColor(37, 99, 235); // Bootstrap/Tailwind blue
-          doc.text('Haga clic aquí para abrir y descargar el documento PDF original', 25, 70);
-          
-          doc.setDrawColor(37, 99, 235);
-          doc.setLineWidth(0.3);
-          doc.line(25, 71.5, 142, 71.5); // Underline
-          doc.link(25, 65, 120, 10, { url: params.credential_image_url });
-          
-          doc.setTextColor(0, 0, 0); // reset text color
-          doc.setDrawColor(0, 0, 0); // reset draw color
+          toast.info('Renderizando credencial PDF para impresión...');
+          cardBase64 = await renderPdfPageToImage(params.credential_image_url);
         } else {
-          const cardBase64 = await imageUrlToBase64(params.credential_image_url);
-          // Add Card Image (Centered)
-          // Card size: ~90mm width, height based on standard card aspect ratio (~1.58)
-          const cardWidth = 100;
-          const cardHeight = 100 / 1.58;
-          
-          // Render it centered on page
-          const cardX = (215.9 - cardWidth) / 2; // letter width is 215.9mm
-          doc.addImage(cardBase64, 'JPEG', cardX, 70, cardWidth, cardHeight);
+          cardBase64 = await imageUrlToBase64(params.credential_image_url);
         }
-      } catch (imgError) {
+
+        // Add Card Image (Centered)
+        // Card size: ~100mm width, height based on standard card aspect ratio (~1.58)
+        const cardWidth = 100;
+        const cardHeight = 100 / 1.58;
+        
+        // Render it centered on page
+        const cardX = (215.9 - cardWidth) / 2; // letter width is 215.9mm
+        doc.addImage(cardBase64, 'JPEG', cardX, 70, cardWidth, cardHeight);
+      } catch (imgError: any) {
         console.warn('Error loading card copy image for PDF page 2:', imgError);
+        // Fallback: draw warning message
+        doc.setFont('Helvetica', 'bold');
+        doc.setTextColor(220, 38, 38);
+        doc.text('ERROR: NO SE PUDO RENDERIZAR LA IMAGEN DE LA CREDENCIAL', 25, 70);
+        doc.setFont('Helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+        doc.text('El documento está en formato PDF. Descárgalo desde el sistema para imprimirlo:', 25, 80);
+        doc.setTextColor(37, 99, 235);
+        doc.text(params.credential_image_url || '', 25, 86);
       }
     }
 
