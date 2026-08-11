@@ -61,7 +61,7 @@ export default async function PersonnelPage({
       .or('dismissal_status.is.null,dismissal_status.eq.completed')
       .or('onboarding_status.is.null,onboarding_status.eq.approved,onboarding_status.eq.rejected');
   } else if (status === 'pending') {
-    query = query.eq('onboarding_status', 'pending');
+    query = query.or('onboarding_status.eq.pending,dismissal_status.eq.pending');
   }
 
 

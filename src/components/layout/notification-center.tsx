@@ -11,7 +11,8 @@ import {
   Users, 
   Check, 
   CheckCheck,
-  RefreshCw
+  RefreshCw,
+  UserX
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
@@ -66,6 +67,9 @@ export function NotificationCenter() {
       case 'fichas-updated':
         router.push('/personnel');
         break;
+      case 'dismissals-pending':
+        router.push('/personnel?status=dismissal_pending');
+        break;
       default:
         break;
     }
@@ -113,6 +117,7 @@ export function NotificationCenter() {
     if (id === 'docs-expiring') return <AlertTriangle className="h-5 w-5 text-amber-500" />;
     if (id === 'fichas-incomplete') return <Users className="h-5 w-5 text-amber-500" />;
     if (id === 'fichas-updated') return <UserCheck className="h-5 w-5 text-blue-500" />;
+    if (id === 'dismissals-pending') return <UserX className="h-5 w-5 text-orange-500" />;
     return <FileWarning className="h-5 w-5 text-slate-500" />;
   };
 

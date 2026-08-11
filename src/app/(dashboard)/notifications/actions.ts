@@ -227,5 +227,27 @@ export async function getDashboardAlerts() {
     });
   }
 
+  // 6. Bajas Pendientes (Pending Dismissals)
+  const { count: pendingDismissalsCount, data: pendingDismissalsData } = await adminClient
+    .from('personnel')
+    .select('id, first_name, last_name_father, rut', { count: 'exact' })
+    .eq('is_active', false)
+    .eq('dismissal_status', 'pending');
+
+  if (pendingDismissalsCount && pendingDismissalsCount > 0) {
+    alerts.push({
+      id: 'dismissals-pending',
+      type: 'warning',
+      category: 'Personal',
+      title: 'Bajas Pendientes',
+      message: `Tienes ${pendingDismissalsCount} desvinculación(es) pendiente(s) de recepción de acta firmada.`,
+      count: pendingDismissalsCount,
+      data: pendingDismissalsData?.map((p: any) => ({
+        ...p,
+        type: 'Baja Pendiente'
+      })).slice(0, 5),
+    });
+  }
+
   return { alerts };
 }
