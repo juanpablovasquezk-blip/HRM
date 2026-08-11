@@ -222,9 +222,18 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     // 2. Delivery & Reception section
     doc.setFont('Helvetica', 'bold');
     doc.text('2. Entrega y recepción:', 25, currentY);
-    currentY += 7;
+    currentY += 5;
 
-    // Drawing the signatures columns
+    // Draw signature of Juan Pablo K. in between
+    if (signatureBase64) {
+      const sigWidth = 35;
+      const sigHeight = 35 / 3.29;
+      doc.addImage(signatureBase64, 'PNG', 25, currentY + 1, sigWidth, sigHeight);
+      currentY += sigHeight + 4; // Shift down below signature block
+    } else {
+      currentY += 7;
+    }
+
     const initialYForSigs = currentY;
     
     // Left column: Minerquim / Juan Pablo
@@ -237,13 +246,6 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     doc.text('RUT: 9.326.241-7', 25, currentY);
     currentY += 5;
     doc.text('Minerquim LTDA. 76.135.448-5', 25, currentY);
-
-    if (signatureBase64) {
-      const sigWidth = 35;
-      const sigHeight = 35 / 3.29;
-      // Draw signature overlapping the "Entregado por:" block
-      doc.addImage(signatureBase64, 'PNG', 22, initialYForSigs + 1, sigWidth, sigHeight);
-    }
 
     // Right column: Recipient (DGAC)
     let dgacY = initialYForSigs;
@@ -270,19 +272,6 @@ export async function generateDismissalActa(params: GenerateActaParams) {
 
     // Y coordinate reset
     currentY = Math.max(currentY + 12, dgacY + 15);
-
-    // 3. Observations section
-    doc.setFont('Helvetica', 'bold');
-    doc.text('3. Observaciones:', 25, currentY);
-    currentY += 6;
-    doc.setFont('Helvetica', 'normal');
-    const obsText = params.refused_to_return 
-      ? 'El trabajador se negó a entregar la credencial física de manera voluntaria al momento de su desvinculación.' 
-      : (params.inactive_reason ? `Baja operativa: ${params.inactive_reason}` : 'Entrega regular sin observaciones.');
-    
-    const splitObs = doc.splitTextToSize(obsText, 165);
-    doc.text(splitObs, 25, currentY);
-    currentY += (splitObs.length * 5) + 10;
 
     // Closing footer
     const closeText = 'En constancia de lo anterior, se firma la presente acta en dos ejemplares de igual tenor y fecha, quedando uno en poder de la DGAC y otro en poder de Minerquim Ltda.';
