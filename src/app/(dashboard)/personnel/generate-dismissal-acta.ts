@@ -171,7 +171,8 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     if (signatureBase64) {
       const sigWidth = 35;
       const sigHeight = 35 / 3.29;
-      doc.addImage(signatureBase64, 'PNG', 25, currentY + 2, sigWidth, sigHeight);
+      // Draw signature overlapping the "Entregado por:" block
+      doc.addImage(signatureBase64, 'PNG', 22, initialYForSigs + 1, sigWidth, sigHeight);
     }
 
     // Right column: Recipient (DGAC)
@@ -222,7 +223,7 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     // PAGE 2: Digital copy of credential card (if exists)
     if (params.credential_image_url) {
       try {
-        const cardBase64 = await imageUrlToBase64(params.credential_image_url);
+        const isPdf = params.credential_image_url.toLowerCase().includes('.pdf');
         doc.addPage();
         
         // Page 2 header
@@ -239,14 +240,30 @@ export async function generateDismissalActa(params: GenerateActaParams) {
         doc.text(`RUT: ${params.rut}`, 25, 44);
         doc.text(`Tipo de Documento: Copia de Credencial ${params.credential_type}`, 25, 50);
 
-        // Add Card Image (Centered)
-        // Card size: ~90mm width, height based on standard card aspect ratio (~1.58)
-        const cardWidth = 100;
-        const cardHeight = 100 / 1.58;
-        
-        // Render it centered on page
-        const cardX = (215.9 - cardWidth) / 2; // letter width is 215.9mm
-        doc.addImage(cardBase64, 'JPEG', cardX, 70, cardWidth, cardHeight);
+        if (isPdf) {
+          // Render a helpful link since we cannot draw a PDF inside jsPDF directly
+          doc.setFont('Helvetica', 'bold');
+          doc.setTextColor(37, 99, 235); // Bootstrap/Tailwind blue
+          doc.text('Haga clic aquí para abrir y descargar el documento PDF original', 25, 70);
+          
+          doc.setDrawColor(37, 99, 235);
+          doc.setLineWidth(0.3);
+          doc.line(25, 71.5, 142, 71.5); // Underline
+          doc.link(25, 65, 120, 10, { url: params.credential_image_url });
+          
+          doc.setTextColor(0, 0, 0); // reset text color
+          doc.setDrawColor(0, 0, 0); // reset draw color
+        } else {
+          const cardBase64 = await imageUrlToBase64(params.credential_image_url);
+          // Add Card Image (Centered)
+          // Card size: ~90mm width, height based on standard card aspect ratio (~1.58)
+          const cardWidth = 100;
+          const cardHeight = 100 / 1.58;
+          
+          // Render it centered on page
+          const cardX = (215.9 - cardWidth) / 2; // letter width is 215.9mm
+          doc.addImage(cardBase64, 'JPEG', cardX, 70, cardWidth, cardHeight);
+        }
       } catch (imgError) {
         console.warn('Error loading card copy image for PDF page 2:', imgError);
       }
