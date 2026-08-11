@@ -88,6 +88,7 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedDef, setSelectedDef] = useState<DocumentDefinition | null>(null);
   const [expiryDate, setExpiryDate] = useState<string>('');
+  const [docNumber, setDocNumber] = useState<string>('');
   const [capturedValue, setCapturedValue] = useState<string | null>(null);
   const [capturedFront, setCapturedFront] = useState<string | null>(null);
   const [capturedBack, setCapturedBack] = useState<string | null>(null);
@@ -108,6 +109,7 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
   const handleOpenUpload = (def: DocumentDefinition) => {
     setSelectedDef(def);
     setExpiryDate('');
+    setDocNumber('');
     setCapturedValue(null);
     setCapturedFront(null);
     setCapturedBack(null);
@@ -134,6 +136,12 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
 
     if (selectedDef.requires_expiration && !selectedDef.depends_on_definition_id && !expiryDate) {
       toast.error('La fecha de vencimiento es obligatoria');
+      return;
+    }
+
+    const isTicaOrPcp = selectedDef.name.toLowerCase().includes('tica') || selectedDef.name.toLowerCase().includes('pcp');
+    if (isTicaOrPcp && (!docNumber || docNumber.trim() === '')) {
+      toast.error('El número de credencial es obligatorio');
       return;
     }
 
@@ -165,6 +173,7 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
         definition_id: selectedDef.id,
         base64Data: base64Data,
         type: selectedDef.name,
+        number: docNumber,
         expiration_date: expiryDate || null,
         status: 'PENDING'
       });
@@ -361,6 +370,21 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
           </DialogHeader>
 
           <div className="space-y-6">
+            {selectedDef && (selectedDef.name.toLowerCase().includes('tica') || selectedDef.name.toLowerCase().includes('pcp')) && (
+              <div className="space-y-2">
+                <Label htmlFor="doc-number" className="text-xs font-black uppercase text-slate-400 ml-1">
+                  Número de Credencial <span className="text-red-500">*</span>
+                </Label>
+                <Input 
+                  id="doc-number"
+                  value={docNumber}
+                  onChange={(e) => setDocNumber(e.target.value)}
+                  placeholder="Ingresa el número de credencial"
+                  className="rounded-2xl border-slate-200"
+                />
+              </div>
+            )}
+
             {selectedDef?.requires_expiration && !selectedDef?.depends_on_definition_id && (
               <div className="space-y-2">
                 <Label htmlFor="expiry" className="text-xs font-black uppercase text-slate-400 ml-1">Fecha de Vencimiento</Label>

@@ -391,17 +391,71 @@ export async function updatePersonnel(
 
 export async function deletePersonnel(
   id: string,
-  reason?: string
+  reason?: string,
+  refusedTica: boolean = false,
+  refusedPcp: boolean = false
 ): Promise<{ success: boolean; error: string | null }> {
   const supabase = await createClient();
   const adminClient = createAdminClient();
 
-  // Soft delete — mark as inactive
+  // Check if they have TICA or PCP documents
+  const { data: docs } = await adminClient
+    .from('documents')
+    .select('*, definition:document_definitions(name)')
+    .eq('personnel_id', id);
+
+  const ticaDoc = docs?.find((d: any) =>
+    (d.definition?.name || d.type || '').toLowerCase().includes('tica')
+  );
+  const pcpDoc = docs?.find((d: any) =>
+    (d.definition?.name || d.type || '').toLowerCase().includes('pcp')
+  );
+
+  const hasTica = !!ticaDoc;
+  const hasPcp = !!pcpDoc;
+
+  let dismissalStatus: 'pending' | 'completed' = 'completed';
+  const recordsToCreate = [];
+
+  if (hasTica) {
+    dismissalStatus = 'pending';
+    recordsToCreate.push({
+      personnel_id: id,
+      credential_type: 'TICA',
+      refused_to_return: refusedTica,
+      credential_image_url: ticaDoc.file_url || null,
+      status: 'pending'
+    });
+  }
+
+  if (hasPcp) {
+    dismissalStatus = 'pending';
+    recordsToCreate.push({
+      personnel_id: id,
+      credential_type: 'PCP',
+      refused_to_return: refusedPcp,
+      credential_image_url: pcpDoc.file_url || null,
+      status: 'pending'
+    });
+  }
+
+  if (recordsToCreate.length > 0) {
+    const { error: recError } = await adminClient
+      .from('dismissal_records')
+      .insert(recordsToCreate);
+    if (recError) {
+      console.error('[PERSONNEL-DELETE] Error creating dismissal records:', recError);
+      return { success: false, error: recError.message };
+    }
+  }
+
+  // Soft delete — mark as inactive & set dismissal_status
   const { error } = await adminClient
     .from('personnel')
     .update({ 
       is_active: false,
-      inactive_reason: reason || null
+      inactive_reason: reason || null,
+      dismissal_status: dismissalStatus
     })
     .eq('id', id);
 
@@ -429,8 +483,10 @@ export async function deletePersonnel(
     }
   }
 
-  // Clean up uploaded documents and warning letters to free up space
-  await deletePersonnelDocumentsAndLetters(id, adminClient);
+  if (dismissalStatus === 'completed') {
+    // Clean up uploaded documents and warning letters to free up space (only if no formal process is needed)
+    await deletePersonnelDocumentsAndLetters(id, adminClient);
+  }
 
   safeRevalidatePath('/personnel');
   safeRevalidatePath('/shifts/assignments');
@@ -873,7 +929,7 @@ export async function approveOnboarding(
 }
 
 // Helper to delete all documents and letters of a worker to free up space
-async function deletePersonnelDocumentsAndLetters(
+export async function deletePersonnelDocumentsAndLetters(
   personnelId: string,
   adminClient: any
 ): Promise<void> {

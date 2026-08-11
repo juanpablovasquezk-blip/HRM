@@ -22,7 +22,7 @@ interface PersonnelFiltersProps {
   initialSearch?: string;
   initialCompanyId?: string;
   initialPositionId?: string;
-  initialStatus?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' | 'missing_docs';
+  initialStatus?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' | 'missing_docs' | 'dismissal_pending';
   companies: Company[];
   positions: Position[];
 }
@@ -180,6 +180,7 @@ export function PersonnelFilters({
           <option value="missing_sizes">⚠️ Sin Tallas EPP</option>
           <option value="incomplete">❌ Fichas Incompletas</option>
           <option value="missing_docs">📄 Doc. Requerida Incompleta</option>
+          <option value="dismissal_pending">⏳ Baja Pendiente</option>
           <option value="inactive">Solo Bajas</option>
           <option value="pending">Solicitudes Pendientes</option>
           <option value="all">Todos</option>

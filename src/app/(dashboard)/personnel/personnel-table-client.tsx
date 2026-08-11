@@ -45,9 +45,11 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { createOnboardingToken, approveOnboarding, rejectOnboarding, deletePersonnel } from './actions';
 import { createWorkerSizeToken } from '../epp/actions';
 import { createPersonnelUpdateToken, sendFichaUpdateWhatsApp } from './update-actions';
+import { generateDismissalActa } from './generate-dismissal-acta';
 
 
 interface Personnel {
@@ -91,6 +93,15 @@ interface Personnel {
   marital_status?: string | null;
   missingFields?: string[];
   missingDocs?: string[];
+  hasTica?: boolean;
+  hasPcp?: boolean;
+  ticaNumber?: string;
+  pcpNumber?: string;
+  ticaExpiry?: string;
+  pcpExpiry?: string;
+  ticaUrl?: string;
+  pcpUrl?: string;
+  dismissal_status?: 'pending' | 'completed' | null;
 }
 
 
@@ -158,6 +169,8 @@ export default function PersonnelTableClient({
   const [isDismissOpen, setIsDismissOpen] = useState(false);
   const [dismissPerson, setDismissPerson] = useState<Personnel | null>(null);
   const [dismissReason, setDismissReason] = useState('');
+  const [refusedTica, setRefusedTica] = useState(false);
+  const [refusedPcp, setRefusedPcp] = useState(false);
 
   // Invite handler
   const handleGenerateInvite = async () => {
@@ -242,6 +255,8 @@ export default function PersonnelTableClient({
   const handleDismissClick = (person: Personnel) => {
     setDismissPerson(person);
     setDismissReason('');
+    setRefusedTica(false);
+    setRefusedPcp(false);
     setIsDismissOpen(true);
   };
 
@@ -253,10 +268,52 @@ export default function PersonnelTableClient({
     }
 
     startTransition(async () => {
-      const res = await deletePersonnel(dismissPerson.id, dismissReason);
+      const res = await deletePersonnel(dismissPerson.id, dismissReason, refusedTica, refusedPcp);
       if (res.success) {
         toast.success(`Trabajador ${dismissPerson.first_name} dado de baja`);
         setIsDismissOpen(false);
+
+        // Generate and download PDF actas if they have TICA or PCP
+        if (dismissPerson.hasTica) {
+          try {
+            await generateDismissalActa({
+              first_name: dismissPerson.first_name,
+              last_name_father: dismissPerson.last_name_father,
+              last_name_mother: dismissPerson.last_name_mother,
+              rut: dismissPerson.rut,
+              main_position_name: positionMap[dismissPerson.main_position] || dismissPerson.main_position,
+              credential_type: 'TICA',
+              refused_to_return: refusedTica,
+              credential_number: dismissPerson.ticaNumber || '',
+              credential_expiry: dismissPerson.ticaExpiry || '',
+              credential_image_url: dismissPerson.ticaUrl || null,
+              inactive_reason: dismissReason
+            });
+          } catch (pdfErr) {
+            console.error('Error generating TICA PDF on dismissal:', pdfErr);
+          }
+        }
+
+        if (dismissPerson.hasPcp) {
+          try {
+            await generateDismissalActa({
+              first_name: dismissPerson.first_name,
+              last_name_father: dismissPerson.last_name_father,
+              last_name_mother: dismissPerson.last_name_mother,
+              rut: dismissPerson.rut,
+              main_position_name: positionMap[dismissPerson.main_position] || dismissPerson.main_position,
+              credential_type: 'PCP',
+              refused_to_return: refusedPcp,
+              credential_number: dismissPerson.pcpNumber || '',
+              credential_expiry: dismissPerson.pcpExpiry || '',
+              credential_image_url: dismissPerson.pcpUrl || null,
+              inactive_reason: dismissReason
+            });
+          } catch (pdfErr) {
+            console.error('Error generating PCP PDF on dismissal:', pdfErr);
+          }
+        }
+
         setDismissPerson(null);
         window.location.reload();
       } else {
@@ -615,9 +672,21 @@ export default function PersonnelTableClient({
                             {!person.is_active && (
                               <Badge 
                                 variant="outline" 
-                                className={person.onboarding_status === 'rejected' ? "bg-red-50 text-red-700 border-red-200 text-[10px] h-5 flex items-center font-bold" : "bg-rose-50 text-rose-700 border-rose-200 text-[10px] h-5 flex items-center font-bold"}
+                                className={
+                                  person.dismissal_status === 'pending'
+                                    ? "bg-orange-50 text-orange-700 border-orange-200 text-[10px] h-5 flex items-center font-bold"
+                                    : person.onboarding_status === 'rejected'
+                                      ? "bg-red-50 text-red-700 border-red-200 text-[10px] h-5 flex items-center font-bold"
+                                      : "bg-rose-50 text-rose-700 border-rose-200 text-[10px] h-5 flex items-center font-bold"
+                                }
                               >
-                                {person.onboarding_status === 'rejected' ? 'Rechazado' : 'De baja'}
+                                {
+                                  person.dismissal_status === 'pending'
+                                    ? 'Baja Pendiente'
+                                    : person.onboarding_status === 'rejected'
+                                      ? 'Rechazado'
+                                      : 'De baja'
+                                }
                               </Badge>
                             )}
                           </div>
@@ -1192,9 +1261,41 @@ export default function PersonnelTableClient({
                 required
               />
               <p className="text-[11px] text-rose-500 font-medium">
-                ⚠️ Al dar de baja, se eliminarán permanentemente todos sus documentos y cartas del sistema para liberar espacio.
+                {dismissPerson?.hasTica || dismissPerson?.hasPcp 
+                  ? '⚠️ Si el trabajador posee credenciales TICA o PCP activas, se generarán automáticamente sus actas de devolución y quedará en estado "Baja Pendiente" hasta subir las recepciones firmadas por la DGAC.' 
+                  : '⚠️ Al dar de baja, se desactivará al trabajador y se limpiarán sus documentos de manera permanente.'}
               </p>
             </div>
+
+            {/* Checkbox for TICA Refusal */}
+            {dismissPerson?.hasTica && (
+              <div className="flex items-start gap-2 p-3 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-100 dark:border-amber-900/30 rounded-xl">
+                <Checkbox 
+                  id="refuse-tica" 
+                  checked={refusedTica}
+                  onCheckedChange={(checked) => setRefusedTica(!!checked)}
+                  className="mt-0.5"
+                />
+                <Label htmlFor="refuse-tica" className="text-xs font-semibold text-amber-800 dark:text-amber-400 cursor-pointer select-none leading-tight">
+                  El trabajador se niega a entregar su credencial TICA física. (Se dejará constancia en el acta).
+                </Label>
+              </div>
+            )}
+
+            {/* Checkbox for PCP Refusal */}
+            {dismissPerson?.hasPcp && (
+              <div className="flex items-start gap-2 p-3 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-100 dark:border-amber-900/30 rounded-xl">
+                <Checkbox 
+                  id="refuse-pcp" 
+                  checked={refusedPcp}
+                  onCheckedChange={(checked) => setRefusedPcp(!!checked)}
+                  className="mt-0.5"
+                />
+                <Label htmlFor="refuse-pcp" className="text-xs font-semibold text-amber-800 dark:text-amber-400 cursor-pointer select-none leading-tight">
+                  El trabajador se niega a entregar su credencial PCP física. (Se dejará constancia en el acta).
+                </Label>
+              </div>
+            )}
           </div>
 
           <DialogFooter className="mt-2 gap-2 flex-col sm:flex-row">

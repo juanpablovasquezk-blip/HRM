@@ -1,6 +1,6 @@
 import { 
   Users, Star, CalendarOff, Plane, 
-  Car, Bus, GitCompare, AlertCircle
+  Car, Bus, GitCompare, AlertCircle, UserMinus
 } from 'lucide-react';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { MonthlyEvolutionChart } from '@/components/dashboard/monthly-evolution-chart';
@@ -50,6 +50,7 @@ export default async function DashboardPage() {
   let manualChanges = 0;
   let pendingRequests = 0;
   let absencePercent = 0;
+  let pendingDismissals = 0;
 
   // For charts
   let monthlyData: Array<{ month: string; extras: number; licencias: number; vacaciones: number; ausentismo_final: number }> = [];
@@ -145,6 +146,15 @@ export default async function DashboardPage() {
       onLeaveToday = (todayLeaves || []).length;
       todayActive = Math.max(0, totalPersonnel - onLeaveToday);
       absencePercent = totalPersonnel > 0 ? Math.round((onLeaveToday / totalPersonnel) * 100) : 0;
+
+      // ── 5c. Bajas pendientes de devolución TICA/PCP ────────────────────────
+      const { count: pendingDismissalsCount } = await supabase
+        .from('personnel')
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', profile.company_id)
+        .eq('is_active', false)
+        .eq('dismissal_status', 'pending');
+      pendingDismissals = pendingDismissalsCount || 0;
 
       // ── 5b. Ausencias activas hoy con nombres (excluye personal/libres) ─────
       if ((todayLeaves || []).length > 0) {
@@ -489,7 +499,7 @@ export default async function DashboardPage() {
       {/* ── Fila 2: KPIs secundarios ── */}
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Operaciones</p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           <StatCard
             title="Transporte Propio"
             value={ownTransport}
@@ -521,6 +531,13 @@ export default async function DashboardPage() {
             subtitle="Por aprobar"
             icon={CalendarOff}
             iconClassName={`${pendingRequests > 0 ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-slate-100 text-slate-500'}`}
+          />
+          <StatCard
+            title="Bajas Pendientes"
+            value={pendingDismissals}
+            subtitle="Devoluciones DGAC"
+            icon={UserMinus}
+            iconClassName={`${pendingDismissals > 0 ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' : 'bg-slate-100 text-slate-500'}`}
           />
         </div>
       </div>

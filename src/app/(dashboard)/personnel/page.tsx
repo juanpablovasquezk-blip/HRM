@@ -11,7 +11,7 @@ import PersonnelTableClient from './personnel-table-client';
 export default async function PersonnelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' | 'missing_docs' }>;
+  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' | 'missing_docs' | 'dismissal_pending' }>;
 }) {
   const params = await searchParams;
   const supabase = await createClient();
@@ -54,8 +54,12 @@ export default async function PersonnelPage({
   } else if (status === 'incomplete') {
     query = query.eq('is_active', true)
       .or('afp.is.null,health_system.is.null,bank_account_number.is.null,emergency_contact_phone.is.null,gender.is.null,marital_status.is.null,phone.is.null,afp.eq.,health_system.eq.,bank_account_number.eq.,emergency_contact_phone.eq.,gender.eq.,marital_status.eq.,phone.eq.');
+  } else if (status === 'dismissal_pending') {
+    query = query.eq('is_active', false).eq('dismissal_status', 'pending');
   } else if (status === 'inactive') {
-    query = query.eq('is_active', false).or('onboarding_status.is.null,onboarding_status.eq.approved,onboarding_status.eq.rejected');
+    query = query.eq('is_active', false)
+      .or('dismissal_status.is.null,dismissal_status.eq.completed')
+      .or('onboarding_status.is.null,onboarding_status.eq.approved,onboarding_status.eq.rejected');
   } else if (status === 'pending') {
     query = query.eq('onboarding_status', 'pending');
   }
@@ -106,7 +110,7 @@ export default async function PersonnelPage({
         .eq('is_mandatory', true),
       supabase
         .from('documents')
-        .select('definition_id, personnel_id, file_url')
+        .select('definition_id, personnel_id, file_url, number, expiration_date')
         .in('personnel_id', displayPersonnel.map(w => w.id))
     ]);
 
@@ -150,10 +154,37 @@ export default async function PersonnelPage({
         })
         .map(def => def.name);
 
+      // Check for TICA & PCP documents
+      const ticaDoc = workerDocs.find((d: any) =>
+        (d.definition_id && mDefs.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('tica')) ||
+        (d.type || '').toLowerCase().includes('tica')
+      );
+      const pcpDoc = workerDocs.find((d: any) =>
+        (d.definition_id && mDefs.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('pcp')) ||
+        (d.type || '').toLowerCase().includes('pcp')
+      );
+
+      const hasTica = !!ticaDoc && !!ticaDoc.file_url;
+      const hasPcp = !!pcpDoc && !!pcpDoc.file_url;
+      const ticaNumber = ticaDoc?.number || '';
+      const pcpNumber = pcpDoc?.number || '';
+      const ticaExpiry = ticaDoc?.expiration_date || '';
+      const pcpExpiry = pcpDoc?.expiration_date || '';
+      const ticaUrl = ticaDoc?.file_url || '';
+      const pcpUrl = pcpDoc?.file_url || '';
+
       return {
         ...worker,
         missingFields,
-        missingDocs
+        missingDocs,
+        hasTica,
+        hasPcp,
+        ticaNumber,
+        pcpNumber,
+        ticaExpiry,
+        pcpExpiry,
+        ticaUrl,
+        pcpUrl
       };
     });
 
@@ -175,6 +206,7 @@ export default async function PersonnelPage({
             Gestiona tu fuerza laboral — {displayPersonnel.length} trabajadores {
               status === 'active' ? 'activos' : 
               status === 'inactive' ? 'de baja' : 
+              status === 'dismissal_pending' ? 'en proceso de baja pendiente' :
               status === 'missing_docs' ? 'con documentación requerida incompleta' :
               'registrados'
             }

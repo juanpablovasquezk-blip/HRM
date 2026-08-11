@@ -74,13 +74,22 @@ export async function uploadDocument(
 
   // Look up definition to know if this document type requires expiration
   let requiresExpiration = true; // default: calculate expiration for legacy uploads
+  let defName = type || '';
   if (definitionId) {
     const { data: defRow } = await adminClient
       .from('document_definitions')
-      .select('requires_expiration')
+      .select('requires_expiration, name')
       .eq('id', definitionId)
       .single();
-    if (defRow) requiresExpiration = defRow.requires_expiration;
+    if (defRow) {
+      requiresExpiration = defRow.requires_expiration;
+      defName = defRow.name;
+    }
+  }
+
+  const isTicaOrPcp = defName.toLowerCase().includes('tica') || defName.toLowerCase().includes('pcp');
+  if (isTicaOrPcp && (!number || number.trim() === '')) {
+    return { success: false, error: 'El número de credencial es obligatorio para TICA y PCP' };
   }
 
   // Calculate expiration only when the definition requires it

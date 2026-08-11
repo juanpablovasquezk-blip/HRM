@@ -24,6 +24,7 @@ import { LettersCard } from '@/components/personnel/letters-card';
 import { getUserRole } from '@/app/role-actions';
 import { ContractDownloadButton } from './contract-download-button';
 import { TicaLetterDownloadButton } from './tica-letter-download-button';
+import { DismissalPanelClient } from './dismissal-panel-client';
 
 export default async function PersonnelDetailPage({
   params,
@@ -49,6 +50,17 @@ export default async function PersonnelDetailPage({
 
   if (error || !person) notFound();
 
+  // Fetch dismissal records if dismissal_status === 'pending'
+  let dismissalRecords: any[] = [];
+  if (person.dismissal_status === 'pending') {
+    const { data: recs } = await supabase
+      .from('dismissal_records')
+      .select('*')
+      .eq('personnel_id', id)
+      .order('created_at', { ascending: true });
+    dismissalRecords = recs || [];
+  }
+
   const posMap = Object.fromEntries((allPositions || []).map((p: any) => [p.id, p.name]));
   const shiftMap = Object.fromEntries((allShifts || []).map((s: any) => [s.id, s.name]));
   const address = (person.address as { street?: string; city?: string; region?: string }) || {};
@@ -60,7 +72,7 @@ export default async function PersonnelDetailPage({
     return def.applicable_positions.includes(person.main_position);
   });
 
-  const documents = (person.documents as Array<{ id: string; definition_id: string; type: string; expiration_date: string | null; file_url: string; uploaded_at: string; status: string }>) || [];
+  const documents = (person.documents as Array<{ id: string; definition_id: string; type: string; number?: string | null; expiration_date: string | null; file_url: string; uploaded_at: string; status: string }>) || [];
 
   // Dynamic Missing Documents Logic
   // Match by definition_id for new uploads, OR by type name for legacy uploads
@@ -119,6 +131,53 @@ export default async function PersonnelDetailPage({
         </div>
 
       </div>
+
+      {person.dismissal_status === 'pending' && (
+        <DismissalPanelClient
+          personnelId={id}
+          personName={`${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`.trim()}
+          personRut={person.rut}
+          mainPositionName={posMap[person.main_position] || person.main_position}
+          dismissalReason={person.inactive_reason || ''}
+          ticaNumber={
+            documents.find((d: any) =>
+              (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('tica')) ||
+              (d.type || '').toLowerCase().includes('tica')
+            )?.number || ''
+          }
+          pcpNumber={
+            documents.find((d: any) =>
+              (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('pcp')) ||
+              (d.type || '').toLowerCase().includes('pcp')
+            )?.number || ''
+          }
+          ticaExpiry={
+            documents.find((d: any) =>
+              (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('tica')) ||
+              (d.type || '').toLowerCase().includes('tica')
+            )?.expiration_date || ''
+          }
+          pcpExpiry={
+            documents.find((d: any) =>
+              (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('pcp')) ||
+              (d.type || '').toLowerCase().includes('pcp')
+            )?.expiration_date || ''
+          }
+          ticaUrl={
+            documents.find((d: any) =>
+              (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('tica')) ||
+              (d.type || '').toLowerCase().includes('tica')
+            )?.file_url || ''
+          }
+          pcpUrl={
+            documents.find((d: any) =>
+              (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('pcp')) ||
+              (d.type || '').toLowerCase().includes('pcp')
+            )?.file_url || ''
+          }
+          initialRecords={dismissalRecords}
+        />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Información Personal */}

@@ -72,6 +72,7 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
   const needsExpirationDate = selectedDef?.requires_expiration && !selectedDef?.depends_on_definition_id;
   const needsAnchorDate = selectedDef?.requires_expiration && !!selectedDef?.depends_on_definition_id;
   const needsIssueDate = selectedDef && !selectedDef.requires_expiration;
+  const isTicaOrPcp = selectedDef?.name.toLowerCase().includes('tica') || selectedDef?.name.toLowerCase().includes('pcp');
 
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -228,8 +229,15 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
 
           {/* ── Número de Documento ───────────────────────────────────────── */}
           <div className="space-y-2">
-            <Label htmlFor="number">Número de Documento</Label>
-            <Input id="number" name="number" placeholder="Opcional" />
+            <Label htmlFor="number">
+              Número de Documento {isTicaOrPcp && <span className="text-red-500">*</span>}
+            </Label>
+            <Input 
+              id="number" 
+              name="number" 
+              placeholder={isTicaOrPcp ? "Ingresa el número de credencial" : "Opcional"} 
+              required={isTicaOrPcp} 
+            />
           </div>
 
           {/* ── Date fields driven by definition metadata ─────────────────── */}

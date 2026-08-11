@@ -55,6 +55,7 @@ export interface Personnel {
   termination_date: string | null;
   has_special_contract: boolean;
   is_active: boolean;
+  dismissal_status?: 'pending' | 'completed' | null;
   created_at: string;
   
   // Emergency Contact
@@ -330,4 +331,17 @@ export interface ScheduleResult {
     recalculated_count: number;
     execution_time_ms?: number;
   };
+}
+
+export interface DismissalRecord {
+  id: string;
+  personnel_id: string;
+  credential_type: 'TICA' | 'PCP';
+  refused_to_return: boolean;
+  credential_image_url: string | null;
+  receipt_file_url: string | null;
+  status: 'pending' | 'completed';
+  created_at: string;
+  completed_at: string | null;
+  created_by: string | null;
 }

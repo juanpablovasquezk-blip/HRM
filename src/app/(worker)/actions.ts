@@ -410,6 +410,12 @@ export async function uploadDocumentRecord(record: any) {
   const session = await getWorkerSession();
   if (!session) return { success: false, error: 'No session' };
 
+  const typeName = record.type || '';
+  const isTicaOrPcp = typeName.toLowerCase().includes('tica') || typeName.toLowerCase().includes('pcp');
+  if (isTicaOrPcp && (!record.number || record.number.trim() === '')) {
+    return { success: false, error: 'El número de credencial es obligatorio para TICA y PCP' };
+  }
+
   const adminClient = createAdminClient();
 
   // 1. Upload base64 file to storage if provided
@@ -500,6 +506,7 @@ export async function uploadDocumentRecord(record: any) {
     definition_id: record.definition_id,
     file_url: fileUrl,
     type: record.type || 'Documento',
+    number: record.number || '',
     status: 'PENDING',
     uploaded_at: new Date().toISOString(),
     expiration_date: record.expiration_date || null,
