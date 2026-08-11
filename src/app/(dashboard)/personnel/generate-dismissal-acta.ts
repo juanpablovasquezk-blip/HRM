@@ -46,13 +46,13 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     let signatureBase64 = '';
 
     try {
-      logoBase64 = await imageUrlToBase64('/templates/acta_image1.png');
+      logoBase64 = await imageUrlToBase64('/templates/acta_image2.png');
     } catch (err) {
       console.warn('Could not load logo image, continuing without it', err);
     }
 
     try {
-      signatureBase64 = await imageUrlToBase64('/templates/acta_image2.png');
+      signatureBase64 = await imageUrlToBase64('/templates/acta_image1.png');
     } catch (err) {
       console.warn('Could not load signature image, continuing without it', err);
     }
@@ -116,7 +116,7 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     const introText = `En la ciudad de Santiago, a ${capitalizedDate}, en dependencias de la ${recipientOfficeName} de la Dirección General de Aeronáutica Civil (DGAC) del Aeropuerto Arturo Merino Benítez, comparece en representación de Minerquim Ltda., RUT 76.135.448-5, don Juan Pablo Vásquez K., en su calidad de Gerente de Operaciones, con el objeto de hacer entrega formal de la siguiente credencial:`;
     
     const splitIntro = doc.splitTextToSize(introText, 165);
-    doc.text(splitIntro, 25, currentY, { align: 'justify' });
+    doc.text(splitIntro, 25, currentY);
     currentY += (splitIntro.length * 5) + 6;
 
     // 1. Details section
@@ -140,13 +140,13 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     }
 
     const splitDetails = doc.splitTextToSize(detailsText, 165);
-    doc.text(splitDetails, 25, currentY, { align: 'justify' });
+    doc.text(splitDetails, 25, currentY);
     currentY += (splitDetails.length * 5) + 6;
 
     // Request clause
     const requestText = `Se deja constancia que este trabajador ya no presta servicios en Minerquim Ltda., por lo que se solicita expresamente a la DGAC proceder a la baja administrativa y técnica de la mencionada credencial, a fin de evitar su uso no autorizado y mantener actualizados los registros de control.`;
     const splitRequest = doc.splitTextToSize(requestText, 165);
-    doc.text(splitRequest, 25, currentY, { align: 'justify' });
+    doc.text(splitRequest, 25, currentY);
     currentY += (splitRequest.length * 5) + 8;
 
     // 2. Delivery & Reception section
@@ -217,7 +217,7 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     const closeText = 'En constancia de lo anterior, se firma la presente acta en dos ejemplares de igual tenor y fecha, quedando uno en poder de la DGAC y otro en poder de Minerquim Ltda.';
     const splitClose = doc.splitTextToSize(closeText, 165);
     doc.setFont('Helvetica', 'italic');
-    doc.text(splitClose, 25, currentY, { align: 'justify' });
+    doc.text(splitClose, 25, currentY);
 
     // PAGE 2: Digital copy of credential card (if exists)
     if (params.credential_image_url) {
