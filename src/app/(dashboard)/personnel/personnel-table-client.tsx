@@ -89,6 +89,8 @@ interface Personnel {
   emergency_contact_phone?: string | null;
   gender?: string | null;
   marital_status?: string | null;
+  missingFields?: string[];
+  missingDocs?: string[];
 }
 
 
@@ -596,9 +598,18 @@ export default function PersonnelTableClient({
                               <Badge 
                                 variant="outline" 
                                 className="bg-amber-50/80 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30 text-[10px] py-0 px-1.5 font-bold uppercase tracking-wider h-5 flex items-center"
-                                title="Falta completar datos en su ficha (AFP, Salud, Contacto de Emergencia, Banco, etc.)"
+                                title={person.missingFields && person.missingFields.length > 0 ? `Falta completar: ${person.missingFields.join(', ')}` : "Falta completar datos en su ficha (AFP, Salud, Contacto de Emergencia, Banco, etc.)"}
                               >
                                 Ficha Incompleta
+                              </Badge>
+                            )}
+                            {person.missingDocs && person.missingDocs.length > 0 && (
+                              <Badge 
+                                variant="outline" 
+                                className="bg-rose-50/80 text-rose-700 border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30 text-[10px] py-0 px-1.5 font-bold uppercase tracking-wider h-5 flex items-center"
+                                title={`Faltan documentos: ${person.missingDocs.join(', ')}`}
+                              >
+                                Doc. Incompleta
                               </Badge>
                             )}
                             {!person.is_active && (
@@ -619,6 +630,28 @@ export default function PersonnelTableClient({
                             <p className="text-[11px] text-rose-600 font-medium italic" title={person.inactive_reason}>
                               Motivo baja: {person.inactive_reason}
                             </p>
+                          )}
+                          
+                          {/* Missing details listing */}
+                          {person.missingFields && person.missingFields.length > 0 && (
+                            <div className="text-[10px] text-amber-700 dark:text-amber-400 flex flex-wrap gap-1 items-center mt-0.5 max-w-md">
+                              <span className="font-semibold select-none">Falta:</span>
+                              {person.missingFields.map((f, i) => (
+                                <span key={i} className="bg-amber-50/50 dark:bg-amber-950/30 px-1 py-0.5 rounded text-[9px] border border-amber-100 dark:border-amber-900/50">
+                                  {f}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {person.missingDocs && person.missingDocs.length > 0 && (
+                            <div className="text-[10px] text-rose-700 dark:text-rose-400 flex flex-wrap gap-1 items-center mt-0.5 max-w-md">
+                              <span className="font-semibold select-none">Faltan documentos:</span>
+                              {person.missingDocs.map((d, i) => (
+                                <span key={i} className="bg-rose-50/50 dark:bg-rose-950/30 px-1 py-0.5 rounded text-[9px] border border-rose-100 dark:border-rose-900/50">
+                                  {d}
+                                </span>
+                              ))}
+                            </div>
                           )}
                         </div>
                       </TableCell>

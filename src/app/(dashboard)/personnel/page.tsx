@@ -95,9 +95,9 @@ export default async function PersonnelPage({
     );
   }
 
-  let displayPersonnel = personnel || [];
+  let displayPersonnel: any[] = personnel || [];
 
-  if (status === 'missing_docs' && displayPersonnel.length > 0) {
+  if (displayPersonnel.length > 0) {
     const [{ data: mandatoryDefs }, { data: existingDocs }] = await Promise.all([
       supabase
         .from('document_definitions')
@@ -110,29 +110,55 @@ export default async function PersonnelPage({
         .in('personnel_id', displayPersonnel.map(w => w.id))
     ]);
 
-    if (mandatoryDefs && mandatoryDefs.length > 0) {
-      const eDocs = existingDocs || [];
-      displayPersonnel = displayPersonnel.filter(worker => {
-        const positionIds: string[] = [];
-        if (worker.main_position) positionIds.push(worker.main_position);
-        if (Array.isArray(worker.secondary_positions)) {
-          positionIds.push(...worker.secondary_positions);
-        }
+    const mDefs = mandatoryDefs || [];
+    const eDocs = existingDocs || [];
 
-        const workerDocs = eDocs.filter(d => d.personnel_id === worker.id);
-        const missingForThisWorker = mandatoryDefs.filter(def => {
+    displayPersonnel = displayPersonnel.map(worker => {
+      // 1. Missing fields (Ficha Incompleta)
+      const fieldsToCheck = {
+        afp: 'AFP',
+        health_system: 'Sist. Salud',
+        bank_account_number: 'Nº Cuenta',
+        emergency_contact_phone: 'Contacto Emerg.',
+        gender: 'Género',
+        marital_status: 'Est. Civil',
+        phone: 'Teléfono'
+      };
+      const missingFields: string[] = [];
+      for (const [field, label] of Object.entries(fieldsToCheck)) {
+        if (!worker[field] || (typeof worker[field] === 'string' && worker[field].trim() === '')) {
+          missingFields.push(label);
+        }
+      }
+
+      // 2. Missing documents (Doc. Incompleta)
+      const positionIds: string[] = [];
+      if (worker.main_position) positionIds.push(worker.main_position);
+      if (Array.isArray(worker.secondary_positions)) {
+        positionIds.push(...worker.secondary_positions);
+      }
+
+      const workerDocs = eDocs.filter(d => d.personnel_id === worker.id);
+      const missingDocs = mDefs
+        .filter(def => {
           const applicable: string[] = def.applicable_positions || [];
           if (applicable.length > 0 && !applicable.some((p: string) => positionIds.includes(p))) {
             return false;
           }
           const doc = workerDocs.find(d => d.definition_id === def.id);
           return !doc || !doc.file_url;
-        });
+        })
+        .map(def => def.name);
 
-        return missingForThisWorker.length > 0;
-      });
-    } else {
-      displayPersonnel = [];
+      return {
+        ...worker,
+        missingFields,
+        missingDocs
+      };
+    });
+
+    if (status === 'missing_docs') {
+      displayPersonnel = displayPersonnel.filter(worker => worker.missingDocs && worker.missingDocs.length > 0);
     }
   }
 
