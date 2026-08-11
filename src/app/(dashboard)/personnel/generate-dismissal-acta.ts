@@ -69,6 +69,19 @@ async function renderPdfPageToImage(pdfUrl: string): Promise<string> {
   });
 }
 
+async function getImageDimensions(base64: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.onerror = () => {
+      resolve({ width: 100, height: 100 }); // fallback
+    };
+    img.src = base64;
+  });
+}
+
 interface GenerateActaParams {
   first_name: string;
   last_name_father: string;
@@ -305,14 +318,22 @@ export async function generateDismissalActa(params: GenerateActaParams) {
           cardBase64 = await imageUrlToBase64(params.credential_image_url);
         }
 
-        // Add Card Image (Centered)
-        // Card size: ~100mm width, height based on standard card aspect ratio (~1.58)
-        const cardWidth = 100;
-        const cardHeight = 100 / 1.58;
-        
-        // Render it centered on page
-        const cardX = (215.9 - cardWidth) / 2; // letter width is 215.9mm
-        doc.addImage(cardBase64, 'JPEG', cardX, 70, cardWidth, cardHeight);
+        // Add Card Image (Centered with dynamic aspect ratio to avoid distortion)
+        const dims = await getImageDimensions(cardBase64);
+        const aspectRatio = dims.width / dims.height;
+
+        let cardWidth = 100;
+        let cardHeight = 100 / aspectRatio;
+
+        // If it fits portrait better, constrain by height
+        if (cardHeight > 130) {
+          cardHeight = 130;
+          cardWidth = 130 * aspectRatio;
+        }
+
+        // Render it centered on page (letter page width is 215.9mm)
+        const cardX = (215.9 - cardWidth) / 2;
+        doc.addImage(cardBase64, 'JPEG', cardX, 65, cardWidth, cardHeight);
       } catch (imgError: any) {
         console.warn('Error loading card copy image for PDF page 2:', imgError);
         // Fallback: draw warning message
