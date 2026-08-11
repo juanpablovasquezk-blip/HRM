@@ -13,7 +13,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Loader2, CheckCircle2, XCircle, Phone, Mail } from 'lucide-react';
 import { toast } from 'sonner';
-import { createPersonnel, updatePersonnel } from '@/app/(dashboard)/personnel/actions';
+import { createPersonnel, updatePersonnel, deletePersonnel } from '@/app/(dashboard)/personnel/actions';
+import { generateDismissalActa } from '@/app/(dashboard)/personnel/generate-dismissal-acta';
+import { Checkbox } from '@/components/ui/checkbox';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog';
 import { createClient } from '@/lib/supabase/client';
 import type { Personnel } from '@/types/database';
 
@@ -23,6 +33,14 @@ interface PersonnelFormProps {
   positions?: { id: string; name: string; area?: { name: string } }[];
   shifts?: { id: string; name: string; start_time: string; end_time: string }[];
   areas?: { id: string; name: string }[];
+  hasTica?: boolean;
+  hasPcp?: boolean;
+  ticaNumber?: string;
+  pcpNumber?: string;
+  ticaExpiry?: string;
+  pcpExpiry?: string;
+  ticaUrl?: string;
+  pcpUrl?: string;
 }
 
 const CLOTHING_SIZES_LETTER = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
@@ -106,7 +124,21 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
 }
 
-export function PersonnelForm({ personnel, companies = [], positions = [], shifts = [], areas = [] }: PersonnelFormProps) {
+export function PersonnelForm({ 
+  personnel, 
+  companies = [], 
+  positions = [], 
+  shifts = [], 
+  areas = [],
+  hasTica = false,
+  hasPcp = false,
+  ticaNumber = '',
+  pcpNumber = '',
+  ticaExpiry = '',
+  pcpExpiry = '',
+  ticaUrl = '',
+  pcpUrl = ''
+}: PersonnelFormProps) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
   const isEditing = !!personnel;
@@ -116,6 +148,83 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
   const [requiresTransport, setRequiresTransport] = useState((personnel as any)?.requires_transport ?? true);
   const [isActive, setIsActive] = useState(personnel?.is_active ?? true);
   const [inactiveReason, setInactiveReason] = useState(personnel?.inactive_reason || '');
+
+  // New dismissal states
+  const [isDismissOpen, setIsDismissOpen] = useState(false);
+  const [dismissalReason, setDismissalReason] = useState('');
+  const [dismissalDate, setDismissalDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [deliveredTica, setDeliveredTica] = useState(true);
+  const [deliveredPcp, setDeliveredPcp] = useState(true);
+
+  const handleConfirmDismiss = () => {
+    if (!personnel) return;
+    if (!dismissalReason.trim()) {
+      toast.error('Por favor, ingresa el motivo de la baja');
+      return;
+    }
+
+    startTransition(async () => {
+      const refusedTica = hasTica ? !deliveredTica : false;
+      const refusedPcp = hasPcp ? !deliveredPcp : false;
+
+      const res = await deletePersonnel(personnel.id, dismissalReason, refusedTica, refusedPcp, dismissalDate);
+      if (res.success) {
+        toast.success(`Trabajador dado de baja correctamente`);
+        setIsDismissOpen(false);
+
+        // Find position name
+        const posObj = positions.find(p => p.id === personnel.main_position);
+        const positionName = posObj ? posObj.name : personnel.main_position;
+
+        // Generate and download PDF actas if they had TICA or PCP
+        if (hasTica) {
+          try {
+            await generateDismissalActa({
+              first_name: personnel.first_name,
+              last_name_father: personnel.last_name_father,
+              last_name_mother: personnel.last_name_mother || '',
+              rut: personnel.rut,
+              main_position_name: positionName || '',
+              credential_type: 'TICA',
+              refused_to_return: refusedTica,
+              credential_number: ticaNumber,
+              credential_expiry: ticaExpiry,
+              credential_image_url: ticaUrl || null,
+              inactive_reason: dismissalReason
+            });
+          } catch (pdfErr) {
+            console.error('Error generating TICA PDF on dismissal:', pdfErr);
+          }
+        }
+
+        if (hasPcp) {
+          try {
+            await generateDismissalActa({
+              first_name: personnel.first_name,
+              last_name_father: personnel.last_name_father,
+              last_name_mother: personnel.last_name_mother || '',
+              rut: personnel.rut,
+              main_position_name: positionName || '',
+              credential_type: 'PCP',
+              refused_to_return: refusedPcp,
+              credential_number: pcpNumber,
+              credential_expiry: pcpExpiry,
+              credential_image_url: pcpUrl || null,
+              inactive_reason: dismissalReason
+            });
+          } catch (pdfErr) {
+            console.error('Error generating PCP PDF on dismissal:', pdfErr);
+          }
+        }
+
+        // Redirect to profile page
+        router.push(`/personnel/${personnel.id}`);
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Error al dar de baja');
+      }
+    });
+  };
   const [selectedSecondary, setSelectedSecondary] = useState<string[]>(
     (personnel?.secondary_positions as string[]) || []
   );
@@ -949,53 +1058,163 @@ export function PersonnelForm({ personnel, companies = [], positions = [], shift
             </div>
             <Switch id="requires_transport" checked={requiresTransport} onCheckedChange={setRequiresTransport} />
           </div>
-          <Separator />
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label htmlFor="is_active" className={!isActive ? 'text-red-600 font-bold' : ''}>Estado Activo</Label>
-                <p className="text-xs text-muted-foreground">Si se desactiva, el trabajador no aparecerá en el roster ni en el listado principal</p>
+          {(!isEditing || !isActive) && (
+            <>
+              <Separator />
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label htmlFor="is_active" className={!isActive ? 'text-red-600 font-bold' : ''}>Estado Activo</Label>
+                    <p className="text-xs text-muted-foreground">Si se desactiva, el trabajador no aparecerá en el roster ni en el listado principal</p>
+                  </div>
+                  <Switch 
+                    id="is_active" 
+                    checked={isActive} 
+                    onCheckedChange={(checked) => {
+                      setIsActive(checked);
+                      if (checked) {
+                        setInactiveReason('');
+                      }
+                    }} 
+                  />
+                </div>
+                {!isActive && (
+                  <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <Label htmlFor="inactive_reason" className="text-red-600 font-bold">Motivo de la Baja *</Label>
+                    <textarea
+                      id="inactive_reason"
+                      placeholder="Por favor, ingresa el motivo por el cual estás dando de baja a este trabajador..."
+                      value={inactiveReason}
+                      onChange={(e) => setInactiveReason(e.target.value)}
+                      className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 placeholder:text-muted-foreground"
+                      required
+                    />
+                    <p className="text-xs text-red-500 font-semibold mt-1">
+                      ⚠️ Al desactivar al trabajador y guardar los cambios, se eliminarán permanentemente todos sus documentos y cartas del sistema para ahorrar espacio.
+                    </p>
+                  </div>
+                )}
               </div>
-              <Switch 
-                id="is_active" 
-                checked={isActive} 
-                onCheckedChange={(checked) => {
-                  setIsActive(checked);
-                  if (checked) {
-                    setInactiveReason('');
-                  }
-                }} 
-              />
-            </div>
-            {!isActive && (
-              <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                <Label htmlFor="inactive_reason" className="text-red-600 font-bold">Motivo de la Baja *</Label>
-                <textarea
-                  id="inactive_reason"
-                  placeholder="Por favor, ingresa el motivo por el cual estás dando de baja a este trabajador..."
-                  value={inactiveReason}
-                  onChange={(e) => setInactiveReason(e.target.value)}
-                  className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 placeholder:text-muted-foreground"
-                  required
-                />
-                <p className="text-xs text-red-500 font-semibold mt-1">
-                  ⚠️ Al desactivar al trabajador y guardar los cambios, se eliminarán permanentemente todos sus documentos y cartas del sistema para ahorrar espacio.
-                </p>
-              </div>
-            )}
-          </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
       {/* Acciones */}
-      <div className="flex items-center gap-3">
-        <Button type="submit" disabled={isPending}
-          className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-lg shadow-orange-500/25">
-          {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {isEditing ? 'Guardar Cambios' : 'Crear Trabajador'}
-        </Button>
-        <Button type="button" variant="outline" onClick={() => router.back()}>Cancelar</Button>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <Button type="submit" disabled={isPending}
+            className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-lg shadow-orange-500/25">
+            {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isEditing ? 'Guardar Cambios' : 'Crear Trabajador'}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => router.back()}>Cancelar</Button>
+        </div>
+
+        {isEditing && isActive && (
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={() => setIsDismissOpen(true)}
+            className="bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-500/25 font-bold uppercase text-xs"
+          >
+            Dar de Baja Trabajador
+          </Button>
+        )}
       </div>
+
+      {/* DIALOG: DAR DE BAJA */}
+      <Dialog open={isDismissOpen} onOpenChange={setIsDismissOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white dark:bg-slate-900 border-none shadow-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase tracking-tight flex items-center gap-2">
+              <svg className="h-5 w-5 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Dar de Baja Trabajador
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Indica la fecha y el motivo de la baja de {personnel?.first_name} {personnel?.last_name_father}. El trabajador será desactivado del sistema.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {/* Date field */}
+            <div className="space-y-1.5">
+              <Label htmlFor="dismissal-date" className="text-sm font-semibold">Fecha de Baja *</Label>
+              <input
+                id="dismissal-date"
+                type="date"
+                value={dismissalDate}
+                onChange={e => setDismissalDate(e.target.value)}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                required
+              />
+            </div>
+
+            {/* Reason field */}
+            <div className="space-y-1.5">
+              <Label htmlFor="dismissal-reason" className="text-sm font-semibold">Motivo de la Baja *</Label>
+              <textarea
+                id="dismissal-reason"
+                placeholder="Escribe el motivo de la baja aquí..."
+                value={dismissalReason}
+                onChange={e => setDismissalReason(e.target.value)}
+                className="flex min-h-[90px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 placeholder:text-slate-400"
+                required
+              />
+              <p className="text-[11px] text-rose-500 font-medium">
+                {hasTica || hasPcp 
+                  ? '⚠️ Si el trabajador posee credenciales TICA o PCP activas, se generarán automáticamente sus actas de devolución y quedará en estado "Baja Pendiente" hasta subir las recepciones firmadas por la DGAC.' 
+                  : '⚠️ Al dar de baja, se desactivará al trabajador y se limpiarán sus documentos de manera permanente.'}
+              </p>
+            </div>
+
+            {/* Checkbox for TICA Return */}
+            {hasTica && (
+              <div className="flex items-start gap-2 p-3 bg-emerald-50/50 dark:bg-emerald-950/10 border border-emerald-100 dark:border-emerald-900/30 rounded-xl">
+                <Checkbox 
+                  id="deliver-tica" 
+                  checked={deliveredTica}
+                  onCheckedChange={(checked) => setDeliveredTica(!!checked)}
+                  className="mt-0.5"
+                />
+                <Label htmlFor="deliver-tica" className="text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer select-none leading-tight">
+                  El trabajador entregó su credencial TICA física. (Si no la entregó, desmarca esta opción para dejar constancia de que se negó en el acta).
+                </Label>
+              </div>
+            )}
+
+            {/* Checkbox for PCP Return */}
+            {hasPcp && (
+              <div className="flex items-start gap-2 p-3 bg-emerald-50/50 dark:bg-emerald-950/10 border border-emerald-100 dark:border-emerald-900/30 rounded-xl">
+                <Checkbox 
+                  id="deliver-pcp" 
+                  checked={deliveredPcp}
+                  onCheckedChange={(checked) => setDeliveredPcp(!!checked)}
+                  className="mt-0.5"
+                />
+                <Label htmlFor="deliver-pcp" className="text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer select-none leading-tight">
+                  El trabajador entregó su credencial PCP física. (Si no la entregó, desmarca esta opción para dejar constancia de que se negó en el acta).
+                </Label>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="mt-2 gap-2 flex-col sm:flex-row">
+            <Button variant="ghost" onClick={() => setIsDismissOpen(false)} className="rounded-xl font-bold uppercase text-xs">
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleConfirmDismiss}
+              disabled={isPending || !dismissalReason.trim() || !dismissalDate}
+              className="bg-rose-600 hover:bg-rose-700 text-white rounded-xl px-6 font-black uppercase text-xs"
+            >
+              {isPending ? 'Procesando...' : 'Confirmar Baja'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

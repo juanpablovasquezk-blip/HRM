@@ -11,7 +11,7 @@ export default async function EditPersonnelPage({
   const supabase = await createClient();
 
   const [{ data: person, error }, { data: companies }, { data: positions }, { data: shifts }, { data: areas }] = await Promise.all([
-    supabase.from('personnel').select('*').eq('id', id).single(),
+    supabase.from('personnel').select('*, documents(*)').eq('id', id).single(),
     supabase.from('companies').select('id, name').order('name'),
     supabase.from('positions').select('id, name, area:areas(name)').order('name'),
     supabase.from('shifts').select('id, name, start_time, end_time').order('name'),
@@ -19,6 +19,29 @@ export default async function EditPersonnelPage({
   ]);
 
   if (error || !person) notFound();
+
+  // Retrieve document definitions to match TICA/PCP names
+  const { data: allDefs } = await supabase.from('document_definitions').select('id, name').eq('is_active', true);
+  const defs = allDefs || [];
+  
+  const documents = (person.documents as any[]) || [];
+  const ticaDoc = documents.find((d: any) =>
+    (d.definition_id && defs.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('tica')) ||
+    (d.type || '').toLowerCase().includes('tica')
+  );
+  const pcpDoc = documents.find((d: any) =>
+    (d.definition_id && defs.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('pcp')) ||
+    (d.type || '').toLowerCase().includes('pcp')
+  );
+
+  const hasTica = !!ticaDoc && !!ticaDoc.file_url;
+  const hasPcp = !!pcpDoc && !!pcpDoc.file_url;
+  const ticaNumber = ticaDoc?.number || '';
+  const pcpNumber = pcpDoc?.number || '';
+  const ticaExpiry = ticaDoc?.expiration_date || '';
+  const pcpExpiry = pcpDoc?.expiration_date || '';
+  const ticaUrl = ticaDoc?.file_url || '';
+  const pcpUrl = pcpDoc?.file_url || '';
 
   return (
     <div className="space-y-6">
@@ -41,6 +64,14 @@ export default async function EditPersonnelPage({
         positions={JSON.parse(JSON.stringify(positions || []))}
         shifts={JSON.parse(JSON.stringify(shifts || []))}
         areas={JSON.parse(JSON.stringify(areas || []))}
+        hasTica={hasTica}
+        hasPcp={hasPcp}
+        ticaNumber={ticaNumber}
+        pcpNumber={pcpNumber}
+        ticaExpiry={ticaExpiry}
+        pcpExpiry={pcpExpiry}
+        ticaUrl={ticaUrl}
+        pcpUrl={pcpUrl}
       />
     </div>
   );

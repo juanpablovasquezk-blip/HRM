@@ -393,7 +393,8 @@ export async function deletePersonnel(
   id: string,
   reason?: string,
   refusedTica: boolean = false,
-  refusedPcp: boolean = false
+  refusedPcp: boolean = false,
+  terminationDate?: string
 ): Promise<{ success: boolean; error: string | null }> {
   const supabase = await createClient();
   const adminClient = createAdminClient();
@@ -449,13 +450,14 @@ export async function deletePersonnel(
     }
   }
 
-  // Soft delete — mark as inactive & set dismissal_status
+  // Soft delete — mark as inactive & set dismissal_status & termination_date
   const { error } = await adminClient
     .from('personnel')
     .update({ 
       is_active: false,
       inactive_reason: reason || null,
-      dismissal_status: dismissalStatus
+      dismissal_status: dismissalStatus,
+      termination_date: terminationDate || new Date().toISOString().split('T')[0]
     })
     .eq('id', id);
 
