@@ -50,6 +50,7 @@ interface DismissalPanelClientProps {
   ticaUrl: string;
   pcpUrl: string;
   initialRecords: DismissalRecord[];
+  isCompleted?: boolean;
 }
 
 export function DismissalPanelClient({
@@ -64,7 +65,8 @@ export function DismissalPanelClient({
   pcpExpiry,
   ticaUrl,
   pcpUrl,
-  initialRecords
+  initialRecords,
+  isCompleted = false
 }: DismissalPanelClientProps) {
   const [records, setRecords] = useState<DismissalRecord[]>(initialRecords);
   const [isPending, startTransition] = useTransition();
@@ -139,6 +141,94 @@ export function DismissalPanelClient({
   };
 
   const allCompleted = records.every(r => r.status === 'completed');
+
+  if (isCompleted) {
+    return (
+      <Card className="border-slate-200 bg-slate-50/40 dark:bg-slate-900/10 dark:border-slate-800 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-black text-slate-700 dark:text-slate-300 flex items-center gap-2 uppercase tracking-wide">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+            Historial de Baja y Entrega de Credenciales
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl text-sm">
+            <p className="mb-1"><span className="font-bold text-slate-700 dark:text-slate-300">Motivo de la baja:</span> <span className="italic text-slate-600 dark:text-slate-400">"{dismissalReason || 'No especificado'}"</span></p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {records.map((record) => {
+              const isTica = record.credential_type === 'TICA';
+              const credNum = isTica ? ticaNumber : pcpNumber;
+              const credExp = isTica ? ticaExpiry : pcpExpiry;
+
+              return (
+                <div 
+                  key={record.id}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 space-y-4 shadow-sm"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-9 w-9 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-700 dark:text-slate-300">
+                        <FileText className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-900 dark:text-slate-100">{record.credential_type}</h4>
+                        <p className="text-[10px] text-slate-500">Credencial Nº {credNum || 'N/A'}</p>
+                      </div>
+                    </div>
+
+                    <Badge 
+                      variant="outline" 
+                      className="bg-emerald-50 text-emerald-700 border-emerald-100 uppercase text-[9px] font-black"
+                    >
+                      Baja Cerrada
+                    </Badge>
+                  </div>
+
+                  <div className="text-xs text-slate-500 space-y-1">
+                    <p><strong>Vencimiento:</strong> {credExp ? new Date(credExp).toLocaleDateString('es-CL') : 'N/A'}</p>
+                    <p>
+                      <strong>Estado de entrega:</strong>{' '}
+                      {record.refused_to_return ? (
+                        <span className="text-red-600 font-bold">El trabajador se negó a entregar la credencial</span>
+                      ) : (
+                        <span className="text-emerald-600 font-bold">Entregada voluntariamente y firmada</span>
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      className="text-xs font-bold uppercase rounded-xl border-slate-200 text-slate-700 hover:bg-slate-100 flex-grow gap-1.5"
+                      onClick={() => handleDownloadActa(record)}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Acta Original
+                    </Button>
+
+                    {record.receipt_file_url && (
+                      <a 
+                        href={record.receipt_file_url} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold uppercase text-slate-700 hover:bg-slate-100 flex-grow"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Ver Acta Recepción
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="border-orange-200 bg-orange-50/20 dark:bg-orange-950/5 shadow-md">

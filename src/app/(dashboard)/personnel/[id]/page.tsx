@@ -50,9 +50,9 @@ export default async function PersonnelDetailPage({
 
   if (error || !person) notFound();
 
-  // Fetch dismissal records if dismissal_status === 'pending'
+  // Fetch dismissal records if there is a dismissal process
   let dismissalRecords: any[] = [];
-  if (person.dismissal_status === 'pending') {
+  if (person.dismissal_status === 'pending' || person.dismissal_status === 'completed' || !person.is_active) {
     const { data: recs } = await supabase
       .from('dismissal_records')
       .select('*')
@@ -132,7 +132,7 @@ export default async function PersonnelDetailPage({
 
       </div>
 
-      {person.dismissal_status === 'pending' && (
+      {(person.dismissal_status === 'pending' || (dismissalRecords && dismissalRecords.length > 0)) && (
         <DismissalPanelClient
           personnelId={id}
           personName={`${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`.trim()}
@@ -176,6 +176,7 @@ export default async function PersonnelDetailPage({
             )?.file_url || ''
           }
           initialRecords={dismissalRecords}
+          isCompleted={person.dismissal_status === 'completed' || !person.is_active}
         />
       )}
 
@@ -315,7 +316,7 @@ export default async function PersonnelDetailPage({
       </div>
 
       {/* Alertas de Cumplimiento */}
-      {missingDocs.length > 0 && (
+      {person.is_active && missingDocs.length > 0 && (
         <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg p-4 flex gap-3 shadow-sm">
           <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-500 shrink-0 mt-0.5" />
           <div className="space-y-1">
