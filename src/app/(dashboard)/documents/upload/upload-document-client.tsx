@@ -27,9 +27,10 @@ interface Personnel {
 interface Props {
   personnelList: Personnel[];
   documentDefinitions: DocumentDefinition[];
+  existingDocuments?: { personnel_id: string; definition_id: string; expiration_date: string | null }[];
 }
 
-function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
+function DocumentUploadForm({ personnelList, documentDefinitions, existingDocuments = [] }: Props) {
   const [isPending, startTransition] = useTransition();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedDefId, setSelectedDefId] = useState('');
@@ -70,7 +71,22 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
   // requires_expiration + has dependency  → date from parent document (anchor)
   // no requires_expiration                → issue date (engine calculates 180d)
   const needsExpirationDate = selectedDef?.requires_expiration && !selectedDef?.depends_on_definition_id;
-  const needsAnchorDate = selectedDef?.requires_expiration && !!selectedDef?.depends_on_definition_id;
+  
+  const hasAnchorDocument = !!(
+    selectedPersonnelId &&
+    selectedDef?.depends_on_definition_id &&
+    existingDocuments.some(
+      doc =>
+        doc.personnel_id === selectedPersonnelId &&
+        doc.definition_id === selectedDef.depends_on_definition_id
+    )
+  );
+
+  const needsAnchorDate =
+    selectedDef?.requires_expiration &&
+    !!selectedDef?.depends_on_definition_id &&
+    !hasAnchorDocument;
+
   const needsIssueDate = selectedDef && !selectedDef.requires_expiration;
   const isTicaOrPcp = selectedDef?.name.toLowerCase().includes('tica') || selectedDef?.name.toLowerCase().includes('pcp');
 
@@ -323,7 +339,7 @@ function DocumentUploadForm({ personnelList, documentDefinitions }: Props) {
   );
 }
 
-export function UploadDocumentClient({ personnelList, documentDefinitions }: Props) {
+export function UploadDocumentClient({ personnelList, documentDefinitions, existingDocuments = [] }: Props) {
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
@@ -334,7 +350,11 @@ export function UploadDocumentClient({ personnelList, documentDefinitions }: Pro
       </div>
 
       <Suspense fallback={<div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>}>
-        <DocumentUploadForm personnelList={personnelList} documentDefinitions={documentDefinitions} />
+        <DocumentUploadForm 
+          personnelList={personnelList} 
+          documentDefinitions={documentDefinitions} 
+          existingDocuments={existingDocuments} 
+        />
       </Suspense>
     </div>
   );

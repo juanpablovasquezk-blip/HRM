@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache';
 import { calculateExpiration } from '@/lib/documents/expiration-engine';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 import { validateAntecedentesPDF } from '@/lib/documents/validation';
+import { calculateDynamicExpiration } from '@/lib/utils/document-calc';
 
 export async function uploadDocument(
   formData: FormData
@@ -75,15 +76,22 @@ export async function uploadDocument(
   // Look up definition to know if this document type requires expiration
   let requiresExpiration = true; // default: calculate expiration for legacy uploads
   let defName = type || '';
+  let dependsOnDefinitionId: string | null = null;
+  let cycleMonths = 6;
+  let anchorDaysOffset = 30;
+
   if (definitionId) {
     const { data: defRow } = await adminClient
       .from('document_definitions')
-      .select('requires_expiration, name')
+      .select('requires_expiration, name, depends_on_definition_id, cycle_months, anchor_days_offset')
       .eq('id', definitionId)
       .single();
     if (defRow) {
       requiresExpiration = defRow.requires_expiration;
       defName = defRow.name;
+      dependsOnDefinitionId = defRow.depends_on_definition_id;
+      cycleMonths = defRow.cycle_months || 6;
+      anchorDaysOffset = defRow.anchor_days_offset || 30;
     }
   }
 
@@ -93,14 +101,38 @@ export async function uploadDocument(
   }
 
   // Calculate expiration only when the definition requires it
-  const baseDate = issueDate ? new Date(issueDate) : new Date();
-  const ticaDate = ticaDateStr ? new Date(ticaDateStr) : null;
-  const explicitExpirationDate = explicitExpirationDateStr ? new Date(explicitExpirationDateStr) : null;
-
   let expirationDateStr: string | null = null;
   if (requiresExpiration) {
-    const expResult = calculateExpiration(baseDate, ticaDate, explicitExpirationDate);
-    expirationDateStr = expResult.expiration_date.toISOString().split('T')[0];
+    let calculated = false;
+
+    // If it depends on an anchor document and we have no input ticaDateStr, try to use existing anchor document expiration
+    if (dependsOnDefinitionId && !ticaDateStr) {
+      const { data: anchorDoc } = await adminClient
+        .from('documents')
+        .select('expiration_date')
+        .eq('personnel_id', personnelId)
+        .eq('definition_id', dependsOnDefinitionId)
+        .maybeSingle();
+
+      if (anchorDoc?.expiration_date) {
+        const calcDate = calculateDynamicExpiration(
+          new Date(anchorDoc.expiration_date + 'T12:00:00'),
+          cycleMonths,
+          anchorDaysOffset
+        );
+        expirationDateStr = calcDate.toISOString().split('T')[0];
+        calculated = true;
+      }
+    }
+
+    if (!calculated) {
+      const baseDate = issueDate ? new Date(issueDate) : new Date();
+      const ticaDate = ticaDateStr ? new Date(ticaDateStr) : null;
+      const explicitExpirationDate = explicitExpirationDateStr ? new Date(explicitExpirationDateStr) : null;
+      
+      const expResult = calculateExpiration(baseDate, ticaDate, explicitExpirationDate);
+      expirationDateStr = expResult.expiration_date.toISOString().split('T')[0];
+    }
   }
 
   // ── Upsert logic: delete previous document of same type/definition ────────
