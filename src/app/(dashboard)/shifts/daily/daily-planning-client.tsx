@@ -131,9 +131,13 @@ export default function DailyPlanningClient({
 
   const getPersonnelStyles = (assignment: ShiftAssignmentWithDetails) => {
     const isExtra = assignment.is_extra;
+    const isAbsent = assignment.attendance_status === 'absent';
     
     // Read-only styling
     if (readOnly) {
+      if (isAbsent) {
+        return ' line-through text-red-500 bg-red-50 border border-red-200 px-2 py-0.5 rounded inline-block shadow-sm ';
+      }
       return isExtra 
         ? ' bg-rose-100 border border-rose-300 text-rose-950 font-bold px-2 py-0.5 rounded inline-block shadow-sm '
         : ' inline-block px-2 py-0.5 ';
@@ -147,7 +151,9 @@ export default function DailyPlanningClient({
 
     let styles = ' inline-block transition-all duration-150 cursor-grab active:cursor-grabbing rounded px-2 py-0.5 select-none ';
 
-    if (isThisDragged) {
+    if (isAbsent) {
+      styles += ' line-through text-red-500 bg-red-50 border border-red-200 hover:bg-red-100 ';
+    } else if (isThisDragged) {
       styles += ' opacity-30 border border-dashed border-slate-400 bg-slate-100 ';
     } else if (isHovered && isValidTarget) {
       styles += ' bg-emerald-100 border-2 border-emerald-500 text-emerald-800 scale-105 font-bold shadow-md z-10 ';
@@ -266,6 +272,16 @@ export default function DailyPlanningClient({
     if (!p) return '-';
     const firstName = p.first_name ? p.first_name.split(' ')[0] : '';
     return `${firstName} ${p.last_name_father || ''}`;
+  };
+
+  const renderPersonnelName = (a: any) => {
+    if (!a?.personnel) return '-';
+    return (
+      <>
+        {a.attendance_status === 'absent' && <span className="inline-block mr-1 text-red-600 select-none">❌</span>}
+        {formatName(a.personnel)}
+      </>
+    );
   };
 
   // Helper to sort by shift start time
@@ -765,7 +781,7 @@ export default function DailyPlanningClient({
                         onDrop={(e) => handleDrop(e, a)}
                         className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
                       >
-                        {formatName(a.personnel)}
+                        {renderPersonnelName(a)}
                       </span>
                       {!readOnly && (
                         <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print">
@@ -802,7 +818,7 @@ export default function DailyPlanningClient({
                         onDrop={(e) => handleDrop(e, a)}
                         className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
                       >
-                        {formatName(a.personnel)}
+                        {renderPersonnelName(a)}
                       </span>
                       {!readOnly && (
                         <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print">
@@ -841,7 +857,7 @@ export default function DailyPlanningClient({
                           onDrop={(e) => handleDrop(e, a)}
                           className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
                         >
-                          {formatName(a.personnel)}
+                          {renderPersonnelName(a)}
                         </span>
                         <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print"><AlertTriangle className="w-3 h-3" /></button>
                       </div>
@@ -877,7 +893,7 @@ export default function DailyPlanningClient({
                         onDrop={(e) => handleDrop(e, a)}
                         className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
                       >
-                        {formatName(a.personnel)}
+                        {renderPersonnelName(a)}
                       </span>
                       <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print"><AlertTriangle className="w-3 h-3" /></button>
                     </div>
@@ -911,7 +927,7 @@ export default function DailyPlanningClient({
                           onDrop={(e) => handleDrop(e, a)}
                           className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
                         >
-                          {formatName(a.personnel)}
+                          {renderPersonnelName(a)}
                         </span>
                         {!readOnly ? (
                           <select 
@@ -953,7 +969,7 @@ export default function DailyPlanningClient({
                           onDrop={(e) => handleDrop(e, a)}
                           className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
                         >
-                          {formatName(a.personnel)}
+                          {renderPersonnelName(a)}
                         </span>
                         {!readOnly ? (
                           <select 
@@ -995,7 +1011,7 @@ export default function DailyPlanningClient({
                           onDrop={(e) => handleDrop(e, a)}
                           className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
                         >
-                          {formatName(a.personnel)}
+                          {renderPersonnelName(a)}
                         </span>
                         <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
                       </div>
@@ -1032,7 +1048,7 @@ export default function DailyPlanningClient({
                           onDrop={(e) => handleDrop(e, pair.conductor)}
                           className={getPersonnelStyles(pair.conductor)}
                         >
-                          {formatName(pair.conductor.personnel)}
+                          {renderPersonnelName(pair.conductor)}
                         </span>
                       ) : (
                         <span>-</span>
@@ -1068,7 +1084,7 @@ export default function DailyPlanningClient({
                           onDrop={(e) => handleDrop(e, pair.ayudante)}
                           className={getPersonnelStyles(pair.ayudante)}
                         >
-                          {formatName(pair.ayudante.personnel)}
+                          {renderPersonnelName(pair.ayudante)}
                         </span>
                       ) : (
                         <span>-</span>

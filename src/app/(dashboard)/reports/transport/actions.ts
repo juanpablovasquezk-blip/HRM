@@ -88,6 +88,14 @@ export async function getTransportReportData(filters: {
 
   let results = data as TransportRequestWithDetails[];
 
+  // Exclude transport requests with type PROPIO if the assignment is marked absent
+  results = results.filter(r => {
+    if (r.transport_type === 'PROPIO' && r.assignment?.attendance_status === 'absent') {
+      return false;
+    }
+    return true;
+  });
+
   if (filters.companyId) {
     results = results.filter(r => r.personnel?.company_id === filters.companyId);
   }

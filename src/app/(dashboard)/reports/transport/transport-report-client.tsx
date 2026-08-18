@@ -182,7 +182,6 @@ export default function TransportReportClient({ companies }: Props) {
   // -----------------------------------------------------------------------
   // Excel exports
   // -----------------------------------------------------------------------
-
   const exportMobilesExcel = () => {
     const mobiles = data.filter(r =>
       r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE' || r.transport_type === 'EMPRESA'
@@ -198,7 +197,9 @@ export default function TransportReportClient({ companies }: Props) {
       'Reserva': r.reservation_number || 'PENDIENTE',
       'Costo': r.cost ?? '',
       'Observaciones': r.observations || '',
-      'Estado': r.transport_type === 'PENDIENTE'
+      'Estado': r.assignment?.attendance_status === 'absent'
+        ? 'AUSENTE (Cobrado)'
+        : r.transport_type === 'PENDIENTE'
         ? 'Pendiente de Reserva'
         : r.transport_type === 'EMPRESA'
         ? 'Móvil Empresa'
@@ -499,7 +500,12 @@ export default function TransportReportClient({ companies }: Props) {
                   <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-3 py-3 text-slate-500">{r.date}</td>
                     <td className="px-3 py-3 font-bold text-slate-700 uppercase">
-                      {r.personnel?.first_name} {r.personnel?.last_name_father}
+                      {r.assignment?.attendance_status === 'absent' && (
+                        <span className="inline-block mr-2 text-[9px] bg-red-100 text-red-700 border border-red-200 px-1.5 py-0.5 rounded-full select-none font-black tracking-widest uppercase align-middle">❌ Ausente</span>
+                      )}
+                      <span className={r.assignment?.attendance_status === 'absent' ? 'line-through text-red-500/60 align-middle' : 'align-middle'}>
+                        {r.personnel?.first_name} {r.personnel?.last_name_father}
+                      </span>
                     </td>
                     <td className="px-3 py-3 text-slate-500">
                       {r.assignment?.position?.name
