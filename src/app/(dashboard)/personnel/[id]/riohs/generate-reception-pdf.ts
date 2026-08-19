@@ -1,8 +1,6 @@
 'use client';
 
 import { jsPDF } from 'jspdf';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 
 interface ReceptionPDFParams {
   workerName: string;
@@ -10,6 +8,11 @@ interface ReceptionPDFParams {
   companyName: string;
   companyRut: string;
   sentAt?: string | Date | null;
+}
+
+interface TextChunk {
+  text: string;
+  bold?: boolean;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -21,8 +24,40 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+function printStyledParagraph(
+  doc: jsPDF,
+  chunks: TextChunk[],
+  startX: number,
+  startY: number,
+  maxWidth: number,
+  lineHeight: number = 6
+): number {
+  let currentX = startX;
+  let currentY = startY;
+
+  for (const chunk of chunks) {
+    doc.setFont('helvetica', chunk.bold ? 'bold' : 'normal');
+    const tokens = chunk.text.split(/(\s+)/);
+
+    for (const token of tokens) {
+      if (!token) continue;
+      const tokenWidth = doc.getTextWidth(token);
+
+      if (currentX + tokenWidth > startX + maxWidth && token.trim() !== '') {
+        currentX = startX;
+        currentY += lineHeight;
+      }
+
+      doc.text(token, currentX, currentY);
+      currentX += tokenWidth;
+    }
+  }
+
+  return currentY;
+}
+
 export async function generateReceptionPDF(params: ReceptionPDFParams) {
-  const { workerName, workerRut, companyName, companyRut, sentAt } = params;
+  const { workerName, workerRut, companyName, companyRut } = params;
 
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -75,58 +110,66 @@ export async function generateReceptionPDF(params: ReceptionPDFParams) {
 
   currentY += 15;
 
-  // Body Text Paragraph 1
+  // Paragraph 1 with Inline BOLD Worker & Company Data
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
   doc.setTextColor(30, 41, 59);
 
   const cleanWorkerName = workerName.trim().toUpperCase();
   const cleanRut = workerRut.trim();
   const cleanCompName = companyName.trim().toUpperCase();
 
-  const sendDateObj = sentAt ? new Date(sentAt) : new Date();
-  const dateFormattedStr = format(sendDateObj, "dd 'de' MMMM 'de' yyyy 'a las' HH:mm 'hrs'", { locale: es });
+  const chunksP1: TextChunk[] = [
+    { text: 'Yo, ' },
+    { text: cleanWorkerName, bold: true },
+    { text: ', Cédula de Identidad N° ' },
+    { text: cleanRut, bold: true },
+    { text: ', declaro recepción y lectura de forma digital de una copia del Reglamento Interno de Orden, Higiene y Seguridad de la empresa ' },
+    { text: `${cleanCompName} RUT ${companyRut}`, bold: true },
+    { text: ', de acuerdo a lo establecido en el artículo 156 inciso 2 del Código del Trabajo y ordinario: 4417/ 21-sep-2017, el cual establece que "el empleador deberá entregar gratuitamente a los trabajadores un ejemplar del reglamento interno de la empresa y el reglamento a que se refiere la Ley N° 16.744".' },
+  ];
 
-  const p1Text = `Yo, ${cleanWorkerName}, Cédula de Identidad N° ${cleanRut}, declaro recepción y lectura de forma digital de una copia del Reglamento Interno de Orden, Higiene y Seguridad de la empresa ${cleanCompName} RUT ${companyRut}, enviado por correo electrónico el ${dateFormattedStr}, de acuerdo a lo establecido en el artículo 156 inciso 2 del Código del Trabajo y ordinario 4417/ 21-sep-2017, el cual establece que "el empleador deberá entregar gratuitamente a los trabajadores un ejemplar del reglamento interno de la empresa y el reglamento a que se refiere la Ley N° 16.744".`;
-
-  const linesP1 = doc.splitTextToSize(p1Text, usableW);
-  doc.text(linesP1, margin, currentY, { align: 'justify', maxWidth: usableW });
-
-  currentY += linesP1.length * 6 + 10;
+  currentY = printStyledParagraph(doc, chunksP1, margin, currentY, usableW, 6);
+  currentY += 10;
 
   // Paragraph 2
-  const p2Text = 'Asumo que es mi responsabilidad leer su contenido y dar cabal cumplimiento a las obligaciones, prohibiciones, normas de orden, higiene y seguridad que en él están escritas, como así también a las disposiciones y procedimientos que en forma posterior se emitan y/o se modifiquen y que formen parte integral de éste.';
-  const linesP2 = doc.splitTextToSize(p2Text, usableW);
-  doc.text(linesP2, margin, currentY, { align: 'justify', maxWidth: usableW });
+  const chunksP2: TextChunk[] = [
+    { text: 'Asumo que es mi responsabilidad leer su contenido y dar cabal cumplimiento a las obligaciones, prohibiciones, normas de orden, higiene y seguridad que en él están escritas, como así también a las disposiciones y procedimientos que en forma posterior se emitan y/o se modifiquen y que formen parte integral de éste.' }
+  ];
+  currentY = printStyledParagraph(doc, chunksP2, margin, currentY, usableW, 6);
 
-  currentY += linesP2.length * 6 + 30;
+  currentY += 35;
 
-  // Date line
-  const todayStr = format(new Date(), "dd 'de' MMMM 'de' yyyy", { locale: es });
+  // Handwritten Signature Block (matching template Image 2)
+  const col1X = margin;
+  const col1W = 85;
+  const col2X = pageW - margin - 60;
+  const col2W = 60;
+
+  doc.setDrawColor(50, 50, 50);
+  doc.setLineWidth(0.4);
+
+  // Left signature line (Nombre del Trabajador)
+  doc.line(col1X, currentY, col1X + col1W, currentY);
+  // Right signature line (Firma del Trabajador)
+  doc.line(col2X, currentY, col2X + col2W, currentY);
+
+  currentY += 5;
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Fecha de Emisión: ${todayStr}`, margin, currentY);
+  doc.setTextColor(30, 41, 59);
+  doc.text('Nombre del Trabajador', col1X + col1W / 2, currentY, { align: 'center' });
+  doc.text('Firma del Trabajador', col2X + col2W / 2, currentY, { align: 'center' });
 
-  currentY += 25;
-
-  // Worker Signature line
-  const sigX = pageW / 2 - 45;
-  doc.setDrawColor(100, 116, 139);
-  doc.line(sigX, currentY, sigX + 90, currentY);
-  currentY += 5;
-  doc.setFont('helvetica', 'bold');
-  doc.text(cleanWorkerName, pageW / 2, currentY, { align: 'center' });
-  currentY += 4;
+  currentY += 16;
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(`RUT: ${cleanRut}`, pageW / 2, currentY, { align: 'center' });
-  currentY += 4;
-  doc.text('Firma del Trabajador', pageW / 2, currentY, { align: 'center' });
+  doc.setTextColor(30, 41, 59);
+  doc.text('(El trabajador debe escribir de su puño y letra). Este comprobante se archivará en la carpeta personal del trabajador.', margin, currentY);
 
-  currentY += 20;
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'italic');
-  doc.setTextColor(100, 116, 139);
-  doc.text('(El trabajador debe escribir de su puño y letra). Este comprobante se archivará en la carpeta personal del trabajador.', pageW / 2, currentY, { align: 'center' });
+  currentY += 15;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Fecha:    ______/______ /________/', margin, currentY);
 
   // Download trigger
   const fileName = `RECEPCION_RIOHS_${cleanRut.replace(/[^0-9kK]/g, '')}.pdf`;
