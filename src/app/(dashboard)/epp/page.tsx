@@ -1295,12 +1295,12 @@ export default function EPPPage() {
                 <Settings2 className="h-4 w-4" />
                 Requerimientos de Cargos
               </TabsTrigger>
+              <TabsTrigger value="reports" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
+                <History className="h-4 w-4" />
+                Informes e Historial
+              </TabsTrigger>
             </>
           )}
-          <TabsTrigger value="reports" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
-            <History className="h-4 w-4" />
-            Informes e Historial
-          </TabsTrigger>
         </TabsList>
 
         {/* --- TAB 1: DELIVERIES ──────────────────────────────────────────────── */}
@@ -1402,29 +1402,33 @@ export default function EPPPage() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopyWorkerSelfServiceLink(worker.id, `${worker.first_name} ${worker.last_name_father}`);
-                            }}
-                            className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 h-8 text-xs gap-1 font-semibold dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 shadow-sm"
-                            title="Generar enlace único con vencimiento de 3 días para WhatsApp"
-                          >
-                            <Link2 className="h-3.5 w-3.5 text-orange-600" />
-                            Link WhatsApp
-                          </Button>
-                          {hasMissingSizes && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={(e) => { e.stopPropagation(); openQuickEditSizes(worker); }}
-                              className="border-amber-300 bg-amber-100/70 hover:bg-amber-200 text-amber-950 h-8 text-xs gap-1 font-semibold"
-                            >
-                              <Edit className="h-3.5 w-3.5 text-amber-700" />
-                              Registrar Tallas
-                            </Button>
+                          {!isReadOnly && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCopyWorkerSelfServiceLink(worker.id, `${worker.first_name} ${worker.last_name_father}`);
+                                }}
+                                className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 h-8 text-xs gap-1 font-semibold dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 shadow-sm"
+                                title="Generar enlace único con vencimiento de 3 días para WhatsApp"
+                              >
+                                <Link2 className="h-3.5 w-3.5 text-orange-600" />
+                                Link WhatsApp
+                              </Button>
+                              {hasMissingSizes && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => { e.stopPropagation(); openQuickEditSizes(worker); }}
+                                  className="border-amber-300 bg-amber-100/70 hover:bg-amber-200 text-amber-950 h-8 text-xs gap-1 font-semibold"
+                                >
+                                  <Edit className="h-3.5 w-3.5 text-amber-700" />
+                                  Registrar Tallas
+                                </Button>
+                              )}
+                            </>
                           )}
                           <Badge variant="outline" className={overallStatusBadge}>
                             {worker.overallStatus === 'RED' ? 'Pendiente / Vencido' :
@@ -3034,27 +3038,31 @@ export default function EPPPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleCopyWorkerSelfServiceLink(worker.id, `${worker.first_name} ${worker.last_name_father}`)}
-                              className="border-slate-300 text-slate-700 hover:bg-slate-100 h-7 text-[11px] px-2 gap-1 font-medium"
-                              title="Generar y copiar enlace exclusivo con vencimiento de 3 días para enviar por WhatsApp"
-                            >
-                              <Link2 className="h-3 w-3 text-orange-600" />
-                              Link WhatsApp
-                            </Button>
-                            <Button
-                              size="sm"
-                              onClick={() => {
-                                setIsMissingSizesDialogOpen(false);
-                                openQuickEditSizes(worker);
-                              }}
-                              className="bg-orange-600 hover:bg-orange-700 text-white h-7 text-[11px] px-2 gap-1"
-                            >
-                              <Edit className="h-3 w-3" />
-                              Cargar Talla
-                            </Button>
+                            {!isReadOnly && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleCopyWorkerSelfServiceLink(worker.id, `${worker.first_name} ${worker.last_name_father}`)}
+                                  className="border-slate-300 text-slate-700 hover:bg-slate-100 h-7 text-[11px] px-2 gap-1 font-medium"
+                                  title="Generar y copiar enlace exclusivo con vencimiento de 3 días para enviar por WhatsApp"
+                                >
+                                  <Link2 className="h-3 w-3 text-orange-600" />
+                                  Link WhatsApp
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    setIsMissingSizesDialogOpen(false);
+                                    openQuickEditSizes(worker);
+                                  }}
+                                  className="bg-orange-600 hover:bg-orange-700 text-white h-7 text-[11px] px-2 gap-1"
+                                >
+                                  <Edit className="h-3 w-3" />
+                                  Cargar Talla
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>

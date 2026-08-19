@@ -975,41 +975,13 @@ export default function PersonnelTableClient({
                         </div>
                       ) : (
                         <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleCopyUpdateFichaLink(person)}
-                            className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/20"
-                            title="Copiar Enlace de Actualización de Ficha (Válido 7 días)"
-                          >
-                            <ClipboardCopy className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            disabled={!person.phone}
-                            onClick={() => handleSendUpdateFichaWhatsApp(person)}
-                            className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
-                            title={person.phone ? "Enviar Enlace de Ficha por WhatsApp" : "No tiene teléfono registrado"}
-                          >
-                            <Send className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleCopyWorkerSizeTokenLink(person)}
-                            className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/20"
-                            title="Copiar Link WhatsApp exclusivo de tallas (Válido 3 días)"
-                          >
-                            <Link2 className="h-4 w-4" />
-                          </Button>
                           <Link href={`/personnel-print/${person.id}`} target="_blank">
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Imprimir Ficha">
                               <Printer className="h-4 w-4" />
                             </Button>
                           </Link>
                           <Link href={`/personnel/${person.id}`}>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Ver Ficha">
                                <FileText className="h-4 w-4" />
                             </Button>
                           </Link>

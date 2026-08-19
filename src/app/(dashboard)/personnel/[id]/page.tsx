@@ -117,8 +117,12 @@ export default async function PersonnelDetailPage({
           )}
         </div>
         <div className="flex gap-2">
-          <ContractDownloadButton person={person} />
-          <TicaLetterDownloadButton person={person} />
+          {canEdit && (
+            <>
+              <ContractDownloadButton person={person} />
+              <TicaLetterDownloadButton person={person} />
+            </>
+          )}
           <Link href={`/personnel-print/${id}`} target="_blank">
             <Button variant="outline" className="border-orange-200 text-orange-700 hover:bg-orange-50 gap-1.5">
               <Printer className="h-4 w-4" />
@@ -306,15 +310,19 @@ export default async function PersonnelDetailPage({
                   {person.is_active ? 'Activo' : 'Inactivo'}
                 </Badge>
               </div>
-              <Separator className="opacity-50" />
-              <div className="space-y-1">
-                <p className="text-[10px] uppercase text-muted-foreground font-bold">Credenciales del Sistema</p>
-                <AccessActions 
-                  personnelId={id} 
-                  hasAccess={!!person.user_id} 
-                  email={person.email} 
-                />
-              </div>
+              {canEdit && (
+                <>
+                  <Separator className="opacity-50" />
+                  <div className="space-y-1">
+                    <p className="text-[10px] uppercase text-muted-foreground font-bold">Credenciales del Sistema</p>
+                    <AccessActions 
+                      personnelId={id} 
+                      hasAccess={!!person.user_id} 
+                      email={person.email} 
+                    />
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
