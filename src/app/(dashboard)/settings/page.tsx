@@ -15,7 +15,7 @@ export default function SettingsPage() {
   const settingsItems = [
     { icon: Building, title: 'Ajustes de Compañía', desc: 'Gestionar información, razones sociales y configuración general', href: '/settings/companies' },
     { icon: FileText, title: 'Documentos Requeridos', desc: 'Configurar qué documentos debe subir cada empleado y cuáles son obligatorios', href: '/settings/documents' },
-    { icon: Users, title: 'Gestión de Usuarios', desc: 'Gestionar usuarios del sistema, roles y permisos' },
+    { icon: Users, title: 'Gestión de Usuarios', desc: 'Gestionar usuarios del sistema, roles y permisos', href: '/settings/users' },
     { icon: Shield, title: 'Seguridad', desc: 'Políticas de contraseña, gestión de sesiones y registros de auditoría' },
     { icon: Bell, title: 'Notificaciones', desc: 'Configurar integración con WhatsApp y preferencias de alertas', href: '/settings/whatsapp' },
     { icon: SettingsIcon, title: 'Reglas de Programación', desc: 'Ventana de congelación, horas máximas, períodos de descanso y restricciones' },
