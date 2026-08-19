@@ -25,6 +25,7 @@ interface DocumentActionsProps {
   docType?: string;
   firstName?: string;
   lastNameFather?: string;
+  readOnly?: boolean;
 }
 
 function getDocumentPrefix(type: string): string {
@@ -46,7 +47,8 @@ export function DocumentActions({
   fileUrl,
   docType,
   firstName,
-  lastNameFather
+  lastNameFather,
+  readOnly = false
 }: DocumentActionsProps) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
@@ -143,45 +145,49 @@ export function DocumentActions({
         </Button>
       )}
 
-      {/* ── Aprobar ── */}
-      {currentStatus !== 'APPROVED' && (
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          disabled={!!loading}
-          onClick={() => handleStatusUpdate('APPROVED')}
-          className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg"
-          title="Aprobar"
-        >
-          {loading === 'APPROVED' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-        </Button>
-      )}
+      {!readOnly && (
+        <>
+          {/* ── Aprobar ── */}
+          {currentStatus !== 'APPROVED' && (
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              disabled={!!loading}
+              onClick={() => handleStatusUpdate('APPROVED')}
+              className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg"
+              title="Aprobar"
+            >
+              {loading === 'APPROVED' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            </Button>
+          )}
 
-      {/* ── Rechazar ── */}
-      {currentStatus !== 'REJECTED' && (
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          disabled={!!loading}
-          onClick={() => setIsRejectDialogOpen(true)}
-          className="h-8 w-8 text-amber-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
-          title="Rechazar"
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      )}
+          {/* ── Rechazar ── */}
+          {currentStatus !== 'REJECTED' && (
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              disabled={!!loading}
+              onClick={() => setIsRejectDialogOpen(true)}
+              className="h-8 w-8 text-amber-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
+              title="Rechazar"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
 
-      {/* ── Eliminar ── */}
-      <Button 
-        variant="ghost" 
-        size="icon" 
-        disabled={!!loading}
-        onClick={() => setIsDeleteDialogOpen(true)}
-        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg"
-        title="Eliminar documento"
-      >
-        {loading === 'DELETE' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-      </Button>
+          {/* ── Eliminar ── */}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            disabled={!!loading}
+            onClick={() => setIsDeleteDialogOpen(true)}
+            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg"
+            title="Eliminar documento"
+          >
+            {loading === 'DELETE' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+          </Button>
+        </>
+      )}
 
       {/* ── Dialog: Rechazar ── */}
       <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>

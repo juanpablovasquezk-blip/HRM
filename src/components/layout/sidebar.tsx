@@ -63,6 +63,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       if (hiddenLabels.includes(item.label)) return false;
     }
 
+    // Specific filtering for Safety Officer role (Prevención de Riesgos)
+    if (role === 'SAFETY_OFFICER') {
+      const allowedLabels = ['Panel Principal', 'Personal', 'EPP y Uniformes'];
+      if (!allowedLabels.includes(item.label)) return false;
+    }
+
     if (!item.requiredPermission) return true;
     if (!role) return false;
     return hasPermission(role, item.requiredPermission as keyof import('@/lib/auth/roles').Permission);

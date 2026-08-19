@@ -93,8 +93,12 @@ import {
 } from './actions';
 import { generateDeliveryFormPDF } from './generate-delivery-pdf';
 
+import { useUser } from '@/hooks/use-user';
+
 export default function EPPPage() {
   const supabase = createClient();
+  const { role } = useUser();
+  const isReadOnly = role === 'SAFETY_OFFICER';
   const [isPending, startTransition] = useTransition();
 
   // Data States
@@ -1252,24 +1256,26 @@ export default function EPPPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button
-            onClick={() => handleCopyWorkerSelfServiceLink()}
-            variant="outline"
-            className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 text-xs font-semibold flex items-center gap-1.5 h-10 px-3 shadow-sm"
-            title="Copiar enlace público de autoservicio de tallas para funcionarios"
-          >
-            <Link2 className="h-4 w-4 text-orange-600" />
-            Copiar Link para Funcionarios
-          </Button>
-          <Button 
-            onClick={() => setIsAddStockOpen(true)}
-            className="bg-orange-600 hover:bg-orange-700 text-white shadow-sm flex items-center gap-1.5 h-10"
-          >
-            <Boxes className="h-4 w-4" />
-            Ingresar Stock
-          </Button>
-        </div>
+        {!isReadOnly && (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => handleCopyWorkerSelfServiceLink()}
+              variant="outline"
+              className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 text-xs font-semibold flex items-center gap-1.5 h-10 px-3 shadow-sm"
+              title="Copiar enlace público de autoservicio de tallas para funcionarios"
+            >
+              <Link2 className="h-4 w-4 text-orange-600" />
+              Copiar Link para Funcionarios
+            </Button>
+            <Button 
+              onClick={() => setIsAddStockOpen(true)}
+              className="bg-orange-600 hover:bg-orange-700 text-white shadow-sm flex items-center gap-1.5 h-10"
+            >
+              <Boxes className="h-4 w-4" />
+              Ingresar Stock
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Tabs Layout */}
@@ -1279,14 +1285,18 @@ export default function EPPPage() {
             <Users className="h-4 w-4" />
             Entregas a Personal
           </TabsTrigger>
-          <TabsTrigger value="stock" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
-            <Boxes className="h-4 w-4" />
-            Stock de Inventario
-          </TabsTrigger>
-          <TabsTrigger value="requirements" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
-            <Settings2 className="h-4 w-4" />
-            Requerimientos de Cargos
-          </TabsTrigger>
+          {!isReadOnly && (
+            <>
+              <TabsTrigger value="stock" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
+                <Boxes className="h-4 w-4" />
+                Stock de Inventario
+              </TabsTrigger>
+              <TabsTrigger value="requirements" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
+                <Settings2 className="h-4 w-4" />
+                Requerimientos de Cargos
+              </TabsTrigger>
+            </>
+          )}
           <TabsTrigger value="reports" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
             <History className="h-4 w-4" />
             Informes e Historial
@@ -1463,14 +1473,16 @@ export default function EPPPage() {
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
                               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Implementos Obligatorios por Cargo</h4>
-                              <Button 
-                                size="sm" 
-                                className="bg-orange-600 hover:bg-orange-700 text-white h-7 text-xs"
-                                onClick={() => openDeliverDialog(worker)}
-                              >
-                                <Plus className="h-3.5 w-3.5 mr-1" />
-                                Entregar EPP / Uniformes
-                              </Button>
+                              {!isReadOnly && (
+                                <Button 
+                                  size="sm" 
+                                  className="bg-orange-600 hover:bg-orange-700 text-white h-7 text-xs"
+                                  onClick={() => openDeliverDialog(worker)}
+                                >
+                                  <Plus className="h-3.5 w-3.5 mr-1" />
+                                  Entregar EPP / Uniformes
+                                </Button>
+                              )}
                             </div>
 
                             {worker.requirements.length === 0 ? (
@@ -1576,11 +1588,11 @@ export default function EPPPage() {
                                       <div className="flex items-center gap-2">
                                         {signedUrl ? (
                                           <a href={signedUrl} target="_blank" rel="noopener noreferrer"
-                                            className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline gap-1 mr-2">
-                                            <ExternalLink className="h-3 w-3" />
+                                            className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline gap-1 mr-2 font-semibold">
+                                            <ExternalLink className="h-3.5 w-3.5" />
                                             Ver Acta PDF
                                           </a>
-                                        ) : (
+                                        ) : !isReadOnly ? (
                                           <div className="flex items-center gap-1 mr-2">
                                             <Label htmlFor={`file-upload-${eventId}`}
                                               className="inline-flex items-center justify-center rounded-md text-[10px] font-bold border border-slate-300 dark:border-slate-700 h-6 px-2 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer gap-1 text-slate-600 dark:text-slate-300">
@@ -1594,17 +1606,21 @@ export default function EPPPage() {
                                             <input id={`file-upload-${eventId}`} type="file" accept=".pdf,image/*" className="hidden"
                                               onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(eventId, e.target.files[0]); }} />
                                           </div>
+                                        ) : (
+                                          <span className="text-[11px] text-muted-foreground italic mr-2">Sin Acta Adjunta</span>
                                         )}
-                                        <Button
-                                          size="sm"
-                                          variant="ghost"
-                                          className="h-6 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 gap-1 px-1.5"
-                                          onClick={() => handleDeleteDeliveryEvent(eventId, formNum)}
-                                          title="Eliminar este formulario de entrega"
-                                        >
-                                          <Trash2 className="h-3 w-3" />
-                                          Eliminar Acta
-                                        </Button>
+                                        {!isReadOnly && (
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-6 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 gap-1 px-1.5"
+                                            onClick={() => handleDeleteDeliveryEvent(eventId, formNum)}
+                                            title="Eliminar este formulario de entrega"
+                                          >
+                                            <Trash2 className="h-3 w-3" />
+                                            Eliminar Acta
+                                          </Button>
+                                        )}
                                       </div>
                                     </div>
                                     {/* Items for this event */}
@@ -1623,7 +1639,7 @@ export default function EPPPage() {
                                               {item.reason === 'PAST_DELIVERY' && 'Histórico'}
                                             </TableCell>
                                             <TableCell className="text-right py-1.5">
-                                              {item.quantity > item.returnedQty && (
+                                              {!isReadOnly && item.quantity > item.returnedQty && (
                                                 <Button size="sm" variant="ghost"
                                                   className="h-6 text-[10px] text-orange-600 hover:text-orange-800 gap-0.5"
                                                   onClick={() => openReturnDialog(item)}>

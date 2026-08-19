@@ -8,6 +8,7 @@ export const ROLE_HIERARCHY: Record<Role, number> = {
   ADMIN: 5,
   HR: 4,
   SUPERVISOR: 3,
+  SAFETY_OFFICER: 2,
   AIRPORT_ASSISTANT: 2,
   USER: 1,
 };
@@ -74,6 +75,21 @@ const ROLE_PERMISSIONS: Record<Role, Permission> = {
     manageAreas: false,
     runScheduler: false,
   },
+  SAFETY_OFFICER: {
+    managePersonnel: false,
+    manageDocuments: false,
+    manageShifts: false,
+    manageLeaves: false,
+    approveLeaves: false,
+    viewReports: false,
+    viewPersonnel: true,
+    viewShifts: false,
+    manageTransport: false,
+    overrideFreeze: false,
+    manageUsers: false,
+    manageAreas: false,
+    runScheduler: false,
+  },
   AIRPORT_ASSISTANT: {
     managePersonnel: false,
     manageDocuments: false,
@@ -115,7 +131,7 @@ export function getPermissions(role: Role): Permission {
 }
 
 export function hasPermission(role: Role, permission: keyof Permission): boolean {
-  return ROLE_PERMISSIONS[role][permission];
+  return ROLE_PERMISSIONS[role]?.[permission] ?? false;
 }
 
 export function canAccess(role: Role, minRole: Role): boolean {
@@ -131,10 +147,11 @@ export function getRoleLabel(role: Role): string {
     ADMIN: 'Administrator',
     HR: 'Human Resources',
     SUPERVISOR: 'Supervisor',
+    SAFETY_OFFICER: 'Prevención de Riesgos',
     AIRPORT_ASSISTANT: 'Asistente Administrativo',
     USER: 'Employee',
   };
-  return labels[role];
+  return labels[role] || role;
 }
 
 export function getRoleBadgeColor(role: Role): string {
@@ -142,8 +159,9 @@ export function getRoleBadgeColor(role: Role): string {
     ADMIN: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
     HR: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
     SUPERVISOR: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+    SAFETY_OFFICER: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400',
     AIRPORT_ASSISTANT: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
     USER: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
   };
-  return colors[role];
+  return colors[role] || 'bg-slate-100 text-slate-800';
 }

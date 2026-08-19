@@ -22,6 +22,7 @@ import { calculateDynamicExpiration, calculateIntervalExpiration } from '@/lib/u
 import { AccessActions } from './access-actions';
 import { LettersCard } from '@/components/personnel/letters-card';
 import { getUserRole } from '@/app/role-actions';
+import { hasPermission } from '@/lib/auth/roles';
 import { ContractDownloadButton } from './contract-download-button';
 import { TicaLetterDownloadButton } from './tica-letter-download-button';
 import { DismissalPanelClient } from './dismissal-panel-client';
@@ -49,6 +50,8 @@ export default async function PersonnelDetailPage({
   ]);
 
   if (error || !person) notFound();
+
+  const canEdit = hasPermission(role as any, 'managePersonnel');
 
   // Fetch dismissal records if there is a dismissal process
   let dismissalRecords: any[] = [];
@@ -122,12 +125,14 @@ export default async function PersonnelDetailPage({
               Imprimir Ficha
             </Button>
           </Link>
-          <Link href={`/personnel/${id}/edit`}>
-            <Button variant="outline">
-              <Edit className="mr-2 h-4 w-4" />
-              Editar
-            </Button>
-          </Link>
+          {canEdit && (
+            <Link href={`/personnel/${id}/edit`}>
+              <Button variant="outline">
+                <Edit className="mr-2 h-4 w-4" />
+                Editar
+              </Button>
+            </Link>
+          )}
         </div>
 
       </div>
@@ -471,6 +476,7 @@ export default async function PersonnelDetailPage({
                                docType={def?.name || doc.type}
                                firstName={person.first_name}
                                lastNameFather={person.last_name_father}
+                               readOnly={!canEdit}
                              />
                           </div>
                         ) : (

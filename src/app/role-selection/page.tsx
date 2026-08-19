@@ -27,7 +27,7 @@ export default function RoleSelectionPage() {
         // Fetch latest role from server (securely fetches from DB via Admin Client)
         const { getUserRole } = await import('@/app/role-actions');
         const role = await getUserRole() || 'USER';
-        const isManagement = ['ADMIN', 'SUPERVISOR', 'HR', 'AIRPORT_ASSISTANT', 'ASSISTANT'].includes(role);
+        const isManagement = ['ADMIN', 'SUPERVISOR', 'HR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'SAFETY_OFFICER'].includes(role);
 
         // Check if exists in personnel table
         const { data: personnel } = await supabase
@@ -44,7 +44,7 @@ export default function RoleSelectionPage() {
 
         // Smart Redirection
         if (hasManagementRole && !hasWorkerRole) {
-          router.push((role === 'ADMIN' || role === 'HR' || role === 'AIRPORT_ASSISTANT') ? '/dashboard' : '/supervisor');
+          router.push((role === 'ADMIN' || role === 'HR' || role === 'AIRPORT_ASSISTANT' || role === 'SAFETY_OFFICER') ? '/dashboard' : '/supervisor');
         } else if (hasWorkerRole && !hasManagementRole) {
           router.push('/worker');
         } else if (!hasManagementRole && !hasWorkerRole) {

@@ -2,7 +2,7 @@
 // Database Types — mirrors supabase/schema.sql exactly
 // =============================================================================
 
-export type Role = 'ADMIN' | 'HR' | 'SUPERVISOR' | 'AIRPORT_ASSISTANT' | 'USER';
+export type Role = 'ADMIN' | 'HR' | 'SUPERVISOR' | 'AIRPORT_ASSISTANT' | 'SAFETY_OFFICER' | 'USER';
 
 export type LeaveType = 'vacation' | 'sick' | 'personal' | 'maternity' | 'other';
 export type LeaveStatus = 'pending' | 'approved' | 'rejected';

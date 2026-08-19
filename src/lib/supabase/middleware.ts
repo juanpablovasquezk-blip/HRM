@@ -56,7 +56,7 @@ export async function updateSession(request: NextRequest) {
       '/leaves', '/reports', '/documents', '/settings'
     ];
     const isManagementPath = managementPaths.some(p => pathname.startsWith(p));
-    const authorizedRoles = ['ADMIN', 'HR', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT'];
+    const authorizedRoles = ['ADMIN', 'HR', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'ASSISTANT', 'SAFETY_OFFICER'];
 
     // OPTIMIZATION: Only double check with DB if role is missing from metadata
     // We trust metadata for performance. Role updates should refresh the session.
@@ -95,7 +95,7 @@ export async function updateSession(request: NextRequest) {
 
     if (isAuthPage || isPublicPage) {
       const url = request.nextUrl.clone();
-      if (role === 'ADMIN' || role === 'HR') {
+      if (role === 'ADMIN' || role === 'HR' || role === 'SAFETY_OFFICER') {
         url.pathname = '/dashboard';
       } else if (role === 'SUPERVISOR' || role === 'ASSISTANT') {
         url.pathname = '/role-selection';
@@ -123,7 +123,7 @@ export async function updateSession(request: NextRequest) {
       }
 
       // 2. Granular role protection
-      if (isAdminOnlyPath && role !== 'ADMIN' && role !== 'HR' && !isMarcela) {
+      if (isAdminOnlyPath && role !== 'ADMIN' && role !== 'HR' && role !== 'SAFETY_OFFICER' && !isMarcela) {
         const url = request.nextUrl.clone();
         // Redirect non-admins to their specific dashboard or worker view
         url.pathname = (role === 'SUPERVISOR') ? '/supervisor' : 
