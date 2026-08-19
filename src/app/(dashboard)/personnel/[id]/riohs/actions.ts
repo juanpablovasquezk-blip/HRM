@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
+'use server';
+
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getUserRole } from '@/app/role-actions';
 
@@ -18,7 +19,7 @@ export interface RiohsRecordData {
 
 export async function getRiohsRecord(personnelId: string): Promise<{ success: boolean; data?: RiohsRecordData | null; error?: string }> {
   try {
-    const supabase = await createClient();
+    const supabase = createAdminClient();
 
     const { data, error } = await supabase
       .from('riohs_records')

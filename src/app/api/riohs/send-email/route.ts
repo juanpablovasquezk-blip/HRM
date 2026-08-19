@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
       pdfFileName = 'RIOHS_MINERQUIM.pdf';
     }
 
-    const absolutePdfPath = path.join(process.cwd(), pdfRelativePath);
+    const absolutePdfPath = path.join(/*turbopackIgnore: true*/ process.cwd(), pdfRelativePath);
 
     if (!fs.existsSync(absolutePdfPath)) {
       return NextResponse.json({ 
