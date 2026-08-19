@@ -890,103 +890,113 @@ export default function PersonnelTableClient({
 
                     {/* Actions Cell */}
                     <TableCell className="text-right">
-                      {person.onboarding_status === 'pending' ? (
-                        <div className="flex justify-end gap-1">
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            disabled={isPending}
-                            onClick={() => {
-                              setSelectedPerson(person);
-                              setApprovePositionId(person.main_position || '');
-                              setApproveRotationPattern(person.rotation_pattern || '5x2');
-                              setApproveFixedShiftId(person.fixed_shift_id || '');
-                              setApproveEnableAccess(true);
-                              setIsApproveOpen(true);
-                            }}
-                            className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
-                            title="Aprobar ficha"
-                          >
-                            <UserCheck className="h-4 w-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            disabled={isPending}
-                            onClick={() => handleRejectClick(person)}
-                            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
-                            title="Rechazar ficha"
-                          >
-                            <UserX className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : canEdit ? (
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleCopyUpdateFichaLink(person)}
-                            className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/20"
-                            title="Copiar Enlace de Actualización de Ficha (Válido 7 días)"
-                          >
-                            <ClipboardCopy className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            disabled={!person.phone}
-                            onClick={() => handleSendUpdateFichaWhatsApp(person)}
-                            className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
-                            title={person.phone ? "Enviar Enlace de Ficha por WhatsApp" : "No tiene teléfono registrado"}
-                          >
-                            <Send className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleCopyWorkerSizeTokenLink(person)}
-                            className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/20"
-                            title="Copiar Link WhatsApp exclusivo de tallas (Válido 3 días)"
-                          >
-                            <Link2 className="h-4 w-4" />
-                          </Button>
-                          <Link href={`/personnel-print/${person.id}`} target="_blank">
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Imprimir Ficha">
-                              <Printer className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                          {person.is_active && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              disabled={isPending}
-                              onClick={() => handleDismissClick(person)}
-                              className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20"
-                              title="Dar de baja trabajador"
-                            >
-                              <UserMinus className="h-4 w-4" />
-                            </Button>
-                          )}
-                          <Link href={`/personnel/${person.id}/edit`}>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Editar Ficha">
-                               <Edit className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                        </div>
-                      ) : (
-                        <div className="flex justify-end gap-1">
-                          <Link href={`/personnel-print/${person.id}`} target="_blank">
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Imprimir Ficha">
-                              <Printer className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                          <Link href={`/personnel/${person.id}`}>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Ver Ficha">
-                               <FileText className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                        </div>
-                      )}
+                      {(() => {
+                        const hasMissingSizes = !person.clothing_tshirt_size || !person.clothing_shoe_size || !(person.clothing_pants_size_letter || person.clothing_pants_size_number);
+                        const hasMissingInfo = !person.phone || !person.afp || !person.health_system || !person.bank_account_number || !person.emergency_contact_phone || !person.gender || !person.marital_status;
+                        const isPendingOnboarding = person.onboarding_status === 'pending' || person.onboarding_status === 'rejected';
+                        const needsFichaUpdate = hasMissingSizes || hasMissingInfo || isPendingOnboarding;
+
+                        if (person.onboarding_status === 'pending') {
+                          return (
+                            <div className="flex justify-end gap-1">
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                disabled={isPending}
+                                onClick={() => {
+                                  setSelectedPerson(person);
+                                  setApprovePositionId(person.main_position || '');
+                                  setApproveRotationPattern(person.rotation_pattern || '5x2');
+                                  setApproveFixedShiftId(person.fixed_shift_id || '');
+                                  setApproveEnableAccess(true);
+                                  setIsApproveOpen(true);
+                                }}
+                                className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                                title="Aprobar ficha"
+                              >
+                                <UserCheck className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                disabled={isPending}
+                                onClick={() => handleRejectClick(person)}
+                                className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                                title="Rechazar ficha"
+                              >
+                                <UserX className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          );
+                        }
+
+                        if (canEdit) {
+                          return (
+                            <div className="flex justify-end gap-1">
+                              {needsFichaUpdate && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleCopyUpdateFichaLink(person)}
+                                    className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/20"
+                                    title="Copiar Enlace de Actualización de Ficha (Válido 7 días)"
+                                  >
+                                    <ClipboardCopy className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    disabled={!person.phone}
+                                    onClick={() => handleSendUpdateFichaWhatsApp(person)}
+                                    className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                                    title={person.phone ? "Enviar Enlace de Ficha por WhatsApp" : "No tiene teléfono registrado"}
+                                  >
+                                    <Send className="h-4 w-4" />
+                                  </Button>
+                                </>
+                              )}
+                              <Link href={`/personnel-print/${person.id}`} target="_blank">
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Imprimir Ficha">
+                                  <Printer className="h-4 w-4" />
+                                </Button>
+                              </Link>
+                              {person.is_active && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  disabled={isPending}
+                                  onClick={() => handleDismissClick(person)}
+                                  className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                                  title="Dar de baja trabajador"
+                                >
+                                  <UserMinus className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Link href={`/personnel/${person.id}/edit`}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Editar Ficha">
+                                   <Edit className="h-4 w-4" />
+                                </Button>
+                              </Link>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div className="flex justify-end gap-1">
+                            <Link href={`/personnel-print/${person.id}`} target="_blank">
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Imprimir Ficha">
+                                <Printer className="h-4 w-4" />
+                              </Button>
+                            </Link>
+                            <Link href={`/personnel/${person.id}`}>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-orange-600" title="Ver Ficha">
+                                 <FileText className="h-4 w-4" />
+                              </Button>
+                            </Link>
+                          </div>
+                        );
+                      })()}
                     </TableCell>
 
                   </TableRow>
