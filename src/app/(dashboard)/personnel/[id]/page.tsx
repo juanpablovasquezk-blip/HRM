@@ -41,12 +41,14 @@ export default async function PersonnelDetailPage({
     { data: allPositions }, 
     { data: allShifts },
     { data: lettersData },
+    { data: riohsRecord },
     role
   ] = await Promise.all([
     supabase.from('personnel').select('*, company:companies(name), documents(*)').eq('id', id).single(),
     supabase.from('positions').select('id, name'),
     supabase.from('shifts').select('id, name'),
     supabase.from('personnel_letters').select('*').eq('personnel_id', id).order('date', { ascending: false }),
+    supabase.from('riohs_records').select('*').eq('personnel_id', id).maybeSingle(),
     getUserRole()
   ]);
 
@@ -514,6 +516,7 @@ export default async function PersonnelDetailPage({
         companyId={person.company_id}
         companyName={person.company?.name || 'MINERQUIM'}
         userRole={role}
+        initialRecord={riohsRecord as any}
       />
 
       {/* Cartas de Felicitación y Amonestación */}

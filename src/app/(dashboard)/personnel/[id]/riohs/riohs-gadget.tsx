@@ -33,6 +33,7 @@ interface RiohsGadgetProps {
   companyName: string;
   companyRut?: string;
   userRole: string;
+  initialRecord?: RiohsRecordData | null;
 }
 
 export function RiohsGadget({
@@ -44,9 +45,10 @@ export function RiohsGadget({
   companyName,
   companyRut = '76.135.448-5',
   userRole,
+  initialRecord = null,
 }: RiohsGadgetProps) {
-  const [record, setRecord] = useState<RiohsRecordData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [record, setRecord] = useState<RiohsRecordData | null>(initialRecord);
+  const [loading, setLoading] = useState(false);
   const [uploadingAuth, setUploadingAuth] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [uploadingReception, setUploadingReception] = useState(false);
@@ -59,16 +61,18 @@ export function RiohsGadget({
   const isRiohsAvailable = isMinerquim;
 
   useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      const res = await getRiohsRecord(personnelId);
-      if (res.success && res.data) {
-        setRecord(res.data);
+    if (initialRecord !== undefined && initialRecord !== null) {
+      setRecord(initialRecord);
+    } else {
+      async function loadData() {
+        const res = await getRiohsRecord(personnelId);
+        if (res && res.success && res.data) {
+          setRecord(res.data);
+        }
       }
-      setLoading(false);
+      loadData();
     }
-    loadData();
-  }, [personnelId]);
+  }, [personnelId, initialRecord]);
 
   const currentStatus = record?.status || 'PENDING';
 
