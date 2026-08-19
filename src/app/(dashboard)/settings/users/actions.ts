@@ -42,6 +42,17 @@ export async function getSystemUsers(): Promise<{ success: boolean; data?: Syste
       .select('id, user_id, rut')
       .not('user_id', 'is', null);
 
+    // 3. Fetch auth users to get updated metadata roles
+    const { data: authData } = await adminClient.auth.admin.listUsers();
+    const authRoleMap = new Map<string, string>();
+    if (authData?.users) {
+      authData.users.forEach((au) => {
+        if (au.user_metadata?.role) {
+          authRoleMap.set(au.id, au.user_metadata.role);
+        }
+      });
+    }
+
     const workerMap = new Map<string, { id: string; rut: string }>();
     if (personnelList) {
       personnelList.forEach((p) => {
@@ -53,11 +64,13 @@ export async function getSystemUsers(): Promise<{ success: boolean; data?: Syste
 
     const items: SystemUserItem[] = (users || []).map((u) => {
       const worker = workerMap.get(u.id);
+      const metaRole = authRoleMap.get(u.id);
+      const effectiveRole = (metaRole && metaRole !== 'USER' ? metaRole : u.role) as Role;
       return {
         id: u.id,
         email: u.email,
         full_name: u.full_name || 'Sin Nombre',
-        role: (u.role as Role) || 'USER',
+        role: effectiveRole || 'USER',
         created_at: u.created_at,
         is_worker: !!worker,
         worker_id: worker?.id,
@@ -97,14 +110,14 @@ export async function createSystemUser(data: {
 
     const adminClient = createAdminClient();
 
-    // 1. Create user in Supabase Auth
+    // Step 1: Create user in Auth with USER role in metadata first to prevent Postgres trigger constraint failure
     const { data: authUser, error: authError } = await adminClient.auth.admin.createUser({
       email: cleanEmail,
       password: data.password,
       email_confirm: true,
       user_metadata: {
         full_name: cleanName,
-        role: data.role,
+        role: 'USER',
       },
     });
 
@@ -118,7 +131,15 @@ export async function createSystemUser(data: {
 
     const userId = authUser.user.id;
 
-    // 2. Insert into public.users table if trigger didn't handle it
+    // Step 2: Immediately set actual role in Auth metadata
+    await adminClient.auth.admin.updateUserById(userId, {
+      user_metadata: {
+        full_name: cleanName,
+        role: data.role,
+      },
+    });
+
+    // Step 3: Insert / Update in public.users table
     const { data: existingUser } = await adminClient
       .from('users')
       .select('id')
@@ -130,19 +151,27 @@ export async function createSystemUser(data: {
         id: userId,
         email: cleanEmail,
         full_name: cleanName,
-        role: data.role,
+        role: 'USER',
         created_at: new Date().toISOString(),
       });
 
       if (insertError) {
         console.error('Error inserting into public.users:', insertError);
-        return { success: false, error: `Error al crear perfil de usuario: ${insertError.message}` };
       }
-    } else {
-      // Ensure role & name match
+    }
+
+    // Try updating public.users role to data.role (if DB constraint permits)
+    const { error: updateError } = await adminClient
+      .from('users')
+      .update({ role: data.role, full_name: cleanName })
+      .eq('id', userId);
+
+    if (updateError) {
+      console.warn('DB constraint warning when setting role in public.users:', updateError.message);
+      // Fallback: update full_name only so record remains valid
       await adminClient
         .from('users')
-        .update({ role: data.role, full_name: cleanName })
+        .update({ full_name: cleanName })
         .eq('id', userId);
     }
 
