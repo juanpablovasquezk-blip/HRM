@@ -22,7 +22,7 @@ interface PersonnelFiltersProps {
   initialSearch?: string;
   initialCompanyId?: string;
   initialPositionId?: string;
-  initialStatus?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' | 'missing_docs' | 'dismissal_pending';
+  initialStatus?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' | 'missing_docs' | 'dismissal_pending' | 'pending_pdr';
   companies: Company[];
   positions: Position[];
 }
@@ -177,6 +177,7 @@ export function PersonnelFilters({
           onChange={(e) => updateFilter('status', e.target.value)}
         >
           <option value="active">Solo Activos</option>
+          <option value="pending_pdr">🛡️ Pendiente RIOHS / PdR</option>
           <option value="missing_sizes">⚠️ Sin Tallas EPP</option>
           <option value="incomplete">❌ Fichas Incompletas</option>
           <option value="missing_docs">📄 Doc. Requerida Incompleta</option>

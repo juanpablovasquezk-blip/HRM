@@ -11,7 +11,7 @@ import PersonnelTableClient from './personnel-table-client';
 export default async function PersonnelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' | 'missing_docs' | 'dismissal_pending' }>;
+  searchParams: Promise<{ search?: string; company_id?: string; position_id?: string; status?: 'active' | 'inactive' | 'pending' | 'missing_sizes' | 'all' | 'incomplete' | 'missing_docs' | 'dismissal_pending' | 'pending_pdr' }>;
 }) {
   const params = await searchParams;
   const supabase = await createClient();
@@ -48,6 +48,16 @@ export default async function PersonnelPage({
   const status = params.status || 'active';
   if (status === 'active' || status === 'missing_docs') {
     query = query.eq('is_active', true).or('onboarding_status.is.null,onboarding_status.eq.approved');
+  } else if (status === 'pending_pdr') {
+    const { data: completedRiohs } = await supabase
+      .from('riohs_records')
+      .select('personnel_id')
+      .eq('status', 'COMPLETED');
+    const completedIds = (completedRiohs || []).map((r: any) => r.personnel_id);
+    query = query.eq('is_active', true).or('onboarding_status.is.null,onboarding_status.eq.approved');
+    if (completedIds.length > 0) {
+      query = query.not('id', 'in', `(${completedIds.join(',')})`);
+    }
   } else if (status === 'missing_sizes') {
     query = query.eq('is_active', true)
       .or('clothing_tshirt_size.is.null,clothing_shoe_size.is.null,clothing_pants_size_letter.is.null,clothing_pants_size_number.is.null');

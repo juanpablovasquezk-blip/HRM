@@ -26,6 +26,7 @@ import { hasPermission } from '@/lib/auth/roles';
 import { ContractDownloadButton } from './contract-download-button';
 import { TicaLetterDownloadButton } from './tica-letter-download-button';
 import { DismissalPanelClient } from './dismissal-panel-client';
+import { RiohsGadget } from './riohs/riohs-gadget';
 
 export default async function PersonnelDetailPage({
   params,
@@ -503,6 +504,17 @@ export default async function PersonnelDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {/* Gadget Prevención de riesgos (RIOHS) */}
+      <RiohsGadget
+        personnelId={id}
+        workerName={`${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`}
+        workerRut={person.rut}
+        workerEmail={person.email}
+        companyId={person.company_id}
+        companyName={person.company?.name || 'MINERQUIM'}
+        userRole={role}
+      />
 
       {/* Cartas de Felicitación y Amonestación */}
       <LettersCard 
