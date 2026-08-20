@@ -43,18 +43,53 @@ export async function getRiohsRecord(personnelId: string): Promise<{ success: bo
   try {
     const supabase = createAdminClient();
 
-    const { data, error } = await supabase
+    // 1. Try fetching from riohs_records table
+    const { data: riohsData, error: riohsErr } = await supabase
       .from('riohs_records')
       .select('*')
       .eq('personnel_id', personnelId)
       .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') {
-      console.warn('riohs_records query warning:', error.message);
+    if (!riohsErr && riohsData) {
+      return { success: true, data: riohsData as RiohsRecordData };
+    }
+
+    // 2. Fallback to documents table if riohs_records table does not exist or has no row
+    const { data: docs } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('personnel_id', personnelId)
+      .ilike('type', 'RIOHS%');
+
+    if (!docs || docs.length === 0) {
       return { success: true, data: null };
     }
 
-    return { success: true, data: data as RiohsRecordData | null };
+    const authGenDoc = docs.find(d => d.type === 'RIOHS Autorización Digital');
+    const authSignedDoc = docs.find(d => d.type === 'RIOHS Autorización Firmada');
+    const emailSentDoc = docs.find(d => d.type === 'RIOHS Email Enviado');
+    const receptionDoc = docs.find(d => d.type === 'RIOHS Recepción Firmada');
+
+    let status: RiohsRecordData['status'] = 'PENDING';
+    if (receptionDoc) status = 'COMPLETED';
+    else if (emailSentDoc) status = 'RIOHS_SENT';
+    else if (authSignedDoc) status = 'AUTH_UPLOADED';
+    else if (authGenDoc) status = 'AUTH_GENERATED';
+
+    const fallbackRecord: RiohsRecordData = {
+      personnel_id: personnelId,
+      company_id: '',
+      status,
+      auth_generated_at: authGenDoc?.uploaded_at || null,
+      auth_signed_file_url: authSignedDoc?.file_url || null,
+      auth_uploaded_at: authSignedDoc?.uploaded_at || null,
+      riohs_sent_at: emailSentDoc?.uploaded_at || null,
+      riohs_sent_to_email: emailSentDoc?.number || null,
+      reception_signed_file_url: receptionDoc?.file_url || null,
+      reception_uploaded_at: receptionDoc?.uploaded_at || null,
+    };
+
+    return { success: true, data: fallbackRecord };
   } catch (err: any) {
     console.error('Error fetching RIOHS record:', err);
     return { success: true, data: null };
@@ -65,40 +100,54 @@ export async function markAuthGenerated(personnelId: string, companyId: string):
   try {
     const adminSupabase = createAdminClient();
     const validCompanyId = await resolveCompanyId(adminSupabase, personnelId, companyId);
+    const nowIso = new Date().toISOString();
 
-    const { data: existing } = await adminSupabase
-      .from('riohs_records')
-      .select('id, status')
+    // Primary: riohs_records table
+    try {
+      const { data: existing } = await adminSupabase
+        .from('riohs_records')
+        .select('id, status')
+        .eq('personnel_id', personnelId)
+        .maybeSingle();
+
+      if (existing) {
+        const newStatus = existing.status === 'PENDING' ? 'AUTH_GENERATED' : existing.status;
+        await adminSupabase
+          .from('riohs_records')
+          .update({
+            status: newStatus,
+            auth_generated_at: nowIso,
+            updated_at: nowIso,
+          })
+          .eq('id', existing.id);
+      } else {
+        await adminSupabase.from('riohs_records').insert({
+          personnel_id: personnelId,
+          company_id: validCompanyId,
+          status: 'AUTH_GENERATED',
+          auth_generated_at: nowIso,
+        });
+      }
+    } catch (e) {
+      console.warn('riohs_records primary insert warning:', e);
+    }
+
+    // Fallback: documents table
+    const { data: existingDoc } = await adminSupabase
+      .from('documents')
+      .select('id')
       .eq('personnel_id', personnelId)
+      .eq('type', 'RIOHS Autorización Digital')
       .maybeSingle();
 
-    if (existing) {
-      const newStatus = existing.status === 'PENDING' ? 'AUTH_GENERATED' : existing.status;
-      const { error: updateErr } = await adminSupabase
-        .from('riohs_records')
-        .update({
-          status: newStatus,
-          auth_generated_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existing.id);
-
-      if (updateErr) {
-        console.error('Error updating riohs_records (markAuthGenerated):', updateErr);
-        return { success: false, error: updateErr.message };
-      }
-    } else {
-      const { error: insertErr } = await adminSupabase.from('riohs_records').insert({
+    if (!existingDoc) {
+      await adminSupabase.from('documents').insert({
         personnel_id: personnelId,
-        company_id: validCompanyId,
-        status: 'AUTH_GENERATED',
-        auth_generated_at: new Date().toISOString(),
+        type: 'RIOHS Autorización Digital',
+        file_url: '',
+        uploaded_at: nowIso,
+        status: 'APPROVED',
       });
-
-      if (insertErr) {
-        console.error('Error inserting riohs_records (markAuthGenerated):', insertErr);
-        return { success: false, error: insertErr.message };
-      }
     }
 
     revalidatePath(`/personnel/${personnelId}`);
@@ -150,74 +199,80 @@ export async function uploadSignedRiohsFile(
     const publicUrl = publicUrlData.publicUrl;
     const nowIso = new Date().toISOString();
 
-    const { data: existing } = await adminSupabase
-      .from('riohs_records')
-      .select('id, status')
-      .eq('personnel_id', personnelId)
-      .maybeSingle();
+    // Primary: riohs_records table
+    try {
+      const { data: existing } = await adminSupabase
+        .from('riohs_records')
+        .select('id, status')
+        .eq('personnel_id', personnelId)
+        .maybeSingle();
 
-    if (docType === 'auth') {
-      const nextStatus = 'AUTH_UPLOADED';
-      if (existing) {
-        const { error: updateErr } = await adminSupabase
-          .from('riohs_records')
-          .update({
+      if (docType === 'auth') {
+        const nextStatus = 'AUTH_UPLOADED';
+        if (existing) {
+          await adminSupabase
+            .from('riohs_records')
+            .update({
+              status: nextStatus,
+              auth_signed_file_url: publicUrl,
+              auth_uploaded_at: nowIso,
+              updated_at: nowIso,
+            })
+            .eq('id', existing.id);
+        } else {
+          await adminSupabase.from('riohs_records').insert({
+            personnel_id: personnelId,
+            company_id: validCompanyId,
             status: nextStatus,
             auth_signed_file_url: publicUrl,
             auth_uploaded_at: nowIso,
-            updated_at: nowIso,
-          })
-          .eq('id', existing.id);
-
-        if (updateErr) {
-          console.error('Error updating riohs_records auth file:', updateErr);
-          return { success: false, error: updateErr.message };
+          });
         }
       } else {
-        const { error: insertErr } = await adminSupabase.from('riohs_records').insert({
-          personnel_id: personnelId,
-          company_id: validCompanyId,
-          status: nextStatus,
-          auth_signed_file_url: publicUrl,
-          auth_uploaded_at: nowIso,
-        });
-
-        if (insertErr) {
-          console.error('Error inserting riohs_records auth file:', insertErr);
-          return { success: false, error: insertErr.message };
-        }
-      }
-    } else {
-      const nextStatus = 'COMPLETED';
-      if (existing) {
-        const { error: updateErr } = await adminSupabase
-          .from('riohs_records')
-          .update({
+        const nextStatus = 'COMPLETED';
+        if (existing) {
+          await adminSupabase
+            .from('riohs_records')
+            .update({
+              status: nextStatus,
+              reception_signed_file_url: publicUrl,
+              reception_uploaded_at: nowIso,
+              updated_at: nowIso,
+            })
+            .eq('id', existing.id);
+        } else {
+          await adminSupabase.from('riohs_records').insert({
+            personnel_id: personnelId,
+            company_id: validCompanyId,
             status: nextStatus,
             reception_signed_file_url: publicUrl,
             reception_uploaded_at: nowIso,
-            updated_at: nowIso,
-          })
-          .eq('id', existing.id);
-
-        if (updateErr) {
-          console.error('Error updating riohs_records reception file:', updateErr);
-          return { success: false, error: updateErr.message };
-        }
-      } else {
-        const { error: insertErr } = await adminSupabase.from('riohs_records').insert({
-          personnel_id: personnelId,
-          company_id: validCompanyId,
-          status: nextStatus,
-          reception_signed_file_url: publicUrl,
-          reception_uploaded_at: nowIso,
-        });
-
-        if (insertErr) {
-          console.error('Error inserting riohs_records reception file:', insertErr);
-          return { success: false, error: insertErr.message };
+          });
         }
       }
+    } catch (e) {
+      console.warn('riohs_records primary upload warning:', e);
+    }
+
+    // Fallback: documents table
+    const docTypeName = docType === 'auth' ? 'RIOHS Autorización Firmada' : 'RIOHS Recepción Firmada';
+    const { data: existingDoc } = await adminSupabase
+      .from('documents')
+      .select('id')
+      .eq('personnel_id', personnelId)
+      .eq('type', docTypeName)
+      .maybeSingle();
+
+    if (existingDoc) {
+      await adminSupabase.from('documents').update({ file_url: publicUrl, uploaded_at: nowIso }).eq('id', existingDoc.id);
+    } else {
+      await adminSupabase.from('documents').insert({
+        personnel_id: personnelId,
+        type: docTypeName,
+        file_url: publicUrl,
+        uploaded_at: nowIso,
+        status: 'APPROVED',
+      });
     }
 
     revalidatePath(`/personnel/${personnelId}`);

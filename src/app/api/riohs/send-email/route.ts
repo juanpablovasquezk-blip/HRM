@@ -153,29 +153,54 @@ export async function POST(req: NextRequest) {
       effectiveCompanyId = firstCompany?.id;
     }
 
-    const { data: existingRecord } = await supabase
-      .from('riohs_records')
-      .select('id')
-      .eq('personnel_id', personnelId)
-      .maybeSingle();
-
-    if (existingRecord) {
-      await supabase
+    try {
+      const { data: existingRecord } = await supabase
         .from('riohs_records')
-        .update({
+        .select('id')
+        .eq('personnel_id', personnelId)
+        .maybeSingle();
+
+      if (existingRecord) {
+        await supabase
+          .from('riohs_records')
+          .update({
+            status: 'RIOHS_SENT',
+            riohs_sent_at: sentAtDate.toISOString(),
+            riohs_sent_to_email: worker.email,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('personnel_id', personnelId);
+      } else {
+        await supabase.from('riohs_records').insert({
+          personnel_id: personnelId,
+          company_id: effectiveCompanyId,
           status: 'RIOHS_SENT',
           riohs_sent_at: sentAtDate.toISOString(),
           riohs_sent_to_email: worker.email,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('personnel_id', personnelId);
+        });
+      }
+    } catch (e) {
+      console.warn('riohs_records email save warning:', e);
+    }
+
+    // Fallback: documents table
+    const { data: existingDoc } = await supabase
+      .from('documents')
+      .select('id')
+      .eq('personnel_id', personnelId)
+      .eq('type', 'RIOHS Email Enviado')
+      .maybeSingle();
+
+    if (existingDoc) {
+      await supabase.from('documents').update({ uploaded_at: sentAtDate.toISOString(), number: worker.email }).eq('id', existingDoc.id);
     } else {
-      await supabase.from('riohs_records').insert({
+      await supabase.from('documents').insert({
         personnel_id: personnelId,
-        company_id: effectiveCompanyId,
-        status: 'RIOHS_SENT',
-        riohs_sent_at: sentAtDate.toISOString(),
-        riohs_sent_to_email: worker.email,
+        type: 'RIOHS Email Enviado',
+        file_url: '',
+        number: worker.email,
+        uploaded_at: sentAtDate.toISOString(),
+        status: 'APPROVED',
       });
     }
 

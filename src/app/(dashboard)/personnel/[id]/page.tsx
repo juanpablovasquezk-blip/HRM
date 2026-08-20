@@ -510,16 +510,50 @@ export default async function PersonnelDetailPage({
       </Card>
 
       {/* Gadget Prevención de riesgos (RIOHS) */}
-      <RiohsGadget
-        personnelId={id}
-        workerName={`${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`}
-        workerRut={person.rut}
-        workerEmail={person.email}
-        companyId={person.company_id}
-        companyName={person.company?.name || 'MINERQUIM'}
-        userRole={role}
-        initialRecord={riohsRecord as any}
-      />
+      {(() => {
+        let activeRiohsRecord = riohsRecord;
+        if (!activeRiohsRecord && person?.documents) {
+          const docs = (person.documents as any[]) || [];
+          const authGenDoc = docs.find(d => d.type === 'RIOHS Autorización Digital');
+          const authSignedDoc = docs.find(d => d.type === 'RIOHS Autorización Firmada');
+          const emailSentDoc = docs.find(d => d.type === 'RIOHS Email Enviado');
+          const receptionDoc = docs.find(d => d.type === 'RIOHS Recepción Firmada');
+
+          if (authGenDoc || authSignedDoc || emailSentDoc || receptionDoc) {
+            let status = 'PENDING';
+            if (receptionDoc) status = 'COMPLETED';
+            else if (emailSentDoc) status = 'RIOHS_SENT';
+            else if (authSignedDoc) status = 'AUTH_UPLOADED';
+            else if (authGenDoc) status = 'AUTH_GENERATED';
+
+            activeRiohsRecord = {
+              personnel_id: id,
+              company_id: person.company_id || '',
+              status,
+              auth_generated_at: authGenDoc?.uploaded_at || null,
+              auth_signed_file_url: authSignedDoc?.file_url || null,
+              auth_uploaded_at: authSignedDoc?.uploaded_at || null,
+              riohs_sent_at: emailSentDoc?.uploaded_at || null,
+              riohs_sent_to_email: emailSentDoc?.number || null,
+              reception_signed_file_url: receptionDoc?.file_url || null,
+              reception_uploaded_at: receptionDoc?.uploaded_at || null,
+            };
+          }
+        }
+
+        return (
+          <RiohsGadget
+            personnelId={id}
+            workerName={`${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`}
+            workerRut={person.rut}
+            workerEmail={person.email}
+            companyId={person.company_id}
+            companyName={person.company?.name || 'MINERQUIM'}
+            userRole={role}
+            initialRecord={activeRiohsRecord as any}
+          />
+        );
+      })()}
 
       {/* Cartas de Felicitación y Amonestación */}
       <LettersCard 
