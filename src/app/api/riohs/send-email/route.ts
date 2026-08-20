@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
           <div class="content">
             <p>Estimado/a <strong>${fullName}</strong>,</p>
 
-            <p>De acuerdo a lo establecido en el <strong>Artículo 156 inciso 2 del Código del Trabajo</strong> y el <strong>Ordinario N° 4417/2017</strong> de la Dirección del Trabajo, hacemos entrega formal y gratuita de una copia en versión digital del <strong>Reglamento Interno de Orden, Higiene y Seguridad (RIOHS)</strong> de la empresa, el cual se encuentra adjunto a este correo electrónico.</p>
+            <p>De acuerdo a lo establecido en el <strong>Artículo 156 inciso 2 del Código del Trabajo</strong> y el <strong>Ordinario N° 4417/2017</strong> de la Dirección del Trabajo, hacemos entrega formal de una copia en versión digital del <strong>Reglamento Interno de Orden, Higiene y Seguridad (RIOHS)</strong> de la empresa, el cual se encuentra adjunto a este correo electrónico.</p>
 
             <div class="highlight-box">
               <p><strong>Comprobante de Envío:</strong> Correo transmitido exitosamente el <strong>${sentAtStr}</strong> a la casilla personal <em>${worker.email}</em>.</p>
