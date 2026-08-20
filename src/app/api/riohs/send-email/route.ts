@@ -204,8 +204,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    revalidatePath(`/personnel/${personnelId}`);
-
     return NextResponse.json({
       success: true,
       message: 'Correo de RIOHS enviado con éxito.',

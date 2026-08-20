@@ -156,9 +156,10 @@ export function RiohsGadget({
 
       let data: any = {};
       try {
-        data = await response.json();
+        const responseText = await response.text();
+        data = responseText ? JSON.parse(responseText) : {};
       } catch (e) {
-        throw new Error(`Error en el servidor (${response.status}): ${response.statusText}`);
+        console.error('Failed to parse response JSON:', e);
       }
 
       if (response.ok && data.success) {
@@ -183,7 +184,7 @@ export function RiohsGadget({
         });
         router.refresh();
       } else {
-        toast.error(data.error || `Error ${response.status}: No se pudo enviar el correo RIOHS.`);
+        toast.error(data.error || `Error (${response.status}): No se pudo enviar el correo RIOHS.`);
       }
     } catch (err: any) {
       console.error(err);
