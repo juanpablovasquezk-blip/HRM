@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     const isTransportes = companyName.toUpperCase().includes('TRANSPORTES');
 
     const subFolder = isTransportes ? 'Transportes' : 'Minerquim';
-    pdfFileName = isTransportes ? 'RIOHS_TRANSPORTES.pdf' : 'RIOHS_MINERQUIM.pdf';
+    const pdfFileName = isTransportes ? 'RIOHS_TRANSPORTES.pdf' : 'RIOHS_MINERQUIM.pdf';
 
     const possiblePaths = [
       path.join(process.cwd(), 'public', 'templates', 'PdR', subFolder, pdfFileName),
