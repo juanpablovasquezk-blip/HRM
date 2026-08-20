@@ -40,13 +40,13 @@ export async function POST(req: NextRequest) {
     let pdfFileName = '';
 
     if (isMinerquim) {
-      pdfRelativePath = path.join('Templates', 'PdR', 'Minerquim', 'RIOHS_MINERQUIM.pdf');
+      pdfRelativePath = path.join('templates', 'PdR', 'Minerquim', 'RIOHS_MINERQUIM.pdf');
       pdfFileName = 'RIOHS_MINERQUIM.pdf';
     } else if (isTransportes) {
-      pdfRelativePath = path.join('Templates', 'PdR', 'Transportes', 'RIOHS_TRANSPORTES.pdf');
+      pdfRelativePath = path.join('templates', 'PdR', 'Transportes', 'RIOHS_TRANSPORTES.pdf');
       pdfFileName = 'RIOHS_TRANSPORTES.pdf';
     } else {
-      pdfRelativePath = path.join('Templates', 'PdR', 'Minerquim', 'RIOHS_MINERQUIM.pdf');
+      pdfRelativePath = path.join('templates', 'PdR', 'Minerquim', 'RIOHS_MINERQUIM.pdf');
       pdfFileName = 'RIOHS_MINERQUIM.pdf';
     }
 
