@@ -36,23 +36,19 @@ export async function POST(req: NextRequest) {
     const isMinerquim = companyName.toUpperCase().includes('MINERQUIM') && !companyName.toUpperCase().includes('TRANSPORTES');
     const isTransportes = companyName.toUpperCase().includes('TRANSPORTES');
 
-    let pdfRelativePath = '';
-    let pdfFileName = '';
+    const subFolder = isTransportes ? 'Transportes' : 'Minerquim';
+    pdfFileName = isTransportes ? 'RIOHS_TRANSPORTES.pdf' : 'RIOHS_MINERQUIM.pdf';
 
-    if (isMinerquim) {
-      pdfRelativePath = path.join('templates', 'PdR', 'Minerquim', 'RIOHS_MINERQUIM.pdf');
-      pdfFileName = 'RIOHS_MINERQUIM.pdf';
-    } else if (isTransportes) {
-      pdfRelativePath = path.join('templates', 'PdR', 'Transportes', 'RIOHS_TRANSPORTES.pdf');
-      pdfFileName = 'RIOHS_TRANSPORTES.pdf';
-    } else {
-      pdfRelativePath = path.join('templates', 'PdR', 'Minerquim', 'RIOHS_MINERQUIM.pdf');
-      pdfFileName = 'RIOHS_MINERQUIM.pdf';
-    }
+    const possiblePaths = [
+      path.join(process.cwd(), 'public', 'templates', 'PdR', subFolder, pdfFileName),
+      path.join(process.cwd(), 'templates', 'PdR', subFolder, pdfFileName),
+      path.join(__dirname, '..', '..', '..', '..', '..', 'public', 'templates', 'PdR', subFolder, pdfFileName),
+      path.join(__dirname, '..', '..', '..', '..', '..', 'templates', 'PdR', subFolder, pdfFileName),
+    ];
 
-    const absolutePdfPath = path.join(/*turbopackIgnore: true*/ process.cwd(), pdfRelativePath);
+    const absolutePdfPath = possiblePaths.find((p) => fs.existsSync(p));
 
-    if (!fs.existsSync(absolutePdfPath)) {
+    if (!absolutePdfPath) {
       return NextResponse.json({ 
         success: false, 
         error: `El archivo Reglamento Interno (${pdfFileName}) no se encuentra cargado en el servidor para la empresa ${companyName}.` 
