@@ -154,12 +154,18 @@ export function RiohsGadget({
         body: JSON.stringify({ personnelId }),
       });
 
+      const responseText = await response.text();
+      console.log('[RIOHS-CLIENT] Response status:', response.status, 'body:', responseText);
+
       let data: any = {};
-      try {
-        const responseText = await response.text();
-        data = responseText ? JSON.parse(responseText) : {};
-      } catch (e) {
-        console.error('Failed to parse response JSON:', e);
+      if (responseText) {
+        try {
+          data = JSON.parse(responseText);
+        } catch (parseErr) {
+          console.error('[RIOHS-CLIENT] JSON parse failed. Raw response:', responseText.substring(0, 500));
+          toast.error(`Error del servidor: respuesta no válida (status ${response.status})`);
+          return;
+        }
       }
 
       if (response.ok && data.success) {
@@ -188,11 +194,13 @@ export function RiohsGadget({
         }
         router.refresh();
       } else {
-        const errorMsg = data?.error || (response.statusText ? `Error ${response.status}: ${response.statusText}` : 'No se pudo enviar el correo RIOHS.');
-        toast.error(errorMsg);
+        // Show the EXACT error from the server
+        const serverError = data?.error || `Error del servidor (${response.status})`;
+        console.error('[RIOHS-CLIENT] Server error:', serverError);
+        toast.error(serverError);
       }
     } catch (err: any) {
-      console.error(err);
+      console.error('[RIOHS-CLIENT] Network/fetch error:', err);
       toast.error(err.message || 'Error de conexión al enviar correo.');
     } finally {
       setSendingEmail(false);

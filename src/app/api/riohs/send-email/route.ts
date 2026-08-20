@@ -11,8 +11,11 @@ const RIOHS_STORAGE_PATHS: Record<string, string> = {
 };
 
 export async function POST(req: NextRequest) {
+  console.log('[RIOHS-EMAIL] Route handler invoked');
   try {
-    const { personnelId } = await req.json();
+    const body = await req.json();
+    const personnelId = body?.personnelId;
+    console.log('[RIOHS-EMAIL] personnelId:', personnelId);
 
     if (!personnelId) {
       return NextResponse.json({ success: false, error: 'ID de trabajador requerido.' }, { status: 400 });
@@ -62,8 +65,10 @@ export async function POST(req: NextRequest) {
       .from('documents')
       .download(storagePath);
 
+    console.log('[RIOHS-EMAIL] PDF download result - error:', pdfError, 'hasData:', !!pdfData);
+
     if (pdfError || !pdfData) {
-      console.error('PDF download error from storage:', pdfError);
+      console.error('[RIOHS-EMAIL] PDF download error from storage:', pdfError);
       return NextResponse.json({
         success: false,
         error: `No se pudo obtener el archivo RIOHS (${pdfFileName}) desde el almacenamiento. Contacte al administrador.`,
@@ -71,6 +76,7 @@ export async function POST(req: NextRequest) {
     }
 
     const pdfBuffer = Buffer.from(await pdfData.arrayBuffer());
+    console.log('[RIOHS-EMAIL] PDF buffer size:', pdfBuffer.length, 'bytes');
     const sentAtDate = new Date();
     const sentAtStr = format(sentAtDate, "dd 'de' MMMM 'de' yyyy 'a las' HH:mm 'hrs'", { locale: es });
     const fullName = `${worker.first_name} ${worker.last_name_father} ${worker.last_name_mother || ''}`.trim();
@@ -223,7 +229,8 @@ export async function POST(req: NextRequest) {
       messageId: info.messageId,
     });
   } catch (error: any) {
-    console.error('Error sending RIOHS email:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Error al enviar correo RIOHS.' }, { status: 500 });
+    console.error('[RIOHS-EMAIL] CATCH ERROR:', error?.message, error?.stack);
+    const errorDetail = error?.message || 'Error desconocido al enviar correo RIOHS.';
+    return NextResponse.json({ success: false, error: errorDetail }, { status: 500 });
   }
 }
