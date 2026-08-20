@@ -184,7 +184,8 @@ export function RiohsGadget({
         });
         router.refresh();
       } else {
-        toast.error(data?.error || 'No se pudo enviar el correo RIOHS.');
+        const errorMsg = data?.error || (response.statusText ? `Error ${response.status}: ${response.statusText}` : 'No se pudo enviar el correo RIOHS.');
+        toast.error(errorMsg);
       }
     } catch (err: any) {
       console.error(err);
