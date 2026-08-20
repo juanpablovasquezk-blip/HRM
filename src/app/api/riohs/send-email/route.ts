@@ -130,11 +130,11 @@ export async function POST(req: NextRequest) {
       </html>
     `;
 
-    // Nodemailer transporter setup
+    // Nodemailer transporter setup — port 587 STARTTLS for external relay
     const transporter = nodemailer.createTransport({
       host: 'mail.minerquim.cl',
-      port: 465,
-      secure: true,
+      port: 587,
+      secure: false,
       auth: {
         user: 'no-reply@minerquim.cl',
         pass: 'Empresa_1000',
