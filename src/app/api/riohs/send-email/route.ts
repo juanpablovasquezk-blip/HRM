@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { revalidatePath } from 'next/cache';
 import nodemailer from 'nodemailer';
-import path from 'path';
-import fs from 'fs';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+
+// Map company to its RIOHS PDF path in Supabase Storage bucket "documents"
+const RIOHS_STORAGE_PATHS: Record<string, string> = {
+  MINERQUIM: 'riohs-templates/RIOHS_MINERQUIM.pdf',
+  // When uploaded, add: TRANSPORTES: 'riohs-templates/RIOHS_TRANSPORTES.pdf',
+};
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,42 +37,40 @@ export async function POST(req: NextRequest) {
 
     const companyName = worker.company?.name || 'MINERQUIM';
     const isTransportes = companyName.toUpperCase().includes('TRANSPORTES');
-    const isMinerquim = !isTransportes;
 
-    let absolutePdfPath = '';
-    let pdfFileName = '';
+    // Determine which RIOHS PDF to attach
+    let storagePath: string;
+    let pdfFileName: string;
 
     if (isTransportes) {
+      storagePath = RIOHS_STORAGE_PATHS['TRANSPORTES'] || '';
       pdfFileName = 'RIOHS_TRANSPORTES.pdf';
-      const possibleTransportesPaths = [
-        path.join(process.cwd(), 'public', 'templates', 'PdR', 'Transportes', pdfFileName),
-        path.join(process.cwd(), 'templates', 'PdR', 'Transportes', pdfFileName),
-      ];
-      absolutePdfPath = possibleTransportesPaths.find((p) => fs.existsSync(p)) || '';
 
-      if (!absolutePdfPath) {
-        return NextResponse.json({ 
-          success: false, 
-          error: `El RIOHS para la empresa Transportes Minerquim aún no se encuentra cargado en el servidor. Se habilitará automáticamente cuando se suba el archivo ${pdfFileName}.` 
+      if (!storagePath) {
+        return NextResponse.json({
+          success: false,
+          error: 'El RIOHS de Transportes Minerquim aún no ha sido cargado en el sistema. Se habilitará cuando el archivo sea subido.',
         }, { status: 400 });
       }
     } else {
+      storagePath = RIOHS_STORAGE_PATHS['MINERQUIM'];
       pdfFileName = 'RIOHS_MINERQUIM.pdf';
-      const possibleMinerquimPaths = [
-        path.join(process.cwd(), 'public', 'templates', 'PdR', 'Minerquim', pdfFileName),
-        path.join(process.cwd(), 'templates', 'PdR', 'Minerquim', pdfFileName),
-      ];
-      absolutePdfPath = possibleMinerquimPaths.find((p) => fs.existsSync(p)) || '';
-
-      if (!absolutePdfPath) {
-        return NextResponse.json({ 
-          success: false, 
-          error: `El archivo Reglamento Interno (${pdfFileName}) no se encuentra cargado en el servidor.` 
-        }, { status: 400 });
-      }
     }
 
-    const pdfBuffer = fs.readFileSync(absolutePdfPath);
+    // Download PDF from Supabase Storage
+    const { data: pdfData, error: pdfError } = await supabase.storage
+      .from('documents')
+      .download(storagePath);
+
+    if (pdfError || !pdfData) {
+      console.error('PDF download error from storage:', pdfError);
+      return NextResponse.json({
+        success: false,
+        error: `No se pudo obtener el archivo RIOHS (${pdfFileName}) desde el almacenamiento. Contacte al administrador.`,
+      }, { status: 500 });
+    }
+
+    const pdfBuffer = Buffer.from(await pdfData.arrayBuffer());
     const sentAtDate = new Date();
     const sentAtStr = format(sentAtDate, "dd 'de' MMMM 'de' yyyy 'a las' HH:mm 'hrs'", { locale: es });
     const fullName = `${worker.first_name} ${worker.last_name_father} ${worker.last_name_mother || ''}`.trim();
@@ -123,7 +124,7 @@ export async function POST(req: NextRequest) {
       </html>
     `;
 
-    // Nodemailer transporter setup (using existing project SMTP credentials)
+    // Nodemailer transporter setup
     const transporter = nodemailer.createTransport({
       host: 'mail.minerquim.cl',
       port: 465,
