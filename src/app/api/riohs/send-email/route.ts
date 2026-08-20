@@ -33,26 +33,40 @@ export async function POST(req: NextRequest) {
     }
 
     const companyName = worker.company?.name || 'MINERQUIM';
-    const isMinerquim = companyName.toUpperCase().includes('MINERQUIM') && !companyName.toUpperCase().includes('TRANSPORTES');
     const isTransportes = companyName.toUpperCase().includes('TRANSPORTES');
+    const isMinerquim = !isTransportes;
 
-    const subFolder = isTransportes ? 'Transportes' : 'Minerquim';
-    const pdfFileName = isTransportes ? 'RIOHS_TRANSPORTES.pdf' : 'RIOHS_MINERQUIM.pdf';
+    let absolutePdfPath = '';
+    let pdfFileName = '';
 
-    const possiblePaths = [
-      path.join(process.cwd(), 'public', 'templates', 'PdR', subFolder, pdfFileName),
-      path.join(process.cwd(), 'templates', 'PdR', subFolder, pdfFileName),
-      path.join(process.cwd(), 'public', 'templates', 'PdR', 'Minerquim', 'RIOHS_MINERQUIM.pdf'),
-      path.join(process.cwd(), 'templates', 'PdR', 'Minerquim', 'RIOHS_MINERQUIM.pdf'),
-    ];
+    if (isTransportes) {
+      pdfFileName = 'RIOHS_TRANSPORTES.pdf';
+      const possibleTransportesPaths = [
+        path.join(process.cwd(), 'public', 'templates', 'PdR', 'Transportes', pdfFileName),
+        path.join(process.cwd(), 'templates', 'PdR', 'Transportes', pdfFileName),
+      ];
+      absolutePdfPath = possibleTransportesPaths.find((p) => fs.existsSync(p)) || '';
 
-    const absolutePdfPath = possiblePaths.find((p) => fs.existsSync(p));
+      if (!absolutePdfPath) {
+        return NextResponse.json({ 
+          success: false, 
+          error: `El RIOHS para la empresa Transportes Minerquim aún no se encuentra cargado en el servidor. Se habilitará automáticamente cuando se suba el archivo ${pdfFileName}.` 
+        }, { status: 400 });
+      }
+    } else {
+      pdfFileName = 'RIOHS_MINERQUIM.pdf';
+      const possibleMinerquimPaths = [
+        path.join(process.cwd(), 'public', 'templates', 'PdR', 'Minerquim', pdfFileName),
+        path.join(process.cwd(), 'templates', 'PdR', 'Minerquim', pdfFileName),
+      ];
+      absolutePdfPath = possibleMinerquimPaths.find((p) => fs.existsSync(p)) || '';
 
-    if (!absolutePdfPath) {
-      return NextResponse.json({ 
-        success: false, 
-        error: `El archivo Reglamento Interno (${pdfFileName}) no se encuentra cargado en el servidor para la empresa ${companyName}.` 
-      }, { status: 400 });
+      if (!absolutePdfPath) {
+        return NextResponse.json({ 
+          success: false, 
+          error: `El archivo Reglamento Interno (${pdfFileName}) no se encuentra cargado en el servidor.` 
+        }, { status: 400 });
+      }
     }
 
     const pdfBuffer = fs.readFileSync(absolutePdfPath);

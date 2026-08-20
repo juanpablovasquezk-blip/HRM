@@ -174,14 +174,18 @@ export function RiohsGadget({
         }));
 
         // Immediately auto-generate and download Reception PDF
-        toast.info('Generando Comprobante de Recepción...');
-        await generateReceptionPDF({
-          workerName,
-          workerRut,
-          companyName: companyName || 'COMERCIALIZADORA Y SERVICIOS DE INGENIERIA MINERQUIM LIMITADA',
-          companyRut: companyRut || '76.135.448-5',
-          sentAt: nowIso,
-        });
+        try {
+          toast.info('Generando Comprobante de Recepción...');
+          await generateReceptionPDF({
+            workerName,
+            workerRut,
+            companyName: companyName || 'COMERCIALIZADORA Y SERVICIOS DE INGENIERIA MINERQUIM LIMITADA',
+            companyRut: companyRut || '76.135.448-5',
+            sentAt: nowIso,
+          });
+        } catch (pdfErr) {
+          console.error('Error generating reception PDF:', pdfErr);
+        }
         router.refresh();
       } else {
         const errorMsg = data?.error || (response.statusText ? `Error ${response.status}: ${response.statusText}` : 'No se pudo enviar el correo RIOHS.');
