@@ -42,8 +42,6 @@ export async function POST(req: NextRequest) {
     const possiblePaths = [
       path.join(process.cwd(), 'public', 'templates', 'PdR', subFolder, pdfFileName),
       path.join(process.cwd(), 'templates', 'PdR', subFolder, pdfFileName),
-      path.join(__dirname, '..', '..', '..', '..', '..', 'public', 'templates', 'PdR', subFolder, pdfFileName),
-      path.join(__dirname, '..', '..', '..', '..', '..', 'templates', 'PdR', subFolder, pdfFileName),
     ];
 
     const absolutePdfPath = possiblePaths.find((p) => fs.existsSync(p));
