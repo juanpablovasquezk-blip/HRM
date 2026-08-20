@@ -121,6 +121,12 @@ export async function POST(req: NextRequest) {
         user: 'no-reply@minerquim.cl',
         pass: 'Empresa_1000',
       },
+      tls: {
+        rejectUnauthorized: false,
+      },
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
     });
 
     const info = await transporter.sendMail({

@@ -142,9 +142,14 @@ export function RiohsGadget({
         body: JSON.stringify({ personnelId }),
       });
 
-      const data = await response.json();
+      let data: any = {};
+      try {
+        data = await response.json();
+      } catch (e) {
+        throw new Error(`Error en el servidor (${response.status}): ${response.statusText}`);
+      }
 
-      if (data.success) {
+      if (response.ok && data.success) {
         toast.success(`Correo enviado a ${workerEmail} con RIOHS adjunto.`);
         
         const nowIso = data.sentAt || new Date().toISOString();
@@ -165,11 +170,11 @@ export function RiohsGadget({
           sentAt: nowIso,
         });
       } else {
-        toast.error(data.error || 'Error al enviar el correo RIOHS.');
+        toast.error(data.error || `Error ${response.status}: No se pudo enviar el correo RIOHS.`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error('Error de conexión al enviar correo.');
+      toast.error(err.message || 'Error de conexión al enviar correo.');
     } finally {
       setSendingEmail(false);
     }
@@ -343,7 +348,7 @@ export function RiohsGadget({
               </label>
               {record?.auth_signed_file_url && (
                 <a href={record.auth_signed_file_url} target="_blank" rel="noopener noreferrer">
-                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-blue-600" title="Ver Autorización Subida">
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-blue-600 shrink-0" title="Ver Autorización Subida">
                     <FileText className="h-3.5 w-3.5" />
                   </Button>
                 </a>
@@ -396,34 +401,47 @@ export function RiohsGadget({
                   <Clock className="h-3.5 w-3.5 text-slate-400" />
                 )}
               </div>
-              <p className="text-[11px] text-slate-500">Subir comprobante de recepción</p>
+              <p className="text-[11px] text-slate-500">Comprobante de recepción</p>
             </div>
 
-            <div className="mt-3 flex items-center gap-1">
-              <label className={`w-full cursor-pointer inline-flex items-center justify-center rounded-md text-[11px] font-medium h-7 px-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 ${
-                (!isRiohsAvailable || !canExecute || uploadingReception || !record?.riohs_sent_at) ? 'opacity-50 pointer-events-none' : ''
-              }`}>
-                {uploadingReception ? (
-                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                ) : (
-                  <Upload className="h-3 w-3 mr-1 text-slate-500" />
+            <div className="mt-3 flex flex-col gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!isRiohsAvailable || !canExecute || !record?.riohs_sent_at}
+                onClick={handleManualDownloadReception}
+                className="w-full text-[11px] h-7 gap-1 font-medium border-orange-200 text-orange-700 hover:bg-orange-100 dark:border-orange-800 dark:text-orange-400"
+              >
+                <Download className="h-3 w-3" />
+                Descargar PDF
+              </Button>
+
+              <div className="flex items-center gap-1">
+                <label className={`w-full cursor-pointer inline-flex items-center justify-center rounded-md text-[11px] font-medium h-7 px-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 ${
+                  (!isRiohsAvailable || !canExecute || uploadingReception || !record?.riohs_sent_at) ? 'opacity-50 pointer-events-none' : ''
+                }`}>
+                  {uploadingReception ? (
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  ) : (
+                    <Upload className="h-3 w-3 mr-1 text-slate-500" />
+                  )}
+                  {record?.reception_signed_file_url ? 'Reemplazar' : 'Subir Firmado'}
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    onChange={handleUploadReceptionFile}
+                    disabled={!isRiohsAvailable || !canExecute || uploadingReception || !record?.riohs_sent_at}
+                    className="hidden"
+                  />
+                </label>
+                {record?.reception_signed_file_url && (
+                  <a href={record.reception_signed_file_url} target="_blank" rel="noopener noreferrer">
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-emerald-600 shrink-0" title="Ver Recepción Subida">
+                      <FileCheck className="h-3.5 w-3.5" />
+                    </Button>
+                  </a>
                 )}
-                {record?.reception_signed_file_url ? 'Reemplazar' : 'Subir Recepción'}
-                <input
-                  type="file"
-                  accept="application/pdf,image/*"
-                  onChange={handleUploadReceptionFile}
-                  disabled={!isRiohsAvailable || !canExecute || uploadingReception || !record?.riohs_sent_at}
-                  className="hidden"
-                />
-              </label>
-              {record?.reception_signed_file_url && (
-                <a href={record.reception_signed_file_url} target="_blank" rel="noopener noreferrer">
-                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-emerald-600" title="Ver Recepción Subida">
-                    <FileCheck className="h-3.5 w-3.5" />
-                  </Button>
-                </a>
-              )}
+              </div>
             </div>
           </div>
         </div>
