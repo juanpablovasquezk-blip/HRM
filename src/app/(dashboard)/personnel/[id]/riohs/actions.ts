@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getUserRole } from '@/app/role-actions';
+import { revalidatePath } from 'next/cache';
 
 export interface RiohsRecordData {
   id?: string;
@@ -15,6 +16,27 @@ export interface RiohsRecordData {
   riohs_sent_to_email?: string | null;
   reception_signed_file_url?: string | null;
   reception_uploaded_at?: string | null;
+}
+
+async function resolveCompanyId(adminSupabase: any, personnelId: string, companyId?: string): Promise<string> {
+  if (companyId && companyId.trim() !== '' && companyId !== 'undefined' && companyId !== 'null') {
+    return companyId;
+  }
+  const { data: worker } = await adminSupabase
+    .from('personnel')
+    .select('company_id')
+    .eq('id', personnelId)
+    .single();
+
+  if (worker?.company_id) return worker.company_id;
+
+  const { data: firstCompany } = await adminSupabase
+    .from('companies')
+    .select('id')
+    .limit(1)
+    .single();
+
+  return firstCompany?.id || '';
 }
 
 export async function getRiohsRecord(personnelId: string): Promise<{ success: boolean; data?: RiohsRecordData | null; error?: string }> {
@@ -42,6 +64,7 @@ export async function getRiohsRecord(personnelId: string): Promise<{ success: bo
 export async function markAuthGenerated(personnelId: string, companyId: string): Promise<{ success: boolean; error?: string }> {
   try {
     const adminSupabase = createAdminClient();
+    const validCompanyId = await resolveCompanyId(adminSupabase, personnelId, companyId);
 
     const { data: existing } = await adminSupabase
       .from('riohs_records')
@@ -50,9 +73,8 @@ export async function markAuthGenerated(personnelId: string, companyId: string):
       .maybeSingle();
 
     if (existing) {
-      // Only advance status if it's currently PENDING
       const newStatus = existing.status === 'PENDING' ? 'AUTH_GENERATED' : existing.status;
-      await adminSupabase
+      const { error: updateErr } = await adminSupabase
         .from('riohs_records')
         .update({
           status: newStatus,
@@ -60,15 +82,26 @@ export async function markAuthGenerated(personnelId: string, companyId: string):
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id);
+
+      if (updateErr) {
+        console.error('Error updating riohs_records (markAuthGenerated):', updateErr);
+        return { success: false, error: updateErr.message };
+      }
     } else {
-      await adminSupabase.from('riohs_records').insert({
+      const { error: insertErr } = await adminSupabase.from('riohs_records').insert({
         personnel_id: personnelId,
-        company_id: companyId,
+        company_id: validCompanyId,
         status: 'AUTH_GENERATED',
         auth_generated_at: new Date().toISOString(),
       });
+
+      if (insertErr) {
+        console.error('Error inserting riohs_records (markAuthGenerated):', insertErr);
+        return { success: false, error: insertErr.message };
+      }
     }
 
+    revalidatePath(`/personnel/${personnelId}`);
     return { success: true };
   } catch (err: any) {
     console.error('Error marking auth generated:', err);
@@ -94,6 +127,7 @@ export async function uploadSignedRiohsFile(
     }
 
     const adminSupabase = createAdminClient();
+    const validCompanyId = await resolveCompanyId(adminSupabase, personnelId, companyId);
 
     const fileExt = file.name.split('.').pop() || 'pdf';
     const fileName = `riohs_${docType}_${personnelId}_${Date.now()}.${fileExt}`;
@@ -125,7 +159,7 @@ export async function uploadSignedRiohsFile(
     if (docType === 'auth') {
       const nextStatus = 'AUTH_UPLOADED';
       if (existing) {
-        await adminSupabase
+        const { error: updateErr } = await adminSupabase
           .from('riohs_records')
           .update({
             status: nextStatus,
@@ -134,19 +168,29 @@ export async function uploadSignedRiohsFile(
             updated_at: nowIso,
           })
           .eq('id', existing.id);
+
+        if (updateErr) {
+          console.error('Error updating riohs_records auth file:', updateErr);
+          return { success: false, error: updateErr.message };
+        }
       } else {
-        await adminSupabase.from('riohs_records').insert({
+        const { error: insertErr } = await adminSupabase.from('riohs_records').insert({
           personnel_id: personnelId,
-          company_id: companyId,
+          company_id: validCompanyId,
           status: nextStatus,
           auth_signed_file_url: publicUrl,
           auth_uploaded_at: nowIso,
         });
+
+        if (insertErr) {
+          console.error('Error inserting riohs_records auth file:', insertErr);
+          return { success: false, error: insertErr.message };
+        }
       }
     } else {
       const nextStatus = 'COMPLETED';
       if (existing) {
-        await adminSupabase
+        const { error: updateErr } = await adminSupabase
           .from('riohs_records')
           .update({
             status: nextStatus,
@@ -155,17 +199,28 @@ export async function uploadSignedRiohsFile(
             updated_at: nowIso,
           })
           .eq('id', existing.id);
+
+        if (updateErr) {
+          console.error('Error updating riohs_records reception file:', updateErr);
+          return { success: false, error: updateErr.message };
+        }
       } else {
-        await adminSupabase.from('riohs_records').insert({
+        const { error: insertErr } = await adminSupabase.from('riohs_records').insert({
           personnel_id: personnelId,
-          company_id: companyId,
+          company_id: validCompanyId,
           status: nextStatus,
           reception_signed_file_url: publicUrl,
           reception_uploaded_at: nowIso,
         });
+
+        if (insertErr) {
+          console.error('Error inserting riohs_records reception file:', insertErr);
+          return { success: false, error: insertErr.message };
+        }
       }
     }
 
+    revalidatePath(`/personnel/${personnelId}`);
     return { success: true, fileUrl: publicUrl };
   } catch (err: any) {
     console.error('Error uploading RIOHS signed file:', err);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { revalidatePath } from 'next/cache';
 import nodemailer from 'nodemailer';
 import path from 'path';
 import fs from 'fs';
@@ -146,6 +147,12 @@ export async function POST(req: NextRequest) {
     console.log('RIOHS email sent successfully:', info.messageId);
 
     // Record RIOHS status update in Database
+    let effectiveCompanyId = worker.company_id;
+    if (!effectiveCompanyId) {
+      const { data: firstCompany } = await supabase.from('companies').select('id').limit(1).single();
+      effectiveCompanyId = firstCompany?.id;
+    }
+
     const { data: existingRecord } = await supabase
       .from('riohs_records')
       .select('id')
@@ -165,12 +172,14 @@ export async function POST(req: NextRequest) {
     } else {
       await supabase.from('riohs_records').insert({
         personnel_id: personnelId,
-        company_id: worker.company_id,
+        company_id: effectiveCompanyId,
         status: 'RIOHS_SENT',
         riohs_sent_at: sentAtDate.toISOString(),
         riohs_sent_to_email: worker.email,
       });
     }
+
+    revalidatePath(`/personnel/${personnelId}`);
 
     return NextResponse.json({
       success: true,

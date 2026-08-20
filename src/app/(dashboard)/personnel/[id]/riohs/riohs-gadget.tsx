@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -47,6 +48,7 @@ export function RiohsGadget({
   userRole,
   initialRecord = null,
 }: RiohsGadgetProps) {
+  const router = useRouter();
   const [record, setRecord] = useState<RiohsRecordData | null>(initialRecord);
   const [loading, setLoading] = useState(false);
   const [uploadingAuth, setUploadingAuth] = useState(false);
@@ -61,17 +63,21 @@ export function RiohsGadget({
   const isRiohsAvailable = isMinerquim;
 
   useEffect(() => {
-    if (initialRecord !== undefined && initialRecord !== null) {
-      setRecord(initialRecord);
-    } else {
-      async function loadData() {
-        const res = await getRiohsRecord(personnelId);
+    let mounted = true;
+    async function loadData() {
+      const res = await getRiohsRecord(personnelId);
+      if (mounted) {
         if (res && res.success && res.data) {
           setRecord(res.data);
+        } else if (initialRecord) {
+          setRecord(initialRecord);
         }
       }
-      loadData();
     }
+    loadData();
+    return () => {
+      mounted = false;
+    };
   }, [personnelId, initialRecord]);
 
   const currentStatus = record?.status || 'PENDING';
@@ -87,16 +93,21 @@ export function RiohsGadget({
         companyRut: companyRut || '76.135.448-5',
       });
 
-      await markAuthGenerated(personnelId, companyId);
-      setRecord((prev) => ({
-        ...prev,
-        personnel_id: personnelId,
-        company_id: companyId,
-        status: prev?.status === 'PENDING' || !prev ? 'AUTH_GENERATED' : prev.status,
-        auth_generated_at: new Date().toISOString(),
-      }));
+      const res = await markAuthGenerated(personnelId, companyId);
+      if (res.success) {
+        setRecord((prev) => ({
+          ...prev,
+          personnel_id: personnelId,
+          company_id: companyId,
+          status: prev?.status === 'PENDING' || !prev ? 'AUTH_GENERATED' : prev.status,
+          auth_generated_at: new Date().toISOString(),
+        }));
 
-      toast.success('Documento de Autorización RIOHS generado y descargado.');
+        toast.success('Documento de Autorización RIOHS generado y descargado.');
+        router.refresh();
+      } else {
+        toast.error(res.error || 'Error al actualizar registro en base de datos.');
+      }
     } catch (e: any) {
       console.error(e);
       toast.error('Error al generar PDF de Autorización');
@@ -121,6 +132,7 @@ export function RiohsGadget({
         auth_uploaded_at: new Date().toISOString(),
       }));
       toast.success('Autorización RIOHS firmada subida correctamente.');
+      router.refresh();
     } else {
       toast.error(res.error || 'Error al subir la autorización firmada.');
     }
@@ -169,6 +181,7 @@ export function RiohsGadget({
           companyRut: companyRut || '76.135.448-5',
           sentAt: nowIso,
         });
+        router.refresh();
       } else {
         toast.error(data.error || `Error ${response.status}: No se pudo enviar el correo RIOHS.`);
       }
@@ -198,6 +211,7 @@ export function RiohsGadget({
         reception_uploaded_at: new Date().toISOString(),
       }));
       toast.success('Comprobante de Recepción RIOHS firmado subido. Proceso completado.');
+      router.refresh();
     } else {
       toast.error(res.error || 'Error al subir el comprobante de recepción.');
     }

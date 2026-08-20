@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +36,7 @@ export default async function PersonnelDetailPage({
 }) {
   const { id } = await params;
   const supabase = await createClient();
+  const adminSupabase = createAdminClient();
 
   const [
     { data: person, error }, 
@@ -48,7 +50,7 @@ export default async function PersonnelDetailPage({
     supabase.from('positions').select('id, name'),
     supabase.from('shifts').select('id, name'),
     supabase.from('personnel_letters').select('*').eq('personnel_id', id).order('date', { ascending: false }),
-    supabase.from('riohs_records').select('*').eq('personnel_id', id).maybeSingle(),
+    adminSupabase.from('riohs_records').select('*').eq('personnel_id', id).maybeSingle(),
     getUserRole()
   ]);
 
