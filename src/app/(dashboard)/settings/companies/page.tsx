@@ -7,10 +7,16 @@ import Link from 'next/link';
 export default async function CompaniesPage() {
   const supabase = await createClient();
   
-  const { data: companies } = await supabase
-    .from('companies')
-    .select('*, company_documents(*)')
-    .order('name');
+  // Query companies and company_documents separately to avoid PGRST200 if FK is not in schema cache
+  const [companiesRes, docsRes] = await Promise.all([
+    supabase.from('companies').select('*').order('name'),
+    supabase.from('company_documents').select('*').order('uploaded_at', { ascending: false }),
+  ]);
+
+  const companiesList = (companiesRes.data || []).map((comp: any) => ({
+    ...comp,
+    company_documents: (docsRes.data || []).filter((d: any) => d.company_id === comp.id),
+  }));
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -31,7 +37,7 @@ export default async function CompaniesPage() {
         </div>
       </div>
 
-      <CompaniesClient initialCompanies={(companies as any[]) || []} />
+      <CompaniesClient initialCompanies={companiesList} />
     </div>
   );
 }

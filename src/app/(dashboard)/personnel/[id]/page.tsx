@@ -44,13 +44,15 @@ export default async function PersonnelDetailPage({
     { data: allShifts },
     { data: lettersData },
     { data: riohsRecord },
+    { data: companyDocsData },
     role
   ] = await Promise.all([
-    supabase.from('personnel').select('*, company:companies(id, name, rut, legal_name, company_documents(*)), documents(*)').eq('id', id).single(),
+    supabase.from('personnel').select('*, company:companies(id, name, rut, legal_name), documents(*)').eq('id', id).single(),
     supabase.from('positions').select('id, name'),
     supabase.from('shifts').select('id, name'),
     supabase.from('personnel_letters').select('*').eq('personnel_id', id).order('date', { ascending: false }),
     adminSupabase.from('riohs_records').select('*').eq('personnel_id', id).maybeSingle(),
+    supabase.from('company_documents').select('*'),
     getUserRole()
   ]);
 
@@ -543,7 +545,7 @@ export default async function PersonnelDetailPage({
           }
         }
 
-        const companyDocs = (person.company?.company_documents as any[]) || [];
+        const companyDocs = (companyDocsData || []).filter((d: any) => d.company_id === person.company_id);
         const hasCompanyRiohs = companyDocs.some((d: any) => d.category === 'RIOHS');
 
         return (

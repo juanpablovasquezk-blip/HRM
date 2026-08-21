@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     // Fetch personnel details with company
     const { data: worker, error: workerErr } = await supabase
       .from('personnel')
-      .select('*, company:companies(id, name, legal_name, rut, company_documents(*))')
+      .select('*, company:companies(id, name, legal_name, rut)')
       .eq('id', personnelId)
       .single();
 
