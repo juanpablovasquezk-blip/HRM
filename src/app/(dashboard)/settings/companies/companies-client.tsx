@@ -60,9 +60,26 @@ interface Company {
 
 export function CompaniesClient({ initialCompanies }: { initialCompanies: Company[] }) {
   const [companies, setCompanies] = useState<Company[]>(initialCompanies);
-  const [expandedCompanyId, setExpandedCompanyId] = useState<string | null>(
-    initialCompanies.length > 0 ? initialCompanies[0].id : null
-  );
+  const [expandedCompanyId, setExpandedCompanyIdState] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('expanded_company_id');
+      if (saved && initialCompanies.some(c => c.id === saved)) {
+        return saved;
+      }
+    }
+    return initialCompanies.length > 0 ? initialCompanies[0].id : null;
+  });
+
+  const setExpandedCompanyId = (id: string | null) => {
+    setExpandedCompanyIdState(id);
+    if (typeof window !== 'undefined') {
+      if (id) {
+        sessionStorage.setItem('expanded_company_id', id);
+      } else {
+        sessionStorage.removeItem('expanded_company_id');
+      }
+    }
+  };
   const [isLoading, setIsLoading] = useState(false);
   const [savingCompanyId, setSavingCompanyId] = useState<string | null>(null);
   const [uploadingCategory, setUploadingCategory] = useState<string | null>(null);
