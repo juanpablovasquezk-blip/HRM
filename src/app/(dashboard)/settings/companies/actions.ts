@@ -100,12 +100,10 @@ export async function uploadCompanyDocument(formData: FormData) {
     const sanitizedTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_');
     const storagePath = `company-documents/${companyId}/${category}_${sanitizedTitle}_${Date.now()}.${fileExt}`;
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
+    // Upload file directly to Supabase storage
     const { error: uploadErr } = await adminSupabase.storage
       .from('documents')
-      .upload(storagePath, buffer, {
+      .upload(storagePath, file, {
         contentType: file.type || 'application/pdf',
         upsert: true,
       });
