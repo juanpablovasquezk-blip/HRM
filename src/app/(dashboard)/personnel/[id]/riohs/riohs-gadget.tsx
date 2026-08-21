@@ -188,6 +188,7 @@ export function RiohsGadget({
             companyName: companyName || 'COMERCIALIZADORA Y SERVICIOS DE INGENIERIA MINERQUIM LIMITADA',
             companyRut: companyRut || '76.135.448-5',
             sentAt: nowIso,
+            workerEmail,
           });
         } catch (pdfErr) {
           console.error('Error generating reception PDF:', pdfErr);
@@ -240,6 +241,7 @@ export function RiohsGadget({
       companyName: companyName || 'COMERCIALIZADORA Y SERVICIOS DE INGENIERIA MINERQUIM LIMITADA',
       companyRut: companyRut || '76.135.448-5',
       sentAt: record?.riohs_sent_at || new Date(),
+      workerEmail: record?.riohs_sent_to_email || workerEmail || undefined,
     });
   };
 

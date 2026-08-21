@@ -8,6 +8,7 @@ interface ReceptionPDFParams {
   companyName: string;
   companyRut: string;
   sentAt?: string | Date | null;
+  workerEmail?: string;
 }
 
 interface TextChunk {
@@ -118,6 +119,21 @@ export async function generateReceptionPDF(params: ReceptionPDFParams) {
   const cleanRut = workerRut.trim();
   const cleanCompName = companyName.trim().toUpperCase();
 
+  // Format sent date for the reception text
+  let sentDateStr = '';
+  if (params.sentAt) {
+    const sentDate = new Date(params.sentAt);
+    const months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    const day = sentDate.getDate();
+    const month = months[sentDate.getMonth()];
+    const year = sentDate.getFullYear();
+    const hours = sentDate.getHours().toString().padStart(2, '0');
+    const mins = sentDate.getMinutes().toString().padStart(2, '0');
+    sentDateStr = `${day} de ${month} de ${year} a las ${hours}:${mins} hrs`;
+  }
+
+  const workerEmail = params.workerEmail || '';
+
   const chunksP1: TextChunk[] = [
     { text: 'Yo, ' },
     { text: cleanWorkerName, bold: true },
@@ -125,7 +141,13 @@ export async function generateReceptionPDF(params: ReceptionPDFParams) {
     { text: cleanRut, bold: true },
     { text: ', declaro recepción y lectura de forma digital de una copia del Reglamento Interno de Orden, Higiene y Seguridad de la empresa ' },
     { text: `${cleanCompName} RUT ${companyRut}`, bold: true },
-    { text: ', de acuerdo a lo establecido en el artículo 156 inciso 2 del Código del Trabajo y ordinario: 4417/ 21-sep-2017, el cual establece que "el empleador deberá entregar gratuitamente a los trabajadores un ejemplar del reglamento interno de la empresa y el reglamento a que se refiere la Ley N° 16.744".' },
+    ...(sentDateStr && workerEmail ? [
+      { text: `, enviado el ` },
+      { text: sentDateStr, bold: true },
+      { text: ` a la casilla personal ` },
+      { text: workerEmail, bold: true },
+    ] : []),
+    { text: ', de acuerdo a lo establecido en el artículo 156 inciso 2 del Código del Trabajo y ordinario: 4417/ 21-sep-2017, el cual establece que "el empleador deberá entregar a los trabajadores un ejemplar del reglamento interno de la empresa y el reglamento a que se refiere la Ley N° 16.744".' },
   ];
 
   currentY = printStyledParagraph(doc, chunksP1, margin, currentY, usableW, 6);

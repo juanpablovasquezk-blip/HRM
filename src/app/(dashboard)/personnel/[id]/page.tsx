@@ -80,7 +80,9 @@ export default async function PersonnelDetailPage({
     return def.applicable_positions.includes(person.main_position);
   });
 
-  const documents = (person.documents as Array<{ id: string; definition_id: string; type: string; number?: string | null; expiration_date: string | null; file_url: string; uploaded_at: string; status: string }>) || [];
+  const allDocuments = (person.documents as Array<{ id: string; definition_id: string; type: string; number?: string | null; expiration_date: string | null; file_url: string; uploaded_at: string; status: string }>) || [];
+  // Filter out RIOHS documents from general documents list — they appear in the PdR gadget instead
+  const documents = allDocuments.filter((doc) => !doc.type?.toUpperCase().startsWith('RIOHS'));
 
   // Dynamic Missing Documents Logic
   // Match by definition_id for new uploads, OR by type name for legacy uploads

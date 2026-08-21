@@ -77,7 +77,9 @@ export async function POST(req: NextRequest) {
     const pdfBuffer = Buffer.from(await pdfData.arrayBuffer());
     console.log('[RIOHS-EMAIL] PDF buffer size:', pdfBuffer.length, 'bytes');
     const sentAtDate = new Date();
-    const sentAtStr = format(sentAtDate, "dd 'de' MMMM 'de' yyyy 'a las' HH:mm 'hrs'", { locale: es });
+    // Convert to Chile timezone (UTC-4 / UTC-3 depending on DST)
+    const chileDate = new Date(sentAtDate.toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+    const sentAtStr = format(chileDate, "dd 'de' MMMM 'de' yyyy 'a las' HH:mm 'hrs'", { locale: es });
     const fullName = `${worker.first_name} ${worker.last_name_father} ${worker.last_name_mother || ''}`.trim();
 
     // HTML Email Template
