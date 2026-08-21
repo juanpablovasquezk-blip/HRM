@@ -81,14 +81,14 @@ export default async function PersonnelDetailPage({
   });
 
   const allDocuments = (person.documents as Array<{ id: string; definition_id: string; type: string; number?: string | null; expiration_date: string | null; file_url: string; uploaded_at: string; status: string }>) || [];
-  // Filter out RIOHS documents from general documents list — they appear in the PdR gadget instead
-  const documents = allDocuments.filter((doc) => !doc.type?.toUpperCase().startsWith('RIOHS'));
+  // Filter out RIOHS documents ONLY for the general documents table display
+  const generalDocuments = allDocuments.filter((doc) => !doc.type?.toUpperCase().startsWith('RIOHS'));
 
   // Dynamic Missing Documents Logic
   // Match by definition_id for new uploads, OR by type name for legacy uploads
-  const uploadedDefIds = new Set(documents.map((doc: any) => doc.definition_id).filter(Boolean));
+  const uploadedDefIds = new Set(allDocuments.map((doc: any) => doc.definition_id).filter(Boolean));
   const uploadedTypes = new Set(
-    documents.map((doc: any) => (doc.type || '').toLowerCase().trim()).filter(Boolean)
+    allDocuments.map((doc: any) => (doc.type || '').toLowerCase().trim()).filter(Boolean)
   );
 
   const missingDocs = definitions
@@ -156,37 +156,37 @@ export default async function PersonnelDetailPage({
           mainPositionName={posMap[person.main_position] || person.main_position}
           dismissalReason={person.inactive_reason || ''}
           ticaNumber={
-            documents.find((d: any) =>
+            allDocuments.find((d: any) =>
               (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('tica')) ||
               (d.type || '').toLowerCase().includes('tica')
             )?.number || ''
           }
           pcpNumber={
-            documents.find((d: any) =>
+            allDocuments.find((d: any) =>
               (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('pcp')) ||
               (d.type || '').toLowerCase().includes('pcp')
             )?.number || ''
           }
           ticaExpiry={
-            documents.find((d: any) =>
+            allDocuments.find((d: any) =>
               (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('tica')) ||
               (d.type || '').toLowerCase().includes('tica')
             )?.expiration_date || ''
           }
           pcpExpiry={
-            documents.find((d: any) =>
+            allDocuments.find((d: any) =>
               (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('pcp')) ||
               (d.type || '').toLowerCase().includes('pcp')
             )?.expiration_date || ''
           }
           ticaUrl={
-            documents.find((d: any) =>
+            allDocuments.find((d: any) =>
               (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('tica')) ||
               (d.type || '').toLowerCase().includes('tica')
             )?.file_url || ''
           }
           pcpUrl={
-            documents.find((d: any) =>
+            allDocuments.find((d: any) =>
               (d.definition_id && definitions.find(def => def.id === d.definition_id)?.name.toLowerCase().includes('pcp')) ||
               (d.type || '').toLowerCase().includes('pcp')
             )?.file_url || ''
@@ -368,7 +368,7 @@ export default async function PersonnelDetailPage({
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {documents.length > 0 ? (
+          {generalDocuments.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -381,7 +381,7 @@ export default async function PersonnelDetailPage({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {documents.map((doc: any) => {
+                {generalDocuments.map((doc: any) => {
                   const def = definitions.find(d => d.id === doc.definition_id)
                     // Fallback: match by name for legacy uploads without definition_id
                     || definitions.find(d =>
@@ -399,7 +399,7 @@ export default async function PersonnelDetailPage({
                   // or if there's no manual expiry stored.
                   if (def?.requires_expiration) {
                     if (def.depends_on_definition_id) {
-                      const anchorDoc = documents.find(d => d.definition_id === def.depends_on_definition_id);
+                      const anchorDoc = allDocuments.find(d => d.definition_id === def.depends_on_definition_id);
                       if (anchorDoc?.expiration_date) {
                         displayExpiry = calculateDynamicExpiration(
                           parseISO(anchorDoc.expiration_date),
