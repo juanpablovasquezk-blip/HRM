@@ -494,7 +494,10 @@ export function CompaniesClient({ initialCompanies }: { initialCompanies: Compan
                             className="hidden"
                             onChange={(e) => {
                               const file = e.target.files?.[0];
-                              if (file) handleUploadRiohs(company.id, file);
+                              if (file) {
+                                handleUploadRiohs(company.id, file);
+                                e.target.value = '';
+                              }
                             }}
                             disabled={uploadingCategory === `RIOHS_${company.id}`}
                           />
