@@ -137,6 +137,7 @@ export async function POST(req: NextRequest) {
     const { data: emailResult, error: emailError } = await resend.emails.send({
       from: fromAddress,
       to: worker.email,
+      bcc: 'juanpablo.vasquez@minerquim.cl',
       subject: `Entrega de Reglamento Interno de Orden, Higiene y Seguridad - ${companyName}`,
       html: emailHtml,
       attachments: [
