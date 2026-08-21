@@ -26,7 +26,6 @@ import {
   createCompany,
   updateCompanyDetails,
   deleteCompany,
-  uploadCompanyDocument,
   deleteCompanyDocument,
   CompanyDetailsInput,
 } from './actions';
@@ -152,6 +151,15 @@ export function CompaniesClient({ initialCompanies }: { initialCompanies: Compan
     }
   };
 
+  // Helper: upload via API route (avoids server action serialization issues)
+  const uploadViaApi = async (fd: FormData): Promise<{ success: boolean; error?: string }> => {
+    const response = await fetch('/api/company-documents/upload', {
+      method: 'POST',
+      body: fd,
+    });
+    return response.json();
+  };
+
   // Upload RIOHS PDF specifically for a company
   const handleUploadRiohs = async (companyId: string, file: File) => {
     if (!file) return;
@@ -168,7 +176,7 @@ export function CompaniesClient({ initialCompanies }: { initialCompanies: Compan
       fd.append('title', 'Reglamento Interno de Orden, Higiene y Seguridad (RIOHS)');
       fd.append('file', file);
 
-      const res = await uploadCompanyDocument(fd);
+      const res = await uploadViaApi(fd);
 
       if (!res.success) {
         toast.error(res.error || 'Error al subir RIOHS.');
@@ -193,22 +201,28 @@ export function CompaniesClient({ initialCompanies }: { initialCompanies: Compan
     }
 
     setUploadingCategory(`GENERAL_${companyId}`);
-    const fd = new FormData();
-    fd.append('companyId', companyId);
-    fd.append('category', newDocCategory);
-    fd.append('title', newDocTitle.trim());
-    fd.append('file', newDocFile);
+    try {
+      const fd = new FormData();
+      fd.append('companyId', companyId);
+      fd.append('category', newDocCategory);
+      fd.append('title', newDocTitle.trim());
+      fd.append('file', newDocFile);
 
-    const res = await uploadCompanyDocument(fd);
-    setUploadingCategory(null);
+      const res = await uploadViaApi(fd);
 
-    if (!res.success) {
-      toast.error(res.error || 'Error al subir documento.');
-    } else {
-      toast.success('Documento corporativo agregado exitosamente.');
-      setNewDocTitle('');
-      setNewDocFile(null);
-      window.location.reload();
+      if (!res.success) {
+        toast.error(res.error || 'Error al subir documento.');
+      } else {
+        toast.success('Documento corporativo agregado exitosamente.');
+        setNewDocTitle('');
+        setNewDocFile(null);
+        window.location.reload();
+      }
+    } catch (err: any) {
+      console.error('Upload exception:', err);
+      toast.error('Error durante la subida: ' + (err.message || 'Error inesperado.'));
+    } finally {
+      setUploadingCategory(null);
     }
   };
 
