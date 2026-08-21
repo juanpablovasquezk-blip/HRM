@@ -537,7 +537,26 @@ export default function DailyPlanningClient({
   const loadAvailable = async (positionId: string, shiftId?: string) => {
     setLoadingAvailable(positionId);
     const res = await getAvailableForExtra(selectedDate, positionId, shiftId);
-    if (res.data) setAvailablePersonnel(prev => ({ ...prev, [positionId]: res.data || [] }));
+    if (res.data) {
+      const getTier = (p: any) => {
+        const hasWarning = Array.isArray(p.fatigue_warnings) && p.fatigue_warnings.length > 0;
+        if (!p.already_assigned && !hasWarning) return 0;
+        if (!p.already_assigned && hasWarning) return 1;
+        if (p.already_assigned && !hasWarning) return 2;
+        return 3;
+      };
+
+      const sortedData = [...res.data].sort((a, b) => {
+        const tierA = getTier(a);
+        const tierB = getTier(b);
+        if (tierA !== tierB) return tierA - tierB;
+        const nameA = `${a.first_name || ''} ${a.last_name_father || ''}`.trim();
+        const nameB = `${b.first_name || ''} ${b.last_name_father || ''}`.trim();
+        return nameA.localeCompare(nameB, 'es', { sensitivity: 'base' });
+      });
+
+      setAvailablePersonnel(prev => ({ ...prev, [positionId]: sortedData }));
+    }
     setLoadingAvailable(null);
   };
 

@@ -284,6 +284,33 @@ export async function getAvailableForExtra(date: string, positionId: string, ext
     };
   });
 
+  // Sort by restriction level:
+  // 1. Negros sin símbolo (!already_assigned, no fatigue warnings)
+  // 2. Negros con símbolo (!already_assigned, has fatigue warnings)
+  // 3. Naranjos sin símbolo (already_assigned, no fatigue warnings)
+  // 4. Naranjos con símbolo (already_assigned, has fatigue warnings)
+  // Alphabetical within same tier
+  results.sort((a, b) => {
+    const getTier = (item: typeof a) => {
+      const hasWarning = Array.isArray(item.fatigue_warnings) && item.fatigue_warnings.length > 0;
+      if (!item.already_assigned && !hasWarning) return 0;
+      if (!item.already_assigned && hasWarning) return 1;
+      if (item.already_assigned && !hasWarning) return 2;
+      return 3;
+    };
+
+    const tierA = getTier(a);
+    const tierB = getTier(b);
+
+    if (tierA !== tierB) {
+      return tierA - tierB;
+    }
+
+    const nameA = `${a.first_name || ''} ${a.last_name_father || ''}`.trim();
+    const nameB = `${b.first_name || ''} ${b.last_name_father || ''}`.trim();
+    return nameA.localeCompare(nameB, 'es', { sensitivity: 'base' });
+  });
+
   return { data: results };
 }
 
