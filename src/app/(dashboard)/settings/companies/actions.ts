@@ -147,7 +147,7 @@ export async function uploadCompanyDocument(formData: FormData) {
 
     revalidatePath('/settings/companies');
     revalidatePath('/personnel');
-    return { success: true, data: docRecord };
+    return { success: true };
   } catch (err: any) {
     console.error('[CompanyDocs] Unexpected error:', err);
     return { success: false, error: err.message || 'Error inesperado.' };
