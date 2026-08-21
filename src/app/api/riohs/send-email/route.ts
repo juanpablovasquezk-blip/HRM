@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -9,8 +9,6 @@ const RIOHS_STORAGE_PATHS: Record<string, string> = {
   MINERQUIM: 'riohs-templates/RIOHS_MINERQUIM.pdf',
   // When uploaded, add: TRANSPORTES: 'riohs-templates/RIOHS_TRANSPORTES.pdf',
 };
-
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: NextRequest) {
   console.log('[RIOHS-EMAIL] Route handler invoked');
@@ -131,11 +129,19 @@ export async function POST(req: NextRequest) {
       </html>
     `;
 
-    // Send email via Resend API
-    const fromAddress = process.env.RESEND_FROM_EMAIL || 'Prevención de Riesgos <onboarding@resend.dev>';
+    // SMTP config — identical to the working cron/absences route
+    const transporter = nodemailer.createTransport({
+      host: 'mail.minerquim.cl',
+      port: 465,
+      secure: true,
+      auth: {
+        user: 'no-reply@minerquim.cl',
+        pass: 'Empresa_1000',
+      },
+    });
 
-    const { data: emailResult, error: emailError } = await resend.emails.send({
-      from: fromAddress,
+    const info = await transporter.sendMail({
+      from: '"Prevención de Riesgos - Grupo Minerquim" <no-reply@minerquim.cl>',
       to: worker.email,
       bcc: 'juanpablo.vasquez@minerquim.cl',
       subject: `Entrega de Reglamento Interno de Orden, Higiene y Seguridad - ${companyName}`,
@@ -144,19 +150,12 @@ export async function POST(req: NextRequest) {
         {
           filename: pdfFileName,
           content: pdfBuffer,
+          contentType: 'application/pdf',
         },
       ],
     });
 
-    if (emailError) {
-      console.error('[RIOHS-EMAIL] Resend error:', emailError);
-      return NextResponse.json({
-        success: false,
-        error: `Error al enviar correo: ${emailError.message}`,
-      }, { status: 500 });
-    }
-
-    console.log('[RIOHS-EMAIL] Email sent successfully via Resend:', emailResult?.id);
+    console.log('[RIOHS-EMAIL] Email sent successfully:', info.messageId);
 
     // Record RIOHS status update in Database
     let effectiveCompanyId = worker.company_id;
@@ -221,7 +220,7 @@ export async function POST(req: NextRequest) {
       message: 'Correo de RIOHS enviado con éxito.',
       sentAt: sentAtDate.toISOString(),
       sentToEmail: worker.email,
-      messageId: emailResult?.id,
+      messageId: info.messageId,
     });
   } catch (error: any) {
     console.error('[RIOHS-EMAIL] CATCH ERROR:', error?.message, error?.stack);
