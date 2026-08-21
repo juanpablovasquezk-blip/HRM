@@ -161,20 +161,26 @@ export function CompaniesClient({ initialCompanies }: { initialCompanies: Compan
     }
 
     setUploadingCategory(`RIOHS_${companyId}`);
-    const fd = new FormData();
-    fd.append('companyId', companyId);
-    fd.append('category', 'RIOHS');
-    fd.append('title', 'Reglamento Interno de Orden, Higiene y Seguridad (RIOHS)');
-    fd.append('file', file);
+    try {
+      const fd = new FormData();
+      fd.append('companyId', companyId);
+      fd.append('category', 'RIOHS');
+      fd.append('title', 'Reglamento Interno de Orden, Higiene y Seguridad (RIOHS)');
+      fd.append('file', file);
 
-    const res = await uploadCompanyDocument(fd);
-    setUploadingCategory(null);
+      const res = await uploadCompanyDocument(fd);
 
-    if (!res.success) {
-      toast.error(res.error || 'Error al subir RIOHS.');
-    } else {
-      toast.success('✅ RIOHS de la empresa subido y actualizado correctamente. El módulo de entrega ha sido activado.');
-      window.location.reload();
+      if (!res.success) {
+        toast.error(res.error || 'Error al subir RIOHS.');
+      } else {
+        toast.success('✅ RIOHS de la empresa subido y actualizado correctamente. El módulo de entrega ha sido activado.');
+        window.location.reload();
+      }
+    } catch (err: any) {
+      console.error('Upload exception:', err);
+      toast.error('Error durante la subida del archivo: ' + (err.message || 'El archivo puede ser demasiado grande o la conexión expiró.'));
+    } finally {
+      setUploadingCategory(null);
     }
   };
 
