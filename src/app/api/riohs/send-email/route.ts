@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -9,6 +9,8 @@ const RIOHS_STORAGE_PATHS: Record<string, string> = {
   MINERQUIM: 'riohs-templates/RIOHS_MINERQUIM.pdf',
   // When uploaded, add: TRANSPORTES: 'riohs-templates/RIOHS_TRANSPORTES.pdf',
 };
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: NextRequest) {
   console.log('[RIOHS-EMAIL] Route handler invoked');
@@ -65,13 +67,12 @@ export async function POST(req: NextRequest) {
       .from('documents')
       .download(storagePath);
 
-    console.log('[RIOHS-EMAIL] PDF download result - error:', pdfError, 'hasData:', !!pdfData);
+    console.log('[RIOHS-EMAIL] PDF download - error:', pdfError, 'hasData:', !!pdfData);
 
     if (pdfError || !pdfData) {
-      console.error('[RIOHS-EMAIL] PDF download error from storage:', pdfError);
       return NextResponse.json({
         success: false,
-        error: `No se pudo obtener el archivo RIOHS (${pdfFileName}) desde el almacenamiento. Contacte al administrador.`,
+        error: `No se pudo obtener el archivo RIOHS (${pdfFileName}) desde el almacenamiento.`,
       }, { status: 500 });
     }
 
@@ -89,7 +90,7 @@ export async function POST(req: NextRequest) {
         <meta charset="utf-8">
         <style>
           body { font-family: Arial, sans-serif; color: #1e293b; background-color: #f8fafc; margin: 0; padding: 20px; }
-          .card { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 30px; shadow: 0 4px 6px rgba(0,0,0,0.05); }
+          .card { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 30px; }
           .header { text-align: center; border-bottom: 2px solid #ea580c; padding-bottom: 15px; margin-bottom: 20px; }
           .header h2 { color: #1a365d; margin: 0; font-size: 20px; text-transform: uppercase; }
           .header p { color: #64748b; margin: 4px 0 0 0; font-size: 12px; font-weight: bold; }
@@ -130,25 +131,11 @@ export async function POST(req: NextRequest) {
       </html>
     `;
 
-    // Nodemailer transporter setup — port 587 STARTTLS for external relay
-    const transporter = nodemailer.createTransport({
-      host: 'mail.minerquim.cl',
-      port: 587,
-      secure: false,
-      auth: {
-        user: 'no-reply@minerquim.cl',
-        pass: 'Empresa_1000',
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-      connectionTimeout: 15000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-    });
+    // Send email via Resend API
+    const fromAddress = process.env.RESEND_FROM_EMAIL || 'Prevención de Riesgos <onboarding@resend.dev>';
 
-    const info = await transporter.sendMail({
-      from: '"Prevención de Riesgos - Grupo Minerquim" <no-reply@minerquim.cl>',
+    const { data: emailResult, error: emailError } = await resend.emails.send({
+      from: fromAddress,
       to: worker.email,
       subject: `Entrega de Reglamento Interno de Orden, Higiene y Seguridad - ${companyName}`,
       html: emailHtml,
@@ -156,12 +143,19 @@ export async function POST(req: NextRequest) {
         {
           filename: pdfFileName,
           content: pdfBuffer,
-          contentType: 'application/pdf',
         },
       ],
     });
 
-    console.log('RIOHS email sent successfully:', info.messageId);
+    if (emailError) {
+      console.error('[RIOHS-EMAIL] Resend error:', emailError);
+      return NextResponse.json({
+        success: false,
+        error: `Error al enviar correo: ${emailError.message}`,
+      }, { status: 500 });
+    }
+
+    console.log('[RIOHS-EMAIL] Email sent successfully via Resend:', emailResult?.id);
 
     // Record RIOHS status update in Database
     let effectiveCompanyId = worker.company_id;
@@ -226,7 +220,7 @@ export async function POST(req: NextRequest) {
       message: 'Correo de RIOHS enviado con éxito.',
       sentAt: sentAtDate.toISOString(),
       sentToEmail: worker.email,
-      messageId: info.messageId,
+      messageId: emailResult?.id,
     });
   } catch (error: any) {
     console.error('[RIOHS-EMAIL] CATCH ERROR:', error?.message, error?.stack);
