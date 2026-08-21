@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     `;
 
     // Send email via Resend API
-    const fromAddress = process.env.RESEND_FROM_EMAIL || 'Prevención de Riesgos <onboarding@resend.dev>';
+    const fromAddress = 'Prevención de Riesgos - Grupo Minerquim <no-reply@minerquim.cl>';
 
     const { data: emailResult, error: emailError } = await resend.emails.send({
       from: fromAddress,
