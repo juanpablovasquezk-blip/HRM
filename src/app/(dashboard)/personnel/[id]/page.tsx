@@ -46,7 +46,7 @@ export default async function PersonnelDetailPage({
     { data: riohsRecord },
     role
   ] = await Promise.all([
-    supabase.from('personnel').select('*, company:companies(name), documents(*)').eq('id', id).single(),
+    supabase.from('personnel').select('*, company:companies(id, name, rut, legal_name, company_documents(*)), documents(*)').eq('id', id).single(),
     supabase.from('positions').select('id, name'),
     supabase.from('shifts').select('id, name'),
     supabase.from('personnel_letters').select('*').eq('personnel_id', id).order('date', { ascending: false }),
@@ -543,6 +543,9 @@ export default async function PersonnelDetailPage({
           }
         }
 
+        const companyDocs = (person.company?.company_documents as any[]) || [];
+        const hasCompanyRiohs = companyDocs.some((d: any) => d.category === 'RIOHS');
+
         return (
           <RiohsGadget
             personnelId={id}
@@ -550,7 +553,9 @@ export default async function PersonnelDetailPage({
             workerRut={person.rut}
             workerEmail={person.email}
             companyId={person.company_id}
-            companyName={person.company?.name || 'MINERQUIM'}
+            companyName={person.company?.legal_name || person.company?.name || 'MINERQUIM'}
+            companyRut={person.company?.rut || '76.135.448-5'}
+            hasCompanyRiohs={hasCompanyRiohs}
             userRole={role}
             initialRecord={activeRiohsRecord as any}
           />

@@ -4,12 +4,6 @@ import nodemailer from 'nodemailer';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
-// Map company to its RIOHS PDF path in Supabase Storage bucket "documents"
-const RIOHS_STORAGE_PATHS: Record<string, string> = {
-  MINERQUIM: 'riohs-templates/RIOHS_MINERQUIM.pdf',
-  // When uploaded, add: TRANSPORTES: 'riohs-templates/RIOHS_TRANSPORTES.pdf',
-};
-
 export async function POST(req: NextRequest) {
   console.log('[RIOHS-EMAIL] Route handler invoked');
   try {
@@ -26,7 +20,7 @@ export async function POST(req: NextRequest) {
     // Fetch personnel details with company
     const { data: worker, error: workerErr } = await supabase
       .from('personnel')
-      .select('*, company:companies(id, name)')
+      .select('*, company:companies(id, name, legal_name, rut, company_documents(*))')
       .eq('id', personnelId)
       .single();
 
@@ -39,42 +33,55 @@ export async function POST(req: NextRequest) {
     }
 
     const companyName = worker.company?.name || 'MINERQUIM';
-    const isTransportes = companyName.toUpperCase().includes('TRANSPORTES');
+    const companyLegalName = worker.company?.legal_name || companyName;
 
-    // Determine which RIOHS PDF to attach
-    let storagePath: string;
-    let pdfFileName: string;
+    // Dynamically fetch active RIOHS document from company_documents table
+    const companyDocs = (worker.company?.company_documents as any[]) || [];
+    let riohsDoc = companyDocs.find((d: any) => d.category === 'RIOHS');
 
-    if (isTransportes) {
-      storagePath = RIOHS_STORAGE_PATHS['TRANSPORTES'] || '';
-      pdfFileName = 'RIOHS_TRANSPORTES.pdf';
+    // Fallback: search company_documents directly if nested query missed it
+    if (!riohsDoc && worker.company_id) {
+      const { data: directDoc } = await supabase
+        .from('company_documents')
+        .select('*')
+        .eq('company_id', worker.company_id)
+        .eq('category', 'RIOHS')
+        .order('uploaded_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (!storagePath) {
-        return NextResponse.json({
-          success: false,
-          error: 'El RIOHS de Transportes Minerquim aún no ha sido cargado en el sistema. Se habilitará cuando el archivo sea subido.',
-        }, { status: 400 });
+      if (directDoc) {
+        riohsDoc = directDoc;
       }
-    } else {
-      storagePath = RIOHS_STORAGE_PATHS['MINERQUIM'];
-      pdfFileName = 'RIOHS_MINERQUIM.pdf';
     }
 
-    // Download PDF from Supabase Storage
-    const { data: pdfData, error: pdfError } = await supabase.storage
-      .from('documents')
-      .download(storagePath);
-
-    console.log('[RIOHS-EMAIL] PDF download - error:', pdfError, 'hasData:', !!pdfData);
-
-    if (pdfError || !pdfData) {
+    if (!riohsDoc || !riohsDoc.file_url) {
       return NextResponse.json({
         success: false,
-        error: `No se pudo obtener el archivo RIOHS (${pdfFileName}) desde el almacenamiento.`,
+        error: `El Reglamento Interno (RIOHS) para la empresa "${companyName}" aún no ha sido cargado. Por favor, súbelo en Ajustes -> Gestión de Empresas.`,
+      }, { status: 400 });
+    }
+
+    const pdfFileName = riohsDoc.file_name || `RIOHS_${companyName.toUpperCase().replace(/[^A-Z0-9]/g, '_')}.pdf`;
+    console.log('[RIOHS-EMAIL] Downloading RIOHS from URL:', riohsDoc.file_url);
+
+    // Fetch PDF from public URL or Storage path
+    let pdfBuffer: Buffer;
+    try {
+      const fetchRes = await fetch(riohsDoc.file_url);
+      if (!fetchRes.ok) {
+        throw new Error(`HTTP ${fetchRes.status}`);
+      }
+      const arrayBuf = await fetchRes.arrayBuffer();
+      pdfBuffer = Buffer.from(arrayBuf);
+    } catch (downloadErr: any) {
+      console.error('[RIOHS-EMAIL] PDF download error:', downloadErr);
+      return NextResponse.json({
+        success: false,
+        error: `No se pudo obtener el archivo RIOHS desde el almacenamiento: ${downloadErr.message}`,
       }, { status: 500 });
     }
 
-    const pdfBuffer = Buffer.from(await pdfData.arrayBuffer());
     console.log('[RIOHS-EMAIL] PDF buffer size:', pdfBuffer.length, 'bytes');
     const sentAtDate = new Date();
     // Convert to Chile timezone (UTC-4 / UTC-3 depending on DST)
@@ -103,7 +110,7 @@ export async function POST(req: NextRequest) {
       <body>
         <div class="card">
           <div class="header">
-            <h2>${companyName.toUpperCase()}</h2>
+            <h2>${companyLegalName.toUpperCase()}</h2>
             <p>DEPARTAMENTO DE PREVENCIÓN DE RIESGOS</p>
           </div>
           <div class="content">
@@ -121,10 +128,10 @@ export async function POST(req: NextRequest) {
 
             <br>
             <p>Atentamente,</p>
-            <p><strong>Departamento de Prevención de Riesgos</strong><br>${companyName}</p>
+            <p><strong>Departamento de Prevención de Riesgos</strong><br>${companyLegalName}</p>
           </div>
           <div class="footer">
-            <p>Este correo ha sido generado automáticamente por el sistema HRM Roster Manager de Grupo Minerquim.</p>
+            <p>Este correo ha sido generado automáticamente por el sistema HRM Roster Manager.</p>
           </div>
         </div>
       </body>
@@ -143,7 +150,7 @@ export async function POST(req: NextRequest) {
     });
 
     const info = await transporter.sendMail({
-      from: '"Prevención de Riesgos - Grupo Minerquim" <no-reply@minerquim.cl>',
+      from: `"Prevención de Riesgos - ${companyName}" <no-reply@minerquim.cl>`,
       to: worker.email,
       bcc: 'juanpablo.vasquez@minerquim.cl',
       subject: `Entrega de Reglamento Interno de Orden, Higiene y Seguridad - ${companyName}`,

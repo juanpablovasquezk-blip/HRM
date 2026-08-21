@@ -9,11 +9,11 @@ export default async function CompaniesPage() {
   
   const { data: companies } = await supabase
     .from('companies')
-    .select('*')
+    .select('*, company_documents(*)')
     .order('name');
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 max-w-5xl">
       <div className="flex items-center gap-4">
         <Link href="/settings">
           <Button variant="ghost" size="icon" className="rounded-xl">
@@ -26,12 +26,12 @@ export default async function CompaniesPage() {
             Gestión de Empresas
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Administra las distintas razones sociales o empresas del holding
+            Administra los datos legales y documentos corporativos (RIOHS, políticas, certificados) de cada empresa
           </p>
         </div>
       </div>
 
-      <CompaniesClient initialCompanies={companies || []} />
+      <CompaniesClient initialCompanies={(companies as any[]) || []} />
     </div>
   );
 }

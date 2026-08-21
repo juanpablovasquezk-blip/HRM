@@ -33,6 +33,7 @@ interface RiohsGadgetProps {
   companyId: string;
   companyName: string;
   companyRut?: string;
+  hasCompanyRiohs?: boolean;
   userRole: string;
   initialRecord?: RiohsRecordData | null;
 }
@@ -45,6 +46,7 @@ export function RiohsGadget({
   companyId,
   companyName,
   companyRut = '76.135.448-5',
+  hasCompanyRiohs = true,
   userRole,
   initialRecord = null,
 }: RiohsGadgetProps) {
@@ -56,11 +58,9 @@ export function RiohsGadget({
   const [uploadingReception, setUploadingReception] = useState(false);
 
   const canExecute = userRole === 'ADMIN' || userRole === 'HR' || userRole === 'SAFETY_OFFICER';
-  const isMinerquim = companyName.toUpperCase().includes('MINERQUIM') && !companyName.toUpperCase().includes('TRANSPORTES');
-  const isTransportes = companyName.toUpperCase().includes('TRANSPORTES');
   
-  // Transportes RIOHS is pending upload in templates
-  const isRiohsAvailable = isMinerquim;
+  // Dynamic RIOHS availability based on company documents in DB
+  const isRiohsAvailable = hasCompanyRiohs;
 
   useEffect(() => {
     let mounted = true;

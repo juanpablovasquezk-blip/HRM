@@ -18,6 +18,26 @@ export type RecalcReason = 'sick_leave' | 'manual' | 'optimization';
 export interface Company {
   id: string;
   name: string;
+  legal_name?: string | null;
+  rut?: string | null;
+  giro?: string | null;
+  address?: string | null;
+  city?: string | null;
+  region?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  legal_representative?: string | null;
+  created_at: string;
+}
+
+export interface CompanyDocument {
+  id: string;
+  company_id: string;
+  category: 'RIOHS' | 'POLITICA' | 'CERTIFICADO' | 'GENERAL' | string;
+  title: string;
+  file_url: string;
+  file_name: string;
+  uploaded_at: string;
   created_at: string;
 }
 
