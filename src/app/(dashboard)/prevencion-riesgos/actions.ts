@@ -56,8 +56,7 @@ export async function getRiohsDashboardData(): Promise<{ success: boolean; data?
           email,
           company_id,
           main_position,
-          company:companies!personnel_company_id_fkey(id, name, rut),
-          position:positions!personnel_main_position_fkey(id, name)
+          company:companies!personnel_company_id_fkey(id, name, rut)
         `)
         .eq('is_active', true)
         .or('onboarding_status.is.null,onboarding_status.eq.approved')
@@ -80,6 +79,8 @@ export async function getRiohsDashboardData(): Promise<{ success: boolean; data?
     ]);
 
     if (pErr) throw pErr;
+
+    const positionMap = Object.fromEntries((positions || []).map((p: any) => [p.id, p.name]));
 
     const riohsMap = new Map<string, any>();
     if (riohsRecords) {
@@ -115,7 +116,6 @@ export async function getRiohsDashboardData(): Promise<{ success: boolean; data?
 
     const workers: RiohsDashboardWorker[] = (personnel || []).map((w: any) => {
       const comp = w.company || {};
-      const pos = w.position || {};
       const rec = riohsMap.get(w.id);
       const fallback = fallbackMap.get(w.id);
 
@@ -134,7 +134,7 @@ export async function getRiohsDashboardData(): Promise<{ success: boolean; data?
         company_name: comp.name || 'Sin Empresa',
         company_rut: comp.rut || '76.135.448-5',
         position_id: w.main_position || '',
-        position_name: pos.name || 'Sin Cargo',
+        position_name: positionMap[w.main_position] || 'Sin Cargo',
         riohs_status: status,
         auth_generated_at: rec?.auth_generated_at || fallback?.auth_generated_at || null,
         auth_signed_file_url: rec?.auth_signed_file_url || fallback?.auth_signed_file_url || null,
