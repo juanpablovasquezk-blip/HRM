@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   LogOut,
   Shirt,
+  ShieldCheck,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -41,6 +42,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: 'Panel Principal', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Personal', href: '/personnel', icon: Users, requiredPermission: 'viewPersonnel' },
+  { label: 'Prevención de Riesgos', href: '/prevencion-riesgos', icon: ShieldCheck, requiredPermission: 'viewPersonnel' },
   { label: 'Documentos', href: '/documents', icon: FileText, requiredPermission: 'manageDocuments' },
   { label: 'Turnos', href: '/shifts', icon: CalendarDays, requiredPermission: 'viewShifts' },
   { label: 'Roster (Plan)', href: '/shifts/roster', icon: Grid3X3, requiredPermission: 'viewShifts' },
@@ -65,7 +67,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
     // Specific filtering for Safety Officer role (Prevención de Riesgos)
     if (role === 'SAFETY_OFFICER') {
-      const allowedLabels = ['Panel Principal', 'Personal', 'EPP y Uniformes'];
+      const allowedLabels = ['Panel Principal', 'Personal', 'Prevención de Riesgos', 'EPP y Uniformes'];
       if (!allowedLabels.includes(item.label)) return false;
     }
 
