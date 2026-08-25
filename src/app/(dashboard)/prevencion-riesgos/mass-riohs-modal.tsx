@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Download, ShieldCheck, Filter, Loader2, CheckCircle2, AlertCircle, User } from 'lucide-react';
+import { Download, ShieldCheck, Filter, Loader2, User } from 'lucide-react';
 import { toast } from 'sonner';
 import { generateAuthorizationPDF } from '@/lib/riohs/generate-authorization-pdf';
 import { markBatchAuthGenerated, RiohsDashboardWorker } from './actions';
@@ -25,6 +25,10 @@ interface MassRiohsModalProps {
   companies: { id: string; name: string; rut?: string }[];
   positions: { id: string; name: string }[];
   canExecute: boolean;
+  initialCompanyId?: string;
+  initialPositionId?: string;
+  preSelectedIds?: Set<string>;
+  customTrigger?: React.ReactElement;
   onSuccess?: () => void;
 }
 
@@ -33,15 +37,27 @@ export function MassRiohsModal({
   companies,
   positions,
   canExecute,
+  initialCompanyId = '',
+  initialPositionId = '',
+  preSelectedIds,
+  customTrigger,
   onSuccess,
 }: MassRiohsModalProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
-  const [selectedPositionId, setSelectedPositionId] = useState<string>('');
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(initialCompanyId);
+  const [selectedPositionId, setSelectedPositionId] = useState<string>(initialPositionId);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+
+  // Sync initial filters when modal opens
+  useEffect(() => {
+    if (open) {
+      setSelectedCompanyId(initialCompanyId);
+      setSelectedPositionId(initialPositionId);
+    }
+  }, [open, initialCompanyId, initialPositionId]);
 
   // Filtered workers inside modal
   const filteredWorkers = workers.filter((w) => {
@@ -55,10 +71,20 @@ export function MassRiohsModal({
     (w) => w.riohs_status === 'PENDING' || w.riohs_status === 'AUTH_GENERATED'
   );
 
-  // Initialize selection when filters or modal open state change
+  // Initialize selection when filters change or modal opens
   useEffect(() => {
     if (open) {
-      setSelectedIds(new Set(eligibleWorkers.map((w) => w.id)));
+      if (preSelectedIds && preSelectedIds.size > 0) {
+        // Intersect preSelectedIds with eligibleWorkers
+        const eligibleSet = new Set(eligibleWorkers.map((w) => w.id));
+        const validSelections = new Set<string>();
+        preSelectedIds.forEach((id) => {
+          if (eligibleSet.has(id)) validSelections.add(id);
+        });
+        setSelectedIds(validSelections.size > 0 ? validSelections : new Set(eligibleWorkers.map((w) => w.id)));
+      } else {
+        setSelectedIds(new Set(eligibleWorkers.map((w) => w.id)));
+      }
     }
   }, [open, selectedCompanyId, selectedPositionId]);
 
@@ -109,7 +135,7 @@ export function MassRiohsModal({
         successCount++;
         setProgress({ current: i + 1, total: selectedWorkersList.length });
 
-        // Small delay to prevent browser locking up during multi-download
+        // Delay to prevent browser download block
         await new Promise((resolve) => setTimeout(resolve, 300));
       } catch (err) {
         console.error(`Error generating PDF for ${worker.fullName}:`, err);
@@ -131,17 +157,19 @@ export function MassRiohsModal({
     router.refresh();
   };
 
+  const triggerElement = customTrigger || (
+    <Button
+      disabled={!canExecute}
+      className="bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800 text-white font-semibold shadow-md gap-2 rounded-xl"
+    >
+      <Download className="h-4 w-4" />
+      Generar Autorizaciones Masivas
+    </Button>
+  );
+
   return (
     <Dialog open={open} onOpenChange={(val) => !generating && setOpen(val)}>
-      <DialogTrigger render={
-        <Button
-          disabled={!canExecute}
-          className="bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800 text-white font-semibold shadow-md gap-2 rounded-xl"
-        >
-          <Download className="h-4 w-4" />
-          Generar Autorizaciones Masivas
-        </Button>
-      } />
+      <DialogTrigger render={triggerElement} />
 
       <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto rounded-3xl border-slate-200">
         <DialogHeader>

@@ -2,22 +2,22 @@
 
 import { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   ShieldCheck,
   Search,
-  Filter,
   CheckCircle2,
   Clock,
   AlertCircle,
-  ExternalLink,
   ChevronRight,
-  RefreshCw,
   X,
   FileText,
+  Download,
+  CheckSquare,
 } from 'lucide-react';
 import { MassRiohsModal } from './mass-riohs-modal';
 import { RiohsDashboardWorker } from './actions';
@@ -40,6 +40,9 @@ export function PrevencionRiesgosClient({
   const [positionId, setPositionId] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'COMPLETED' | 'IN_PROGRESS' | 'PENDING'>('all');
   const [stepFilter, setStepFilter] = useState<'all' | 'AUTH_GENERATED' | 'AUTH_UPLOADED' | 'RIOHS_SENT'>('all');
+
+  // Selected workers state
+  const [selectedWorkerIds, setSelectedWorkerIds] = useState<Set<string>>(new Set());
 
   // Summary Metrics
   const totalCount = initialWorkers.length;
@@ -85,6 +88,36 @@ export function PrevencionRiesgosClient({
     });
   }, [initialWorkers, companyId, positionId, search, statusFilter, stepFilter]);
 
+  // Eligible workers among current filtered
+  const visibleEligibleWorkers = filteredWorkers.filter(
+    (w) => w.riohs_status === 'PENDING' || w.riohs_status === 'AUTH_GENERATED'
+  );
+
+  const isAllVisibleEligibleSelected =
+    visibleEligibleWorkers.length > 0 &&
+    visibleEligibleWorkers.every((w) => selectedWorkerIds.has(w.id));
+
+  const toggleSelectAllVisibleEligible = () => {
+    const next = new Set(selectedWorkerIds);
+    if (isAllVisibleEligibleSelected) {
+      visibleEligibleWorkers.forEach((w) => next.delete(w.id));
+    } else {
+      visibleEligibleWorkers.forEach((w) => next.add(w.id));
+    }
+    setSelectedWorkerIds(next);
+  };
+
+  const toggleWorkerSelection = (id: string) => {
+    const next = new Set(selectedWorkerIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedWorkerIds(next);
+  };
+
+  const clearSelection = () => {
+    setSelectedWorkerIds(new Set());
+  };
+
   const clearFilters = () => {
     setSearch('');
     setCompanyId('');
@@ -117,6 +150,9 @@ export function PrevencionRiesgosClient({
             companies={companies}
             positions={positions}
             canExecute={canExecute}
+            initialCompanyId={companyId}
+            initialPositionId={positionId}
+            preSelectedIds={selectedWorkerIds}
           />
         </div>
       </div>
@@ -126,7 +162,7 @@ export function PrevencionRiesgosClient({
         <Card className="border-slate-200/80 dark:border-slate-800 shadow-xs bg-white dark:bg-slate-900">
           <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Personal Active</p>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Personal Activo</p>
               <h3 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mt-1">{totalCount}</h3>
               <p className="text-[11px] text-slate-400 mt-0.5">Trabajadores registrados</p>
             </div>
@@ -274,12 +310,13 @@ export function PrevencionRiesgosClient({
             </div>
           </div>
 
-          {hasActiveFilters && (
-            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-              <span className="text-slate-500">
-                Mostrando <strong className="text-slate-800 dark:text-slate-200">{filteredWorkers.length}</strong> de{' '}
-                {totalCount} trabajadores
-              </span>
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+            <span className="text-slate-500">
+              Mostrando <strong className="text-slate-800 dark:text-slate-200">{filteredWorkers.length}</strong> de{' '}
+              {totalCount} trabajadores
+            </span>
+
+            {hasActiveFilters && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -289,10 +326,47 @@ export function PrevencionRiesgosClient({
                 <X className="h-3.5 w-3.5" />
                 Limpiar Filtros
               </Button>
-            </div>
-          )}
+            )}
+          </div>
         </CardContent>
       </Card>
+
+      {/* Floating Selection Bar */}
+      {selectedWorkerIds.size > 0 && (
+        <div className="p-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-2xl shadow-lg flex items-center justify-between animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="flex items-center gap-2 text-xs font-bold pl-2">
+            <CheckSquare className="h-4 w-4" />
+            {selectedWorkerIds.size} trabajador(es) seleccionado(s)
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearSelection}
+              className="text-white/80 hover:text-white hover:bg-orange-600 text-xs h-8"
+            >
+              Desmarcar todos
+            </Button>
+
+            <MassRiohsModal
+              workers={initialWorkers}
+              companies={companies}
+              positions={positions}
+              canExecute={canExecute}
+              initialCompanyId={companyId}
+              initialPositionId={positionId}
+              preSelectedIds={selectedWorkerIds}
+              customTrigger={
+                <Button size="sm" className="bg-white text-orange-700 hover:bg-orange-50 font-bold text-xs shadow-xs h-8 gap-1.5 rounded-xl">
+                  <Download className="h-3.5 w-3.5" />
+                  Generar Autorizaciones ({selectedWorkerIds.size})
+                </Button>
+              }
+            />
+          </div>
+        </div>
+      )}
 
       {/* Main Personnel RIOHS Table */}
       <Card className="border-slate-200/60 dark:border-slate-800 shadow-xs overflow-hidden">
@@ -301,6 +375,14 @@ export function PrevencionRiesgosClient({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-100/70 dark:bg-slate-900 border-b border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[11px]">
                 <tr>
+                  <th className="py-3 px-3 w-10 text-center">
+                    <Checkbox
+                      checked={isAllVisibleEligibleSelected}
+                      disabled={visibleEligibleWorkers.length === 0}
+                      onCheckedChange={toggleSelectAllVisibleEligible}
+                      className="rounded-md border-slate-300 data-[state=checked]:bg-orange-600 data-[state=checked]:border-orange-600"
+                    />
+                  </th>
                   <th className="py-3 px-4">Trabajador</th>
                   <th className="py-3 px-4">RUT</th>
                   <th className="py-3 px-4">Empresa / Cargo</th>
@@ -312,105 +394,123 @@ export function PrevencionRiesgosClient({
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-normal">
                 {filteredWorkers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-400 italic">
+                    <td colSpan={7} className="py-12 text-center text-slate-400 italic">
                       No se encontraron trabajadores que coincidan con los criterios de búsqueda.
                     </td>
                   </tr>
                 ) : (
-                  filteredWorkers.map((worker) => (
-                    <tr
-                      key={worker.id}
-                      className="hover:bg-slate-50/80 dark:hover:bg-slate-900/50 transition-colors"
-                    >
-                      <td className="py-3 px-4">
-                        <div className="flex flex-col">
-                          <Link
-                            href={`/personnel/${worker.id}`}
-                            className="font-bold text-slate-900 dark:text-slate-100 hover:text-orange-600 dark:hover:text-orange-400 transition-colors"
+                  filteredWorkers.map((worker) => {
+                    const isEligible = worker.riohs_status === 'PENDING' || worker.riohs_status === 'AUTH_GENERATED';
+                    const isChecked = selectedWorkerIds.has(worker.id);
+
+                    return (
+                      <tr
+                        key={worker.id}
+                        className={`transition-colors ${
+                          isChecked
+                            ? 'bg-orange-50/60 dark:bg-orange-950/20'
+                            : 'hover:bg-slate-50/80 dark:hover:bg-slate-900/50'
+                        }`}
+                      >
+                        <td className="py-3 px-3 text-center">
+                          <Checkbox
+                            checked={isChecked}
+                            disabled={!isEligible}
+                            onCheckedChange={() => isEligible && toggleWorkerSelection(worker.id)}
+                            className="rounded-md border-slate-300 data-[state=checked]:bg-orange-600 data-[state=checked]:border-orange-600"
+                          />
+                        </td>
+
+                        <td className="py-3 px-4">
+                          <div className="flex flex-col">
+                            <Link
+                              href={`/personnel/${worker.id}`}
+                              className="font-bold text-slate-900 dark:text-slate-100 hover:text-orange-600 dark:hover:text-orange-400 transition-colors"
+                            >
+                              {worker.fullName}
+                            </Link>
+                            <span className="text-[11px] text-slate-400">{worker.email || 'Sin correo electrónico'}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-4 font-mono font-medium text-slate-700 dark:text-slate-300">
+                          {worker.rut}
+                        </td>
+
+                        <td className="py-3 px-4">
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">{worker.company_name}</span>
+                            <span className="text-[11px] text-slate-500">{worker.position_name}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-4">
+                          <Badge
+                            className={
+                              worker.riohs_status === 'COMPLETED'
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-300'
+                                : worker.riohs_status === 'RIOHS_SENT'
+                                ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border-purple-300'
+                                : worker.riohs_status === 'AUTH_UPLOADED'
+                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border-blue-300'
+                                : worker.riohs_status === 'AUTH_GENERATED'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300'
+                                : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300'
+                            }
                           >
-                            {worker.fullName}
+                            {worker.riohs_status === 'COMPLETED' && '✅ Completado'}
+                            {worker.riohs_status === 'RIOHS_SENT' && '✉️ RIOHS Enviado'}
+                            {worker.riohs_status === 'AUTH_UPLOADED' && '📄 Auth Firmada'}
+                            {worker.riohs_status === 'AUTH_GENERATED' && '⏳ Auth Generada'}
+                            {worker.riohs_status === 'PENDING' && '⚪ No Iniciado'}
+                          </Badge>
+                        </td>
+
+                        <td className="py-3 px-4">
+                          <div className="text-xs text-slate-600 dark:text-slate-400">
+                            {worker.riohs_status === 'COMPLETED' && (
+                              <span className="text-emerald-700 dark:text-emerald-400 font-medium">
+                                Reglamento Entregado y Recepción Firmada
+                              </span>
+                            )}
+                            {worker.riohs_status === 'RIOHS_SENT' && (
+                              <span className="text-purple-700 dark:text-purple-400 font-medium">
+                                Esperando firma de Comprobante de Recepción (Paso 4)
+                              </span>
+                            )}
+                            {worker.riohs_status === 'AUTH_UPLOADED' && (
+                              <span className="text-blue-700 dark:text-blue-400 font-medium">
+                                Autorización firmada subida. Listo para enviar email (Paso 3)
+                              </span>
+                            )}
+                            {worker.riohs_status === 'AUTH_GENERATED' && (
+                              <span className="text-amber-700 dark:text-amber-400 font-medium">
+                                PDF Autorización generado. Esperando firma física (Paso 2)
+                              </span>
+                            )}
+                            {worker.riohs_status === 'PENDING' && (
+                              <span className="text-slate-400 italic">
+                                Pendiente de iniciar Paso 1
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-4 text-right">
+                          <Link href={`/personnel/${worker.id}`}>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 text-xs font-semibold text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/30 gap-1 rounded-lg"
+                            >
+                              Gestionar
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            </Button>
                           </Link>
-                          <span className="text-[11px] text-slate-400">{worker.email || 'Sin correo electrónico'}</span>
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-4 font-mono font-medium text-slate-700 dark:text-slate-300">
-                        {worker.rut}
-                      </td>
-
-                      <td className="py-3 px-4">
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-slate-800 dark:text-slate-200">{worker.company_name}</span>
-                          <span className="text-[11px] text-slate-500">{worker.position_name}</span>
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-4">
-                        <Badge
-                          className={
-                            worker.riohs_status === 'COMPLETED'
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-300'
-                              : worker.riohs_status === 'RIOHS_SENT'
-                              ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border-purple-300'
-                              : worker.riohs_status === 'AUTH_UPLOADED'
-                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border-blue-300'
-                              : worker.riohs_status === 'AUTH_GENERATED'
-                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300'
-                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300'
-                          }
-                        >
-                          {worker.riohs_status === 'COMPLETED' && '✅ Completado'}
-                          {worker.riohs_status === 'RIOHS_SENT' && '✉️ RIOHS Enviado'}
-                          {worker.riohs_status === 'AUTH_UPLOADED' && '📄 Auth Firmada'}
-                          {worker.riohs_status === 'AUTH_GENERATED' && '⏳ Auth Generada'}
-                          {worker.riohs_status === 'PENDING' && '⚪ No Iniciado'}
-                        </Badge>
-                      </td>
-
-                      <td className="py-3 px-4">
-                        <div className="text-xs text-slate-600 dark:text-slate-400">
-                          {worker.riohs_status === 'COMPLETED' && (
-                            <span className="text-emerald-700 dark:text-emerald-400 font-medium">
-                              Reglamento Entregado y Recepción Firmada
-                            </span>
-                          )}
-                          {worker.riohs_status === 'RIOHS_SENT' && (
-                            <span className="text-purple-700 dark:text-purple-400 font-medium">
-                              Esperando firma de Comprobante de Recepción (Paso 4)
-                            </span>
-                          )}
-                          {worker.riohs_status === 'AUTH_UPLOADED' && (
-                            <span className="text-blue-700 dark:text-blue-400 font-medium">
-                              Autorización firmada subida. Listo para enviar email (Paso 3)
-                            </span>
-                          )}
-                          {worker.riohs_status === 'AUTH_GENERATED' && (
-                            <span className="text-amber-700 dark:text-amber-400 font-medium">
-                              PDF Autorización generado. Esperando firma física (Paso 2)
-                            </span>
-                          )}
-                          {worker.riohs_status === 'PENDING' && (
-                            <span className="text-slate-400 italic">
-                              Pendiente de iniciar Paso 1
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-4 text-right">
-                        <Link href={`/personnel/${worker.id}`}>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 text-xs font-semibold text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/30 gap-1 rounded-lg"
-                          >
-                            Gestionar
-                            <ChevronRight className="h-3.5 w-3.5" />
-                          </Button>
-                        </Link>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
