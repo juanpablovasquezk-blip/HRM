@@ -57,6 +57,18 @@ function printStyledParagraph(
   return currentY;
 }
 
+export function formatReceptionFileName(workerName: string): string {
+  const cleanName = workerName
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9\s]/g, "")
+    .replace(/\s+/g, '_');
+
+  return `RECEPCION_RIOHS_${cleanName}.pdf`;
+}
+
 export async function generateReceptionPDF(params: ReceptionPDFParams) {
   const { workerName, workerRut, companyName, companyRut } = params;
 
@@ -194,6 +206,6 @@ export async function generateReceptionPDF(params: ReceptionPDFParams) {
   doc.text('Fecha:    ______/______ /________/', margin, currentY);
 
   // Download trigger
-  const fileName = `RECEPCION_RIOHS_${cleanRut.replace(/[^0-9kK]/g, '')}.pdf`;
+  const fileName = formatReceptionFileName(workerName);
   doc.save(fileName);
 }
