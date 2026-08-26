@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { format, parseISO, addDays, subDays } from 'date-fns';
+
 import { es } from 'date-fns/locale';
 import { 
   Calendar, 
@@ -78,6 +79,26 @@ export default function DailyPlanningClient({
   const [editShiftId, setEditShiftId] = useState<string>('');
   const [editPositionId, setEditPositionId] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const availableWorkerPositions = useMemo(() => {
+    if (!editingAssignment?.personnel) return positions;
+    const p = editingAssignment.personnel;
+    const allowedIds = new Set<string>();
+    
+    if (p.main_position) allowedIds.add(p.main_position);
+    if (Array.isArray(p.secondary_positions)) {
+      p.secondary_positions.forEach(id => allowedIds.add(id));
+    }
+    if (editingAssignment.position_id) {
+      allowedIds.add(editingAssignment.position_id);
+    }
+
+    if (allowedIds.size === 0) return positions;
+
+    const filtered = positions.filter(pos => allowedIds.has(pos.id));
+    return filtered.length > 0 ? filtered : positions;
+  }, [editingAssignment, positions]);
+
 
   const handleOpenEdit = (assignment: ShiftAssignmentWithDetails) => {
     if (readOnly) return;
@@ -1159,7 +1180,7 @@ export default function DailyPlanningClient({
                   value={editPositionId}
                   onChange={(e) => setEditPositionId(e.target.value)}
                 >
-                  {positions.map((p) => {
+                  {availableWorkerPositions.map((p) => {
                     const area = areas.find(a => a.id === p.area_id);
                     return (
                       <option key={p.id} value={p.id}>
