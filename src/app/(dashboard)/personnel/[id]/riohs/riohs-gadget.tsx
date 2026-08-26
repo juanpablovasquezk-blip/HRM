@@ -36,6 +36,8 @@ interface RiohsGadgetProps {
   hasCompanyRiohs?: boolean;
   userRole: string;
   initialRecord?: RiohsRecordData | null;
+  firstName?: string;
+  lastNameFather?: string;
 }
 
 export function RiohsGadget({
@@ -49,6 +51,8 @@ export function RiohsGadget({
   hasCompanyRiohs = true,
   userRole,
   initialRecord = null,
+  firstName,
+  lastNameFather,
 }: RiohsGadgetProps) {
   const router = useRouter();
   const [record, setRecord] = useState<RiohsRecordData | null>(initialRecord);
@@ -189,6 +193,8 @@ export function RiohsGadget({
             companyRut: companyRut || '76.135.448-5',
             sentAt: nowIso,
             workerEmail,
+            firstName,
+            lastNameFather,
           });
         } catch (pdfErr) {
           console.error('Error generating reception PDF:', pdfErr);
@@ -242,6 +248,8 @@ export function RiohsGadget({
       companyRut: companyRut || '76.135.448-5',
       sentAt: record?.riohs_sent_at || new Date(),
       workerEmail: record?.riohs_sent_to_email || workerEmail || undefined,
+      firstName,
+      lastNameFather,
     });
   };
 

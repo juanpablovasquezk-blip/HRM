@@ -552,6 +552,8 @@ export default async function PersonnelDetailPage({
           <RiohsGadget
             personnelId={id}
             workerName={`${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`}
+            firstName={person.first_name}
+            lastNameFather={person.last_name_father}
             workerRut={person.rut}
             workerEmail={person.email}
             companyId={person.company_id}

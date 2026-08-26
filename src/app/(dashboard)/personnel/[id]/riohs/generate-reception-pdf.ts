@@ -9,6 +9,8 @@ interface ReceptionPDFParams {
   companyRut: string;
   sentAt?: string | Date | null;
   workerEmail?: string;
+  firstName?: string;
+  lastNameFather?: string;
 }
 
 interface TextChunk {
@@ -57,9 +59,40 @@ function printStyledParagraph(
   return currentY;
 }
 
-export function formatReceptionFileName(workerName: string): string {
-  const cleanName = workerName
-    .trim()
+export function formatReceptionFileName(
+  workerName: string,
+  firstName?: string,
+  lastNameFather?: string
+): string {
+  let first: string = '';
+  let last: string = '';
+
+  if (firstName && lastNameFather) {
+    first = firstName.trim().split(/\s+/)[0] || '';
+    last = lastNameFather.trim().split(/\s+/)[0] || '';
+  } else {
+    const parts = workerName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 4) {
+      // e.g. "JUAN PABLO VASQUEZ KAUSEL" -> primer nombre "JUAN", primer apellido "VASQUEZ"
+      first = parts[0];
+      last = parts[parts.length - 2];
+    } else if (parts.length === 3) {
+      // e.g. "JUAN VASQUEZ KAUSEL" -> primer nombre "JUAN", primer apellido "VASQUEZ"
+      first = parts[0];
+      last = parts[1];
+    } else if (parts.length === 2) {
+      // e.g. "JUAN VASQUEZ"
+      first = parts[0];
+      last = parts[1];
+    } else {
+      first = parts[0] || '';
+      last = parts[1] || '';
+    }
+  }
+
+  const rawString = `${first} ${last}`.trim() || workerName.trim();
+
+  const cleanName = rawString
     .toUpperCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -206,6 +239,6 @@ export async function generateReceptionPDF(params: ReceptionPDFParams) {
   doc.text('Fecha:    ______/______ /________/', margin, currentY);
 
   // Download trigger
-  const fileName = formatReceptionFileName(workerName);
+  const fileName = formatReceptionFileName(workerName, params.firstName, params.lastNameFather);
   doc.save(fileName);
 }
