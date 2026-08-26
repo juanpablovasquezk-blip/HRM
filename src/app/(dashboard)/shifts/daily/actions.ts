@@ -23,6 +23,56 @@ export async function updateAssignmentShift(assignmentId: string, shiftId: strin
   return { success: true };
 }
 
+export async function updateAssignmentDetails(
+  assignmentId: string,
+  shiftId: string,
+  positionId: string,
+  areaId: string
+) {
+  const supabase = createAdminClient();
+
+  // Fetch existing assignment for audit log
+  const { data: existing } = await supabase
+    .from('shift_assignments')
+    .select('id, personnel_id, date, shift_id, is_published')
+    .eq('id', assignmentId)
+    .single();
+
+  if (existing && existing.shift_id !== shiftId) {
+    try {
+      await supabase.from('roster_audit_logs').insert({
+        assignment_id: existing.id,
+        personnel_id: existing.personnel_id,
+        date: existing.date,
+        previous_shift_id: existing.shift_id,
+        new_shift_id: shiftId,
+        was_published: existing.is_published === true,
+        reason: 'Cambio rápido desde planificación diaria',
+      });
+    } catch (auditErr) {
+      console.warn('[updateAssignmentDetails] Error inserting audit log:', auditErr);
+    }
+  }
+
+  const { error } = await supabase
+    .from('shift_assignments')
+    .update({ 
+      shift_id: shiftId,
+      position_id: positionId,
+      area_id: areaId,
+      is_manual: true,
+      is_validated: true,
+      is_published: true
+    })
+    .eq('id', assignmentId);
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath('/shifts/daily');
+  revalidatePath('/shifts/roster');
+  return { success: true };
+}
+
+
 /**
  * Fetch all data for the daily operational view
  */

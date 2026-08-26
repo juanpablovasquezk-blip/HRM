@@ -32,9 +32,19 @@ import type {
   Shift 
 } from '@/types/database';
 import { deleteAssignment, deleteRequirement } from '../actions';
-import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, resetDailyPlan, updateAssignmentShift, swapAssignments } from './actions';
+import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, resetDailyPlan, updateAssignmentShift, updateAssignmentDetails } from './actions';
 import { sendDailyPlanScreenshotAction } from './publish-actions';
 import { RotateCcw, Mail, Copy, Camera } from 'lucide-react';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogFooter,
+  DialogDescription
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 
 interface Props {
   initialAssignments: ShiftAssignmentWithDetails[];
@@ -63,112 +73,68 @@ export default function DailyPlanningClient({
   const [isConfirmed, setIsConfirmed] = useState(initialAssignments.some(a => a.is_confirmed));
   const [isConfirming, setIsConfirming] = useState(false);
   
-  const [draggedAssignment, setDraggedAssignment] = useState<ShiftAssignmentWithDetails | null>(null);
-  const [dragOverAssignmentId, setDragOverAssignmentId] = useState<string | null>(null);
+  // State for quick edit modal
+  const [editingAssignment, setEditingAssignment] = useState<ShiftAssignmentWithDetails | null>(null);
+  const [editShiftId, setEditShiftId] = useState<string>('');
+  const [editPositionId, setEditPositionId] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  const handleDragStart = (e: React.DragEvent, assignment: ShiftAssignmentWithDetails) => {
+  const handleOpenEdit = (assignment: ShiftAssignmentWithDetails) => {
     if (readOnly) return;
-    e.dataTransfer.setData('text/plain', assignment.id);
-    setDraggedAssignment(assignment);
+    setEditingAssignment(assignment);
+    setEditShiftId(assignment.shift_id);
+    setEditPositionId(assignment.position_id);
   };
 
-  const handleDragEnd = () => {
-    setDraggedAssignment(null);
-    setDragOverAssignmentId(null);
-  };
-
-  const canSwap = (a: ShiftAssignmentWithDetails, b: ShiftAssignmentWithDetails) => {
-    if (a.date !== b.date) return false;
-    // Must be the same position (role)
-    if (a.position_id !== b.position_id) return false;
-    // Must share schedule (same shift_id or same start/end times)
-    return a.shift_id === b.shift_id || 
-      (a.shift?.start_time === b.shift?.start_time && a.shift?.end_time === b.shift?.end_time);
-  };
-
-  const handleDragOver = (e: React.DragEvent, target: ShiftAssignmentWithDetails) => {
-    if (draggedAssignment && draggedAssignment.id !== target.id && canSwap(draggedAssignment, target)) {
-      e.preventDefault();
-    }
-  };
-
-  const handleDragEnter = (e: React.DragEvent, target: ShiftAssignmentWithDetails) => {
-    if (draggedAssignment && draggedAssignment.id !== target.id && canSwap(draggedAssignment, target)) {
-      setDragOverAssignmentId(target.id);
-    }
-  };
-
-  const handleDragLeave = () => {
-    setDragOverAssignmentId(null);
-  };
-
-  const handleDrop = async (e: React.DragEvent, target: ShiftAssignmentWithDetails) => {
-    e.preventDefault();
-    if (!draggedAssignment || draggedAssignment.id === target.id || !canSwap(draggedAssignment, target)) {
-      return;
-    }
-
-    const source = draggedAssignment;
-    setDraggedAssignment(null);
-    setDragOverAssignmentId(null);
-
-    const sourceName = formatName(source.personnel);
-    const targetName = formatName(target.personnel);
-
-    const toastId = toast.loading(`Intercambiando a ${sourceName} con ${targetName}...`);
+  const handleSaveEdit = async () => {
+    if (!editingAssignment || !editShiftId || !editPositionId) return;
+    setIsSavingEdit(true);
+    const toastId = toast.loading('Guardando y publicando cambio...');
     try {
-      const res = await swapAssignments(source.id, target.id);
+      const selectedPos = positions.find(p => p.id === editPositionId);
+      const targetAreaId = selectedPos?.area_id || editingAssignment.area_id;
+
+      const res = await updateAssignmentDetails(
+        editingAssignment.id,
+        editShiftId,
+        editPositionId,
+        targetAreaId
+      );
+
       if (res.success) {
-        toast.success(`Intercambio exitoso: ${sourceName} ↔ ${targetName}`, { id: toastId });
+        toast.success('Asignación actualizada y publicada (sin WhatsApp)', { id: toastId });
+        setEditingAssignment(null);
         router.refresh();
       } else {
-        toast.error(`Error al intercambiar: ${res.error}`, { id: toastId });
+        toast.error(`Error: ${res.error}`, { id: toastId });
       }
     } catch (err: any) {
       toast.error(`Error: ${err.message || String(err)}`, { id: toastId });
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
   const getPersonnelStyles = (assignment: ShiftAssignmentWithDetails) => {
     const isExtra = assignment.is_extra;
     const isAbsent = assignment.attendance_status === 'absent';
-    
-    // Read-only styling
-    if (readOnly) {
-      if (isAbsent) {
-        return ' line-through text-red-500 bg-red-50 border border-red-200 px-2 py-0.5 rounded inline-block shadow-sm ';
-      }
-      return isExtra 
-        ? ' bg-rose-100 border border-rose-300 text-rose-950 font-bold px-2 py-0.5 rounded inline-block shadow-sm '
-        : ' inline-block px-2 py-0.5 ';
+
+    let styles = ' inline-block rounded px-2 py-0.5 select-none ';
+
+    if (!readOnly) {
+      styles += ' cursor-pointer hover:underline hover:bg-blue-100/80 text-blue-900 ';
     }
 
-    // Draggable styling
-    const isThisDragged = draggedAssignment?.id === assignment.id;
-    const isDragActive = draggedAssignment !== null;
-    const isValidTarget = isDragActive && !isThisDragged && canSwap(draggedAssignment, assignment);
-    const isHovered = dragOverAssignmentId === assignment.id;
-
-    let styles = ' inline-block transition-all duration-150 cursor-grab active:cursor-grabbing rounded px-2 py-0.5 select-none ';
-
     if (isAbsent) {
-      styles += ' line-through text-red-500 bg-red-50 border border-red-200 hover:bg-red-100 ';
-    } else if (isThisDragged) {
-      styles += ' opacity-30 border border-dashed border-slate-400 bg-slate-100 ';
-    } else if (isHovered && isValidTarget) {
-      styles += ' bg-emerald-100 border-2 border-emerald-500 text-emerald-800 scale-105 font-bold shadow-md z-10 ';
-    } else if (isValidTarget) {
-      styles += ' bg-indigo-50 border-2 border-dashed border-indigo-400 text-indigo-900 animate-pulse ring-2 ring-indigo-200 ring-opacity-40 ';
+      styles += ' line-through text-red-500 bg-red-50 border border-red-200 ';
+    } else if (isExtra) {
+      styles += ' bg-rose-100 border border-rose-300 text-rose-950 font-bold ';
     } else {
-      // Normal state when not dragging or when dragging something else
-      if (isExtra) {
-        styles += ' bg-rose-100 border border-rose-300 text-rose-950 font-bold hover:bg-rose-200/80 hover:border-rose-400 shadow-sm ';
-      } else {
-        styles += ' border border-transparent hover:bg-slate-100 hover:border-slate-200 ';
-      }
+      styles += ' border border-transparent ';
     }
     return styles;
   };
+
   
   // Update local state if date or assignments change
   // Initial redirect ONLY if no date in URL
@@ -791,19 +757,14 @@ export default function DailyPlanningClient({
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
                       <span 
-                        draggable={!readOnly}
-                        onDragStart={(e) => handleDragStart(e, a)}
-                        onDragEnd={handleDragEnd}
-                        onDragOver={(e) => handleDragOver(e, a)}
-                        onDragEnter={(e) => handleDragEnter(e, a)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDrop(e, a)}
+                        onClick={() => handleOpenEdit(a)}
                         className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
+                        title="Pincha para cambiar turno o cargo"
                       >
                         {renderPersonnelName(a)}
                       </span>
                       {!readOnly && (
-                        <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print">
+                        <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print" title="Cancelar asignación">
                           <AlertTriangle className="w-3 h-3" />
                         </button>
                       )}
@@ -828,19 +789,14 @@ export default function DailyPlanningClient({
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
                       <span 
-                        draggable={!readOnly}
-                        onDragStart={(e) => handleDragStart(e, a)}
-                        onDragEnd={handleDragEnd}
-                        onDragOver={(e) => handleDragOver(e, a)}
-                        onDragEnter={(e) => handleDragEnter(e, a)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDrop(e, a)}
+                        onClick={() => handleOpenEdit(a)}
                         className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
+                        title="Pincha para cambiar turno o cargo"
                       >
                         {renderPersonnelName(a)}
                       </span>
                       {!readOnly && (
-                        <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print">
+                        <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print" title="Cancelar asignación">
                           <AlertTriangle className="w-3 h-3" />
                         </button>
                       )}
@@ -867,18 +823,13 @@ export default function DailyPlanningClient({
                     <div key={a.id} className="flex flex-col relative group">
                       <div className="flex items-center gap-1">
                         <span 
-                          draggable={!readOnly}
-                          onDragStart={(e) => handleDragStart(e, a)}
-                          onDragEnd={handleDragEnd}
-                          onDragOver={(e) => handleDragOver(e, a)}
-                          onDragEnter={(e) => handleDragEnter(e, a)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={(e) => handleDrop(e, a)}
+                          onClick={() => handleOpenEdit(a)}
                           className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
+                          title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(a)}
                         </span>
-                        <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print"><AlertTriangle className="w-3 h-3" /></button>
+                        <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print" title="Cancelar asignación"><AlertTriangle className="w-3 h-3" /></button>
                       </div>
                       <span className="text-[7px] text-slate-300 uppercase leading-none">{a.area?.name}</span>
                     </div>
@@ -903,18 +854,13 @@ export default function DailyPlanningClient({
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
                       <span 
-                        draggable={!readOnly}
-                        onDragStart={(e) => handleDragStart(e, a)}
-                        onDragEnd={handleDragEnd}
-                        onDragOver={(e) => handleDragOver(e, a)}
-                        onDragEnter={(e) => handleDragEnter(e, a)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDrop(e, a)}
+                        onClick={() => handleOpenEdit(a)}
                         className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
+                        title="Pincha para cambiar turno o cargo"
                       >
                         {renderPersonnelName(a)}
                       </span>
-                      <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print"><AlertTriangle className="w-3 h-3" /></button>
+                      <button onClick={() => handleDeleteAssignment(a.id)} className="opacity-0 group-hover:opacity-100 text-red-400 p-0.5 no-print" title="Cancelar asignación"><AlertTriangle className="w-3 h-3" /></button>
                     </div>
                   ))}
                 </div>
@@ -937,14 +883,9 @@ export default function DailyPlanningClient({
                     {dhl.map(a => (
                       <div key={a.id} className="flex flex-col relative group">
                         <span 
-                          draggable={!readOnly}
-                          onDragStart={(e) => handleDragStart(e, a)}
-                          onDragEnd={handleDragEnd}
-                          onDragOver={(e) => handleDragOver(e, a)}
-                          onDragEnter={(e) => handleDragEnter(e, a)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={(e) => handleDrop(e, a)}
+                          onClick={() => handleOpenEdit(a)}
                           className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
+                          title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(a)}
                         </span>
@@ -961,7 +902,7 @@ export default function DailyPlanningClient({
                         ) : (
                           <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
                         )}
-                        <button onClick={() => handleDeleteAssignment(a.id)} className="absolute -top-1 -right-2 opacity-0 group-hover:opacity-100 text-red-400 p-1 no-print">
+                        <button onClick={() => handleDeleteAssignment(a.id)} className="absolute -top-1 -right-2 opacity-0 group-hover:opacity-100 text-red-400 p-1 no-print" title="Cancelar asignación">
                            <AlertTriangle className="w-3 h-3" />
                         </button>
                       </div>
@@ -979,14 +920,9 @@ export default function DailyPlanningClient({
                     {fedex.map(a => (
                       <div key={a.id} className="flex flex-col relative group">
                         <span 
-                          draggable={!readOnly}
-                          onDragStart={(e) => handleDragStart(e, a)}
-                          onDragEnd={handleDragEnd}
-                          onDragOver={(e) => handleDragOver(e, a)}
-                          onDragEnter={(e) => handleDragEnter(e, a)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={(e) => handleDrop(e, a)}
+                          onClick={() => handleOpenEdit(a)}
                           className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
+                          title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(a)}
                         </span>
@@ -1003,7 +939,7 @@ export default function DailyPlanningClient({
                         ) : (
                           <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
                         )}
-                        <button onClick={() => handleDeleteAssignment(a.id)} className="absolute -top-1 -right-2 opacity-0 group-hover:opacity-100 text-red-400 p-1 no-print">
+                        <button onClick={() => handleDeleteAssignment(a.id)} className="absolute -top-1 -right-2 opacity-0 group-hover:opacity-100 text-red-400 p-1 no-print" title="Cancelar asignación">
                            <AlertTriangle className="w-3 h-3" />
                         </button>
                       </div>
@@ -1021,14 +957,9 @@ export default function DailyPlanningClient({
                     {bodegasOthers.map(a => (
                       <div key={a.id} className="flex flex-col">
                         <span 
-                          draggable={!readOnly}
-                          onDragStart={(e) => handleDragStart(e, a)}
-                          onDragEnd={handleDragEnd}
-                          onDragOver={(e) => handleDragOver(e, a)}
-                          onDragEnter={(e) => handleDragEnter(e, a)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={(e) => handleDrop(e, a)}
+                          onClick={() => handleOpenEdit(a)}
                           className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
+                          title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(a)}
                         </span>
@@ -1058,14 +989,9 @@ export default function DailyPlanningClient({
                     <div className="flex flex-col gap-0.5">
                       {pair.conductor ? (
                         <span 
-                          draggable={!readOnly}
-                          onDragStart={(e) => handleDragStart(e, pair.conductor)}
-                          onDragEnd={handleDragEnd}
-                          onDragOver={(e) => handleDragOver(e, pair.conductor)}
-                          onDragEnter={(e) => handleDragEnter(e, pair.conductor)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={(e) => handleDrop(e, pair.conductor)}
+                          onClick={() => handleOpenEdit(pair.conductor)}
                           className={getPersonnelStyles(pair.conductor)}
+                          title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(pair.conductor)}
                         </span>
@@ -1085,7 +1011,7 @@ export default function DailyPlanningClient({
                       )}
                     </div>
                     {pair.conductor && !readOnly && (
-                      <button onClick={() => handleDeleteAssignment(pair.conductor.id)} className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 text-red-400 no-print">
+                      <button onClick={() => handleDeleteAssignment(pair.conductor.id)} className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 text-red-400 no-print" title="Cancelar asignación">
                          <AlertTriangle className="w-3 h-3" />
                       </button>
                     )}
@@ -1094,14 +1020,9 @@ export default function DailyPlanningClient({
                     <div className="flex flex-col gap-0.5">
                       {pair.ayudante ? (
                         <span 
-                          draggable={!readOnly}
-                          onDragStart={(e) => handleDragStart(e, pair.ayudante)}
-                          onDragEnd={handleDragEnd}
-                          onDragOver={(e) => handleDragOver(e, pair.ayudante)}
-                          onDragEnter={(e) => handleDragEnter(e, pair.ayudante)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={(e) => handleDrop(e, pair.ayudante)}
+                          onClick={() => handleOpenEdit(pair.ayudante)}
                           className={getPersonnelStyles(pair.ayudante)}
+                          title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(pair.ayudante)}
                         </span>
@@ -1121,7 +1042,7 @@ export default function DailyPlanningClient({
                       )}
                     </div>
                     {pair.ayudante && !readOnly && (
-                      <button onClick={() => handleDeleteAssignment(pair.ayudante.id)} className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 text-red-400 no-print">
+                      <button onClick={() => handleDeleteAssignment(pair.ayudante.id)} className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 text-red-400 no-print" title="Cancelar asignación">
                          <AlertTriangle className="w-3 h-3" />
                       </button>
                     )}
@@ -1152,7 +1073,7 @@ export default function DailyPlanningClient({
                   </div>
                </div>
                {!readOnly && (
-                 <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-4">
                     {Array.from({ length: left }).map((_, i) => (
                       <select key={i} className="w-full p-2 bg-white rounded border border-indigo-200 text-xs font-bold uppercase" onFocus={() => loadAvailable(req.position_id, req.shift_id)} onChange={(e) => handleAssignExtra(req.position_id, req.shift_id, req.area_id, e.target.value)} defaultValue="">
                         <option value="" disabled>Seleccionar libre...</option>
@@ -1177,7 +1098,7 @@ export default function DailyPlanningClient({
                         )}
                       </select>
                     ))}
-                 </div>
+                  </div>
                )}
             </div>
           );
@@ -1186,6 +1107,97 @@ export default function DailyPlanningClient({
 
         <div className="mt-8 text-[9px] text-slate-300 text-right uppercase tracking-widest border-t pt-2">Reporte generado HRM — {format(new Date(), "yyyy-MM-dd HH:mm")}</div>
       </div>
+
+      {/* POPUP DE EDICIÓN RÁPIDA DE ASIGNACIÓN */}
+      <Dialog open={!!editingAssignment} onOpenChange={(open) => { if (!open) setEditingAssignment(null); }}>
+        <DialogContent className="max-w-md bg-white p-6 rounded-xl shadow-xl border border-slate-200">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-blue-600" />
+              Cambio de Turno / Cargo
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Modifica el turno o cargo asignado. Al guardar, quedará validado y publicado automáticamente (sin envío de WhatsApp).
+            </DialogDescription>
+          </DialogHeader>
+
+          {editingAssignment && (
+            <div className="space-y-4 py-3">
+              {/* Información del trabajador */}
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Trabajador</div>
+                <div className="text-base font-bold text-slate-800 uppercase mt-0.5">
+                  {editingAssignment.personnel?.first_name} {editingAssignment.personnel?.last_name_father} {editingAssignment.personnel?.last_name_mother || ''}
+                </div>
+                <div className="text-xs text-slate-500 mt-1 flex items-center gap-3">
+                  <span><strong className="text-slate-700">RUT:</strong> {editingAssignment.personnel?.rut || '-'}</span>
+                  <span><strong className="text-slate-700">Cargo actual:</strong> {editingAssignment.position?.name || '-'}</span>
+                </div>
+              </div>
+
+              {/* Selector de Turno */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-700">Nuevo Turno</Label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-slate-300 bg-background px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={editShiftId}
+                  onChange={(e) => setEditShiftId(e.target.value)}
+                >
+                  {shifts.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.start_time.substring(0, 5)} - {s.end_time.substring(0, 5)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Selector de Cargo (Posición) */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-700">Nuevo Cargo (Posición)</Label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-slate-300 bg-background px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={editPositionId}
+                  onChange={(e) => setEditPositionId(e.target.value)}
+                >
+                  {positions.map((p) => {
+                    const area = areas.find(a => a.id === p.area_id);
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.name} {area ? `— ${area.name}` : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <Button
+              variant="outline"
+              onClick={() => setEditingAssignment(null)}
+              disabled={isSavingEdit}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+              onClick={handleSaveEdit}
+              disabled={isSavingEdit}
+            >
+              {isSavingEdit ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                'Aceptar'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
