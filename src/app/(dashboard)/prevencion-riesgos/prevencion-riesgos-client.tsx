@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { MassRiohsModal } from './mass-riohs-modal';
 import { RiohsDashboardWorker } from './actions';
+import { MultiSelectFilter, FilterOption } from '@/components/ui/multi-select-filter';
 
 interface PrevencionRiesgosClientProps {
   initialWorkers: RiohsDashboardWorker[];
@@ -36,13 +37,65 @@ export function PrevencionRiesgosClient({
   canExecute,
 }: PrevencionRiesgosClientProps) {
   const [search, setSearch] = useState('');
-  const [companyId, setCompanyId] = useState('');
-  const [positionId, setPositionId] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'COMPLETED' | 'IN_PROGRESS' | 'PENDING'>('all');
-  const [stepFilter, setStepFilter] = useState<'all' | 'AUTH_GENERATED' | 'AUTH_UPLOADED' | 'RIOHS_SENT'>('all');
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
+  const [selectedPositionNames, setSelectedPositionNames] = useState<string[]>([]);
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
+  const [selectedSteps, setSelectedSteps] = useState<string[]>([]);
 
   // Selected workers state
   const [selectedWorkerIds, setSelectedWorkerIds] = useState<Set<string>>(new Set());
+
+  // Filter Options for MultiSelect
+  const companyOptions: FilterOption[] = useMemo(() => {
+    const counts = new Map<string, number>();
+    initialWorkers.forEach((w) => {
+      if (w.company_id) counts.set(w.company_id, (counts.get(w.company_id) || 0) + 1);
+    });
+
+    return companies
+      .map((c) => ({
+        value: c.id,
+        label: c.name,
+        count: counts.get(c.id) || 0,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [companies, initialWorkers]);
+
+  const positionOptions: FilterOption[] = useMemo(() => {
+    const counts = new Map<string, number>();
+    initialWorkers.forEach((w) => {
+      const name = w.position_name?.trim() || 'Sin Cargo';
+      counts.set(name, (counts.get(name) || 0) + 1);
+    });
+
+    const namesSet = new Set<string>();
+    positions.forEach((p) => {
+      if (p.name?.trim()) namesSet.add(p.name.trim());
+    });
+    initialWorkers.forEach((w) => {
+      if (w.position_name?.trim()) namesSet.add(w.position_name.trim());
+    });
+
+    return Array.from(namesSet)
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({
+        value: name,
+        label: name,
+        count: counts.get(name) || 0,
+      }));
+  }, [positions, initialWorkers]);
+
+  const statusOptions: FilterOption[] = [
+    { value: 'COMPLETED', label: '✅ Completados' },
+    { value: 'IN_PROGRESS', label: '⏳ En Progreso (Pasos 1-3)' },
+    { value: 'PENDING', label: '⚪ No Iniciados' },
+  ];
+
+  const stepOptions: FilterOption[] = [
+    { value: 'AUTH_GENERATED', label: '1. Auth Generada (Pend. Firma)' },
+    { value: 'AUTH_UPLOADED', label: '2. Auth Firmada (Listo p/ Envío)' },
+    { value: 'RIOHS_SENT', label: '3. RIOHS Enviado (Pend. Recepción)' },
+  ];
 
   // Summary Metrics
   const totalCount = initialWorkers.length;
@@ -58,10 +111,14 @@ export function PrevencionRiesgosClient({
   const filteredWorkers = useMemo(() => {
     return initialWorkers.filter((w) => {
       // Company filter
-      if (companyId && w.company_id !== companyId) return false;
+      if (selectedCompanyIds.length > 0 && !selectedCompanyIds.includes(w.company_id)) {
+        return false;
+      }
 
       // Position filter
-      if (positionId && w.position_id !== positionId) return false;
+      if (selectedPositionNames.length > 0 && !selectedPositionNames.includes(w.position_name)) {
+        return false;
+      }
 
       // Search filter (Name or RUT)
       if (search.trim()) {
@@ -72,21 +129,26 @@ export function PrevencionRiesgosClient({
       }
 
       // Status filter
-      if (statusFilter === 'COMPLETED' && w.riohs_status !== 'COMPLETED') return false;
-      if (statusFilter === 'PENDING' && w.riohs_status !== 'PENDING') return false;
-      if (statusFilter === 'IN_PROGRESS') {
-        const isInProgress = ['AUTH_GENERATED', 'AUTH_UPLOADED', 'RIOHS_SENT'].includes(w.riohs_status);
-        if (!isInProgress) return false;
+      if (selectedStatuses.length > 0) {
+        const matchesStatus = selectedStatuses.some((st) => {
+          if (st === 'COMPLETED') return w.riohs_status === 'COMPLETED';
+          if (st === 'PENDING') return w.riohs_status === 'PENDING';
+          if (st === 'IN_PROGRESS') {
+            return ['AUTH_GENERATED', 'AUTH_UPLOADED', 'RIOHS_SENT'].includes(w.riohs_status);
+          }
+          return false;
+        });
+        if (!matchesStatus) return false;
       }
 
-      // Sub-step filter (when in progress or all)
-      if (stepFilter !== 'all') {
-        if (w.riohs_status !== stepFilter) return false;
+      // Sub-step filter
+      if (selectedSteps.length > 0 && !selectedSteps.includes(w.riohs_status)) {
+        return false;
       }
 
       return true;
     });
-  }, [initialWorkers, companyId, positionId, search, statusFilter, stepFilter]);
+  }, [initialWorkers, selectedCompanyIds, selectedPositionNames, search, selectedStatuses, selectedSteps]);
 
   // Eligible workers among current filtered
   const visibleEligibleWorkers = filteredWorkers.filter(
@@ -120,13 +182,19 @@ export function PrevencionRiesgosClient({
 
   const clearFilters = () => {
     setSearch('');
-    setCompanyId('');
-    setPositionId('');
-    setStatusFilter('all');
-    setStepFilter('all');
+    setSelectedCompanyIds([]);
+    setSelectedPositionNames([]);
+    setSelectedStatuses([]);
+    setSelectedSteps([]);
   };
 
-  const hasActiveFilters = Boolean(search || companyId || positionId || statusFilter !== 'all' || stepFilter !== 'all');
+  const hasActiveFilters = Boolean(
+    search ||
+      selectedCompanyIds.length > 0 ||
+      selectedPositionNames.length > 0 ||
+      selectedStatuses.length > 0 ||
+      selectedSteps.length > 0
+  );
 
   return (
     <div className="space-y-6">
@@ -150,8 +218,8 @@ export function PrevencionRiesgosClient({
             companies={companies}
             positions={positions}
             canExecute={canExecute}
-            initialCompanyId={companyId}
-            initialPositionId={positionId}
+            initialCompanyId={selectedCompanyIds.length === 1 ? selectedCompanyIds[0] : ''}
+            initialPositionId=""
             preSelectedIds={selectedWorkerIds}
           />
         </div>
@@ -244,69 +312,54 @@ export function PrevencionRiesgosClient({
 
             {/* Company Filter */}
             <div>
-              <select
-                value={companyId}
-                onChange={(e) => setCompanyId(e.target.value)}
-                className="flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">Todas las empresas</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <MultiSelectFilter
+                placeholder="Todas las empresas"
+                singularName="empresa"
+                pluralName="empresas"
+                options={companyOptions}
+                selectedValues={selectedCompanyIds}
+                onChange={setSelectedCompanyIds}
+                searchPlaceholder="Buscar empresa..."
+              />
             </div>
 
             {/* Position Filter */}
             <div>
-              <select
-                value={positionId}
-                onChange={(e) => setPositionId(e.target.value)}
-                className="flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">Todos los cargos</option>
-                {positions.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+              <MultiSelectFilter
+                placeholder="Todos los cargos"
+                singularName="cargo"
+                pluralName="cargos"
+                options={positionOptions}
+                selectedValues={selectedPositionNames}
+                onChange={setSelectedPositionNames}
+                searchPlaceholder="Buscar cargo..."
+              />
             </div>
 
             {/* Status Main Filter */}
             <div>
-              <select
-                value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value as any);
-                  if (e.target.value !== 'IN_PROGRESS' && e.target.value !== 'all') {
-                    setStepFilter('all');
-                  }
-                }}
-                className="flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="all">Todos los estados RIOHS</option>
-                <option value="COMPLETED">✅ Completados</option>
-                <option value="IN_PROGRESS">⏳ En Progreso (Pasos 1-3)</option>
-                <option value="PENDING">⚪ No Iniciados</option>
-              </select>
+              <MultiSelectFilter
+                placeholder="Todos los estados RIOHS"
+                singularName="estado"
+                pluralName="estados"
+                options={statusOptions}
+                selectedValues={selectedStatuses}
+                onChange={setSelectedStatuses}
+                searchPlaceholder="Buscar estado..."
+              />
             </div>
 
             {/* Sub-step Filter */}
             <div>
-              <select
-                value={stepFilter}
-                onChange={(e) => setStepFilter(e.target.value as any)}
-                className={`flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                  statusFilter === 'COMPLETED' || statusFilter === 'PENDING' ? 'opacity-50 pointer-events-none' : ''
-                }`}
-              >
-                <option value="all">Todos los pasos intermedios</option>
-                <option value="AUTH_GENERATED">1. Auth Generada (Pend. Firma)</option>
-                <option value="AUTH_UPLOADED">2. Auth Firmada (Listo p/ Envío)</option>
-                <option value="RIOHS_SENT">3. RIOHS Enviado (Pend. Recepción)</option>
-              </select>
+              <MultiSelectFilter
+                placeholder="Todos los pasos intermedios"
+                singularName="paso"
+                pluralName="pasos"
+                options={stepOptions}
+                selectedValues={selectedSteps}
+                onChange={setSelectedSteps}
+                searchPlaceholder="Buscar paso..."
+              />
             </div>
           </div>
 
@@ -354,8 +407,8 @@ export function PrevencionRiesgosClient({
               companies={companies}
               positions={positions}
               canExecute={canExecute}
-              initialCompanyId={companyId}
-              initialPositionId={positionId}
+              initialCompanyId={selectedCompanyIds.length === 1 ? selectedCompanyIds[0] : ''}
+              initialPositionId=""
               preSelectedIds={selectedWorkerIds}
               customTrigger={
                 <Button size="sm" className="bg-white text-orange-700 hover:bg-orange-50 font-bold text-xs shadow-xs h-8 gap-1.5 rounded-xl">
