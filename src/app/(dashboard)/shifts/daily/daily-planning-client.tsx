@@ -140,7 +140,7 @@ export default function DailyPlanningClient({
     const isExtra = assignment.is_extra;
     const isAbsent = assignment.attendance_status === 'absent';
 
-    let styles = ' inline-block rounded px-2 py-0.5 select-none ';
+    let styles = ' inline-block rounded px-2 py-0.5 select-none whitespace-nowrap ';
 
     if (!readOnly) {
       styles += ' cursor-pointer hover:underline hover:bg-blue-100/80 text-blue-900 ';
@@ -232,7 +232,7 @@ export default function DailyPlanningClient({
             useCORS: true,
             allowTaint: true,
             backgroundColor: '#ffffff',
-            windowWidth: 800,
+            windowWidth: 940,
             ignoreElements: (element) => {
               return element.classList.contains('no-print');
             }
@@ -502,7 +502,7 @@ export default function DailyPlanningClient({
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
-        windowWidth: 800, // Force a desktop-like viewport width so it renders nicely even on mobile screens
+        windowWidth: 940, // Force a desktop-like viewport width so it renders nicely even on mobile screens
         ignoreElements: (element) => {
           return element.classList.contains('no-print');
         }
@@ -631,7 +631,7 @@ export default function DailyPlanningClient({
             position: absolute !important;
             left: 0 !important;
             top: 0 !important;
-            width: 210mm !important;
+            width: 230mm !important;
             max-height: 297mm !important; /* A4 Height limit */
             overflow: hidden !important;
             margin: 0 !important;
@@ -779,7 +779,7 @@ export default function DailyPlanningClient({
       )}
 
       {/* REPORT */}
-      <div id="daily-report-content" ref={reportRef} className="bg-white p-5 md:p-6 rounded-xl shadow-xl border border-slate-100 text-slate-900 font-sans mx-auto max-w-full md:w-[210mm] box-border">
+      <div id="daily-report-content" ref={reportRef} className="bg-white p-5 md:p-6 rounded-xl shadow-xl border border-slate-100 text-slate-900 font-sans mx-auto w-full max-w-[920px] box-border">
         <div id="print-header" className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-end">
           <h2 className="text-lg font-black tracking-tight uppercase text-slate-900 leading-tight">
             Programación Operativa <br />
@@ -801,7 +801,7 @@ export default function DailyPlanningClient({
                 <div className="w-[110px] flex-shrink-0 font-mono text-[11px] text-slate-500 pt-0.5">
                   {group[0].shift?.start_time.substring(0,5)} - {group[0].shift?.end_time.substring(0,5)}
                 </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 flex-1">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
                       <span 
@@ -834,7 +834,7 @@ export default function DailyPlanningClient({
                 <div className="w-[110px] flex-shrink-0 font-mono text-[11px] text-slate-500 pt-0.5">
                   {group[0].shift?.start_time.substring(0,5)} - {group[0].shift?.end_time.substring(0,5)}
                 </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 flex-1">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
                       <span 
@@ -868,7 +868,7 @@ export default function DailyPlanningClient({
                   <span className="font-mono text-[11px] text-slate-500 leading-none">{group[0].shift?.start_time.substring(0,5)} - {group[0].shift?.end_time.substring(0,5)}</span>
                   <span className="text-[8px] text-slate-400 uppercase font-bold">{group[0].position?.name}</span>
                 </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 flex-1">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex flex-col relative group">
                       <div className="flex items-center gap-1">
@@ -901,7 +901,7 @@ export default function DailyPlanningClient({
                   <span className="font-mono text-[11px] text-slate-500 leading-none">{group[0].shift?.start_time.substring(0,5)} - {group[0].shift?.end_time.substring(0,5)}</span>
                   <span className="text-[8px] text-slate-400 uppercase font-bold">{group[0].position?.name}</span>
                 </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 flex-1">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
                       <span 
@@ -931,9 +931,9 @@ export default function DailyPlanningClient({
                  <div className="flex items-center gap-2">
                    <span className="bg-slate-900 text-white text-[9px] font-black px-1.5 py-0.5 rounded">DHL</span>
                  </div>
-                 <div className="grid grid-cols-4 sm:grid-cols-5 gap-x-3 gap-y-1 pl-1">
+                 <div className="flex flex-wrap gap-x-5 gap-y-2 pl-1">
                     {dhl.map(a => (
-                      <div key={a.id} className="flex flex-col relative group">
+                      <div key={a.id} className="flex flex-col relative group min-w-[120px]">
                         <span 
                           onClick={() => handleOpenEdit(a)}
                           className={`font-bold uppercase text-[11.5px] leading-tight ${getPersonnelStyles(a)}`}
@@ -942,7 +942,7 @@ export default function DailyPlanningClient({
                         >
                           {renderPersonnelName(a)}
                         </span>
-                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight">
+                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight pl-0.5 mt-0.5">
                           {a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}
                         </span>
                         {!readOnly && (
@@ -970,9 +970,9 @@ export default function DailyPlanningClient({
                  <div className="flex items-center gap-2">
                    <span className="bg-slate-900 text-white text-[9px] font-black px-1.5 py-0.5 rounded">FEDEX</span>
                  </div>
-                 <div className="grid grid-cols-4 sm:grid-cols-5 gap-x-3 gap-y-1 pl-1">
+                 <div className="flex flex-wrap gap-x-5 gap-y-2 pl-1">
                     {fedex.map(a => (
-                      <div key={a.id} className="flex flex-col relative group">
+                      <div key={a.id} className="flex flex-col relative group min-w-[120px]">
                         <span 
                           onClick={() => handleOpenEdit(a)}
                           className={`font-bold uppercase text-[11.5px] leading-tight ${getPersonnelStyles(a)}`}
@@ -981,7 +981,7 @@ export default function DailyPlanningClient({
                         >
                           {renderPersonnelName(a)}
                         </span>
-                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight">
+                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight pl-0.5 mt-0.5">
                           {a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}
                         </span>
                         {!readOnly && (
@@ -1009,9 +1009,9 @@ export default function DailyPlanningClient({
                  <div className="flex items-center gap-2">
                    <span className="bg-yellow-400 text-yellow-900 text-[9px] font-black px-1.5 py-0.5 rounded uppercase">OTROS BODEGA</span>
                  </div>
-                 <div className="grid grid-cols-4 sm:grid-cols-5 gap-x-3 gap-y-1 pl-1">
+                 <div className="flex flex-wrap gap-x-5 gap-y-2 pl-1">
                     {bodegasOthers.map(a => (
-                      <div key={a.id} className="flex flex-col">
+                      <div key={a.id} className="flex flex-col min-w-[120px]">
                         <span 
                           onClick={() => handleOpenEdit(a)}
                           className={`font-bold uppercase text-[11.5px] leading-tight ${getPersonnelStyles(a)}`}
@@ -1020,7 +1020,7 @@ export default function DailyPlanningClient({
                         >
                           {renderPersonnelName(a)}
                         </span>
-                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
+                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight pl-0.5 mt-0.5">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
                       </div>
                     ))}
                  </div>
@@ -1036,8 +1036,8 @@ export default function DailyPlanningClient({
             <thead>
               <tr className="text-[9px] uppercase text-slate-400 border-b border-slate-200">
                 <th className="py-0.5 w-[110px]">Horario</th>
-                <th className="py-0.5">Conductor</th>
-                <th className="py-0.5">Ayudante</th>
+                <th className="py-0.5 w-[44%]">Conductor</th>
+                <th className="py-0.5 w-[44%]">Ayudante</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
