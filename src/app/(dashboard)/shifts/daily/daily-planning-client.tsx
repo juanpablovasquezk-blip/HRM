@@ -351,13 +351,24 @@ export default function DailyPlanningClient({
     a.area?.name.toUpperCase().includes('AEROPUERTO')
   ));
 
-  const dhl = sortByTime(activeAssignments.filter(a => a.position?.name.toUpperCase().includes('DHL')));
-  const fedex = sortByTime(activeAssignments.filter(a => a.position?.name.toUpperCase().includes('FEDEX')));
-  
+  const dhl = sortByTime(activeAssignments.filter(a => 
+    (a.position?.name || '').toUpperCase().includes('DHL') ||
+    (a.area?.name || '').toUpperCase().includes('DHL')
+  ));
+
+  const fedex = sortByTime(activeAssignments.filter(a => 
+    (a.position?.name || '').toUpperCase().includes('FEDEX') ||
+    (a.area?.name || '').toUpperCase().includes('FEDEX')
+  ));
+
+  const dhlIds = new Set(dhl.map(a => a.id));
+  const fedexIds = new Set(fedex.map(a => a.id));
+
   const bodegasOthers = sortByTime(activeAssignments.filter(a => 
-    a.area?.name.toUpperCase().includes('BODEGA') && 
-    !a.position?.name.toUpperCase().includes('DHL') && 
-    !a.position?.name.toUpperCase().includes('FEDEX')
+    !dhlIds.has(a.id) &&
+    !fedexIds.has(a.id) &&
+    ((a.area?.name || '').toUpperCase().includes('BODEGA') || 
+     (a.position?.name || '').toUpperCase().includes('BODEGA'))
   ));
 
   const handleDeleteAssignment = async (id: string) => {
@@ -929,7 +940,7 @@ export default function DailyPlanningClient({
             {dhl.length > 0 && (
               <div className="space-y-1">
                  <div className="flex items-center gap-2">
-                   <span className="bg-slate-900 text-white text-[9px] font-black px-1.5 py-0.5 rounded">DHL</span>
+                   <span className="bg-slate-900 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>DHL</span>
                  </div>
                  <div className="flex flex-wrap gap-x-5 gap-y-2 pl-1">
                     {dhl.map(a => (
@@ -968,7 +979,7 @@ export default function DailyPlanningClient({
             {fedex.length > 0 && (
               <div className="space-y-1">
                  <div className="flex items-center gap-2">
-                   <span className="bg-slate-900 text-white text-[9px] font-black px-1.5 py-0.5 rounded">FEDEX</span>
+                   <span className="bg-slate-900 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>FEDEX</span>
                  </div>
                  <div className="flex flex-wrap gap-x-5 gap-y-2 pl-1">
                     {fedex.map(a => (
@@ -1007,7 +1018,7 @@ export default function DailyPlanningClient({
             {bodegasOthers.length > 0 && (
               <div className="space-y-1">
                  <div className="flex items-center gap-2">
-                   <span className="bg-yellow-400 text-yellow-900 text-[9px] font-black px-1.5 py-0.5 rounded uppercase">OTROS BODEGA</span>
+                   <span className="bg-yellow-400 text-yellow-900 text-[9px] font-black px-1.5 py-0.5 rounded uppercase" style={{ backgroundColor: '#fef08a', color: '#713f12' }}>OTROS BODEGA</span>
                  </div>
                  <div className="flex flex-wrap gap-x-5 gap-y-2 pl-1">
                     {bodegasOthers.map(a => (
@@ -1020,7 +1031,10 @@ export default function DailyPlanningClient({
                         >
                           {renderPersonnelName(a)}
                         </span>
-                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight pl-0.5 mt-0.5">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
+                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight pl-0.5 mt-0.5">
+                          {a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}
+                          {a.area?.name ? ` • ${a.area.name}` : (a.position?.name ? ` • ${a.position.name}` : '')}
+                        </span>
                       </div>
                     ))}
                  </div>
