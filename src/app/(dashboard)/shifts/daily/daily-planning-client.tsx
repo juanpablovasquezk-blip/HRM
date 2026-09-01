@@ -156,6 +156,33 @@ export default function DailyPlanningClient({
     return styles;
   };
 
+  const getPersonnelInlineStyle = (assignment?: ShiftAssignmentWithDetails | null) => {
+    if (!assignment) return undefined;
+    const isExtra = assignment.is_extra;
+    const isAbsent = assignment.attendance_status === 'absent';
+
+    if (isAbsent) {
+      return {
+        backgroundColor: '#fef2f2',
+        borderColor: '#fecaca',
+        color: '#ef4444',
+        borderWidth: '1px',
+        borderStyle: 'solid',
+      };
+    }
+    if (isExtra) {
+      return {
+        backgroundColor: '#ffe4e6',
+        borderColor: '#fda4af',
+        color: '#881337',
+        borderWidth: '1px',
+        borderStyle: 'solid',
+        fontWeight: 'bold',
+      };
+    }
+    return undefined;
+  };
+
   
   // Update local state if date or assignments change
   // Initial redirect ONLY if no date in URL
@@ -752,34 +779,35 @@ export default function DailyPlanningClient({
       )}
 
       {/* REPORT */}
-      <div id="daily-report-content" ref={reportRef} className="bg-white p-6 md:p-8 rounded-xl shadow-xl border border-slate-100 text-slate-900 font-sans mx-auto max-w-full md:w-[210mm]">
-        <div id="print-header" className="border-b-2 border-slate-900 pb-3 mb-6 flex justify-between items-end">
-          <h2 className="text-xl font-black tracking-tight uppercase text-slate-900">
+      <div id="daily-report-content" ref={reportRef} className="bg-white p-5 md:p-6 rounded-xl shadow-xl border border-slate-100 text-slate-900 font-sans mx-auto max-w-full md:w-[210mm] box-border">
+        <div id="print-header" className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-end">
+          <h2 className="text-lg font-black tracking-tight uppercase text-slate-900 leading-tight">
             Programación Operativa <br />
-            <span className="text-slate-500 text-base font-bold">
+            <span className="text-slate-500 text-sm font-bold">
               {format(parseISO(selectedDate), "EEEE d 'de' MMMM 'de' yyyy", { locale: es })}
             </span>
           </h2>
-          <div id="print-logo-container" className="h-12 overflow-hidden rounded-lg">
+          <div id="print-logo-container" className="h-10 overflow-hidden rounded-lg">
              <img src="/logo.jpg" alt="Minerquim Logo" className="h-full object-contain" />
           </div>
         </div>
 
         {/* SECTION: SUPERVISOR */}
-        <section className="mb-4">
-          <h3 className="text-sm font-bold border-b border-slate-300 pb-1 mb-2 flex items-center gap-2 text-indigo-700 uppercase tracking-wider"><ShieldCheck className="w-4 h-4" />Supervisor</h3>
-          <div className="space-y-1.5 pl-2">
+        <section className="mb-3.5">
+          <h3 className="text-xs font-bold border-b border-slate-300 pb-1 mb-1.5 flex items-center gap-1.5 text-indigo-700 uppercase tracking-wider"><ShieldCheck className="w-3.5 h-3.5" />Supervisor</h3>
+          <div className="space-y-1 pl-2">
             {groupBySlot(supervisors).map((group, idx) => (
-              <div key={idx} className="flex flex-wrap items-start gap-x-6 gap-y-1">
-                <div className="w-[130px] flex-shrink-0 font-mono text-[11px] text-slate-500 pt-0.5">
+              <div key={idx} className="flex flex-wrap items-start gap-x-4 gap-y-1">
+                <div className="w-[110px] flex-shrink-0 font-mono text-[11px] text-slate-500 pt-0.5">
                   {group[0].shift?.start_time.substring(0,5)} - {group[0].shift?.end_time.substring(0,5)}
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
+                <div className="flex flex-wrap gap-x-3 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
                       <span 
                         onClick={() => handleOpenEdit(a)}
-                        className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
+                        className={`font-bold uppercase text-[11.5px] ${getPersonnelStyles(a)}`}
+                        style={getPersonnelInlineStyle(a)}
                         title="Pincha para cambiar turno o cargo"
                       >
                         {renderPersonnelName(a)}
@@ -798,20 +826,21 @@ export default function DailyPlanningClient({
         </section>
 
         {/* SECTION: CANES */}
-        <section className="mb-4">
-          <h3 className="text-sm font-bold border-b border-slate-300 pb-1 mb-2 flex items-center gap-2 text-amber-700 uppercase tracking-wider"><Users className="w-4 h-4" />Canes</h3>
-          <div className="space-y-1.5 pl-2">
+        <section className="mb-3.5">
+          <h3 className="text-xs font-bold border-b border-slate-300 pb-1 mb-1.5 flex items-center gap-1.5 text-amber-700 uppercase tracking-wider"><Users className="w-3.5 h-3.5" />Canes</h3>
+          <div className="space-y-1 pl-2">
             {groupBySlot(canes).map((group, idx) => (
-              <div key={idx} className="flex flex-wrap items-start gap-x-6 gap-y-1">
-                <div className="w-[130px] flex-shrink-0 font-mono text-[11px] text-slate-500 pt-0.5">
+              <div key={idx} className="flex flex-wrap items-start gap-x-4 gap-y-1">
+                <div className="w-[110px] flex-shrink-0 font-mono text-[11px] text-slate-500 pt-0.5">
                   {group[0].shift?.start_time.substring(0,5)} - {group[0].shift?.end_time.substring(0,5)}
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
+                <div className="flex flex-wrap gap-x-3 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
                       <span 
                         onClick={() => handleOpenEdit(a)}
-                        className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
+                        className={`font-bold uppercase text-[11.5px] ${getPersonnelStyles(a)}`}
+                        style={getPersonnelInlineStyle(a)}
                         title="Pincha para cambiar turno o cargo"
                       >
                         {renderPersonnelName(a)}
@@ -830,22 +859,23 @@ export default function DailyPlanningClient({
         </section>
 
         {/* SECTION: GRÚAS / ATREX / BASE */}
-        <section className="mb-4">
-          <h3 className="text-sm font-bold border-b border-slate-300 pb-1 mb-2 flex items-center gap-2 text-emerald-700 uppercase tracking-wider"><Dna className="w-4 h-4" />Grúas / Atrex / Base</h3>
-          <div className="space-y-2 pl-2">
+        <section className="mb-3.5">
+          <h3 className="text-xs font-bold border-b border-slate-300 pb-1 mb-1.5 flex items-center gap-1.5 text-emerald-700 uppercase tracking-wider"><Dna className="w-3.5 h-3.5" />Grúas / Atrex / Base</h3>
+          <div className="space-y-1.5 pl-2">
             {groupBySlot(cranes).map((group, idx) => (
-              <div key={idx} className="flex flex-wrap items-start gap-x-6 gap-y-1">
-                <div className="w-[130px] flex-shrink-0 flex flex-col pt-0.5">
+              <div key={idx} className="flex flex-wrap items-start gap-x-4 gap-y-1">
+                <div className="w-[110px] flex-shrink-0 flex flex-col pt-0.5">
                   <span className="font-mono text-[11px] text-slate-500 leading-none">{group[0].shift?.start_time.substring(0,5)} - {group[0].shift?.end_time.substring(0,5)}</span>
                   <span className="text-[8px] text-slate-400 uppercase font-bold">{group[0].position?.name}</span>
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
+                <div className="flex flex-wrap gap-x-3 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex flex-col relative group">
                       <div className="flex items-center gap-1">
                         <span 
                           onClick={() => handleOpenEdit(a)}
-                          className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
+                          className={`font-bold uppercase text-[11.5px] leading-tight ${getPersonnelStyles(a)}`}
+                          style={getPersonnelInlineStyle(a)}
                           title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(a)}
@@ -862,21 +892,22 @@ export default function DailyPlanningClient({
         </section>
 
         {/* SECTION: AEROPUERTO */}
-        <section className="mb-4">
-          <h3 className="text-sm font-bold border-b border-slate-300 pb-1 mb-2 flex items-center gap-2 text-blue-700 uppercase tracking-wider"><Plane className="w-4 h-4" />Aeropuerto</h3>
-          <div className="space-y-2 pl-2">
+        <section className="mb-3.5">
+          <h3 className="text-xs font-bold border-b border-slate-300 pb-1 mb-1.5 flex items-center gap-1.5 text-blue-700 uppercase tracking-wider"><Plane className="w-3.5 h-3.5" />Aeropuerto</h3>
+          <div className="space-y-1.5 pl-2">
             {groupBySlot(aeropuerto).map((group, idx) => (
-              <div key={idx} className="flex flex-wrap items-start gap-x-6 gap-y-1">
-                <div className="w-[130px] flex-shrink-0 flex flex-col pt-0.5">
+              <div key={idx} className="flex flex-wrap items-start gap-x-4 gap-y-1">
+                <div className="w-[110px] flex-shrink-0 flex flex-col pt-0.5">
                   <span className="font-mono text-[11px] text-slate-500 leading-none">{group[0].shift?.start_time.substring(0,5)} - {group[0].shift?.end_time.substring(0,5)}</span>
                   <span className="text-[8px] text-slate-400 uppercase font-bold">{group[0].position?.name}</span>
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 flex-1">
+                <div className="flex flex-wrap gap-x-3 gap-y-1 flex-1">
                   {group.map(a => (
                     <div key={a.id} className="flex items-center gap-1 group">
                       <span 
                         onClick={() => handleOpenEdit(a)}
-                        className={`font-bold uppercase text-[12px] ${getPersonnelStyles(a)}`}
+                        className={`font-bold uppercase text-[11.5px] ${getPersonnelStyles(a)}`}
+                        style={getPersonnelInlineStyle(a)}
                         title="Pincha para cambiar turno o cargo"
                       >
                         {renderPersonnelName(a)}
@@ -891,28 +922,32 @@ export default function DailyPlanningClient({
         </section>
 
         {/* SECTION: BODEGAS */}
-        <section className="mb-5">
-          <h3 className="text-sm font-bold border-b border-slate-300 pb-1 mb-2 flex items-center gap-2 text-slate-800 uppercase tracking-wider"><Warehouse className="w-4 h-4" />Bodegas</h3>
-          <div className="space-y-3 pl-4 mt-2">
+        <section className="mb-3.5">
+          <h3 className="text-xs font-bold border-b border-slate-300 pb-1 mb-1.5 flex items-center gap-1.5 text-slate-800 uppercase tracking-wider"><Warehouse className="w-3.5 h-3.5" />Bodegas</h3>
+          <div className="space-y-2.5 pl-2 mt-1.5">
             {/* DHL Grouping */}
             {dhl.length > 0 && (
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                  <div className="flex items-center gap-2">
                    <span className="bg-slate-900 text-white text-[9px] font-black px-1.5 py-0.5 rounded">DHL</span>
                  </div>
-                 <div className="grid grid-cols-4 gap-x-4 gap-y-1.5 pl-1">
+                 <div className="grid grid-cols-4 sm:grid-cols-5 gap-x-3 gap-y-1 pl-1">
                     {dhl.map(a => (
                       <div key={a.id} className="flex flex-col relative group">
                         <span 
                           onClick={() => handleOpenEdit(a)}
-                          className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
+                          className={`font-bold uppercase text-[11.5px] leading-tight ${getPersonnelStyles(a)}`}
+                          style={getPersonnelInlineStyle(a)}
                           title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(a)}
                         </span>
-                        {!readOnly ? (
+                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight">
+                          {a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}
+                        </span>
+                        {!readOnly && (
                           <select 
-                            className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
+                            className="text-[8.5px] bg-slate-50 border-none p-0 h-3.5 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print mt-0.5"
                             value={a.shift_id}
                             onChange={(e) => handleUpdateShift(a.id, e.target.value)}
                           >
@@ -920,8 +955,6 @@ export default function DailyPlanningClient({
                               <option key={s.id} value={s.id}>{s.name} ({s.start_time.substring(0,5)})</option>
                             ))}
                           </select>
-                        ) : (
-                          <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
                         )}
                         <button onClick={() => handleDeleteAssignment(a.id)} className="absolute -top-1 -right-2 opacity-0 group-hover:opacity-100 text-red-400 p-1 no-print" title="Cancelar asignación">
                            <AlertTriangle className="w-3 h-3" />
@@ -933,23 +966,27 @@ export default function DailyPlanningClient({
             )}
             {/* FEDEX Grouping */}
             {fedex.length > 0 && (
-              <div className="space-y-3">
+              <div className="space-y-1">
                  <div className="flex items-center gap-2">
-                   <span className="bg-slate-900 text-white text-[10px] font-black px-2 py-0.5 rounded">FEDEX</span>
+                   <span className="bg-slate-900 text-white text-[9px] font-black px-1.5 py-0.5 rounded">FEDEX</span>
                  </div>
-                 <div className="grid grid-cols-4 gap-x-4 gap-y-2 pl-2">
+                 <div className="grid grid-cols-4 sm:grid-cols-5 gap-x-3 gap-y-1 pl-1">
                     {fedex.map(a => (
                       <div key={a.id} className="flex flex-col relative group">
                         <span 
                           onClick={() => handleOpenEdit(a)}
-                          className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
+                          className={`font-bold uppercase text-[11.5px] leading-tight ${getPersonnelStyles(a)}`}
+                          style={getPersonnelInlineStyle(a)}
                           title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(a)}
                         </span>
-                        {!readOnly ? (
+                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight">
+                          {a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}
+                        </span>
+                        {!readOnly && (
                           <select 
-                            className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
+                            className="text-[8.5px] bg-slate-50 border-none p-0 h-3.5 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print mt-0.5"
                             value={a.shift_id}
                             onChange={(e) => handleUpdateShift(a.id, e.target.value)}
                           >
@@ -957,8 +994,6 @@ export default function DailyPlanningClient({
                               <option key={s.id} value={s.id}>{s.name} ({s.start_time.substring(0,5)})</option>
                             ))}
                           </select>
-                        ) : (
-                          <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
                         )}
                         <button onClick={() => handleDeleteAssignment(a.id)} className="absolute -top-1 -right-2 opacity-0 group-hover:opacity-100 text-red-400 p-1 no-print" title="Cancelar asignación">
                            <AlertTriangle className="w-3 h-3" />
@@ -970,21 +1005,22 @@ export default function DailyPlanningClient({
             )}
             {/* OTHERS */}
             {bodegasOthers.length > 0 && (
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                  <div className="flex items-center gap-2">
                    <span className="bg-yellow-400 text-yellow-900 text-[9px] font-black px-1.5 py-0.5 rounded uppercase">OTROS BODEGA</span>
                  </div>
-                 <div className="grid grid-cols-4 gap-x-4 gap-y-1.5 pl-1">
+                 <div className="grid grid-cols-4 sm:grid-cols-5 gap-x-3 gap-y-1 pl-1">
                     {bodegasOthers.map(a => (
                       <div key={a.id} className="flex flex-col">
                         <span 
                           onClick={() => handleOpenEdit(a)}
-                          className={`font-bold uppercase text-[12px] leading-tight ${getPersonnelStyles(a)}`}
+                          className={`font-bold uppercase text-[11.5px] leading-tight ${getPersonnelStyles(a)}`}
+                          style={getPersonnelInlineStyle(a)}
                           title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(a)}
                         </span>
-                        <span className="font-mono text-[8px] text-slate-400 leading-none">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
+                        <span className="font-mono text-[8.5px] text-slate-400 leading-tight">{a.shift?.start_time.substring(0,5)} - {a.shift?.end_time.substring(0,5)}</span>
                       </div>
                     ))}
                  </div>
@@ -994,34 +1030,37 @@ export default function DailyPlanningClient({
         </section>
 
         {/* SECTION: BLUE EXPRESS */}
-        <section className="mb-5">
-          <h3 className="text-sm font-bold border-b border-slate-300 pb-1 mb-2 flex items-center gap-2 text-indigo-800 uppercase tracking-wider"><Truck className="w-4 h-4" />Transporte Blue Express</h3>
-          <table className="w-full text-left mt-1">
+        <section className="mb-3.5">
+          <h3 className="text-xs font-bold border-b border-slate-300 pb-1 mb-1.5 flex items-center gap-1.5 text-indigo-800 uppercase tracking-wider"><Truck className="w-3.5 h-3.5" />Transporte Blue Express</h3>
+          <table className="w-full text-left mt-1 border-collapse">
             <thead>
-              <tr className="text-[9px] uppercase text-slate-400 border-b border-slate-100">
-                <th className="py-1 w-[120px]">Horario</th><th className="py-1">Conductor</th><th className="py-1">Ayudante</th>
+              <tr className="text-[9px] uppercase text-slate-400 border-b border-slate-200">
+                <th className="py-0.5 w-[110px]">Horario</th>
+                <th className="py-0.5">Conductor</th>
+                <th className="py-0.5">Ayudante</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {bluePairs.map(pair => (
                 <tr key={pair.id} className="group">
-                  <td className="py-1 font-mono text-[10px] text-slate-500">{pair.time}</td>
-                  <td className="py-1 font-bold uppercase text-[12px] relative">
+                  <td className="py-0.5 font-mono text-[10px] text-slate-500">{pair.time}</td>
+                  <td className="py-0.5 font-bold uppercase text-[11.5px] relative">
                     <div className="flex flex-col gap-0.5">
                       {pair.conductor ? (
                         <span 
                           onClick={() => handleOpenEdit(pair.conductor)}
                           className={getPersonnelStyles(pair.conductor)}
+                          style={getPersonnelInlineStyle(pair.conductor)}
                           title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(pair.conductor)}
                         </span>
                       ) : (
-                        <span>-</span>
+                        <span className="text-slate-400 font-normal">-</span>
                       )}
                       {pair.conductor && !readOnly && (
                         <select 
-                          className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
+                          className="text-[8.5px] bg-slate-50 border-none p-0 h-3.5 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
                           value={pair.conductor.shift_id}
                           onChange={(e) => handleUpdateShift(pair.conductor.id, e.target.value)}
                         >
@@ -1032,27 +1071,28 @@ export default function DailyPlanningClient({
                       )}
                     </div>
                     {pair.conductor && !readOnly && (
-                      <button onClick={() => handleDeleteAssignment(pair.conductor.id)} className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 text-red-400 no-print" title="Cancelar asignación">
+                      <button onClick={() => handleDeleteAssignment(pair.conductor.id)} className="absolute right-2 top-0.5 opacity-0 group-hover:opacity-100 text-red-400 no-print" title="Cancelar asignación">
                          <AlertTriangle className="w-3 h-3" />
                       </button>
                     )}
                   </td>
-                  <td className="py-1 font-bold uppercase text-[12px] relative">
+                  <td className="py-0.5 font-bold uppercase text-[11.5px] relative">
                     <div className="flex flex-col gap-0.5">
                       {pair.ayudante ? (
                         <span 
                           onClick={() => handleOpenEdit(pair.ayudante)}
                           className={getPersonnelStyles(pair.ayudante)}
+                          style={getPersonnelInlineStyle(pair.ayudante)}
                           title="Pincha para cambiar turno o cargo"
                         >
                           {renderPersonnelName(pair.ayudante)}
                         </span>
                       ) : (
-                        <span>-</span>
+                        <span className="text-slate-400 font-normal">-</span>
                       )}
                       {pair.ayudante && !readOnly && (
                         <select 
-                          className="text-[9px] bg-slate-50 border-none p-0 h-4 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
+                          className="text-[8.5px] bg-slate-50 border-none p-0 h-3.5 w-24 text-slate-500 font-mono focus:ring-0 cursor-pointer no-print"
                           value={pair.ayudante.shift_id}
                           onChange={(e) => handleUpdateShift(pair.ayudante.id, e.target.value)}
                         >
@@ -1063,7 +1103,7 @@ export default function DailyPlanningClient({
                       )}
                     </div>
                     {pair.ayudante && !readOnly && (
-                      <button onClick={() => handleDeleteAssignment(pair.ayudante.id)} className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 text-red-400 no-print" title="Cancelar asignación">
+                      <button onClick={() => handleDeleteAssignment(pair.ayudante.id)} className="absolute right-2 top-0.5 opacity-0 group-hover:opacity-100 text-red-400 no-print" title="Cancelar asignación">
                          <AlertTriangle className="w-3 h-3" />
                       </button>
                     )}
@@ -1072,7 +1112,7 @@ export default function DailyPlanningClient({
               ))}
             </tbody>
           </table>
-          {bluePairs.length === 0 && <p className="text-slate-400 italic text-center py-4">No hay rutas planificadas para hoy</p>}
+          {bluePairs.length === 0 && <p className="text-slate-400 italic text-center py-2 text-xs">No hay rutas planificadas para hoy</p>}
         </section>
 
         {/* EXTRA SLOTS */}
@@ -1081,8 +1121,8 @@ export default function DailyPlanningClient({
           const left = req.required_count - filled;
           if (left <= 0) return null;
           return (
-            <div key={req.id} className="mt-8 p-4 border-2 border-dashed border-indigo-200 rounded-xl bg-indigo-50/20 no-print">
-               <div className="flex items-center justify-between mb-2">
+            <div key={req.id} className="mt-4 p-3 border-2 border-dashed border-indigo-200 rounded-xl bg-indigo-50/20 no-print">
+               <div className="flex items-center justify-between mb-1.5">
                   <div className="text-indigo-800 font-bold text-xs">DOTACIÓN EXTRA: {req.area?.name} - {req.position?.name} ({req.shift?.name})</div>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full uppercase">{left} pendientes</span>
@@ -1094,9 +1134,9 @@ export default function DailyPlanningClient({
                   </div>
                </div>
                {!readOnly && (
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-3">
                     {Array.from({ length: left }).map((_, i) => (
-                      <select key={i} className="w-full p-2 bg-white rounded border border-indigo-200 text-xs font-bold uppercase" onFocus={() => loadAvailable(req.position_id, req.shift_id)} onChange={(e) => handleAssignExtra(req.position_id, req.shift_id, req.area_id, e.target.value)} defaultValue="">
+                      <select key={i} className="w-full p-1.5 bg-white rounded border border-indigo-200 text-xs font-bold uppercase" onFocus={() => loadAvailable(req.position_id, req.shift_id)} onChange={(e) => handleAssignExtra(req.position_id, req.shift_id, req.area_id, e.target.value)} defaultValue="">
                         <option value="" disabled>Seleccionar libre...</option>
                         {loadingAvailable === req.position_id ? (
                           <option>Cargando...</option>
@@ -1125,8 +1165,7 @@ export default function DailyPlanningClient({
           );
         })}
 
-
-        <div className="mt-8 text-[9px] text-slate-300 text-right uppercase tracking-widest border-t pt-2">Reporte generado HRM — {format(new Date(), "yyyy-MM-dd HH:mm")}</div>
+        <div className="mt-4 text-[8.5px] text-slate-300 text-right uppercase tracking-widest border-t pt-1.5">Reporte generado HRM — {format(new Date(), "yyyy-MM-dd HH:mm")}</div>
       </div>
 
       {/* POPUP DE EDICIÓN RÁPIDA DE ASIGNACIÓN */}
