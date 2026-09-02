@@ -23,11 +23,13 @@ export default function PersonnelClient({
   personnel, 
   documentDefs, 
   documents,
+  riohsRecords = [],
   userRole = 'USER'
 }: { 
   personnel: any[], 
   documentDefs: any[], 
   documents: any[],
+  riohsRecords?: any[],
   userRole?: string
 }) {
   const router = useRouter();
@@ -239,6 +241,7 @@ export default function PersonnelClient({
           onClose={() => setSelectedPersonForUpload(null)}
           personnel={selectedPersonForUpload}
           documentDefs={documentDefs}
+          riohsRecord={riohsRecords.find(r => r.personnel_id === selectedPersonForUpload.id)}
           initialDocName={initialDocName}
           onSuccess={() => {
             router.refresh();

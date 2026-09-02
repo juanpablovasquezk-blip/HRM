@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, 
   Camera, 
@@ -12,7 +12,9 @@ import {
   Calendar,
   AlertCircle,
   FileCheck,
-  Trash2
+  Trash2,
+  AlertTriangle,
+  Info
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { convertImagesToLightweightPDF } from '@/lib/utils/mobile-pdf-builder';
@@ -23,6 +25,7 @@ interface UploadDocumentModalProps {
   onClose: () => void;
   personnel: any | null;
   documentDefs: any[];
+  riohsRecord?: any | null;
   initialDocName?: string;
   onSuccess: () => void;
 }
@@ -34,10 +37,11 @@ export default function UploadDocumentModal({
   onClose,
   personnel,
   documentDefs,
+  riohsRecord,
   initialDocName,
   onSuccess
 }: UploadDocumentModalProps) {
-  const [category, setCategory] = useState<'GENERAL' | 'PDR'>('PDR');
+  const [category, setCategory] = useState<'PDR' | 'GENERAL'>('PDR');
   const [selectedDefId, setSelectedDefId] = useState<string>('');
   const [customDocName, setCustomDocName] = useState<string>('');
   
@@ -53,24 +57,101 @@ export default function UploadDocumentModal({
   const [isProcessingPdf, setIsProcessingPdf] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
+  // 1. Detect all pending documents & RIOHS steps for this specific worker
+  const workerPendingItems = useMemo(() => {
+    if (!personnel) return [];
+    const items: { id: string; name: string; type: 'MISSING' | 'EXPIRED' | 'RIOHS'; isPdR: boolean; description?: string }[] = [];
+
+    // RIOHS Step detection
+    if (riohsRecord) {
+      if (riohsRecord.riohs_status === 'AUTH_GENERATED') {
+        items.push({
+          id: 'RIOHS_STEP_2',
+          name: 'Autorización RIOHS Firmada (Paso 2 PdR)',
+          type: 'RIOHS',
+          isPdR: true,
+          description: 'Paso 2 PdR: Subir autorización firmada del Reglamento Interno'
+        });
+      } else if (riohsRecord.riohs_status === 'RIOHS_SENT') {
+        items.push({
+          id: 'RIOHS_STEP_4',
+          name: 'Comprobante de Recepción RIOHS Firmado (Paso 4 PdR)',
+          type: 'RIOHS',
+          isPdR: true,
+          description: 'Paso 4 PdR: Subir comprobante de recepción firmado'
+        });
+      }
+    } else {
+      // If no RIOHS record exists yet, offer Step 2 as available
+      items.push({
+        id: 'RIOHS_STEP_2',
+        name: 'Autorización RIOHS Firmada (Paso 2 PdR)',
+        type: 'RIOHS',
+        isPdR: true,
+        description: 'Paso 2 PdR: Subir autorización firmada del Reglamento Interno'
+      });
+    }
+
+    // Missing docs
+    (personnel.missing_docs || []).forEach((docName: string) => {
+      const isPdR = PDR_DOC_KEYWORDS.some(kw => docName.toUpperCase().includes(kw));
+      const matchingDef = documentDefs.find(def => def.name.toLowerCase() === docName.toLowerCase());
+      items.push({
+        id: matchingDef?.id || `MISSING_${docName}`,
+        name: docName,
+        type: 'MISSING',
+        isPdR
+      });
+    });
+
+    // Expired docs
+    (personnel.expired_docs || []).forEach((docName: string) => {
+      const isPdR = PDR_DOC_KEYWORDS.some(kw => docName.toUpperCase().includes(kw));
+      const matchingDef = documentDefs.find(def => def.name.toLowerCase() === docName.toLowerCase());
+      items.push({
+        id: matchingDef?.id || `EXPIRED_${docName}`,
+        name: `${docName} (Vencido)`,
+        type: 'EXPIRED',
+        isPdR
+      });
+    });
+
+    return items;
+  }, [personnel, riohsRecord, documentDefs]);
+
+  // Pre-select document logic when modal opens
   useEffect(() => {
+    if (!isOpen) return;
+
     if (initialDocName) {
       const isPdR = PDR_DOC_KEYWORDS.some(kw => initialDocName.toUpperCase().includes(kw));
       setCategory(isPdR ? 'PDR' : 'GENERAL');
-      
-      const matchingDef = documentDefs.find(def => def.name.toLowerCase() === initialDocName.toLowerCase());
-      if (matchingDef) {
-        setSelectedDefId(matchingDef.id);
+
+      // Check in workerPendingItems first
+      const pendingMatch = workerPendingItems.find(p => p.name.toLowerCase().includes(initialDocName.toLowerCase()));
+      if (pendingMatch) {
+        setSelectedDefId(pendingMatch.id);
         setCustomDocName('');
       } else {
-        setSelectedDefId('OTHER');
-        setCustomDocName(initialDocName);
+        const matchingDef = documentDefs.find(def => def.name.toLowerCase() === initialDocName.toLowerCase());
+        if (matchingDef) {
+          setSelectedDefId(matchingDef.id);
+          setCustomDocName('');
+        } else {
+          setSelectedDefId('OTHER');
+          setCustomDocName(initialDocName);
+        }
       }
+    } else if (workerPendingItems.length > 0) {
+      // Auto pre-select the first pending item!
+      setSelectedDefId(workerPendingItems[0].id);
+      setCategory(workerPendingItems[0].isPdR ? 'PDR' : 'GENERAL');
+      setCustomDocName('');
     } else {
       setSelectedDefId('');
       setCustomDocName('');
     }
-    
+
     // Reset state
     setCapturedPhotos([]);
     setSelectedFile(null);
@@ -79,11 +160,14 @@ export default function UploadDocumentModal({
     setIssueDate('');
     setExpirationDate('');
     setDocNumber('');
-  }, [isOpen, initialDocName, documentDefs]);
+  }, [isOpen, initialDocName, workerPendingItems, documentDefs]);
 
   if (!isOpen || !personnel) return null;
 
-  // Filter definitions by category
+  // Selected item description / details
+  const selectedPendingItem = workerPendingItems.find(item => item.id === selectedDefId);
+
+  // Filter definitions by category for general listing
   const filteredDefs = documentDefs.filter(def => {
     const isPdR = PDR_DOC_KEYWORDS.some(kw => def.name.toUpperCase().includes(kw));
     return category === 'PDR' ? isPdR : !isPdR;
@@ -157,16 +241,25 @@ export default function UploadDocumentModal({
     let docTypeName = '';
     let defId = selectedDefId;
 
-    if (selectedDefId === 'OTHER' || !selectedDefId) {
+    if (selectedDefId === 'RIOHS_STEP_2') {
+      docTypeName = 'AUTORIZACION RIOHS';
+      defId = '';
+    } else if (selectedDefId === 'RIOHS_STEP_4') {
+      docTypeName = 'COMPROBANTE RECEPCION RIOHS';
+      defId = '';
+    } else if (selectedDefId === 'OTHER' || !selectedDefId) {
       if (!customDocName.trim()) {
         toast.error('Por favor especifica el nombre del documento.');
         return;
       }
       docTypeName = customDocName.trim().toUpperCase();
       defId = '';
+    } else if (selectedDefId.startsWith('MISSING_') || selectedDefId.startsWith('EXPIRED_')) {
+      docTypeName = selectedPendingItem?.name.replace(' (Vencido)', '').toUpperCase() || 'DOCUMENTO';
+      defId = '';
     } else {
       const defObj = documentDefs.find(d => d.id === selectedDefId);
-      docTypeName = defObj ? defObj.name : 'DOCUMENTO';
+      docTypeName = defObj ? defObj.name : (selectedPendingItem?.name || 'DOCUMENTO');
     }
 
     // Determine final File object to upload
@@ -228,6 +321,7 @@ export default function UploadDocumentModal({
             </div>
           </div>
           <button 
+            type="button"
             onClick={onClose}
             className="h-8 w-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
           >
@@ -237,12 +331,26 @@ export default function UploadDocumentModal({
 
         {/* Modal Form Content */}
         <form onSubmit={handleSubmit} className="p-5 overflow-y-auto space-y-5 flex-1">
+
+          {/* Pending Step Banner Alert */}
+          {selectedPendingItem && (
+            <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3.5 flex items-start gap-3 text-orange-900">
+              <AlertTriangle className="h-5 w-5 text-orange-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Pendiente Detectado</p>
+                <p className="text-xs font-bold">{selectedPendingItem.name}</p>
+                {selectedPendingItem.description && (
+                  <p className="text-[11px] font-medium text-orange-700 mt-0.5">{selectedPendingItem.description}</p>
+                )}
+              </div>
+            </div>
+          )}
           
           {/* Category Selector Tabs */}
           <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl">
             <button
               type="button"
-              onClick={() => { setCategory('PDR'); setSelectedDefId(''); }}
+              onClick={() => { setCategory('PDR'); }}
               className={`py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
                 category === 'PDR' 
                   ? 'bg-orange-500 text-white shadow-md' 
@@ -254,7 +362,7 @@ export default function UploadDocumentModal({
             </button>
             <button
               type="button"
-              onClick={() => { setCategory('GENERAL'); setSelectedDefId(''); }}
+              onClick={() => { setCategory('GENERAL'); }}
               className={`py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
                 category === 'GENERAL' 
                   ? 'bg-blue-600 text-white shadow-md' 
@@ -266,22 +374,41 @@ export default function UploadDocumentModal({
             </button>
           </div>
 
-          {/* Document Type Selector */}
+          {/* Smart Document Selector */}
           <div className="space-y-1.5">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              Tipo de Documento {category === 'PDR' ? '(Prevención de Riesgos)' : '(General)'}
+              Seleccionar Documento a Regularizar
             </label>
             <select
               value={selectedDefId}
-              onChange={(e) => setSelectedDefId(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedDefId(val);
+                const pendingMatch = workerPendingItems.find(item => item.id === val);
+                if (pendingMatch) {
+                  setCategory(pendingMatch.isPdR ? 'PDR' : 'GENERAL');
+                }
+              }}
               className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-bold rounded-xl p-3 outline-none focus:ring-2 focus:ring-orange-500"
             >
-              <option value="">-- Seleccionar documento pendiente --</option>
-              {filteredDefs.map(def => (
-                <option key={def.id} value={def.id}>
-                  {def.name} {def.is_mandatory ? '(Obligatorio)' : ''}
-                </option>
-              ))}
+              {workerPendingItems.length > 0 && (
+                <optgroup label="⚠️ DOCUMENTOS PENDIENTES DE ESTE TRABAJADOR">
+                  {workerPendingItems.map(item => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+
+              <optgroup label="📂 TODOS LOS DOCUMENTOS DEL SISTEMA">
+                {filteredDefs.map(def => (
+                  <option key={def.id} value={def.id}>
+                    {def.name} {def.is_mandatory ? '(Obligatorio)' : ''}
+                  </option>
+                ))}
+              </optgroup>
+              
               <option value="OTHER">＋ Otro documento (Escribir nombre)...</option>
             </select>
           </div>
@@ -302,7 +429,7 @@ export default function UploadDocumentModal({
 
           {/* Capture Controls */}
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Captura o Archivo</label>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Captura de Cámara o Archivo</label>
             
             <div className="grid grid-cols-2 gap-3">
               {/* Camera Capture Button */}
@@ -338,7 +465,7 @@ export default function UploadDocumentModal({
           {isProcessingPdf && (
             <div className="flex items-center justify-center gap-3 p-4 bg-amber-50 text-amber-800 rounded-2xl border border-amber-200">
               <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
-              <span className="text-xs font-bold">Comprimiendo imagen y compilando PDF liviano...</span>
+              <span className="text-xs font-bold">Comprimiendo foto y generando PDF liviano...</span>
             </div>
           )}
 

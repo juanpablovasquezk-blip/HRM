@@ -16,7 +16,8 @@ export default async function SupervisorPersonnelPage() {
     { data: personnelRaw },
     { data: documentDefs },
     { data: documents },
-    { data: positions }
+    { data: positions },
+    { data: riohsRecords }
   ] = await Promise.all([
     supabase
       .from('personnel')
@@ -26,7 +27,8 @@ export default async function SupervisorPersonnelPage() {
       .order('last_name_father', { ascending: true }),
     supabase.from('document_definitions').select('*').eq('is_active', true),
     supabase.from('documents').select('*'),
-    supabase.from('positions').select('id, name')
+    supabase.from('positions').select('id, name'),
+    supabase.from('riohs_records').select('*')
   ]);
 
   const posMap = Object.fromEntries((positions || []).map(p => [p.id, p.name]));
@@ -41,6 +43,7 @@ export default async function SupervisorPersonnelPage() {
       personnel={personnel} 
       documentDefs={documentDefs || []} 
       documents={documents || []} 
+      riohsRecords={riohsRecords || []}
       userRole={userRole || 'USER'}
     />
   );
