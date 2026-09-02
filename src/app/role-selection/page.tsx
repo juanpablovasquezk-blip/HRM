@@ -42,16 +42,26 @@ export default function RoleSelectionPage() {
         setCanSupervisor(hasManagementRole);
         setCanWorker(hasWorkerRole);
 
-        // Smart Redirection
+        const isMobileDevice = typeof window !== 'undefined' && (
+          /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+          window.innerWidth < 768
+        );
+
+        // Smart Redirection:
+        // On mobile devices, management roles (Admin/Supervisor) default directly to Mobile App (/supervisor)
+        if (isMobileDevice && hasManagementRole) {
+          router.push('/supervisor');
+          return;
+        }
+
         if (hasManagementRole && !hasWorkerRole) {
-          router.push((role === 'ADMIN' || role === 'HR' || role === 'AIRPORT_ASSISTANT' || role === 'SAFETY_OFFICER') ? '/dashboard' : '/supervisor');
+          router.push('/supervisor');
         } else if (hasWorkerRole && !hasManagementRole) {
           router.push('/worker');
         } else if (!hasManagementRole && !hasWorkerRole) {
-          // Fallback: If no role detected, assume worker (safety) or logout
           router.push('/worker');
         } else {
-          // User has BOTH, stay here and show selection
+          // User has BOTH on desktop, stay here and show selection
           setLoading(false);
         }
       } catch (error) {
@@ -68,7 +78,7 @@ export default function RoleSelectionPage() {
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="h-10 w-10 text-orange-500 animate-spin" />
-          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Verificando accesos...</p>
+          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Cargando aplicación móvil...</p>
         </div>
       </div>
     );
@@ -81,8 +91,8 @@ export default function RoleSelectionPage() {
           <div className="mx-auto mb-4 relative h-[80px] w-auto inline-flex items-center justify-center">
             <img src="/logo.png" alt="Logo" className="h-full w-auto object-contain" />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Detectamos dos roles</h1>
-          <p className="text-slate-500 text-sm font-medium">Eres trabajador y supervisor. Elige cómo entrar:</p>
+          <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Selecciona un Modo</h1>
+          <p className="text-slate-500 text-sm font-medium">Elige la vista según tu dispositivo o actividad:</p>
         </div>
 
         <div className="grid gap-4">
@@ -93,10 +103,25 @@ export default function RoleSelectionPage() {
                   <Users className="h-7 w-7" />
                 </div>
                 <div className="flex-1 text-left">
-                  <h3 className="font-black text-slate-900 uppercase text-sm tracking-tight">Modo Supervisor</h3>
-                  <p className="text-[11px] text-slate-500 font-medium">Gestionar asistencia, transporte y personal del equipo.</p>
+                  <h3 className="font-black text-slate-900 uppercase text-sm tracking-tight">App Móvil (Supervisor / Terreno)</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">Asistencia, transporte, personal y carga de documentos con cámara.</p>
                 </div>
                 <ArrowRight className="h-5 w-5 text-slate-200 group-hover:text-orange-500 group-hover:translate-x-1 transition-all" />
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link href="/dashboard">
+            <Card className="hover:border-blue-500 hover:bg-blue-50/50 transition-all cursor-pointer group border-2 border-transparent bg-white shadow-xl shadow-slate-200/50 rounded-3xl overflow-hidden">
+              <CardContent className="flex items-center gap-4 p-6">
+                <div className="h-14 w-14 rounded-2xl bg-blue-100 flex items-center justify-center text-blue-600 group-hover:bg-blue-500 group-hover:text-white transition-all duration-300">
+                  <Users className="h-7 w-7" />
+                </div>
+                <div className="flex-1 text-left">
+                  <h3 className="font-black text-slate-900 uppercase text-sm tracking-tight">Panel Desktop (Administrador)</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">Panel de control completo para PC o Tablet.</p>
+                </div>
+                <ArrowRight className="h-5 w-5 text-slate-200 group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
               </CardContent>
             </Card>
           </Link>
@@ -108,8 +133,8 @@ export default function RoleSelectionPage() {
                   <User className="h-7 w-7" />
                 </div>
                 <div className="flex-1 text-left">
-                  <h3 className="font-black text-slate-900 uppercase text-sm tracking-tight">Mi Roster Personal</h3>
-                  <p className="text-[11px] text-slate-500 font-medium">Ver mis propios turnos, documentos y transporte solicitado.</p>
+                  <h3 className="font-black text-slate-900 uppercase text-sm tracking-tight">Mi Ficha Personal</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">Ver mis propios turnos, documentos y transporte.</p>
                 </div>
                 <ArrowRight className="h-5 w-5 text-slate-200 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
               </CardContent>

@@ -63,8 +63,12 @@ export default function WorkerLayout({
     { label: 'Movilidad', href: '/worker/transport', icon: Bus },
   ];
 
-  if (role === 'SUPERVISOR' || role === 'ADMIN' || role === 'AIRPORT_ASSISTANT' || role === 'HR') {
-    const targetPath = (role === 'ADMIN' || role === 'HR' || role === 'AIRPORT_ASSISTANT') ? '/dashboard' : '/supervisor';
+  if (role === 'SUPERVISOR' || role === 'ADMIN' || role === 'AIRPORT_ASSISTANT' || role === 'HR' || role === 'SAFETY_OFFICER') {
+    const isMobile = typeof window !== 'undefined' && (
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      window.innerWidth < 768
+    );
+    const targetPath = isMobile ? '/supervisor' : '/role-selection';
     navItems.push({ label: 'Gestión', href: targetPath, icon: Users });
   }
 

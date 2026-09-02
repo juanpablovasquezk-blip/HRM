@@ -95,12 +95,8 @@ export async function updateSession(request: NextRequest) {
 
     if (isAuthPage || isPublicPage) {
       const url = request.nextUrl.clone();
-      if (role === 'ADMIN' || role === 'HR' || role === 'SAFETY_OFFICER') {
-        url.pathname = '/dashboard';
-      } else if (role === 'SUPERVISOR' || role === 'ASSISTANT') {
+      if (role === 'ADMIN' || role === 'HR' || role === 'SUPERVISOR' || role === 'SAFETY_OFFICER' || role === 'ASSISTANT') {
         url.pathname = '/role-selection';
-      } else if (role === 'AIRPORT_ASSISTANT') {
-        url.pathname = '/worker';
       } else {
         url.pathname = '/worker';
       }
