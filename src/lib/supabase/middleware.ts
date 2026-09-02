@@ -141,6 +141,17 @@ export async function updateSession(request: NextRequest) {
         return NextResponse.redirect(url);
       }
     }
+
+    // Auto-redirect mobile devices accessing /dashboard to /supervisor unless force=desktop is passed
+    const userAgent = request.headers.get('user-agent') || '';
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+    const forceDesktop = request.nextUrl.searchParams.get('force') === 'desktop';
+
+    if (pathname === '/dashboard' && isMobile && !forceDesktop && (role === 'SUPERVISOR' || role === 'ADMIN' || role === 'HR' || role === 'SAFETY_OFFICER' || role === 'ASSISTANT')) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/supervisor';
+      return NextResponse.redirect(url);
+    }
   }
 
   return supabaseResponse;

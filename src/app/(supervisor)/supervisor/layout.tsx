@@ -36,7 +36,7 @@ export default function SupervisorLayout({
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 flex justify-around p-2 z-50">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 flex justify-around p-2 z-40">
         {navItems.map((item) => (
           <Link
             key={item.href}

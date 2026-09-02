@@ -307,10 +307,10 @@ export default function UploadDocumentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4">
-      <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col animate-in slide-in-from-bottom duration-300">
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-slate-900/70 backdrop-blur-sm p-0 sm:p-4">
+      <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[92dvh] sm:max-h-[85vh] flex flex-col animate-in slide-in-from-bottom duration-300">
         {/* Header */}
-        <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
+        <div className="bg-slate-900 text-white p-5 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-2xl bg-orange-500/20 text-orange-400 flex items-center justify-center">
               <ShieldCheck className="h-6 w-6" />
@@ -330,196 +330,199 @@ export default function UploadDocumentModal({
         </div>
 
         {/* Modal Form Content */}
-        <form onSubmit={handleSubmit} className="p-5 overflow-y-auto space-y-5 flex-1">
+        <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          {/* Scrollable Form Body */}
+          <div className="p-5 overflow-y-auto overscroll-contain space-y-5 flex-1 min-h-0" style={{ WebkitOverflowScrolling: 'touch' }}>
 
-          {/* Pending Step Banner Alert */}
-          {selectedPendingItem && (
-            <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3.5 flex items-start gap-3 text-orange-900">
-              <AlertTriangle className="h-5 w-5 text-orange-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Pendiente Detectado</p>
-                <p className="text-xs font-bold">{selectedPendingItem.name}</p>
-                {selectedPendingItem.description && (
-                  <p className="text-[11px] font-medium text-orange-700 mt-0.5">{selectedPendingItem.description}</p>
-                )}
+            {/* Pending Step Banner Alert */}
+            {selectedPendingItem && (
+              <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3.5 flex items-start gap-3 text-orange-900">
+                <AlertTriangle className="h-5 w-5 text-orange-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Pendiente Detectado</p>
+                  <p className="text-xs font-bold">{selectedPendingItem.name}</p>
+                  {selectedPendingItem.description && (
+                    <p className="text-[11px] font-medium text-orange-700 mt-0.5">{selectedPendingItem.description}</p>
+                  )}
+                </div>
               </div>
+            )}
+            
+            {/* Category Selector Tabs */}
+            <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => { setCategory('PDR'); }}
+                className={`py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
+                  category === 'PDR' 
+                    ? 'bg-orange-500 text-white shadow-md' 
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Prevención (PdR)
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCategory('GENERAL'); }}
+                className={`py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
+                  category === 'GENERAL' 
+                    ? 'bg-blue-600 text-white shadow-md' 
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <FileText className="h-4 w-4" />
+                General
+              </button>
             </div>
-          )}
-          
-          {/* Category Selector Tabs */}
-          <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl">
-            <button
-              type="button"
-              onClick={() => { setCategory('PDR'); }}
-              className={`py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
-                category === 'PDR' 
-                  ? 'bg-orange-500 text-white shadow-md' 
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              Prevención (PdR)
-            </button>
-            <button
-              type="button"
-              onClick={() => { setCategory('GENERAL'); }}
-              className={`py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
-                category === 'GENERAL' 
-                  ? 'bg-blue-600 text-white shadow-md' 
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              <FileText className="h-4 w-4" />
-              General
-            </button>
-          </div>
 
-          {/* Smart Document Selector */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              Seleccionar Documento a Regularizar
-            </label>
-            <select
-              value={selectedDefId}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSelectedDefId(val);
-                const pendingMatch = workerPendingItems.find(item => item.id === val);
-                if (pendingMatch) {
-                  setCategory(pendingMatch.isPdR ? 'PDR' : 'GENERAL');
-                }
-              }}
-              className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-bold rounded-xl p-3 outline-none focus:ring-2 focus:ring-orange-500"
-            >
-              {workerPendingItems.length > 0 && (
-                <optgroup label="⚠️ DOCUMENTOS PENDIENTES DE ESTE TRABAJADOR">
-                  {workerPendingItems.map(item => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
+            {/* Smart Document Selector */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Seleccionar Documento a Regularizar
+              </label>
+              <select
+                value={selectedDefId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedDefId(val);
+                  const pendingMatch = workerPendingItems.find(item => item.id === val);
+                  if (pendingMatch) {
+                    setCategory(pendingMatch.isPdR ? 'PDR' : 'GENERAL');
+                  }
+                }}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-bold rounded-xl p-3 outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                {workerPendingItems.length > 0 && (
+                  <optgroup label="⚠️ DOCUMENTOS PENDIENTES DE ESTE TRABAJADOR">
+                    {workerPendingItems.map(item => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+
+                <optgroup label="📂 TODOS LOS DOCUMENTOS DEL SISTEMA">
+                  {filteredDefs.map(def => (
+                    <option key={def.id} value={def.id}>
+                      {def.name} {def.is_mandatory ? '(Obligatorio)' : ''}
                     </option>
                   ))}
                 </optgroup>
-              )}
-
-              <optgroup label="📂 TODOS LOS DOCUMENTOS DEL SISTEMA">
-                {filteredDefs.map(def => (
-                  <option key={def.id} value={def.id}>
-                    {def.name} {def.is_mandatory ? '(Obligatorio)' : ''}
-                  </option>
-                ))}
-              </optgroup>
-              
-              <option value="OTHER">＋ Otro documento (Escribir nombre)...</option>
-            </select>
-          </div>
-
-          {selectedDefId === 'OTHER' && (
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nombre del Documento</label>
-              <input 
-                type="text"
-                placeholder="Ej. Autorización Especial de Seguridad, Inducción Faena..."
-                value={customDocName}
-                onChange={(e) => setCustomDocName(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-bold rounded-xl p-3 outline-none focus:ring-2 focus:ring-orange-500"
-                required
-              />
+                
+                <option value="OTHER">＋ Otro documento (Escribir nombre)...</option>
+              </select>
             </div>
-          )}
 
-          {/* Capture Controls */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Captura de Cámara o Archivo</label>
-            
-            <div className="grid grid-cols-2 gap-3">
-              {/* Camera Capture Button */}
-              <label className="flex flex-col items-center justify-center p-4 bg-orange-50 text-orange-700 border-2 border-dashed border-orange-200 rounded-2xl cursor-pointer hover:bg-orange-100 transition-all text-center">
-                <Camera className="h-7 w-7 text-orange-600 mb-1" />
-                <span className="text-xs font-black uppercase">Tomar Foto</span>
-                <span className="text-[9px] font-medium text-orange-500">Cámara celular</span>
+            {selectedDefId === 'OTHER' && (
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nombre del Documento</label>
                 <input 
-                  type="file" 
-                  accept="image/*" 
-                  capture="environment" 
-                  onChange={handleCameraCapture}
-                  className="hidden" 
+                  type="text"
+                  placeholder="Ej. Autorización Especial de Seguridad, Inducción Faena..."
+                  value={customDocName}
+                  onChange={(e) => setCustomDocName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-xs font-bold rounded-xl p-3 outline-none focus:ring-2 focus:ring-orange-500"
+                  required
                 />
-              </label>
-
-              {/* File Selector Button */}
-              <label className="flex flex-col items-center justify-center p-4 bg-slate-50 text-slate-700 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-100 transition-all text-center">
-                <Upload className="h-7 w-7 text-slate-500 mb-1" />
-                <span className="text-xs font-black uppercase">Subir Archivo</span>
-                <span className="text-[9px] font-medium text-slate-400">PDF o Imagen</span>
-                <input 
-                  type="file" 
-                  accept="application/pdf,image/*" 
-                  onChange={handleFileSelect}
-                  className="hidden" 
-                />
-              </label>
-            </div>
-          </div>
-
-          {/* Processing Indicator */}
-          {isProcessingPdf && (
-            <div className="flex items-center justify-center gap-3 p-4 bg-amber-50 text-amber-800 rounded-2xl border border-amber-200">
-              <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
-              <span className="text-xs font-bold">Comprimiendo foto y generando PDF liviano...</span>
-            </div>
-          )}
-
-          {/* Preview of Generated PDF / File */}
-          {(generatedPdfBlob || selectedFile) && !isProcessingPdf && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0">
-                  <FileCheck className="h-6 w-6" />
-                </div>
-                <div>
-                  <p className="text-xs font-black text-emerald-900 uppercase">
-                    {generatedPdfBlob ? 'PDF Liviano Listo' : selectedFile?.name}
-                  </p>
-                  <p className="text-[10px] font-bold text-emerald-700">
-                    Tamaño: <span className="font-black text-emerald-900">{generatedPdfSize} KB</span> (Optimizado)
-                  </p>
-                </div>
               </div>
+            )}
 
-              <button 
-                type="button" 
-                onClick={() => { setGeneratedPdfBlob(null); setSelectedFile(null); setCapturedPhotos([]); }}
-                className="text-emerald-700 hover:text-red-600 p-2"
-              >
-                <Trash2 className="h-5 w-5" />
-              </button>
-            </div>
-          )}
+            {/* Capture Controls */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Captura de Cámara o Archivo</label>
+              
+              <div className="grid grid-cols-2 gap-3">
+                {/* Camera Capture Button */}
+                <label className="flex flex-col items-center justify-center p-4 bg-orange-50 text-orange-700 border-2 border-dashed border-orange-200 rounded-2xl cursor-pointer hover:bg-orange-100 active:scale-95 transition-all text-center">
+                  <Camera className="h-7 w-7 text-orange-600 mb-1" />
+                  <span className="text-xs font-black uppercase">Tomar Foto</span>
+                  <span className="text-[9px] font-medium text-orange-500">Cámara celular</span>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    capture="environment" 
+                    onChange={handleCameraCapture}
+                    className="hidden" 
+                  />
+                </label>
 
-          {/* Optional Dates */}
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Fecha Emisión</label>
-              <input 
-                type="date"
-                value={issueDate}
-                onChange={(e) => setIssueDate(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl p-2.5"
-              />
+                {/* File Selector Button */}
+                <label className="flex flex-col items-center justify-center p-4 bg-slate-50 text-slate-700 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-100 active:scale-95 transition-all text-center">
+                  <Upload className="h-7 w-7 text-slate-500 mb-1" />
+                  <span className="text-xs font-black uppercase">Subir Archivo</span>
+                  <span className="text-[9px] font-medium text-slate-400">PDF o Imagen</span>
+                  <input 
+                    type="file" 
+                    accept="application/pdf,image/*" 
+                    onChange={handleFileSelect}
+                    className="hidden" 
+                  />
+                </label>
+              </div>
             </div>
-            <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Fecha Vencimiento</label>
-              <input 
-                type="date"
-                value={expirationDate}
-                onChange={(e) => setExpirationDate(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl p-2.5"
-              />
+
+            {/* Processing Indicator */}
+            {isProcessingPdf && (
+              <div className="flex items-center justify-center gap-3 p-4 bg-amber-50 text-amber-800 rounded-2xl border border-amber-200">
+                <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
+                <span className="text-xs font-bold">Comprimiendo foto y generando PDF liviano...</span>
+              </div>
+            )}
+
+            {/* Preview of Generated PDF / File */}
+            {(generatedPdfBlob || selectedFile) && !isProcessingPdf && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0">
+                    <FileCheck className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-emerald-900 uppercase">
+                      {generatedPdfBlob ? 'PDF Liviano Listo' : selectedFile?.name}
+                    </p>
+                    <p className="text-[10px] font-bold text-emerald-700">
+                      Tamaño: <span className="font-black text-emerald-900">{generatedPdfSize} KB</span> (Optimizado)
+                    </p>
+                  </div>
+                </div>
+
+                <button 
+                  type="button" 
+                  onClick={() => { setGeneratedPdfBlob(null); setSelectedFile(null); setCapturedPhotos([]); }}
+                  className="text-emerald-700 hover:text-red-600 p-2"
+                >
+                  <Trash2 className="h-5 w-5" />
+                </button>
+              </div>
+            )}
+
+            {/* Optional Dates */}
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Fecha Emisión</label>
+                <input 
+                  type="date"
+                  value={issueDate}
+                  onChange={(e) => setIssueDate(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl p-2.5"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Fecha Vencimiento</label>
+                <input 
+                  type="date"
+                  value={expirationDate}
+                  onChange={(e) => setExpirationDate(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl p-2.5"
+                />
+              </div>
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="pt-3 flex gap-3">
+          {/* Sticky Footer Action Buttons */}
+          <div className="p-4 sm:p-5 bg-white border-t border-slate-100 flex gap-3 shrink-0 shadow-lg pb-8 sm:pb-4">
             <button
               type="button"
               onClick={onClose}
