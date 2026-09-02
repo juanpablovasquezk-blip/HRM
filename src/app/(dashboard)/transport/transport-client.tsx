@@ -859,6 +859,9 @@ export default function TransportClient({
       if (r.type !== 'ENTRADA') return false;
       if (r.status !== 'ABIERTO') return false;
       
+      // Los registros de bono de recogida del conductor no son solicitudes pendientes de coordinar
+      if (r.observations?.startsWith('Recogida a')) return false;
+
       // Si es movilización propia, solo mostrar si es de Fedex (para coordinar horario)
       if (r.transport_type === 'PROPIO') {
         const areaName = (r.assignment?.area?.name || '').toUpperCase();
@@ -875,6 +878,8 @@ export default function TransportClient({
       if (r.type !== 'SALIDA') return false;
       if (r.status !== 'ABIERTO') return false;
       
+      if (r.observations?.startsWith('Recogida a')) return false;
+
       if (r.transport_type === 'PROPIO') {
         const areaName = (r.assignment?.area?.name || '').toUpperCase();
         const posName = (r.assignment?.position?.name || '').toUpperCase();

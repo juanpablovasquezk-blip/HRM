@@ -157,15 +157,27 @@ export async function assignColleaguePickup(passengerRequestId: string, driverPe
       })
       .eq('id', passengerRequestId);
 
-    // 5. Create or update driver's pickup bonus row
+    // 5. Get driver's own assignment if available
+    const { data: driverAsg } = await supabase
+      .from('shift_assignments')
+      .select('id')
+      .eq('personnel_id', driverPersonnelId)
+      .eq('date', passReq.date)
+      .limit(1)
+      .maybeSingle();
+
+    const targetAssignmentId = driverAsg?.id || passReq.assignment_id;
+
+    // 6. Create or update driver's pickup bonus row as GESTIONADO
     if (currentPickupForPassenger) {
       await supabase
         .from('transport_requests')
         .update({
           observations: `Recogida a ${passengerName}`,
-          status: 'ABIERTO',
+          status: 'GESTIONADO',
           pickup_address: passReq.pickup_address,
-          destination_address: passReq.destination_address
+          destination_address: passReq.destination_address,
+          assignment_id: targetAssignmentId
         })
         .eq('id', currentPickupForPassenger.id);
     } else {
@@ -173,11 +185,11 @@ export async function assignColleaguePickup(passengerRequestId: string, driverPe
         .from('transport_requests')
         .insert({
           personnel_id: driverPersonnelId,
-          assignment_id: passReq.assignment_id,
+          assignment_id: targetAssignmentId,
           date: passReq.date,
           type: passReq.type,
           transport_type: 'PROPIO',
-          status: 'ABIERTO',
+          status: 'GESTIONADO',
           observations: `Recogida a ${passengerName}`,
           pickup_address: passReq.pickup_address,
           destination_address: passReq.destination_address,
@@ -460,6 +472,17 @@ export async function sendTransportNotification(requestId: string, isTimePending
       .from('transport_requests')
       .update({ status: 'GESTIONADO' })
       .eq('id', requestId);
+
+    // If Carpooling, also mark driver's bonus row as GESTIONADO
+    if (tr.transport_type === 'COLEGA') {
+      await supabase
+        .from('transport_requests')
+        .update({ status: 'GESTIONADO' })
+        .eq('date', tr.date)
+        .eq('type', tr.type)
+        .eq('transport_type', 'PROPIO')
+        .ilike('observations', `%Recogida a ${name}%`);
+    }
 
     revalidatePath('/transport');
     return { success: true };
