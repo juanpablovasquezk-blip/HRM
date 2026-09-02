@@ -195,37 +195,37 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
           status: `Cargando datos de ${workerName}...`
         });
 
-        // 1. Fetch roster data for this worker
-        const result = await getIndividualRoster(workerId, startDate, endDate);
-        if (result.error) {
-          console.error(`Error loading data for ${workerName}:`, result.error);
-          errorsList.push(`${workerName}: ${result.error}`);
-          continue;
-        }
-
-        // 2. Render roster locally (this updates the data prop in React, which re-renders the container)
-        setData(result);
-        setSelectedId(workerId);
-
-        // 3. Wait for DOM to update and render completely
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // 4. Capture screenshot
-        if (!rosterRef.current) {
-          console.error('Roster reference container is missing');
-          errorsList.push(`${workerName}: Contenedor del Roster no disponible en el DOM`);
-          continue;
-        }
-
-        setBulkProgress({
-          current: i + 1,
-          total: selectedWorkers.length,
-          status: `Generando captura de pantalla para ${workerName}...`
-        });
-
         try {
+          // 1. Fetch roster data for this worker
+          const result = await getIndividualRoster(workerId, startDate, endDate);
+          if (result.error) {
+            console.error(`Error loading data for ${workerName}:`, result.error);
+            errorsList.push(`${workerName}: ${result.error}`);
+            continue;
+          }
+
+          // 2. Render roster locally (this updates the data prop in React, which re-renders the container)
+          setData(result);
+          setSelectedId(workerId);
+
+          // 3. Wait for DOM to update and render completely
+          await new Promise(resolve => setTimeout(resolve, 600));
+
+          // 4. Capture screenshot
+          if (!rosterRef.current) {
+            console.error('Roster reference container is missing');
+            errorsList.push(`${workerName}: Contenedor del Roster no disponible en el DOM`);
+            continue;
+          }
+
+          setBulkProgress({
+            current: i + 1,
+            total: selectedWorkers.length,
+            status: `Generando captura para ${workerName}...`
+          });
+
           const canvas = await html2canvas(rosterRef.current, {
-            scale: 2,
+            scale: 1.5,
             useCORS: true,
             allowTaint: true,
             backgroundColor: '#ffffff',
@@ -233,7 +233,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
             ignoreElements: (element) => element.classList.contains('no-print')
           });
 
-          const base64Image = canvas.toDataURL('image/png');
+          const base64Image = canvas.toDataURL('image/jpeg', 0.9);
 
           // 5. Send via server action
           setBulkProgress({
@@ -246,25 +246,28 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
           if (!sendRes.success) {
             console.error(`Error sending WhatsApp for ${workerName}:`, sendRes.error);
             errorsList.push(`${workerName}: ${sendRes.error}`);
+          } else {
+            // Small throttle between sends
+            await new Promise(resolve => setTimeout(resolve, 800));
           }
-        } catch (captureErr: any) {
-          console.error(`Error capturing or sending for ${workerName}:`, captureErr);
-          errorsList.push(`${workerName}: Error de captura: ${captureErr.message || String(captureErr)}`);
+        } catch (workerErr: any) {
+          console.error(`Error processing worker ${workerName}:`, workerErr);
+          errorsList.push(`${workerName}: ${workerErr.message || 'Error desconocido'}`);
         }
       }
 
       if (errorsList.length > 0) {
         setBulkErrors(errorsList);
-        toast.error('El envío masivo finalizó con algunos errores. Revisa la lista en el modal.');
+        toast.error(`El envío finalizó con ${errorsList.length} error(es). Revisa el detalle.`);
       } else {
-        toast.success('Envío masivo finalizado con éxito');
+        toast.success(`Envío masivo completado con éxito (${selectedWorkers.length} enviados)`);
         setIsBulkModalOpen(false);
         setSelectedWorkers([]);
         setBulkProgress(null);
       }
     } catch (err: any) {
       console.error('Error in bulk send loop:', err);
-      toast.error('Ocurrió un error inesperado durante el envío masivo');
+      toast.error('Error durante el envío masivo: ' + (err.message || String(err)));
     } finally {
       setIsSendingBulk(false);
       // Restore original selection

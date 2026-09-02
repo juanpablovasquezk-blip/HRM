@@ -1,10 +1,10 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { startOfDay, endOfDay, eachDayOfInterval, format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { sendWhatsAppMedia } from '@/lib/ultramsg';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export async function getIndividualRoster(personnelId: string, startDate: string, endDate: string) {
   const supabase = await createClient();
@@ -69,10 +69,7 @@ export async function sendRosterWhatsApp(
   endDate: string
 ) {
   try {
-    const adminClient = createSupabaseClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const adminClient = createAdminClient();
 
     // 1. Fetch Personnel Info (to get name and phone)
     const { data: personnel, error: pErr } = await adminClient
@@ -85,7 +82,7 @@ export async function sendRosterWhatsApp(
       return { success: false, error: 'Trabajador no encontrado' };
     }
 
-    if (!personnel.phone) {
+    if (!personnel.phone || !personnel.phone.trim()) {
       return { success: false, error: `El trabajador ${personnel.first_name} ${personnel.last_name_father} no tiene un teléfono registrado.` };
     }
 
@@ -93,22 +90,10 @@ export async function sendRosterWhatsApp(
     const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(base64Data, 'base64');
 
-    // 2b. Find which bucket exists: 'media' or 'documents'
-    const { data: buckets } = await adminClient.storage.listBuckets();
-    const bucketNames = (buckets || []).map(b => b.name);
-    const bucketName = bucketNames.includes('media') 
-      ? 'media' 
-      : bucketNames.includes('documents') 
-        ? 'documents' 
-        : null;
-
-    if (!bucketName) {
-      return { success: false, error: 'No se encontró un bucket de almacenamiento válido (se requiere "media" o "documents" en Supabase)' };
-    }
-
-    // 3. Upload file to selected bucket under roster_shares/
+    const bucketName = 'documents';
     const fileName = `roster_shares/roster_${personnelId}_${Date.now()}.png`;
 
+    // 3. Upload file to storage
     const { error: uploadError } = await adminClient.storage
       .from(bucketName)
       .upload(fileName, buffer, {
@@ -117,54 +102,45 @@ export async function sendRosterWhatsApp(
       });
 
     if (uploadError) {
-      return { success: false, error: `Error de subida a Storage: ${uploadError.message}` };
+      console.error('[STORAGE-UPLOAD-ERROR]', uploadError);
+      return { success: false, error: `Error al subir imagen: ${uploadError.message}` };
     }
 
-    // 4. Create a signed URL for public access with 1 hour expiration
+    // 4. Create a signed URL for public access with 2 hours expiration
     const { data: signedData, error: signError } = await adminClient.storage
       .from(bucketName)
-      .createSignedUrl(fileName, 3600);
+      .createSignedUrl(fileName, 7200);
 
     if (signError || !signedData?.signedUrl) {
-      // Clean up file if signing failed
       await adminClient.storage.from(bucketName).remove([fileName]);
-      return { success: false, error: `Error al generar URL firmada: ${signError?.message || 'URL vacía'}` };
+      return { success: false, error: `Error al generar enlace de imagen: ${signError?.message || 'URL vacía'}` };
     }
 
-    // 5. Send message via WhatsApp
-    const phone = personnel.phone;
-    let cleanPhone = phone.replace(/[^\d+]/g, '');
-    if (!cleanPhone.startsWith('+') && cleanPhone.startsWith('56')) {
-      cleanPhone = '+' + cleanPhone;
+    // 5. Clean phone number for UltraMsg (digits only, Chile 56 prefix)
+    let cleanPhone = personnel.phone.replace(/\D/g, '');
+    if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
+      cleanPhone = '56' + cleanPhone;
+    } else if (cleanPhone.length === 8) {
+      cleanPhone = '569' + cleanPhone;
     }
 
-    const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hrm.minerquim.cl';
     const message = `Su rol está disponible en la plataforma\n\nAcceda aquí: ${platformUrl}\n\n*Este es un mensaje automático. No lo responda. Si tiene alguna duda comuníquese con su supervisor.*`;
 
     const res = await sendWhatsAppMedia(cleanPhone, signedData.signedUrl, message);
 
-    // 6. Delete file from storage asynchronously after 2 minutes
+    // 6. Delete file from storage asynchronously after 5 minutes
     setTimeout(async () => {
       try {
-        const cleanupClient = createSupabaseClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.SUPABASE_SERVICE_ROLE_KEY!
-        );
-        const { error: delError } = await cleanupClient.storage
-          .from(bucketName)
-          .remove([fileName]);
-        if (delError) {
-          console.error(`[ULTRAMSG-CLEANUP] Failed to delete temporary file ${fileName} from ${bucketName}:`, delError.message);
-        } else {
-          console.log(`[ULTRAMSG-CLEANUP] Successfully deleted temporary file ${fileName} from ${bucketName}`);
-        }
+        const cleanupClient = createAdminClient();
+        await cleanupClient.storage.from(bucketName).remove([fileName]);
       } catch (e) {
-        console.error(`[ULTRAMSG-CLEANUP] Exception deleting temporary file ${fileName} from ${bucketName}:`, e);
+        console.error('[ULTRAMSG-CLEANUP] Exception:', e);
       }
-    }, 120000);
+    }, 300000);
 
     if (!res.success) {
-      return { success: false, error: `Error de WhatsApp: ${res.error}` };
+      return { success: false, error: `Error WhatsApp: ${res.error}` };
     }
 
     return { success: true };
