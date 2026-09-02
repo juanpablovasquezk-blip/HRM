@@ -189,7 +189,9 @@ export async function createPersonnel(
         role = 'SUPERVISOR';
       }
     }
-    await enablePersonnelAccess(person.id, personnelData.email, role);
+    if (person?.id) {
+      await enablePersonnelAccess(person.id, personnelData.email, role);
+    }
   }
 
   safeRevalidatePath('/personnel');
