@@ -3058,6 +3058,7 @@ const PersonnelRow = memo(({
                           </div>
                         </div>
                       );
+                    })()}
                   </TooltipTrigger>
                   <TooltipContent
                     side="top"
