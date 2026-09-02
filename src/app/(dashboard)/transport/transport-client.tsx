@@ -39,6 +39,46 @@ interface RequestCardProps {
   onUpdateShift: (assignmentId: string, newShiftId: string) => Promise<void>;
 }
 
+// Ordenamiento por:
+// 1. Horario de entrada / turno
+// 2. Grupo o Cargo (DHL, FEDEX, BLUEEXPRESS, etc.)
+// 3. Apellido del personal
+function sortTransportRequests(a: TransportRequestWithDetails, b: TransportRequestWithDetails): number {
+  // 1. Horario de turno (o recogida si aplica)
+  const timeA = a.type === 'SALIDA' 
+    ? (a.assignment?.shift?.end_time || a.assignment?.shift?.start_time || '99:99')
+    : (a.assignment?.shift?.start_time || '99:99');
+  const timeB = b.type === 'SALIDA' 
+    ? (b.assignment?.shift?.end_time || b.assignment?.shift?.start_time || '99:99')
+    : (b.assignment?.shift?.start_time || '99:99');
+
+  const timeCompare = timeA.localeCompare(timeB);
+  if (timeCompare !== 0) return timeCompare;
+
+  // 2. Grupo o Cargo (DHL, FEDEX, BLUEEXPRESS, AEROPUERTO, etc.)
+  const getGroupKey = (req: TransportRequestWithDetails) => {
+    const area = (req.assignment?.area?.name || '').toUpperCase().trim();
+    const pos = (req.assignment?.position?.name || '').toUpperCase().trim();
+
+    if (area.includes('DHL') || pos.includes('DHL')) return `DHL - ${pos || area}`;
+    if (area.includes('FEDEX') || pos.includes('FEDEX')) return `FEDEX - ${pos || area}`;
+    if (area.includes('BLUE') || pos.includes('BLUE')) return `BLUE EXPRESS - ${pos || area}`;
+    if (area.includes('AEROPUERTO') || pos.includes('AEROPUERTO')) return `AEROPUERTO - ${pos || area}`;
+
+    return `${area} ${pos}`.trim() || 'OTROS';
+  };
+
+  const groupA = getGroupKey(a);
+  const groupB = getGroupKey(b);
+  const groupCompare = groupA.localeCompare(groupB, 'es', { sensitivity: 'base' });
+  if (groupCompare !== 0) return groupCompare;
+
+  // 3. Apellido (Paterno, Materno, Nombres)
+  const nameA = `${a.personnel?.last_name_father || ''} ${a.personnel?.last_name_mother || ''} ${a.personnel?.first_name || ''}`.trim();
+  const nameB = `${b.personnel?.last_name_father || ''} ${b.personnel?.last_name_mother || ''} ${b.personnel?.first_name || ''}`.trim();
+  return nameA.localeCompare(nameB, 'es', { sensitivity: 'base' });
+}
+
 const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId, availableShifts, onUpdateShift }: RequestCardProps) => {
   const [localData, setLocalData] = useState({
     reservation_number: req.reservation_number || '',
@@ -548,36 +588,42 @@ export default function TransportClient({
   };
 
   // 1. Entradas pendientes (status === 'ABIERTO')
-  const entriesPending = requests.filter(r => {
-    if (r.type !== 'ENTRADA') return false;
-    if (r.status !== 'ABIERTO') return false;
-    
-    // Si es movilización propia, solo mostrar si es de Fedex (para coordinar horario)
-    if (r.transport_type === 'PROPIO') {
-      const areaName = (r.assignment?.area?.name || '').toUpperCase();
-      const posName = (r.assignment?.position?.name || '').toUpperCase();
-      return posName.includes('FEDEX') || areaName.includes('FEDEX');
-    }
-    return true;
-  });
+  const entriesPending = [...requests]
+    .filter(r => {
+      if (r.type !== 'ENTRADA') return false;
+      if (r.status !== 'ABIERTO') return false;
+      
+      // Si es movilización propia, solo mostrar si es de Fedex (para coordinar horario)
+      if (r.transport_type === 'PROPIO') {
+        const areaName = (r.assignment?.area?.name || '').toUpperCase();
+        const posName = (r.assignment?.position?.name || '').toUpperCase();
+        return posName.includes('FEDEX') || areaName.includes('FEDEX');
+      }
+      return true;
+    })
+    .sort(sortTransportRequests);
 
   // 2. Salidas pendientes (status === 'ABIERTO')
-  const exitsPending = requests.filter(r => {
-    if (r.type !== 'SALIDA') return false;
-    if (r.status !== 'ABIERTO') return false;
-    
-    if (r.transport_type === 'PROPIO') {
-      const areaName = (r.assignment?.area?.name || '').toUpperCase();
-      const posName = (r.assignment?.position?.name || '').toUpperCase();
-      return posName.includes('FEDEX') || areaName.includes('FEDEX');
-    }
-    return true;
-  });
+  const exitsPending = [...requests]
+    .filter(r => {
+      if (r.type !== 'SALIDA') return false;
+      if (r.status !== 'ABIERTO') return false;
+      
+      if (r.transport_type === 'PROPIO') {
+        const areaName = (r.assignment?.area?.name || '').toUpperCase();
+        const posName = (r.assignment?.position?.name || '').toUpperCase();
+        return posName.includes('FEDEX') || areaName.includes('FEDEX');
+      }
+      return true;
+    })
+    .sort(sortTransportRequests);
 
   // 3. Transportes gestionados / notificados
-  const managedRequests = requests.filter(r => {
-    return r.status === 'GESTIONADO' || r.status === 'CONFORME' || r.status === 'NO_CONFORME';
-  });
+  const managedRequests = [...requests]
+    .filter(r => {
+      return r.status === 'GESTIONADO' || r.status === 'CONFORME' || r.status === 'NO_CONFORME';
+    })
+    .sort(sortTransportRequests);
 
   return (
     <div className="space-y-6 h-full flex flex-col">
