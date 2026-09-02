@@ -30,7 +30,7 @@ import type { Personnel } from '@/types/database';
 interface PersonnelFormProps {
   personnel?: Personnel;
   companies?: { id: string; name: string }[];
-  positions?: { id: string; name: string; area?: { name: string } }[];
+  positions?: { id: string; name: string; area?: { name: string }; requires_shifts?: boolean }[];
   shifts?: { id: string; name: string; start_time: string; end_time: string }[];
   areas?: { id: string; name: string }[];
   hasTica?: boolean;
@@ -281,6 +281,8 @@ export function PersonnelForm({
   const emailError = emailTouched && emailDisplay && !emailValid
     ? 'Formato inválido. Ej: juan.perez@empresa.com'
     : '';
+
+  const [requiresShifts, setRequiresShifts] = useState<boolean>((personnel as any)?.requires_shifts ?? true);
 
   // Stabilize initial values for uncontrolled inputs to satisfy Base UI
   const [initialValues] = useState(() => {
@@ -847,14 +849,40 @@ export function PersonnelForm({
             <Label htmlFor="main_position">Cargo Principal</Label>
             <select id="main_position" name="main_position"
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              defaultValue={initialValues.main_position}>
+              defaultValue={initialValues.main_position}
+              onChange={(e) => {
+                const selectedPosId = e.target.value;
+                const posObj = positions.find(p => p.id === selectedPosId);
+                if (posObj && posObj.requires_shifts !== undefined) {
+                  setRequiresShifts(posObj.requires_shifts);
+                }
+              }}>
               <option value="">Por asignar / Sin cargo</option>
               {positions.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} {p.area?.name ? `(${p.area.name})` : ''}
+                  {p.name} {p.area?.name ? `(${p.area.name})` : ''} {p.requires_shifts === false ? ' (Sin turnos)' : ''}
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="space-y-2 md:col-span-2">
+            <div className="flex items-center justify-between p-3.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div className="space-y-0.5">
+                <Label htmlFor="requires_shifts_toggle" className="text-sm font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
+                  Requiere asignación de turnos (Roster Operativo)
+                </Label>
+                <p className="text-xs text-slate-500">
+                  Si se desmarca, este trabajador estará exento de la planificación de turnos pero mantendrá acceso a su Ficha, Documentos y EPP.
+                </p>
+              </div>
+              <Switch 
+                id="requires_shifts_toggle" 
+                checked={requiresShifts} 
+                onCheckedChange={setRequiresShifts} 
+              />
+            </div>
+            <input type="hidden" name="requires_shifts" value={requiresShifts ? 'true' : 'false'} />
           </div>
 
           <div className="space-y-2 md:col-span-2">

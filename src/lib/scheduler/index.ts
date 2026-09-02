@@ -73,8 +73,16 @@ export async function generateSchedule(
   const { data: personnelRaw } = await supabase.from('personnel').select('*').eq('is_active', true);
   const { data: positions } = await supabase.from('positions').select('*');
   
+  // Filter out personnel/positions exempt from operational shift assignments
+  const activeShiftPersonnel = (personnelRaw || []).filter(p => {
+    if (p.requires_shifts === false) return false;
+    const mainPos = (positions || []).find(pos => pos.id === p.main_position);
+    if (mainPos && mainPos.requires_shifts === false) return false;
+    return true;
+  });
+
   // 1. Intentar por ID exacto
-  let filteredPersonnel = (personnelRaw || []).filter(p => {
+  let filteredPersonnel = activeShiftPersonnel.filter(p => {
     if (!targetPositionId) return true;
     return String(p.main_position) === String(targetPositionId);
   });

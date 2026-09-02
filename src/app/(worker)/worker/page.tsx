@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'next/link';
 import { getWorkerTomorrowData, getWorkerSession, getWorkerFreeRequests } from '../actions';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
@@ -57,15 +58,35 @@ export default async function WorkerHomePage() {
 
       {/* Main Content */}
       {data.assignments.length === 0 ? (
-        <div className="bg-white rounded-3xl p-12 text-center border-2 border-dashed border-slate-100 flex flex-col items-center gap-4">
-          <div className="h-16 w-16 bg-slate-50 rounded-full flex items-center justify-center">
-            <Clock className="h-8 w-8 text-slate-300" />
+        session.requires_shifts === false ? (
+          <div className="bg-white rounded-3xl p-10 text-center border border-slate-100 shadow-sm flex flex-col items-center gap-4">
+            <div className="h-16 w-16 bg-orange-50 rounded-2xl flex items-center justify-center">
+              <Briefcase className="h-8 w-8 text-orange-500" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="font-black text-lg text-slate-900 uppercase tracking-tight">Registro Administrativo</h3>
+              <p className="text-slate-500 text-xs font-medium">Tu cargo no requiere rotación ni asignación de turnos operativos.</p>
+            </div>
+            <div className="pt-2 flex flex-col w-full gap-2">
+              <Link href="/worker/profile" className="text-xs font-bold text-orange-600 bg-orange-50 py-2.5 px-4 rounded-xl hover:bg-orange-100 transition-colors">
+                Ver Mi Ficha Personal
+              </Link>
+              <Link href="/worker/documents" className="text-xs font-bold text-slate-600 bg-slate-50 py-2.5 px-4 rounded-xl hover:bg-slate-100 transition-colors">
+                Mis Documentos
+              </Link>
+            </div>
           </div>
-          <div className="space-y-1">
-            <h3 className="font-bold text-xl text-slate-400 uppercase">Turno Libre</h3>
-            <p className="text-slate-400 text-sm">Disfruta tu día de descanso</p>
+        ) : (
+          <div className="bg-white rounded-3xl p-12 text-center border-2 border-dashed border-slate-100 flex flex-col items-center gap-4">
+            <div className="h-16 w-16 bg-slate-50 rounded-full flex items-center justify-center">
+              <Clock className="h-8 w-8 text-slate-300" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="font-bold text-xl text-slate-400 uppercase">Turno Libre</h3>
+              <p className="text-slate-400 text-sm">Disfruta tu día de descanso</p>
+            </div>
           </div>
-        </div>
+        )
       ) : (
         <div className="space-y-4">
           {data.assignments.map((asg) => (

@@ -114,7 +114,12 @@ export function AreasClient({ initialAreas, userCompanyId }: AreasClientProps) {
                       {area.positions.map((pos: any) => (
                         <Badge key={pos.id} variant="secondary" className="font-normal text-xs flex items-center gap-1 group py-1">
                           <Briefcase className="h-3 w-3 text-slate-400" /> 
-                          {pos.name}
+                          <span>{pos.name}</span>
+                          {pos.requires_shifts === false && (
+                            <span className="bg-amber-100 text-amber-800 text-[9px] font-bold px-1.5 py-0.5 rounded ml-1">
+                              Sin turnos
+                            </span>
+                          )}
                           <Button 
                             variant="ghost" 
                             size="icon" 
@@ -145,24 +150,30 @@ export function AreasClient({ initialAreas, userCompanyId }: AreasClientProps) {
                       initialAreas.flatMap((a: any) => (a.positions || []).map((p: any) => p.name))
                     )).sort();
                     return (
-                      <form action={(formData) => handleCreatePosition(area.id, formData)} className="mt-4 flex gap-2">
-                        {creatingNewPosition ? (
-                          <Input name="name" placeholder="Nombre del nuevo cargo..." size={1} className="h-8 text-xs flex-1" autoFocus required />
-                        ) : (
-                          <select name="name" required className="flex h-8 flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs"
-                            onChange={(e) => { if (e.target.value === '__NEW__') { e.preventDefault(); setCreatingNewPosition(true); } }}
-                          >
-                            <option value="">Seleccionar cargo...</option>
-                            {allPositionNames.map((name: string) => (
-                              <option key={name} value={name}>{name}</option>
-                            ))}
-                            <option value="__NEW__" className="font-semibold">＋ Crear cargo nuevo...</option>
-                          </select>
-                        )}
-                        <Button type="submit" size="sm" className="h-8" disabled={isPending}>Ok</Button>
-                        <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => { setAddingPositionToArea(null); setCreatingNewPosition(false); }}>
-                           <X className="h-3 w-3" />
-                        </Button>
+                      <form action={(formData) => handleCreatePosition(area.id, formData)} className="mt-4 flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <div className="flex gap-2">
+                          {creatingNewPosition ? (
+                            <Input name="name" placeholder="Nombre del nuevo cargo..." size={1} className="h-8 text-xs flex-1 bg-white" autoFocus required />
+                          ) : (
+                            <select name="name" required className="flex h-8 flex-1 rounded-md border border-input bg-white px-2 py-1 text-xs"
+                              onChange={(e) => { if (e.target.value === '__NEW__') { e.preventDefault(); setCreatingNewPosition(true); } }}
+                            >
+                              <option value="">Seleccionar cargo...</option>
+                              {allPositionNames.map((name: string) => (
+                                <option key={name} value={name}>{name}</option>
+                              ))}
+                              <option value="__NEW__" className="font-semibold">＋ Crear cargo nuevo...</option>
+                            </select>
+                          )}
+                          <Button type="submit" size="sm" className="h-8 bg-orange-600 text-white hover:bg-orange-700" disabled={isPending}>Ok</Button>
+                          <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => { setAddingPositionToArea(null); setCreatingNewPosition(false); }}>
+                             <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-600 font-medium pt-1">
+                          <input type="checkbox" name="requires_shifts" value="true" defaultChecked className="rounded border-slate-300 text-orange-600 focus:ring-orange-500 h-3.5 w-3.5" />
+                          <span>Requiere asignación de turnos (Roster Operativo)</span>
+                        </label>
                       </form>
                     );
                   })() : (

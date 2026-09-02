@@ -155,10 +155,28 @@ export async function listAreas() {
 
 export async function createPosition(formData: FormData) {
   const supabase = await createClient();
+  const requiresShiftsVal = formData.get('requires_shifts');
+  const requires_shifts = requiresShiftsVal !== null ? (requiresShiftsVal === 'true' || requiresShiftsVal === 'on' || requiresShiftsVal === '1') : true;
+
   const { error } = await supabase.from('positions').insert({
     area_id: formData.get('area_id') as string,
     name: formData.get('name') as string,
+    requires_shifts,
   });
+  if (error) return { success: false, error: error.message };
+  revalidatePath('/shifts/areas');
+  return { success: true, error: null };
+}
+
+export async function updatePosition(id: string, formData: FormData) {
+  const supabase = await createClient();
+  const requiresShiftsVal = formData.get('requires_shifts');
+  const requires_shifts = requiresShiftsVal !== null ? (requiresShiftsVal === 'true' || requiresShiftsVal === 'on' || requiresShiftsVal === '1') : true;
+
+  const { error } = await supabase.from('positions').update({
+    name: formData.get('name') as string,
+    requires_shifts,
+  }).eq('id', id);
   if (error) return { success: false, error: error.message };
   revalidatePath('/shifts/areas');
   return { success: true, error: null };
