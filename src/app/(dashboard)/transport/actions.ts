@@ -115,17 +115,19 @@ export async function sendTransportNotification(requestId: string, isTimePending
     let shiftStart = '00:00';
     let areaName = '';
     let posName = '';
+    let posGroupId: string | null = null;
 
     if (asg) {
       const [sDataRes, aDataRes, pDataRes] = await Promise.all([
         supabase.from('shifts').select('start_time').eq('id', asg.shift_id).single(),
         supabase.from('areas').select('name').eq('id', asg.area_id).single(),
-        supabase.from('positions').select('name').eq('id', asg.position_id).single()
+        supabase.from('positions').select('name, whatsapp_group_id').eq('id', asg.position_id).single()
       ]);
       
       shiftStart = sDataRes.data?.start_time?.substring(0, 5) || '00:00';
       areaName = (aDataRes.data?.name || '').toUpperCase();
       posName = (pDataRes.data?.name || '').toUpperCase();
+      posGroupId = pDataRes.data?.whatsapp_group_id || null;
     }
 
     // 4. Exclude Supervisors
@@ -156,23 +158,33 @@ export async function sendTransportNotification(requestId: string, isTimePending
 
     const message = `${body}\n\n${warning}`;
 
-    // 5. Determine Group
+    // 5. Determine Group (Priority: Position whatsapp_group_id > Name search in assignment/area > Settings fallback)
     const dbSettings = await getSystemSettings();
-    let positionName = (pData?.main_position_name || '').toUpperCase();
+    let groupId = posGroupId || null;
 
-    // If position name is missing, fetch it from the ID
-    if (!positionName && pData?.main_position) {
-      const { data: posData } = await supabase.from('positions').select('name').eq('id', pData.main_position).single();
-      positionName = (posData?.name || '').toUpperCase();
+    if (!groupId) {
+      const combinedSearch = `${areaName} ${posName} ${pData?.main_position_name || ''}`.toUpperCase().replace(/\s+/g, '');
+      if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
+      else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
+      else if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
+      else if (combinedSearch.includes('AEROPUERTO')) groupId = dbSettings.ultramsg_group_others;
     }
 
-    const combinedSearch = `${areaName} ${positionName}`.replace(/\s+/g, ''); 
-    
-    let groupId = dbSettings.ultramsg_group_others;
-    if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
-    else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
-    else if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
-    else if (combinedSearch.includes('AEROPUERTO')) groupId = dbSettings.ultramsg_group_others;
+    if (!groupId && pData?.main_position) {
+      const { data: mainPosData } = await supabase.from('positions').select('name, whatsapp_group_id').eq('id', pData.main_position).single();
+      if (mainPosData?.whatsapp_group_id) {
+        groupId = mainPosData.whatsapp_group_id;
+      } else if (mainPosData?.name) {
+        const mUpper = mainPosData.name.toUpperCase();
+        if (mUpper.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
+        else if (mUpper.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
+        else if (mUpper.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
+      }
+    }
+
+    if (!groupId) {
+      groupId = dbSettings.ultramsg_group_others;
+    }
 
     // 6. Find 04:00 Supervisor for the individual message
     let supervisorName = 'SUPERVISOR DE TURNO';
