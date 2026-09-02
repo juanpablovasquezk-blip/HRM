@@ -93,7 +93,7 @@ import {
   DropdownMenuItem
 } from '@/components/ui/dropdown-menu';
 
-interface Position { id: string; name: string; area_id: string; }
+interface Position { id: string; name: string; area_id: string; requires_shifts?: boolean; }
 interface Area { id: string; name: string; positions: Position[]; }
 interface Shift { id: string; name: string; start_time: string; end_time: string; }
 interface Leave { id: string; personnel_id: string; start_date: string; end_date: string; type: string; }
@@ -132,6 +132,7 @@ interface Personnel {
   has_special_contract: boolean;
   birth_date: string | null;
   address?: any;
+  requires_shifts?: boolean;
 }
 
 interface RosterGridProps {
@@ -319,6 +320,11 @@ export function RosterGridClient({
     const monthEndStr = format(endOfMonth(monthDate), 'yyyy-MM-dd');
 
     const filtered = personnel.filter(p => {
+      // 0. Exclude non-shift personnel / positions (e.g. Gerente de Operaciones)
+      if (p.requires_shifts === false) return false;
+      const posObj = positions.find(pos => pos.id === p.main_position);
+      if (posObj?.requires_shifts === false) return false;
+
       // 1. Contract Date Check
       if (p.termination_date && p.termination_date < monthStartStr) {
         // Only show if they have assignments in this month (historical data)
@@ -355,9 +361,22 @@ export function RosterGridClient({
   }, [personnel, search, positionFilter, areaFilter, positions, personnelFilter]);
 
   const uniquePositionNames = useMemo(() => {
-    const names = positions.map(p => p.name);
+    const activePositionsWithShifts = positions.filter(pos => {
+      // 1. Exclude positions that explicitly do not require shifts (e.g. Gerente de Operaciones)
+      if (pos.requires_shifts === false) return false;
+
+      // 2. Exclude positions that currently have no active personnel assigned to them
+      const count = personnel.filter(p => {
+        if (p.requires_shifts === false) return false;
+        return p.main_position === pos.id || p.main_position === pos.name;
+      }).length;
+
+      return count > 0;
+    });
+
+    const names = activePositionsWithShifts.map(p => p.name);
     return Array.from(new Set(names)).sort();
-  }, [positions]);
+  }, [positions, personnel]);
 
   const filteredPersonnelForSelect = useMemo(() => {
     return personnel.filter(p => {

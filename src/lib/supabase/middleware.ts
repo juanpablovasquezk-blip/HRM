@@ -94,9 +94,12 @@ export async function updateSession(request: NextRequest) {
     if (!role) role = 'USER';
 
     if (isAuthPage || isPublicPage) {
+      const userAgent = request.headers.get('user-agent') || '';
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+
       const url = request.nextUrl.clone();
       if (role === 'ADMIN' || role === 'HR' || role === 'SUPERVISOR' || role === 'SAFETY_OFFICER' || role === 'ASSISTANT') {
-        url.pathname = '/role-selection';
+        url.pathname = isMobile ? '/supervisor' : '/dashboard';
       } else {
         url.pathname = '/worker';
       }

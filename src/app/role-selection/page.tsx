@@ -47,22 +47,10 @@ export default function RoleSelectionPage() {
           window.innerWidth < 768
         );
 
-        // Smart Redirection:
-        // On mobile devices, management roles (Admin/Supervisor) default directly to Mobile App (/supervisor)
-        if (isMobileDevice && hasManagementRole) {
-          router.push('/supervisor');
-          return;
-        }
-
-        if (hasManagementRole && !hasWorkerRole) {
-          router.push('/supervisor');
-        } else if (hasWorkerRole && !hasManagementRole) {
-          router.push('/worker');
-        } else if (!hasManagementRole && !hasWorkerRole) {
-          router.push('/worker');
+        if (hasManagementRole) {
+          router.push(isMobileDevice ? '/supervisor' : '/dashboard');
         } else {
-          // User has BOTH on desktop, stay here and show selection
-          setLoading(false);
+          router.push('/worker');
         }
       } catch (error) {
         console.error('Role check error:', error);
