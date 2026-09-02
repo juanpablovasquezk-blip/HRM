@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { 
@@ -12,19 +13,29 @@ import {
   Info,
   ShieldAlert,
   SearchCode,
-  FileText
+  FileText,
+  PlusCircle,
+  Camera
 } from 'lucide-react';
+import UploadDocumentModal from './upload-document-modal';
 
 export default function PersonnelClient({ 
   personnel, 
   documentDefs, 
-  documents 
+  documents,
+  userRole = 'USER'
 }: { 
   personnel: any[], 
   documentDefs: any[], 
-  documents: any[] 
+  documents: any[],
+  userRole?: string
 }) {
+  const router = useRouter();
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedPersonForUpload, setSelectedPersonForUpload] = useState<any | null>(null);
+  const [initialDocName, setInitialDocName] = useState<string>('');
+
+  const isAdmin = userRole === 'ADMIN';
 
   // Enhanced personnel with compliance data
   const enhancedPersonnel = useMemo(() => {
@@ -64,6 +75,11 @@ export default function PersonnelClient({
     return { total, withIssues, compliant: total - withIssues };
   }, [enhancedPersonnel]);
 
+  const handleOpenUpload = (person: any, docName?: string) => {
+    setSelectedPersonForUpload(person);
+    setInitialDocName(docName || '');
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
       {/* Sticky Header */}
@@ -100,7 +116,7 @@ export default function PersonnelClient({
           const hasIssues = (p.missing_docs?.length || 0) > 0 || (p.expired_docs?.length || 0) > 0;
           
           return (
-            <div key={p.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden transition-all active:scale-[0.98]">
+            <div key={p.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden transition-all">
               <div className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className={`h-11 w-11 rounded-full flex items-center justify-center flex-shrink-0
@@ -117,44 +133,87 @@ export default function PersonnelClient({
                     </p>
                   </div>
                 </div>
-                {!hasIssues && (
-                  <Badge className="bg-emerald-100 text-emerald-700 text-[8px] font-black uppercase rounded-lg border-none">
-                    Al Día
-                  </Badge>
-                )}
+
+                <div className="flex items-center gap-2">
+                  {!hasIssues && (
+                    <Badge className="bg-emerald-100 text-emerald-700 text-[8px] font-black uppercase rounded-lg border-none">
+                      Al Día
+                    </Badge>
+                  )}
+
+                  {/* Upload button restricted ONLY to ADMIN */}
+                  {isAdmin && (
+                    <button
+                      onClick={() => handleOpenUpload(p)}
+                      className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider bg-orange-50 text-orange-600 hover:bg-orange-100 px-3 py-2 rounded-xl transition-colors shrink-0"
+                    >
+                      <Camera className="h-3.5 w-3.5" />
+                      <span>Cargar</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {hasIssues && (
                 <div className="bg-slate-50 p-4 border-t border-slate-100 space-y-3">
                   {p.missing_docs?.length > 0 && (
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <p className="text-[9px] font-black text-red-600 uppercase tracking-widest flex items-center gap-1.5">
                         <FileWarning className="h-3 w-3" />
                         Documentos Faltantes
                       </p>
                       <div className="flex flex-wrap gap-1.5 pl-4">
                         {p.missing_docs.map((doc: string, i: number) => (
-                          <span key={i} className="text-[9px] font-bold text-slate-500 bg-white px-2 py-1 rounded-md border border-slate-200">
-                            {doc}
-                          </span>
+                          <button
+                            key={i}
+                            disabled={!isAdmin}
+                            onClick={() => isAdmin && handleOpenUpload(p, doc)}
+                            className={`text-[9px] font-bold text-slate-600 bg-white px-2.5 py-1 rounded-md border border-slate-200 flex items-center gap-1 transition-all ${
+                              isAdmin ? 'hover:border-orange-500 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer' : 'cursor-default'
+                            }`}
+                          >
+                            <span>{doc}</span>
+                            {isAdmin && <PlusCircle className="h-3 w-3 text-orange-500 ml-0.5" />}
+                          </button>
                         ))}
                       </div>
                     </div>
                   )}
 
                   {p.expired_docs?.length > 0 && (
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <p className="text-[9px] font-black text-orange-600 uppercase tracking-widest flex items-center gap-1.5">
                         <FileWarning className="h-3 w-3" />
                         Documentos Vencidos
                       </p>
                       <div className="flex flex-wrap gap-1.5 pl-4">
                         {p.expired_docs.map((doc: string, i: number) => (
-                          <span key={i} className="text-[9px] font-bold text-slate-500 bg-white px-2 py-1 rounded-md border border-slate-200">
-                            {doc}
-                          </span>
+                          <button
+                            key={i}
+                            disabled={!isAdmin}
+                            onClick={() => isAdmin && handleOpenUpload(p, doc)}
+                            className={`text-[9px] font-bold text-slate-600 bg-white px-2.5 py-1 rounded-md border border-slate-200 flex items-center gap-1 transition-all ${
+                              isAdmin ? 'hover:border-orange-500 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer' : 'cursor-default'
+                            }`}
+                          >
+                            <span>{doc}</span>
+                            {isAdmin && <PlusCircle className="h-3 w-3 text-orange-500 ml-0.5" />}
+                          </button>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Regularization Action Banner for Admin */}
+                  {isAdmin && (
+                    <div className="pt-1">
+                      <button
+                        onClick={() => handleOpenUpload(p)}
+                        className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black text-[10px] uppercase tracking-wider py-2 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5"
+                      >
+                        <Camera className="h-3.5 w-3.5" />
+                        <span>Tomar Foto / Subir Pendiente (PdR)</span>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -172,6 +231,20 @@ export default function PersonnelClient({
           </div>
         )}
       </div>
+
+      {/* Document Upload Modal */}
+      {selectedPersonForUpload && (
+        <UploadDocumentModal
+          isOpen={!!selectedPersonForUpload}
+          onClose={() => setSelectedPersonForUpload(null)}
+          personnel={selectedPersonForUpload}
+          documentDefs={documentDefs}
+          initialDocName={initialDocName}
+          onSuccess={() => {
+            router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

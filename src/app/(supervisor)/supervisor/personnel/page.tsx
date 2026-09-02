@@ -2,6 +2,7 @@ import React from 'react';
 import { getSupervisorSession } from '../../actions';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
+import { getUserRole } from '@/app/role-actions';
 import SupervisorPersonnelClient from './personnel-client';
 
 export default async function SupervisorPersonnelPage() {
@@ -9,6 +10,7 @@ export default async function SupervisorPersonnelPage() {
   if (!session) redirect('/supervisor/login');
 
   const supabase = await createClient();
+  const userRole = await getUserRole();
   
   const [
     { data: personnel },
@@ -25,6 +27,7 @@ export default async function SupervisorPersonnelPage() {
       personnel={personnel || []} 
       documentDefs={documentDefs || []} 
       documents={documents || []} 
+      userRole={userRole || 'USER'}
     />
   );
 }

@@ -590,3 +590,110 @@ export async function getMonthlyPlanning(month?: string) {
     month: targetMonth
   };
 }
+
+export async function uploadSupervisorDocument(formData: FormData): Promise<{ success: boolean; error?: string; file_url?: string }> {
+  try {
+    const { getUserRole } = await import('@/app/role-actions');
+    const role = await getUserRole();
+
+    if (role !== 'ADMIN') {
+      return { success: false, error: 'Acceso denegado. Función reservada únicamente para Administradores.' };
+    }
+
+    const supabase = createAdminClient();
+
+    const personnelId = formData.get('personnel_id') as string;
+    const definitionId = formData.get('definition_id') as string;
+    const docTypeName = formData.get('doc_type_name') as string || 'DOCUMENTO';
+    const file = formData.get('file') as File;
+    const issueDate = formData.get('issue_date') as string || null;
+    const expirationDate = formData.get('expiration_date') as string || null;
+    const docNumber = formData.get('document_number') as string || '';
+
+    if (!personnelId || !file) {
+      return { success: false, error: 'Se requieren el trabajador y el archivo PDF.' };
+    }
+
+    // 1. Upload file to Supabase Storage bucket 'documents'
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const fileExt = file.name.split('.').pop() || 'pdf';
+    const fileName = `mobile_admin_${personnelId}_${Date.now()}.${fileExt}`;
+    const filePath = `personnel-docs/${personnelId}/${fileName}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from('documents')
+      .upload(filePath, buffer, {
+        contentType: file.type || 'application/pdf',
+        upsert: true
+      });
+
+    if (uploadErr) {
+      console.error('[uploadSupervisorDocument] Storage upload error:', uploadErr);
+      return { success: false, error: `Error subiendo archivo: ${uploadErr.message}` };
+    }
+
+    const { data: publicUrlData } = supabase.storage.from('documents').getPublicUrl(filePath);
+    const fileUrl = publicUrlData.publicUrl;
+
+    // 2. Insert into documents table with status = 'APPROVED'
+    const docData: any = {
+      personnel_id: personnelId,
+      type: docTypeName,
+      file_url: fileUrl,
+      status: 'APPROVED',
+      issue_date: issueDate || null,
+      expiration_date: expirationDate || null,
+      number: docNumber || '',
+      uploaded_at: new Date().toISOString()
+    };
+
+    if (definitionId && definitionId !== 'undefined' && definitionId !== 'null') {
+      docData.definition_id = definitionId;
+    }
+
+    const { error: dbErr } = await supabase.from('documents').insert(docData);
+    if (dbErr) {
+      console.error('[uploadSupervisorDocument] DB Insert error:', dbErr);
+      return { success: false, error: `Error registrando documento: ${dbErr.message}` };
+    }
+
+    // 3. Handle PdR / RIOHS sync if document matches RIOHS
+    const isRiohsDoc = docTypeName.toUpperCase().includes('RIOHS') || docTypeName.toUpperCase().includes('REGLAMENTO');
+    if (isRiohsDoc) {
+      const { data: existingRiohs } = await supabase
+        .from('riohs_records')
+        .select('*')
+        .eq('personnel_id', personnelId)
+        .maybeSingle();
+
+      if (existingRiohs) {
+        await supabase
+          .from('riohs_records')
+          .update({
+            riohs_status: 'COMPLETED',
+            reception_signed_file_url: fileUrl,
+            reception_uploaded_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('personnel_id', personnelId);
+      } else {
+        await supabase.from('riohs_records').insert({
+          personnel_id: personnelId,
+          riohs_status: 'COMPLETED',
+          reception_signed_file_url: fileUrl,
+          reception_uploaded_at: new Date().toISOString()
+        });
+      }
+    }
+
+    revalidatePath('/supervisor/personnel');
+    revalidatePath('/personnel');
+    revalidatePath('/prevencion-riesgos');
+
+    return { success: true, file_url: fileUrl };
+  } catch (err: any) {
+    console.error('[uploadSupervisorDocument] Exception:', err);
+    return { success: false, error: err.message || 'Error interno procesando documento' };
+  }
+}
+
