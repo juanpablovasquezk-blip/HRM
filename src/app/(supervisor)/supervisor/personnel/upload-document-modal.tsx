@@ -64,7 +64,7 @@ export default function UploadDocumentModal({
 
     // RIOHS Step detection
     if (riohsRecord) {
-      if (riohsRecord.riohs_status === 'AUTH_GENERATED') {
+      if (riohsRecord.status === 'AUTH_GENERATED') {
         items.push({
           id: 'RIOHS_STEP_2',
           name: 'Autorización RIOHS Firmada (Paso 2 PdR)',
@@ -72,7 +72,7 @@ export default function UploadDocumentModal({
           isPdR: true,
           description: 'Paso 2 PdR: Subir autorización firmada del Reglamento Interno'
         });
-      } else if (riohsRecord.riohs_status === 'RIOHS_SENT') {
+      } else if (riohsRecord.status === 'RIOHS_SENT') {
         items.push({
           id: 'RIOHS_STEP_4',
           name: 'Comprobante de Recepción RIOHS Firmado (Paso 4 PdR)',
