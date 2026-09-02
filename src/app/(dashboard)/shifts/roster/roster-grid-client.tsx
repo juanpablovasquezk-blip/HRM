@@ -574,8 +574,17 @@ export function RosterGridClient({
           toast.success('Autogeneración completada');
         }
       } catch (err) {
-        setAiError(err instanceof Error ? err.message : 'Error desconocido');
-        setAiStep('error');
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('was not found on the server') || msg.includes('failed-to-find-server-action') || msg.includes('Server Action')) {
+          setAiError('Se ha desplegado una nueva versión del sistema. Recargando la página automáticamente para sincronizar...');
+          toast.info('Sincronizando la última versión del sistema...');
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        } else {
+          setAiError(msg);
+          setAiStep('error');
+        }
       } finally {
         clearInterval(timer);
         clearInterval(progressInterval);
