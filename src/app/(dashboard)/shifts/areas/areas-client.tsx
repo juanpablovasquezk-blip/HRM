@@ -14,9 +14,11 @@ import { createArea, deleteArea, createPosition, deletePosition } from '@/app/(d
 interface AreasClientProps {
   initialAreas: any[];
   userCompanyId: string;
+  backUrl?: string;
+  backLabel?: string;
 }
 
-export function AreasClient({ initialAreas, userCompanyId }: AreasClientProps) {
+export function AreasClient({ initialAreas, userCompanyId, backUrl = '/shifts', backLabel = 'Volver a Turnos' }: AreasClientProps) {
   const [isPending, startTransition] = useTransition();
   const [showNewAreaForm, setShowNewAreaForm] = useState(false);
   const [addingPositionToArea, setAddingPositionToArea] = useState<string | null>(null);
@@ -50,8 +52,8 @@ export function AreasClient({ initialAreas, userCompanyId }: AreasClientProps) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <Link href="/shifts" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-orange-600 transition-colors mb-2">
-            <ArrowLeft className="h-3.5 w-3.5" /> Volver a Turnos
+          <Link href={backUrl} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-orange-600 transition-colors mb-2">
+            <ArrowLeft className="h-3.5 w-3.5" /> {backLabel}
           </Link>
           <h1 className="text-2xl font-bold tracking-tight">Áreas y Cargos</h1>
           <p className="text-muted-foreground text-sm mt-1">

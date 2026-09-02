@@ -1,7 +1,7 @@
 'use client';
 
 import { Card, CardContent } from '@/components/ui/card';
-import { Settings as SettingsIcon, Building, Users, Shield, Bell, FileText, History } from 'lucide-react';
+import { Settings as SettingsIcon, Building, Users, Shield, Bell, FileText, History, MapPin } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
@@ -14,6 +14,7 @@ export default function SettingsPage() {
 
   const settingsItems = [
     { icon: Building, title: 'Ajustes de Compañía', desc: 'Gestionar información, razones sociales y configuración general', href: '/settings/companies' },
+    { icon: MapPin, title: 'Áreas y Cargos', desc: 'Gestionar áreas de la empresa y cargos (operativos y administrativos exentos de turnos)', href: '/settings/areas' },
     { icon: FileText, title: 'Documentos Requeridos', desc: 'Configurar qué documentos debe subir cada empleado y cuáles son obligatorios', href: '/settings/documents' },
     { icon: Users, title: 'Gestión de Usuarios', desc: 'Gestionar usuarios del sistema, roles y permisos', href: '/settings/users' },
     { icon: Shield, title: 'Seguridad', desc: 'Políticas de contraseña, gestión de sesiones y registros de auditoría' },
