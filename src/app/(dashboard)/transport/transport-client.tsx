@@ -129,12 +129,19 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
     }
   }, [req.reservation_number, req.pickup_time, req.observations, req.cost, req.assignment?.shift_id, extractedProvider]);
 
-  // List of potential drivers (all workers in allRequests on the same date/type, excluding self)
+  // List of potential drivers: strictly those who have transport_type === 'PROPIO' on the same date and type
   const potentialDrivers = React.useMemo(() => {
     const driversMap = new Map();
     allRequests.forEach(r => {
-      if (r.personnel && r.personnel.id !== req.personnel?.id) {
-        // Count how many passengers this driver currently picks up
+      const isPickupBonus = r.observations?.startsWith('Recogida a');
+      if (
+        r.personnel && 
+        r.personnel.id !== req.personnel?.id && 
+        r.transport_type === 'PROPIO' && 
+        !isPickupBonus &&
+        r.type === req.type
+      ) {
+        // Count how many passengers this driver currently picks up on this date/type
         const passengerCount = allRequests.filter(other => 
           other.transport_type === 'COLEGA' && 
           other.type === req.type &&
@@ -144,9 +151,9 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
         if (!driversMap.has(r.personnel.id)) {
           driversMap.set(r.personnel.id, {
             id: r.personnel.id,
-            name: `${r.personnel.first_name} ${r.personnel.last_name_father}`,
+            name: `${r.personnel.first_name} ${r.personnel.last_name_father}`.trim(),
             phone: r.personnel.phone,
-            isOwnTransport: r.transport_type === 'PROPIO',
+            isOwnTransport: true,
             shiftTime: r.assignment?.shift?.start_time?.substring(0, 5) || '',
             areaName: r.assignment?.area?.name || '',
             passengerCount
@@ -154,7 +161,7 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
         }
       }
     });
-    return Array.from(driversMap.values());
+    return Array.from(driversMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
   }, [allRequests, req.personnel?.id, req.type]);
 
   const hasChanges = 
@@ -452,19 +459,19 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
                   defaultValue=""
                   className="w-full text-xs p-2 rounded-lg border border-purple-300 bg-white font-medium focus:ring-purple-500"
                 >
-                  <option value="" disabled>Seleccionar conductor ({potentialDrivers.length} disponibles)...</option>
+                  <option value="" disabled>Seleccionar conductor con Movilización Propia ({potentialDrivers.length} disponibles)...</option>
                   {potentialDrivers.map(d => (
                     <option 
                       key={d.id} 
                       value={d.id} 
                       disabled={d.passengerCount >= 3}
                     >
-                      {d.name} {d.isOwnTransport ? '(Auto Propio)' : `(${d.shiftTime})`} — {d.passengerCount}/3 pasajeros {d.passengerCount >= 3 ? '[LLENO]' : ''}
+                      {d.name} ({d.shiftTime}) — {d.passengerCount}/3 pasajeros {d.passengerCount >= 3 ? '[LLENO]' : ''}
                     </option>
                   ))}
                 </select>
                 {potentialDrivers.length === 0 && (
-                  <p className="text-[10px] text-purple-500 italic">No hay otros compañeros programados en esta fecha.</p>
+                  <p className="text-[10px] text-purple-600 font-medium italic">No hay compañeros con Movilización Propia programados en este turno.</p>
                 )}
               </div>
             )}
