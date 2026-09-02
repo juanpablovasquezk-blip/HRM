@@ -35,6 +35,7 @@ export default async function SupervisorPersonnelPage() {
 
   const personnel = (personnelRaw || []).map(p => ({
     ...p,
+    main_position_id: p.main_position, // preserve UUID for filtering
     main_position: posMap[p.main_position] || p.main_position || 'Sin Cargo'
   }));
 

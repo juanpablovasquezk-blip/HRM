@@ -43,15 +43,29 @@ export default function PersonnelClient({
   const enhancedPersonnel = useMemo(() => {
     return personnel.map(p => {
       const userDocs = documents.filter(d => d.personnel_id === p.id);
+      const positionId = p.main_position_id; // UUID of their position
       
-      // Calculate expired
+      // Filter definitions that actually apply to this worker's position
+      const applicableDefs = documentDefs.filter(def => {
+        if (!def.is_mandatory) return false;
+        // If applicable_positions is null/empty, it applies to everyone
+        if (!def.applicable_positions || def.applicable_positions.length === 0) return true;
+        // Otherwise, check if this worker's position is in the list
+        return positionId && def.applicable_positions.includes(positionId);
+      });
+
+      // Calculate expired (only for applicable docs)
       const expired_docs = userDocs
         .filter(d => d.status === 'APPROVED' && d.expiration_date && new Date(d.expiration_date) < new Date())
+        .filter(d => {
+          // Only show as expired if it's an applicable document for this position
+          if (!d.definition_id) return false;
+          return applicableDefs.some(def => def.id === d.definition_id);
+        })
         .map(d => documentDefs.find(def => def.id === d.definition_id)?.name || d.type);
 
-      // Calculate missing (mandatory only)
-      const missing_docs = documentDefs
-        .filter(def => def.is_mandatory)
+      // Calculate missing (mandatory & applicable to position only)
+      const missing_docs = applicableDefs
         .filter(def => !userDocs.some(d => d.definition_id === def.id))
         .map(def => def.name);
 
