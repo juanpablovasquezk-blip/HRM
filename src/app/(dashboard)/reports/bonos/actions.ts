@@ -63,6 +63,7 @@ export async function getBonosReportData(filters: BonosReportFilters) {
       type,
       transport_type,
       paid_month,
+      observations,
       personnel_id,
       personnel:personnel_id (
         id,

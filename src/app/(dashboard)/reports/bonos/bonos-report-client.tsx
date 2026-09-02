@@ -983,7 +983,7 @@ export function BonosReportClient({
                                     {format(parseISO(t.date), "eeee dd/MM/yyyy", { locale: es })}
                                   </td>
                                   <td className="px-4 py-2 font-bold text-indigo-700 dark:text-indigo-400 border-r border-slate-100 dark:border-slate-900">
-                                    Transporte Nocturno
+                                    {t.observations?.startsWith('Recogida a') ? t.observations : 'Transporte Nocturno'}
                                   </td>
                                   <td className="px-4 py-2 border-r border-slate-100 dark:border-slate-900">
                                     <span className={cn(

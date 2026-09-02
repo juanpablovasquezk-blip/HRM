@@ -184,17 +184,18 @@ export default function TransportReportClient({ companies }: Props) {
   // -----------------------------------------------------------------------
   const exportMobilesExcel = () => {
     const mobiles = data.filter(r =>
-      r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE' || r.transport_type === 'EMPRESA'
+      r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE' || r.transport_type === 'EMPRESA' || r.transport_type === 'OTRO_PROVEEDOR'
     );
     const wsData = mobiles.map(r => ({
       'Fecha': r.date,
       'Nombre': `${r.personnel?.first_name} ${r.personnel?.last_name_father}`,
       'Puesto': r.assignment?.position?.name || 'N/A',
       'Empresa': r.personnel?.company?.name || 'N/A',
+      'Modalidad': r.transport_type === 'OTRO_PROVEEDOR' ? 'Otro Proveedor' : r.transport_type,
       'Dirección Origen': r.pickup_address,
       'Dirección Destino': r.destination_address,
       'Hora Recogida': r.pickup_time || 'PENDIENTE',
-      'Reserva': r.reservation_number || 'PENDIENTE',
+      'Reserva / Contacto': r.reservation_number || 'PENDIENTE',
       'Costo': r.cost ?? '',
       'Observaciones': r.observations || '',
       'Estado': r.assignment?.attendance_status === 'absent'
@@ -203,6 +204,8 @@ export default function TransportReportClient({ companies }: Props) {
         ? 'Pendiente de Reserva'
         : r.transport_type === 'EMPRESA'
         ? 'Móvil Empresa'
+        : r.transport_type === 'OTRO_PROVEEDOR'
+        ? (r.cost != null && r.cost > 0 ? 'Valorizado' : 'Pendiente Valorizar')
         : 'Confirmado',
     }));
 
@@ -213,18 +216,20 @@ export default function TransportReportClient({ companies }: Props) {
   };
 
   const exportOwnTransportExcel = () => {
-    const own = data.filter(r => r.transport_type === 'PROPIO');
+    const own = data.filter(r => r.transport_type === 'PROPIO' || r.transport_type === 'COLEGA');
     const wsData = own.map(r => ({
       'Fecha': r.date,
       'Nombre': `${r.personnel?.first_name} ${r.personnel?.last_name_father}`,
       'Puesto': r.assignment?.position?.name || 'N/A',
       'Empresa': r.personnel?.company?.name || 'N/A',
+      'Modalidad': r.transport_type === 'COLEGA' ? 'Recogido por Colega' : (r.observations?.startsWith('Recogida a') ? 'Conductor (Recoge Colega)' : 'Auto Propio'),
+      'Detalle / Observación': r.observations || '',
       'Hora de Entrada': r.assignment?.shift?.start_time || 'N/A',
     }));
 
     const ws = XLSX.utils.json_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Transporte Propio');
+    XLSX.utils.book_append_sheet(wb, ws, 'Transporte Propio y Colegas');
     XLSX.writeFile(wb, `Reporte_Propio_${filters.startDate}_${filters.endDate}.xlsx`);
   };
 
@@ -280,12 +285,44 @@ export default function TransportReportClient({ companies }: Props) {
   // Derived values
   // -----------------------------------------------------------------------
 
-  const mobileRows = data.filter(r =>
-    r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE' || r.transport_type === 'EMPRESA'
+  const [showPendingOnly, setShowPendingOnly] = useState(false);
+  const [editingCostId, setEditingCostId] = useState<string | null>(null);
+  const [tempCostValue, setTempCostValue] = useState<string>('');
+  const [savingCostId, setSavingCostId] = useState<string | null>(null);
+
+  const allMobileRows = data.filter(r =>
+    r.transport_type === 'REQUERIDO' || r.transport_type === 'PENDIENTE' || r.transport_type === 'EMPRESA' || r.transport_type === 'OTRO_PROVEEDOR'
   );
-  const ownRows = data.filter(r => r.transport_type === 'PROPIO');
-  const totalCost = mobileRows.reduce((sum, r) => sum + (r.cost ?? 0), 0);
-  const withCostCount = mobileRows.filter(r => r.cost != null).length;
+  
+  const pendingCostCount = allMobileRows.filter(r => r.transport_type === 'OTRO_PROVEEDOR' && (r.cost == null || r.cost === 0)).length;
+
+  const mobileRows = showPendingOnly
+    ? allMobileRows.filter(r => r.transport_type === 'OTRO_PROVEEDOR' && (r.cost == null || r.cost === 0))
+    : allMobileRows;
+
+  const ownRows = data.filter(r => r.transport_type === 'PROPIO' || r.transport_type === 'COLEGA');
+  const totalCost = allMobileRows.reduce((sum, r) => sum + (r.cost ?? 0), 0);
+  const withCostCount = allMobileRows.filter(r => r.cost != null && r.cost > 0).length;
+
+  const handleSaveDirectCost = async (requestId: string) => {
+    setSavingCostId(requestId);
+    try {
+      const val = tempCostValue ? Number(tempCostValue) : null;
+      const { updateTransportCost } = await import('../../transport/actions');
+      const res = await updateTransportCost(requestId, val);
+      if (res.success) {
+        setData(prev => prev.map(item => item.id === requestId ? { ...item, cost: val } : item));
+        toast.success('Costo guardado');
+        setEditingCostId(null);
+      } else {
+        toast.error('Error al guardar: ' + res.error);
+      }
+    } catch (e: any) {
+      toast.error('Error: ' + e.message);
+    } finally {
+      setSavingCostId(null);
+    }
+  };
 
   // -----------------------------------------------------------------------
 
@@ -452,19 +489,33 @@ export default function TransportReportClient({ companies }: Props) {
       {/* ================================================================ */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
-        {/* CONTRACTED MOBILES */}
+        {/* CONTRACTED MOBILES & ALTERNATIVE PROVIDERS */}
         <div className="space-y-4">
           <div className="flex items-center justify-between border-b border-slate-200 pb-2">
             <div className="flex items-center gap-2">
               <Car className="w-5 h-5 text-indigo-600" />
-              <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Móviles Contratados</h2>
+              <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Móviles Contratados y Proveedores</h2>
             </div>
-            <button
-              onClick={exportMobilesExcel}
-              className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all text-xs font-bold uppercase shadow-sm"
-            >
-              <FileSpreadsheet className="w-4 h-4" /> Exportar Excel
-            </button>
+            <div className="flex items-center gap-2">
+              {pendingCostCount > 0 && (
+                <button
+                  onClick={() => setShowPendingOnly(!showPendingOnly)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-1 ${
+                    showPendingOnly 
+                      ? 'bg-amber-600 text-white' 
+                      : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                  }`}
+                >
+                  ⏳ {pendingCostCount} Pendientes de Valorizar
+                </button>
+              )}
+              <button
+                onClick={exportMobilesExcel}
+                className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all text-xs font-bold uppercase shadow-sm"
+              >
+                <FileSpreadsheet className="w-4 h-4" /> Exportar Excel
+              </button>
+            </div>
           </div>
 
           {/* Cost summary */}
@@ -474,7 +525,7 @@ export default function TransportReportClient({ companies }: Props) {
               <div className="text-xs text-emerald-800">
                 <span className="font-bold">Costo total período:</span>{' '}
                 <span className="text-lg font-black">{formatCLP(totalCost)}</span>
-                <span className="text-slate-400 ml-2">({withCostCount} de {mobileRows.length} con precio importado)</span>
+                <span className="text-slate-400 ml-2">({withCostCount} de {allMobileRows.length} con valorización registrada)</span>
               </div>
             </div>
           )}
@@ -489,48 +540,110 @@ export default function TransportReportClient({ companies }: Props) {
                     <span className="flex items-center gap-1"><Briefcase className="w-3 h-3" />Puesto</span>
                   </th>
                   <th className="px-3 py-3">Recogida</th>
-                  <th className="px-3 py-3">Reserva</th>
+                  <th className="px-3 py-3">Modalidad / Proveedor</th>
                   <th className="px-3 py-3 text-right">
                     <span className="flex items-center gap-1 justify-end"><DollarSign className="w-3 h-3" />Costo</span>
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {mobileRows.map(r => (
-                  <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-3 py-3 text-slate-500">{r.date}</td>
-                    <td className="px-3 py-3 font-bold text-slate-700 uppercase">
-                      {r.assignment?.attendance_status === 'absent' && (
-                        <span className="inline-block mr-2 text-[9px] bg-red-100 text-red-700 border border-red-200 px-1.5 py-0.5 rounded-full select-none font-black tracking-widest uppercase align-middle">❌ Ausente</span>
-                      )}
-                      <span className={r.assignment?.attendance_status === 'absent' ? 'line-through text-red-500/60 align-middle' : 'align-middle'}>
-                        {r.personnel?.first_name} {r.personnel?.last_name_father}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-slate-500">
-                      {r.assignment?.position?.name
-                        ? <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase">{r.assignment.position.name}</span>
-                        : <span className="text-slate-300">—</span>
-                      }
-                    </td>
-                    <td className="px-3 py-3 text-indigo-600 font-mono font-bold">{r.pickup_time || '--:--'}</td>
-                    <td className="px-3 py-3">
-                      {r.transport_type === 'PENDIENTE' ? (
-                        <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-bold uppercase">Pendiente</span>
-                      ) : r.transport_type === 'EMPRESA' ? (
-                        <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-bold uppercase">Móvil Empresa</span>
-                      ) : (
-                        <span className="text-slate-700 font-mono font-semibold">{r.reservation_number || '-'}</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      {r.cost != null
-                        ? <span className="font-bold text-emerald-700">{formatCLP(r.cost)}</span>
-                        : <span className="text-slate-300 text-[10px]">Sin precio</span>
-                      }
-                    </td>
-                  </tr>
-                ))}
+                {mobileRows.map(r => {
+                  const isEditingThisCost = editingCostId === r.id;
+                  const isSavingThis = savingCostId === r.id;
+                  const isAlternative = r.transport_type === 'OTRO_PROVEEDOR';
+                  const provMatch = r.observations?.match(/Proveedor:\s*([^|]+)/i);
+                  const provTitle = provMatch ? provMatch[1].trim() : 'Otro Proveedor';
+
+                  return (
+                    <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-3 py-3 text-slate-500">{r.date}</td>
+                      <td className="px-3 py-3 font-bold text-slate-700 uppercase">
+                        {r.assignment?.attendance_status === 'absent' && (
+                          <span className="inline-block mr-2 text-[9px] bg-red-100 text-red-700 border border-red-200 px-1.5 py-0.5 rounded-full select-none font-black tracking-widest uppercase align-middle">❌ Ausente</span>
+                        )}
+                        <span className={r.assignment?.attendance_status === 'absent' ? 'line-through text-red-500/60 align-middle' : 'align-middle'}>
+                          {r.personnel?.first_name} {r.personnel?.last_name_father}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-slate-500">
+                        {r.assignment?.position?.name
+                          ? <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase">{r.assignment.position.name}</span>
+                          : <span className="text-slate-300">—</span>
+                        }
+                      </td>
+                      <td className="px-3 py-3 text-indigo-600 font-mono font-bold">{r.pickup_time || '--:--'}</td>
+                      <td className="px-3 py-3">
+                        {r.transport_type === 'PENDIENTE' ? (
+                          <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-bold uppercase">Pendiente</span>
+                        ) : r.transport_type === 'EMPRESA' ? (
+                          <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-bold uppercase">Móvil Empresa</span>
+                        ) : isAlternative ? (
+                          <div className="flex flex-col">
+                            <span className="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-bold uppercase w-fit">🚖 {provTitle}</span>
+                            {r.reservation_number && <span className="text-[9px] text-slate-400 font-mono mt-0.5">Ref: {r.reservation_number}</span>}
+                          </div>
+                        ) : (
+                          <span className="text-slate-700 font-mono font-semibold">{r.reservation_number || '-'}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        {isEditingThisCost ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <input
+                              type="number"
+                              value={tempCostValue}
+                              onChange={(e) => setTempCostValue(e.target.value)}
+                              placeholder="$"
+                              className="w-20 text-xs p-1 rounded border border-indigo-400 font-bold text-right"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => handleSaveDirectCost(r.id)}
+                              disabled={isSavingThis}
+                              className="px-1.5 py-1 bg-emerald-600 text-white rounded text-[10px] font-bold"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              onClick={() => setEditingCostId(null)}
+                              className="px-1.5 py-1 bg-slate-200 text-slate-600 rounded text-[10px]"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : r.cost != null && r.cost > 0 ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span className="font-bold text-emerald-700">{formatCLP(r.cost)}</span>
+                            {isAlternative && (
+                              <button
+                                onClick={() => {
+                                  setEditingCostId(r.id);
+                                  setTempCostValue(String(r.cost));
+                                }}
+                                className="text-[9px] text-slate-400 hover:text-indigo-600"
+                                title="Editar valor"
+                              >
+                                ✏️
+                              </button>
+                            )}
+                          </div>
+                        ) : isAlternative ? (
+                          <button
+                            onClick={() => {
+                              setEditingCostId(r.id);
+                              setTempCostValue('');
+                            }}
+                            className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full font-bold hover:bg-amber-100"
+                          >
+                            + Valorizar
+                          </button>
+                        ) : (
+                          <span className="text-slate-300 text-[10px]">Sin precio</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             {mobileRows.length === 0 && (
@@ -539,12 +652,12 @@ export default function TransportReportClient({ companies }: Props) {
           </div>
         </div>
 
-        {/* OWN TRANSPORT */}
+        {/* OWN TRANSPORT & CARPOOLING */}
         <div className="space-y-4">
           <div className="flex items-center justify-between border-b border-slate-200 pb-2">
             <div className="flex items-center gap-2">
               <User className="w-5 h-5 text-emerald-600" />
-              <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Transporte Propio</h2>
+              <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Transporte Propio y Colegas</h2>
             </div>
             <button
               onClick={exportOwnTransportExcel}
@@ -560,6 +673,7 @@ export default function TransportReportClient({ companies }: Props) {
                 <tr>
                   <th className="px-3 py-3">Fecha</th>
                   <th className="px-3 py-3">Personal</th>
+                  <th className="px-3 py-3">Modalidad / Nota</th>
                   <th className="px-3 py-3">
                     <span className="flex items-center gap-1"><Briefcase className="w-3 h-3" />Puesto</span>
                   </th>
@@ -572,6 +686,21 @@ export default function TransportReportClient({ companies }: Props) {
                     <td className="px-3 py-3 text-slate-500">{r.date}</td>
                     <td className="px-3 py-3 font-bold text-slate-700 uppercase">
                       {r.personnel?.first_name} {r.personnel?.last_name_father}
+                    </td>
+                    <td className="px-3 py-3">
+                      {r.transport_type === 'COLEGA' ? (
+                        <span className="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-bold uppercase">
+                          🚗 {r.observations?.replace(/\|.*$/, '').trim() || 'Lo pasa a buscar colega'}
+                        </span>
+                      ) : r.observations?.startsWith('Recogida a') ? (
+                        <span className="text-[10px] bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full font-bold uppercase">
+                          🚗 {r.observations}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold uppercase">
+                          Auto Propio
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       {r.assignment?.position?.name

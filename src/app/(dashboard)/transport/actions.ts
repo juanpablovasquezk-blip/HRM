@@ -70,6 +70,179 @@ export async function updateTransportRequest(id: string, updates: any) {
   }
 }
 
+export async function updateTransportCost(requestId: string, cost: number | null) {
+  try {
+    const role = await getAuthorizedRole();
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
+      return { success: false, error: 'No autorizado' };
+    }
+
+    const supabase = createAdminClient();
+    const { error } = await supabase
+      .from('transport_requests')
+      .update({ cost: cost !== null ? Number(cost) : null })
+      .eq('id', requestId);
+
+    if (error) throw error;
+
+    revalidatePath('/transport');
+    revalidatePath('/reports/transport');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error updateTransportCost:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function assignColleaguePickup(passengerRequestId: string, driverPersonnelId: string) {
+  try {
+    const role = await getAuthorizedRole();
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
+      return { success: false, error: 'No autorizado' };
+    }
+
+    const supabase = createAdminClient();
+
+    // 1. Fetch passenger request & personnel
+    const { data: passReq, error: passErr } = await supabase
+      .from('transport_requests')
+      .select('*, personnel:personnel_id(first_name, last_name_father)')
+      .eq('id', passengerRequestId)
+      .single();
+
+    if (passErr || !passReq) {
+      return { success: false, error: 'Solicitud de pasajero no encontrada' };
+    }
+
+    const passengerName = `${passReq.personnel?.first_name || ''} ${passReq.personnel?.last_name_father || ''}`.trim();
+
+    // 2. Fetch driver personnel
+    const { data: driver, error: driverErr } = await supabase
+      .from('personnel')
+      .select('id, first_name, last_name_father, phone')
+      .eq('id', driverPersonnelId)
+      .single();
+
+    if (driverErr || !driver) {
+      return { success: false, error: 'Conductor no encontrado' };
+    }
+
+    const driverName = `${driver.first_name} ${driver.last_name_father}`.trim();
+
+    // 3. Check capacity: max 3 passengers per driver on this date and type
+    const { data: existingPickups } = await supabase
+      .from('transport_requests')
+      .select('id, observations')
+      .eq('personnel_id', driverPersonnelId)
+      .eq('date', passReq.date)
+      .eq('type', passReq.type)
+      .ilike('observations', 'Recogida a %');
+
+    // Exclude existing row for THIS passenger if already assigned
+    const currentPickupForPassenger = existingPickups?.find(r => r.observations?.includes(passengerName));
+    const otherPickupsCount = (existingPickups || []).filter(r => !r.observations?.includes(passengerName)).length;
+
+    if (otherPickupsCount >= 3) {
+      return { success: false, error: `El conductor ${driverName} ya tiene el límite máximo de 3 pasajeros asignados para este turno.` };
+    }
+
+    // 4. Update passenger request
+    const passengerObservations = `Pasa a buscar: ${driverName} | DRIVER_ID:${driver.id}`;
+    await supabase
+      .from('transport_requests')
+      .update({
+        transport_type: 'COLEGA',
+        observations: passengerObservations,
+        status: 'ABIERTO'
+      })
+      .eq('id', passengerRequestId);
+
+    // 5. Create or update driver's pickup bonus row
+    if (currentPickupForPassenger) {
+      await supabase
+        .from('transport_requests')
+        .update({
+          observations: `Recogida a ${passengerName}`,
+          status: 'ABIERTO',
+          pickup_address: passReq.pickup_address,
+          destination_address: passReq.destination_address
+        })
+        .eq('id', currentPickupForPassenger.id);
+    } else {
+      await supabase
+        .from('transport_requests')
+        .insert({
+          personnel_id: driverPersonnelId,
+          assignment_id: passReq.assignment_id,
+          date: passReq.date,
+          type: passReq.type,
+          transport_type: 'PROPIO',
+          status: 'ABIERTO',
+          observations: `Recogida a ${passengerName}`,
+          pickup_address: passReq.pickup_address,
+          destination_address: passReq.destination_address,
+          updated_by_name: 'Carpooling / Colega'
+        });
+    }
+
+    revalidatePath('/transport');
+    revalidatePath('/reports/bonos');
+    return { success: true, driverName };
+  } catch (error: any) {
+    console.error('Error in assignColleaguePickup:', error);
+    return { success: false, error: error.message || 'Error al asignar colega' };
+  }
+}
+
+export async function unassignColleaguePickup(passengerRequestId: string) {
+  try {
+    const role = await getAuthorizedRole();
+    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
+      return { success: false, error: 'No autorizado' };
+    }
+
+    const supabase = createAdminClient();
+
+    const { data: passReq } = await supabase
+      .from('transport_requests')
+      .select('*, personnel:personnel_id(first_name, last_name_father)')
+      .eq('id', passengerRequestId)
+      .single();
+
+    if (!passReq) return { success: false, error: 'Solicitud no encontrada' };
+
+    const passengerName = `${passReq.personnel?.first_name || ''} ${passReq.personnel?.last_name_father || ''}`.trim();
+
+    // Remove the driver's bonus row for this passenger
+    if (passengerName) {
+      await supabase
+        .from('transport_requests')
+        .delete()
+        .eq('date', passReq.date)
+        .eq('type', passReq.type)
+        .eq('transport_type', 'PROPIO')
+        .ilike('observations', `%Recogida a ${passengerName}%`);
+    }
+
+    // Reset passenger request to REQUIERE TRANSPORTE
+    await supabase
+      .from('transport_requests')
+      .update({
+        transport_type: 'REQUERIDO',
+        observations: null,
+        status: 'ABIERTO'
+      })
+      .eq('id', passengerRequestId);
+
+    revalidatePath('/transport');
+    revalidatePath('/reports/bonos');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error in unassignColleaguePickup:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 export async function sendTransportNotification(requestId: string, isTimePending: boolean = false) {
   try {
     const role = await getAuthorizedRole();
@@ -142,7 +315,41 @@ export async function sendTransportNotification(requestId: string, isTimePending
     const warning = `ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA`;
     const isFedex = posName.includes('FEDEX') || areaName.includes('FEDEX');
 
-    if (isTimePending && isFedex) {
+    // Custom Messages per Mode
+    let driverPhone: string | null = null;
+    let driverMessage: string | null = null;
+
+    if (tr.transport_type === 'COLEGA') {
+      // 1. CARPOOLING: Recogida por colega
+      let driverName = 'UN COMPAÑERO';
+      const obs = tr.observations || '';
+      const matchName = obs.match(/Pasa a buscar:\s*([^|]+)/i);
+      if (matchName) driverName = matchName[1].trim().toUpperCase();
+
+      const matchDriverId = obs.match(/DRIVER_ID:\s*([a-f0-9-]+)/i);
+      if (matchDriverId) {
+        const { data: driverRow } = await supabase
+          .from('personnel')
+          .select('first_name, last_name_father, phone')
+          .eq('id', matchDriverId[1])
+          .single();
+        if (driverRow) {
+          driverName = `${driverRow.first_name} ${driverRow.last_name_father}`.toUpperCase();
+          driverPhone = driverRow.phone;
+          driverMessage = `SR. ${driverName}\nTURNO ${dateStr}: ${shiftStart}\nASIGNACIÓN DE RECOGIDA DE COMPAÑERO:\n- PASAJERO: ${name}\n- DIRECCIÓN: ${tr.pickup_address || 'Sin dirección'}\n- TELÉFONO: ${phone || 'Sin teléfono'}\nPor favor coordinar horario internamente para el ingreso a las ${shiftStart}.\n\n${warning}`;
+        }
+      }
+
+      body = `SR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nMAÑANA LO PASARÁ A BUSCAR EL SR. ${driverName}. INTERNAMENTE SE CONTACTARÁ PARA COORDINAR EL HORARIO PARA SU ENTRADA A TRABAJAR A LAS ${shiftStart}.`;
+    } else if (tr.transport_type === 'OTRO_PROVEEDOR') {
+      // 2. OTRO PROVEEDOR
+      let provName = 'PROVEEDOR ALTERNATIVO';
+      const obs = tr.observations || '';
+      const matchProv = obs.match(/Proveedor:\s*([^|]+)/i);
+      if (matchProv) provName = matchProv[1].trim().toUpperCase();
+
+      body = `SR. ${name}\nTURNO ${dateStr}: ${shiftStart}\nTRANSPORTE COORDINADO CON: ${provName}\nHORA DE RECOGIDA: ${tr.pickup_time?.substring(0,5) || 'POR CONFIRMAR'}\nRESERVA / MÓVIL: ${tr.reservation_number || 'PENDIENTE'}\nDESDE: ${tr.pickup_address || '---'}\nHASTA: ${tr.destination_address || '---'}`;
+    } else if (isTimePending && isFedex) {
       if (tr.transport_type === 'PROPIO') {
         body = `SR. ${name}\nTURNO ${dateStr}: ATENTO A LA HORA DE INGRESO PARA MAÑANA QUE SERA INFORMADA\nLLEGA POR SUS PROPIOS MEDIOS`;
       } else {
@@ -186,39 +393,40 @@ export async function sendTransportNotification(requestId: string, isTimePending
       groupId = dbSettings.ultramsg_group_others;
     }
 
-    // 6. Find 04:00 Supervisor for the individual message
-    let supervisorName = 'SUPERVISOR DE TURNO';
-    try {
-      // Fetch assignments with personnel and their assigned position for the day
-      const { data: assignments, error: asgErr } = await supabase
-        .from('shift_assignments')
-        .select(`
-          shifts!shift_assignments_shift_id_fkey(start_time),
-          personnel(first_name, last_name_father),
-          positions(name)
-        `)
-        .eq('date', tr.date)
-        .eq('status', 'scheduled');
-        
-      if (asgErr) throw asgErr;
-      
-      const sup0400 = assignments?.find((s: any) => {
-        const startTime = s.shifts?.start_time || '';
-        const posName = (s.positions?.name || '').toUpperCase();
-        return startTime.startsWith('04:00') && posName.includes('SUPERVISOR');
-      });
+    // 6. Find 04:00 Supervisor for the individual message if Transvip
+    let individualMessage = `${body}\n\n${warning}`;
 
-      if (sup0400) {
-        const p = Array.isArray(sup0400.personnel) ? sup0400.personnel[0] : sup0400.personnel;
-        if (p) {
-          supervisorName = `${p.first_name} ${p.last_name_father}`.toUpperCase();
+    if (tr.transport_type === 'REQUERIDO' || tr.transport_type === 'EMPRESA') {
+      let supervisorName = 'SUPERVISOR DE TURNO';
+      try {
+        const { data: assignments } = await supabase
+          .from('shift_assignments')
+          .select(`
+            shifts!shift_assignments_shift_id_fkey(start_time),
+            personnel(first_name, last_name_father),
+            positions(name)
+          `)
+          .eq('date', tr.date)
+          .eq('status', 'scheduled');
+          
+        const sup0400 = assignments?.find((s: any) => {
+          const startTime = s.shifts?.start_time || '';
+          const pName = (s.positions?.name || '').toUpperCase();
+          return startTime.startsWith('04:00') && pName.includes('SUPERVISOR');
+        });
+
+        if (sup0400) {
+          const p = Array.isArray(sup0400.personnel) ? sup0400.personnel[0] : sup0400.personnel;
+          if (p) {
+            supervisorName = `${p.first_name} ${p.last_name_father}`.toUpperCase();
+          }
         }
+      } catch (e) {
+        console.error('Error finding supervisor:', e);
       }
-    } catch (e) {
-      console.error('Error finding supervisor:', e);
-    }
 
-    const individualMessage = `${body}\n\nSi tiene problemas con su recogida, contactarse con Transvip al (2) 2677 3000. Si no lo pasan a buscar, contactese con el supervisor *${supervisorName}* a las 04:00.\n\n${warning}`;
+      individualMessage = `${body}\n\nSi tiene problemas con su recogida, contactarse con Transvip al (2) 2677 3000. Si no lo pasan a buscar, contactese con el supervisor *${supervisorName}* a las 04:00.\n\n${warning}`;
+    }
 
     // 7. Send to both in parallel using cached settings
     const sendPromises = [];
@@ -232,6 +440,11 @@ export async function sendTransportNotification(requestId: string, isTimePending
     
     if (phone) {
       sendPromises.push(sendWhatsAppMessage(phone.trim().replace(/\D/g, ''), individualMessage, dbSettings));
+    }
+
+    // If Carpooling, also send notification to Driver
+    if (driverPhone && driverMessage) {
+      sendPromises.push(sendWhatsAppMessage(driverPhone.trim().replace(/\D/g, ''), driverMessage, dbSettings));
     }
 
     const results = await Promise.all(sendPromises);
