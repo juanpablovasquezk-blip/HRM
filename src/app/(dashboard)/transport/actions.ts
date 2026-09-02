@@ -230,6 +230,12 @@ export async function sendTransportNotification(requestId: string, isTimePending
       return { success: false, error: failed.error || 'Error al enviar uno de los mensajes' };
     }
 
+    // Mark request as GESTIONADO
+    await supabase
+      .from('transport_requests')
+      .update({ status: 'GESTIONADO' })
+      .eq('id', requestId);
+
     revalidatePath('/transport');
     return { success: true };
   } catch (error: any) {

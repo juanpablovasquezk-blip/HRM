@@ -15,14 +15,19 @@ import {
   ThumbsUp, 
   ThumbsDown,
   Car,
-  Info
+  Info,
+  CheckCircle2,
+  RotateCcw,
+  Send,
+  Loader2,
+  RefreshCw,
+  Trash2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import type { TransportRequestWithDetails, Company, TransportType, TransportStatus } from '@/types/database';
 import { updateTransportRequest, generateTransportRequests, clearTransportRequests, sendTransportNotification, getAvailableShifts, updateAssignmentShift } from './actions';
 import { Button } from '@/components/ui/button';
-import { Loader2, RefreshCw, Trash2, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
 interface RequestCardProps {
@@ -42,9 +47,12 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId, av
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isNotifying, setIsNotifying] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [isTimePending, setIsTimePending] = useState(true);
   const [selectedShiftId, setSelectedShiftId] = useState(req.assignment?.shift_id || '');
   const [isUpdatingShift, setIsUpdatingShift] = useState(false);
+
+  const isManaged = req.status === 'GESTIONADO' || req.status === 'CONFORME' || req.status === 'NO_CONFORME';
 
   // Sync local data if req changes (e.g. from parent state update)
   useEffect(() => {
@@ -69,13 +77,24 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId, av
 
   const handleNotify = async () => {
     setIsNotifying(true);
+    // If there are unsaved changes, save them first
+    if (hasChanges) {
+      await onUpdate(req.id, localData);
+    }
     const res = await sendTransportNotification(req.id, isTimePending);
     if (res.success) {
-      toast.success('WhatsApp enviado correctamente');
+      toast.success(isManaged ? 'WhatsApp re-enviado correctamente' : 'WhatsApp enviado y movido a Gestionados');
     } else {
       toast.error('Error al enviar: ' + res.error);
     }
     setIsNotifying(false);
+  };
+
+  const handleResetToPending = async () => {
+    setIsResetting(true);
+    await onUpdate(req.id, { status: 'ABIERTO' });
+    toast.success('Transporte devuelto a Pendientes');
+    setIsResetting(false);
   };
 
   const handleShiftUpdate = async () => {
@@ -99,15 +118,46 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId, av
   const isFedex = posName.includes('FEDEX') || areaName.includes('FEDEX');
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-all">
+    <div className={`bg-white rounded-xl shadow-sm border transition-all overflow-hidden hover:shadow-md ${
+      isManaged ? 'border-emerald-200 ring-1 ring-emerald-100' : 'border-slate-200'
+    }`}>
+      {/* Managed Banner / Badge */}
+      {isManaged && (
+        <div className="bg-gradient-to-r from-emerald-500 to-teal-600 px-3.5 py-1.5 text-white flex items-center justify-between text-xs font-bold shadow-inner">
+          <div className="flex items-center gap-1.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-100" />
+            <span className="tracking-wide uppercase text-[11px]">WhatsApp Enviado</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${
+              req.type === 'ENTRADA' ? 'bg-blue-900/60 text-blue-100' : 'bg-amber-900/60 text-amber-100'
+            }`}>
+              {req.type}
+            </span>
+            {req.status === 'CONFORME' && (
+              <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-white text-emerald-800 uppercase flex items-center gap-0.5">
+                <ThumbsUp className="w-2.5 h-2.5" /> Conforme
+              </span>
+            )}
+            {req.status === 'NO_CONFORME' && (
+              <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white uppercase flex items-center gap-0.5">
+                <ThumbsDown className="w-2.5 h-2.5" /> No Conforme
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
         <div className="flex items-center gap-2">
-          <div className={`p-1.5 rounded-lg ${req.type === 'ENTRADA' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'}`}>
+          <div className={`p-1.5 rounded-lg ${
+            isManaged ? 'bg-emerald-100 text-emerald-700' : req.type === 'ENTRADA' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'
+          }`}>
             <Clock className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="font-bold text-slate-900 uppercase text-sm">
+            <h3 className="font-bold text-slate-900 uppercase text-sm flex items-center gap-2">
               {req.personnel?.first_name} {req.personnel?.last_name_father}
             </h3>
             {isFedex && req.type === 'ENTRADA' ? (
@@ -212,66 +262,101 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId, av
 
         {/* Admin Inputs */}
         {showNotifyButton && (
-          <div className="bg-indigo-50/50 p-3 rounded-lg border border-indigo-100 space-y-3">
+          <div className={`p-3 rounded-lg border space-y-3 ${
+            isManaged ? 'bg-emerald-50/40 border-emerald-100' : 'bg-indigo-50/50 border-indigo-100'
+          }`}>
             {req.transport_type !== 'PROPIO' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-indigo-700 uppercase flex items-center gap-1">
+                  <label className={`text-[10px] font-bold uppercase flex items-center gap-1 ${
+                    isManaged ? 'text-emerald-800' : 'text-indigo-700'
+                  }`}>
                     <Hash className="w-3 h-3" /> Nro Reserva
                   </label>
                   <input 
                     type="text" 
                     value={localData.reservation_number}
                     onChange={(e) => setLocalData({ ...localData, reservation_number: e.target.value })}
-                    className="w-full text-xs p-2 rounded border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500"
+                    className={`w-full text-xs p-2 rounded focus:ring-indigo-500 focus:border-indigo-500 bg-white ${
+                      isManaged ? 'border-emerald-200' : 'border-indigo-200'
+                    }`}
                     placeholder="Ingresar reserva..."
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-indigo-700 uppercase flex items-center gap-1">
+                  <label className={`text-[10px] font-bold uppercase flex items-center gap-1 ${
+                    isManaged ? 'text-emerald-800' : 'text-indigo-700'
+                  }`}>
                     <Clock className="w-3 h-3" /> Hora Recogida
                   </label>
                   <input 
                     type="time" 
                     value={localData.pickup_time}
                     onChange={(e) => setLocalData({ ...localData, pickup_time: e.target.value })}
-                    className="w-full text-xs p-2 rounded border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500"
+                    className={`w-full text-xs p-2 rounded focus:ring-indigo-500 focus:border-indigo-500 bg-white ${
+                      isManaged ? 'border-emerald-200' : 'border-indigo-200'
+                    }`}
                   />
                 </div>
               </div>
             )}
             
-              {hasChanges && req.transport_type !== 'PROPIO' ? (
-                <button 
-                  onClick={saveChanges}
-                  disabled={isSaving}
-                  className="w-full py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 active:scale-95 disabled:opacity-50"
-                >
-                  {isSaving ? 'Guardando...' : 'Guardar Cambios de Reserva'}
-                </button>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {isFedex && (
-                    <label className="flex items-center gap-2 text-[10px] font-bold text-indigo-800 bg-indigo-100 p-2 rounded cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={isTimePending}
-                        onChange={(e) => setIsTimePending(e.target.checked)}
-                        className="rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      Hora de ingreso por confirmar
-                    </label>
-                  )}
+            {hasChanges && req.transport_type !== 'PROPIO' ? (
+              <button 
+                onClick={saveChanges}
+                disabled={isSaving}
+                className="w-full py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 active:scale-95 disabled:opacity-50"
+              >
+                {isSaving ? 'Guardando...' : 'Guardar Cambios de Reserva'}
+              </button>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {isFedex && (
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-indigo-800 bg-indigo-100 p-2 rounded cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={isTimePending}
+                      onChange={(e) => setIsTimePending(e.target.checked)}
+                      className="rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Hora de ingreso por confirmar
+                  </label>
+                )}
+                
+                <div className="flex items-center gap-2">
                   <button 
                     onClick={handleNotify}
                     disabled={!isDataComplete || isNotifying}
-                    className={`w-full py-2 flex items-center justify-center gap-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 disabled:opacity-30 disabled:grayscale ${isDataComplete ? 'bg-emerald-600 text-white shadow-emerald-200 hover:bg-emerald-700' : 'bg-slate-200 text-slate-500 shadow-none cursor-not-allowed'}`}
+                    className={`flex-1 py-2 flex items-center justify-center gap-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 disabled:opacity-30 disabled:grayscale ${
+                      isManaged 
+                        ? 'bg-emerald-600 text-white shadow-emerald-200 hover:bg-emerald-700'
+                        : isDataComplete 
+                          ? 'bg-emerald-600 text-white shadow-emerald-200 hover:bg-emerald-700' 
+                          : 'bg-slate-200 text-slate-500 shadow-none cursor-not-allowed'
+                    }`}
                   >
                     {isNotifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-                    {isDataComplete ? 'Enviar Notificación WhatsApp' : 'Datos Incompletos para Notificar'}
+                    {isManaged 
+                      ? 'Re-enviar WhatsApp' 
+                      : isDataComplete 
+                        ? 'Enviar Notificación WhatsApp' 
+                        : 'Datos Incompletos para Notificar'}
                   </button>
+
+                  {isManaged && (
+                    <button
+                      onClick={handleResetToPending}
+                      disabled={isResetting}
+                      title="Mover de vuelta a lista de pendientes"
+                      className="px-2.5 py-2 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800 rounded-lg text-[10px] font-bold transition-all border border-slate-200 flex items-center gap-1"
+                    >
+                      {isResetting ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                      <span className="hidden sm:inline">Revertir</span>
+                    </button>
+                  )}
                 </div>
-              )}
+              </div>
+            )}
           </div>
         )}
 
@@ -292,13 +377,21 @@ const RequestCard = React.memo(({ req, onUpdate, onCopyToClipboard, copiedId, av
            <div className="flex items-center gap-2">
               <button 
                 onClick={() => onUpdate(req.id, { status: 'CONFORME' })}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition-colors text-[10px] font-bold uppercase"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors text-[10px] font-bold uppercase ${
+                  req.status === 'CONFORME' 
+                    ? 'bg-emerald-600 text-white shadow-sm' 
+                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                }`}
               >
                 <ThumbsUp className="w-3.5 h-3.5" /> Conforme
               </button>
               <button 
                 onClick={() => onUpdate(req.id, { status: 'NO_CONFORME' })}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors text-[10px] font-bold uppercase"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors text-[10px] font-bold uppercase ${
+                  req.status === 'NO_CONFORME' 
+                    ? 'bg-red-600 text-white shadow-sm' 
+                    : 'bg-red-50 text-red-700 hover:bg-red-100'
+                }`}
               >
                 <ThumbsDown className="w-3.5 h-3.5" /> No Conforme
               </button>
@@ -418,14 +511,14 @@ export default function TransportClient({
   };
 
   const handleBulkFedexShiftUpdate = async (newShiftId: string) => {
-    const fedexEntries = entries.filter(r => {
+    const fedexEntries = entriesPending.filter(r => {
       const areaName = (r.assignment?.area?.name || '').toUpperCase();
       const posName = (r.assignment?.position?.name || '').toUpperCase();
       return posName.includes('FEDEX') || areaName.includes('FEDEX');
     });
     
     if (fedexEntries.length === 0) {
-      toast.error('No hay entradas de Fedex para actualizar');
+      toast.error('No hay entradas pendientes de Fedex para actualizar');
       return;
     }
 
@@ -454,7 +547,9 @@ export default function TransportClient({
     toast.success('Dirección copiada');
   };
 
-  const activeRequests = requests.filter(r => {
+  // 1. Entradas pendientes (status === 'ABIERTO')
+  const entriesPending = requests.filter(r => {
+    if (r.type !== 'ENTRADA') return false;
     if (r.status !== 'ABIERTO') return false;
     
     // Si es movilización propia, solo mostrar si es de Fedex (para coordinar horario)
@@ -463,12 +558,26 @@ export default function TransportClient({
       const posName = (r.assignment?.position?.name || '').toUpperCase();
       return posName.includes('FEDEX') || areaName.includes('FEDEX');
     }
-    
     return true;
   });
 
-  const entries = activeRequests.filter(r => r.type === 'ENTRADA');
-  const exits = activeRequests.filter(r => r.type === 'SALIDA');
+  // 2. Salidas pendientes (status === 'ABIERTO')
+  const exitsPending = requests.filter(r => {
+    if (r.type !== 'SALIDA') return false;
+    if (r.status !== 'ABIERTO') return false;
+    
+    if (r.transport_type === 'PROPIO') {
+      const areaName = (r.assignment?.area?.name || '').toUpperCase();
+      const posName = (r.assignment?.position?.name || '').toUpperCase();
+      return posName.includes('FEDEX') || areaName.includes('FEDEX');
+    }
+    return true;
+  });
+
+  // 3. Transportes gestionados / notificados
+  const managedRequests = requests.filter(r => {
+    return r.status === 'GESTIONADO' || r.status === 'CONFORME' || r.status === 'NO_CONFORME';
+  });
 
   return (
     <div className="space-y-6 h-full flex flex-col">
@@ -507,37 +616,47 @@ export default function TransportClient({
           </Button>
         </div>
         
-        <div className="flex items-center gap-4 text-xs">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full font-bold uppercase">
-             {entries.length} Entradas Pendientes
+        <div className="flex items-center gap-3 text-xs flex-wrap">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-100 rounded-full font-bold uppercase">
+             <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+             {entriesPending.length} Entradas Pendientes
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-700 rounded-full font-bold uppercase">
-             {exits.length} Salidas Pendientes
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full font-bold uppercase">
+             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+             {managedRequests.length} Gestionados
+          </div>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 text-orange-700 border border-orange-100 rounded-full font-bold uppercase">
+             <span className="w-2 h-2 rounded-full bg-orange-500"></span>
+             {exitsPending.length} Salidas Pendientes
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1 min-h-0 overflow-hidden pb-4">
-        {/* ENTRADAS */}
+      {/* 3 COLUMNS GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0 overflow-hidden pb-4">
+        {/* COL 1: ENTRADAS PENDIENTES */}
         <div className="flex flex-col min-h-0 bg-slate-50/50 rounded-2xl border border-slate-200 overflow-hidden shadow-inner">
           <div className="flex items-center gap-2 border-b border-slate-200 p-4 bg-white sticky top-0 z-20 shadow-sm">
              <div className="w-1.5 h-6 bg-blue-600 rounded-full" />
-             <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Entradas (A la Empresa)</h2>
-             <Badge variant="outline" className="ml-auto bg-blue-50 text-blue-700 border-blue-100">{entries.length}</Badge>
+             <div>
+               <h2 className="text-base font-black text-slate-900 uppercase tracking-tight">Entradas Pendientes</h2>
+               <p className="text-[10px] text-slate-400 font-medium">Hacia la empresa</p>
+             </div>
+             <Badge variant="outline" className="ml-auto bg-blue-50 text-blue-700 border-blue-200">{entriesPending.length}</Badge>
              
-             {entries.some(r => {
+             {entriesPending.some(r => {
                const areaName = (r.assignment?.area?.name || '').toUpperCase();
                const posName = (r.assignment?.position?.name || '').toUpperCase();
                return posName.includes('FEDEX') || areaName.includes('FEDEX');
              }) && (
-               <div className="ml-4 flex items-center gap-2 border-l pl-4 border-slate-200">
+               <div className="ml-2 flex items-center gap-1 border-l pl-2 border-slate-200">
                  <select 
-                   className="text-[10px] font-bold border-slate-200 rounded p-1 bg-indigo-50 text-indigo-700"
+                   className="text-[10px] font-bold border-slate-200 rounded p-1 bg-indigo-50 text-indigo-700 max-w-[130px]"
                    onChange={(e) => e.target.value && handleBulkFedexShiftUpdate(e.target.value)}
                    disabled={isBulkUpdating}
                    defaultValue=""
                  >
-                   <option value="" disabled>CAMBIO MASIVO FEDEX...</option>
+                   <option value="" disabled>MASIVO FEDEX...</option>
                    {availableShifts.map((s: any) => (
                      <option key={s.id} value={s.id}>{s.start_time.substring(0,5)} - {s.end_time.substring(0,5)}</option>
                    ))}
@@ -547,7 +666,7 @@ export default function TransportClient({
              )}
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-            {entries.length > 0 ? entries.map(req => (
+            {entriesPending.length > 0 ? entriesPending.map(req => (
               <RequestCard 
                 key={req.id} 
                 req={req} 
@@ -560,21 +679,55 @@ export default function TransportClient({
             )) : (
               <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 bg-white/50">
                 <Clock className="w-8 h-8 mx-auto mb-2 opacity-20" />
-                No hay ingresos para esta fecha
+                No hay entradas pendientes para esta fecha
               </div>
             )}
           </div>
         </div>
 
-        {/* SALIDAS */}
+        {/* COL 2: TRANSPORTES GESTIONADOS */}
+        <div className="flex flex-col min-h-0 bg-emerald-50/20 rounded-2xl border border-emerald-200 overflow-hidden shadow-inner">
+          <div className="flex items-center gap-2 border-b border-emerald-100 p-4 bg-white sticky top-0 z-20 shadow-sm">
+             <div className="w-1.5 h-6 bg-emerald-600 rounded-full" />
+             <div>
+               <h2 className="text-base font-black text-slate-900 uppercase tracking-tight">Transporte Gestionado</h2>
+               <p className="text-[10px] text-emerald-600 font-medium">Notificados por WhatsApp</p>
+             </div>
+             <Badge variant="outline" className="ml-auto bg-emerald-50 text-emerald-700 border-emerald-200">{managedRequests.length}</Badge>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+            {managedRequests.length > 0 ? managedRequests.map(req => (
+              <RequestCard 
+                key={req.id} 
+                req={req} 
+                onUpdate={handleUpdate} 
+                onCopyToClipboard={copyToClipboard}
+                copiedId={copiedId}
+                availableShifts={availableShifts}
+                onUpdateShift={handleShiftUpdate}
+              />
+            )) : (
+              <div className="p-12 text-center border-2 border-dashed border-emerald-200/60 rounded-xl text-emerald-700/60 bg-white/50">
+                <CheckCircle2 className="w-8 h-8 mx-auto mb-2 opacity-30 text-emerald-600" />
+                <p className="font-medium text-xs">Sin transportes gestionados aún</p>
+                <p className="text-[10px] text-slate-400 mt-1">Al ingresar datos y notificar por WhatsApp, las tarjetas pasarán aquí.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* COL 3: SALIDAS PENDIENTES */}
         <div className="flex flex-col min-h-0 bg-slate-50/50 rounded-2xl border border-slate-200 overflow-hidden shadow-inner">
           <div className="flex items-center gap-2 border-b border-slate-200 p-4 bg-white sticky top-0 z-20 shadow-sm">
              <div className="w-1.5 h-6 bg-orange-600 rounded-full" />
-             <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Salidas (A Domicilio)</h2>
-             <Badge variant="outline" className="ml-auto bg-orange-50 text-orange-700 border-orange-100">{exits.length}</Badge>
+             <div>
+               <h2 className="text-base font-black text-slate-900 uppercase tracking-tight">Salidas Pendientes</h2>
+               <p className="text-[10px] text-slate-400 font-medium">A domicilio</p>
+             </div>
+             <Badge variant="outline" className="ml-auto bg-orange-50 text-orange-700 border-orange-200">{exitsPending.length}</Badge>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-            {exits.length > 0 ? exits.map(req => (
+            {exitsPending.length > 0 ? exitsPending.map(req => (
               <RequestCard 
                 key={req.id} 
                 req={req} 
@@ -587,7 +740,7 @@ export default function TransportClient({
             )) : (
               <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 bg-white/50">
                 <Clock className="w-8 h-8 mx-auto mb-2 opacity-20" />
-                No hay salidas para esta fecha
+                No hay salidas pendientes para esta fecha
               </div>
             )}
           </div>

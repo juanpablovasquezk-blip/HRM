@@ -243,7 +243,7 @@ export interface TransportLog {
 }
 
 export type TransportType = 'PENDIENTE' | 'PROPIO' | 'REQUERIDO' | 'EMPRESA';
-export type TransportStatus = 'ABIERTO' | 'CONFORME' | 'NO_CONFORME';
+export type TransportStatus = 'ABIERTO' | 'GESTIONADO' | 'CONFORME' | 'NO_CONFORME';
 
 export interface TransportRequest {
   id: string;
