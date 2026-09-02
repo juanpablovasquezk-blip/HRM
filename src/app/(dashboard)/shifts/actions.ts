@@ -158,13 +158,23 @@ export async function createPosition(formData: FormData) {
   const requiresShiftsVal = formData.get('requires_shifts');
   const requires_shifts = requiresShiftsVal !== null ? (requiresShiftsVal === 'true' || requiresShiftsVal === 'on' || requiresShiftsVal === '1') : true;
 
-  const { error } = await supabase.from('positions').insert({
+  const insertData: any = {
     area_id: formData.get('area_id') as string,
     name: formData.get('name') as string,
     requires_shifts,
-  });
+  };
+
+  let { error } = await supabase.from('positions').insert(insertData);
+
+  if (error && (error.message?.includes('requires_shifts') || error.code === '42703')) {
+    delete insertData.requires_shifts;
+    const retry = await supabase.from('positions').insert(insertData);
+    error = retry.error;
+  }
+
   if (error) return { success: false, error: error.message };
   revalidatePath('/shifts/areas');
+  revalidatePath('/settings/areas');
   return { success: true, error: null };
 }
 
@@ -173,12 +183,22 @@ export async function updatePosition(id: string, formData: FormData) {
   const requiresShiftsVal = formData.get('requires_shifts');
   const requires_shifts = requiresShiftsVal !== null ? (requiresShiftsVal === 'true' || requiresShiftsVal === 'on' || requiresShiftsVal === '1') : true;
 
-  const { error } = await supabase.from('positions').update({
+  const updateData: any = {
     name: formData.get('name') as string,
     requires_shifts,
-  }).eq('id', id);
+  };
+
+  let { error } = await supabase.from('positions').update(updateData).eq('id', id);
+
+  if (error && (error.message?.includes('requires_shifts') || error.code === '42703')) {
+    delete updateData.requires_shifts;
+    const retry = await supabase.from('positions').update(updateData).eq('id', id);
+    error = retry.error;
+  }
+
   if (error) return { success: false, error: error.message };
   revalidatePath('/shifts/areas');
+  revalidatePath('/settings/areas');
   return { success: true, error: null };
 }
 

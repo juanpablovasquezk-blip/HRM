@@ -170,7 +170,13 @@ export async function createPersonnel(
     personnelData.is_active = false;
   }
 
-  const { data: person, error: insertError } = await supabase.from('personnel').insert(personnelData).select('id').single();
+  let { data: person, error: insertError } = await supabase.from('personnel').insert(personnelData).select('id').single();
+  if (insertError && (insertError.message?.includes('requires_shifts') || insertError.code === '42703')) {
+    delete (personnelData as any).requires_shifts;
+    const retry = await supabase.from('personnel').insert(personnelData).select('id').single();
+    person = retry.data;
+    insertError = retry.error;
+  }
   if (insertError) return { success: false, error: insertError.message };
 
   // Handle system access if requested
@@ -308,6 +314,13 @@ export async function updatePersonnel(
       .from('personnel')
       .update(updatePayload)
       .eq('id', id);
+    updateError = error;
+  }
+
+  if (updateError && (updateError.message?.includes('requires_shifts') || updateError.code === '42703')) {
+    delete (updatePayload as any).requires_shifts;
+    const adminForUpdate = createAdminClient();
+    const { error } = await adminForUpdate.from('personnel').update(updatePayload).eq('id', id);
     updateError = error;
   }
 
