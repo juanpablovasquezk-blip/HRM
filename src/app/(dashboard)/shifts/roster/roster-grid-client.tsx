@@ -1704,7 +1704,32 @@ export function RosterGridClient({
             </Badge>
           </div>
         )}
+      </div>
+
+      {/* Visual Management Legend for Operador Aeropuerto */}
+      {(positionFilter?.toUpperCase().includes('AEROPUERTO') || filteredPersonnel.some(p => (positionsMap[p.main_position]?.name || '').toUpperCase().includes('AEROPUERTO'))) && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-xl text-xs flex-wrap shadow-sm">
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mr-1">Gestión Visual Aeropuerto (Borrador):</span>
+          <span className="flex items-center gap-1.5 font-bold text-amber-950 bg-amber-100/90 border border-amber-400 px-2 py-0.5 rounded-lg text-[10px] shadow-xs">
+            <div className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0 shadow-xs" /> AM 04 (Madrugada)
+          </span>
+          <span className="flex items-center gap-1.5 font-bold text-sky-950 bg-sky-100/90 border border-sky-400 px-2 py-0.5 rounded-lg text-[10px] shadow-xs">
+            <div className="w-2.5 h-2.5 rounded-full bg-sky-500 shrink-0 shadow-xs" /> AM 07 (Mañana)
+          </span>
+          <span className="flex items-center gap-1.5 font-bold text-purple-950 bg-purple-100/90 border border-purple-400 px-2 py-0.5 rounded-lg text-[10px] shadow-xs">
+            <div className="w-2.5 h-2.5 rounded-full bg-purple-500 shrink-0 shadow-xs" /> PM 13:30 (Tarde)
+          </span>
+          <span className="flex items-center gap-1.5 font-bold text-white bg-slate-800 border border-slate-950 px-2 py-0.5 rounded-lg text-[10px] shadow-xs">
+            <div className="w-2.5 h-2.5 rounded-full bg-slate-300 shrink-0 shadow-xs" /> NS 22 (Noche)
+          </span>
+          <span className="flex items-center gap-1.5 font-bold text-emerald-950 bg-emerald-100/90 border border-emerald-400 px-2 py-0.5 rounded-lg text-[10px] shadow-xs">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 shadow-xs" /> AM 08 / Intermedio
+          </span>
+          <span className="flex items-center gap-1.5 font-bold text-rose-950 bg-rose-100/90 border border-rose-400 px-2 py-0.5 rounded-lg text-[10px] shadow-xs">
+            <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 shadow-xs" /> AM 05 (DHL)
+          </span>
         </div>
+      )}
 
       {/* Roster Grid Wrapper */}
       <div className="flex-1 overflow-hidden border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-950 shadow-md">
@@ -2874,6 +2899,43 @@ const PersonnelRow = memo(({
         );
         const isAirport = (positionsMap[person.main_position]?.name || '').toUpperCase().includes('AEROPUERTO');
         
+        const getAirportDraftShiftColor = (shiftName: string, startTime: string) => {
+          const sName = (shiftName || '').toUpperCase();
+          const sStart = startTime || '';
+
+          // AM 04 (04:00) / AM 03:30 / AM 03 -> Naranja / Ámbar vibrante
+          if (sName.includes('AM 04') || sName.includes('AM 03') || sStart.startsWith('04:') || sStart.startsWith('03:')) {
+            return "bg-amber-100/95 border-amber-400 text-amber-950 dark:bg-amber-950/60 dark:border-amber-500 dark:text-amber-200 font-black shadow-sm ring-1 ring-amber-400/40";
+          }
+
+          // AM 07 (07:00) -> Azul Cielo / Cyan
+          if (sName.includes('AM 07') || sStart.startsWith('07:')) {
+            return "bg-sky-100/95 border-sky-400 text-sky-950 dark:bg-sky-950/60 dark:border-sky-500 dark:text-sky-200 font-black shadow-sm ring-1 ring-sky-400/40";
+          }
+
+          // PM 13:30 (13:30) / Tarde -> Violeta / Púrpura
+          if (sName.includes('PM 13') || sName.includes('13:30') || sStart.startsWith('13:')) {
+            return "bg-purple-100/95 border-purple-400 text-purple-950 dark:bg-purple-950/60 dark:border-purple-500 dark:text-purple-200 font-black shadow-sm ring-1 ring-purple-400/40";
+          }
+
+          // NS 22 (22:00) / AM 00 -> Noche / Dark Slate
+          if (sName.includes('NS 22') || sName.includes('22:00') || sName.includes('AM 00') || sStart.startsWith('22:') || sStart.startsWith('00:')) {
+            return "bg-slate-800 border-slate-950 text-white dark:bg-slate-900 dark:border-slate-600 dark:text-slate-100 font-black shadow-sm";
+          }
+
+          // AM 08 / AM 08:30 / AM 10 / AM 11 -> Verde / Esmeralda
+          if (sName.includes('AM 08') || sName.includes('AM 10') || sName.includes('AM 11') || sStart.startsWith('08:') || sStart.startsWith('10:') || sStart.startsWith('11:')) {
+            return "bg-emerald-100/95 border-emerald-400 text-emerald-950 dark:bg-emerald-950/60 dark:border-emerald-500 dark:text-emerald-200 font-black shadow-sm ring-1 ring-emerald-400/40";
+          }
+
+          // AM 05 -> Rosa / Fucsia
+          if (sName.includes('AM 05') || sStart.startsWith('05:')) {
+            return "bg-rose-100/95 border-rose-400 text-rose-950 dark:bg-rose-950/60 dark:border-rose-500 dark:text-rose-200 font-black shadow-sm ring-1 ring-rose-400/40";
+          }
+
+          return "bg-indigo-100/95 border-indigo-400 text-indigo-950 dark:bg-indigo-950/60 dark:border-indigo-500 dark:text-indigo-200 font-black shadow-sm";
+        };
+
         const getLeaveLabel = (type: string) => {
           switch(type) {
             case 'vacation': return 'VAC';
@@ -2958,31 +3020,44 @@ const PersonnelRow = memo(({
               ) : shift ? (
                 <Tooltip>
                   <TooltipTrigger>
-                    <div 
-                      draggable={!isBlocked && assignment?.status !== 'cancelled'}
-                      onDragStart={(e) => handleDragStart(e, assignment)}
-                      className={cn(
-                        "flex flex-col items-center justify-center rounded-lg p-1 border shadow-sm transition-all cursor-grab active:cursor-grabbing",
-                        assignment?.status === 'confirmed' || assignment?.is_confirmed
-                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700" 
-                          : "bg-blue-500/10 border-blue-500/30 text-blue-700",
-                        assignment?.is_extra && "ring-2 ring-amber-400 ring-offset-1 ring-offset-white ring-inset",
-                        assignment?.status === 'cancelled' && "opacity-40 grayscale",
-                        isAirport && "border-indigo-400 border-dashed"
-                      )}
-                    >
-                      <span className="text-[10px] font-black leading-tight uppercase">{shift.name}</span>
-                      <div className="flex items-center gap-0.5 mt-0.5">
-                        {assignment?.is_published ? (
-                          <Sparkles className="h-2 w-2 text-emerald-500" />
-                        ) : (
-                          <div className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                        )}
-                        <span className="text-[8px] opacity-70">
-                          {shift.start_time.substring(0, 5)}
-                        </span>
-                      </div>
-                    </div>
+                    {(() => {
+                      const isDraft = !assignment?.is_published && !assignment?.is_validated;
+                      return (
+                        <div 
+                          draggable={!isBlocked && assignment?.status !== 'cancelled'}
+                          onDragStart={(e) => handleDragStart(e, assignment)}
+                          className={cn(
+                            "flex flex-col items-center justify-center rounded-lg p-1 border shadow-sm transition-all cursor-grab active:cursor-grabbing",
+                            assignment?.status === 'confirmed' || assignment?.is_confirmed
+                              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 font-bold" 
+                              : assignment?.is_published
+                              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 font-bold"
+                              : assignment?.is_validated
+                              ? "bg-blue-500/10 border-blue-500/30 text-blue-700 font-bold"
+                              : isAirport
+                              ? getAirportDraftShiftColor(shift.name, shift.start_time)
+                              : "bg-blue-500/10 border-blue-500/30 text-blue-700",
+                            assignment?.is_extra && "ring-2 ring-amber-400 ring-offset-1 ring-offset-white ring-inset",
+                            assignment?.status === 'cancelled' && "opacity-40 grayscale",
+                            isAirport && !isDraft && "border-indigo-400 border-dashed"
+                          )}
+                        >
+                          <span className="text-[10px] font-black leading-tight uppercase">{shift.name}</span>
+                          <div className="flex items-center gap-0.5 mt-0.5">
+                            {assignment?.is_published ? (
+                              <Sparkles className="h-2 w-2 text-emerald-500" />
+                            ) : (
+                              <div className={cn(
+                                "h-1.5 w-1.5 rounded-full",
+                                isAirport && isDraft ? "bg-slate-500" : "bg-slate-300"
+                              )} />
+                            )}
+                            <span className="text-[8px] opacity-80 font-bold">
+                              {shift.start_time.substring(0, 5)}
+                            </span>
+                          </div>
+                        </div>
+                      );
                   </TooltipTrigger>
                   <TooltipContent
                     side="top"
