@@ -151,10 +151,14 @@ function scorePreference(
     else if (!isNightShift && (personnel.prefers_night || hasNightInPattern)) score = 50;
 
     const hasPrio04 = (personnel.rotation_pattern || '').includes('PRIO-04');
-    const isSupervisor04 = (shiftSlot.position_name || '').toUpperCase().includes('SUPERVISOR') && shiftSlot.shift_start.includes('04');
+    const sName = (shiftSlot.shift_name || '').toUpperCase();
+    const sStart = shiftSlot.shift_start || '';
+    const isEarlyMorning04 = (sStart.startsWith('03') || sStart.startsWith('04') || sName.includes('AM 04') || sName.includes('AM 03'));
 
-    if (hasPrio04 && isSupervisor04) score = 800;
-    else if (!hasPrio04 && isSupervisor04) score = 300;
+    if (isEarlyMorning04) {
+      if (hasPrio04) score = 800;
+      else score = 200; // Lower score if they don't have PRIO-04, prioritizing PRIO-04 workers
+    }
   }
 
   // Transport Preference Penalty

@@ -170,12 +170,13 @@ export function greedyAssign(
   // PASS -2 (MOVED TO END)
 
   // =========================================================================
-  // PASS -0.5: AIRPORT SPECIALISTS (ITALO/DEIMAR) PRIORITY - WEEKENDS FIRST
+  // PASS -0.5: AIRPORT SPECIALIST (ITALO GUERRA) PRIORITY FOR PM 13:30
   // =========================================================================
   if (startDateStr && endDateStr && pmShift) {
     const specialists = personnelPool.filter(p => {
       const pName = (p.first_name || '').toUpperCase();
-      return pName.includes('ITALO') || pName.includes('DEIMAR');
+      const pFixed = p.fixed_shift_id === pmShift.id;
+      return pName.includes('ITALO') || pFixed;
     });
 
     // Pasada 1: FINES DE SEMANA (Prioridad absoluta para cobertura)
@@ -188,7 +189,6 @@ export function greedyAssign(
         const dStr = format(simDate, 'yyyy-MM-dd');
         const dayOfWeek = simDate.getDay();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-        const isSundayDay = dayOfWeek === 0;
 
         if (isWeekend && !state.assignments.some(a => a.date === dStr) && !p.leave_dates.has(dStr)) {
           const slot = slots.find(s => s.date === dStr && s.shift_id === pmShift.id && (assignments.filter(a => a.date === s.date && a.shift_id === s.shift_id).length < s.required_count));
@@ -236,6 +236,77 @@ export function greedyAssign(
           }
         }
         simDate = addDays(simDate, 1);
+      }
+    }
+  }
+
+  // =========================================================================
+  // PASS -0.4: AIRPORT AM 04 PRIORITY (DEIMAR NOGUERA / ALVARO MORALES)
+  // =========================================================================
+  const am04Shift = allShifts?.find(s => normStr(s.name).includes('04:00') || normStr(s.name).includes('AM 04') || s.start_time?.startsWith('04:00'));
+  if (startDateStr && endDateStr && am04Shift) {
+    const prio04Personnel = personnelPool.filter(p => {
+      const isAero = normStr(p.main_position_name).includes('AEROPUERTO');
+      const hasPrio = (p.rotation_pattern || '').toUpperCase().includes('PRIO-04');
+      return isAero && hasPrio;
+    });
+
+    if (prio04Personnel.length > 0) {
+      const aero04Slots = slots.filter(s => 
+        normStr(s.position_name).includes('AEROPUERTO') && 
+        (s.shift_id === am04Shift.id || s.shift_start?.startsWith('04'))
+      ).sort((a, b) => a.date.localeCompare(b.date));
+
+      for (const slot of aero04Slots) {
+        const alreadyAssigned = assignments.filter(a => a.date === slot.date && a.position_id === slot.position_id && a.shift_id === slot.shift_id).length;
+        if (alreadyAssigned >= slot.required_count) continue;
+
+        // Balance assignments between Deimar and Alvaro based on assigned days in the week
+        const available = prio04Personnel.filter(p => {
+          const state = personnelState.get(p.personnel_id)!;
+          if (state.assignments.some(a => a.date === slot.date) || p.leave_dates.has(slot.date)) return false;
+          return true;
+        }).sort((a, b) => {
+          const stateA = personnelState.get(a.personnel_id)!;
+          const stateB = personnelState.get(b.personnel_id)!;
+          const simDate = parseISO(slot.date);
+          const weekStart = startOfWeek(simDate, { weekStartsOn: 1 });
+          const countA = stateA.assignments.filter(asg => {
+            const d = parseISO(asg.date);
+            return d >= weekStart && d <= addDays(weekStart, 6);
+          }).length;
+          const countB = stateB.assignments.filter(asg => {
+            const d = parseISO(asg.date);
+            return d >= weekStart && d <= addDays(weekStart, 6);
+          }).length;
+          return countA - countB;
+        });
+
+        for (const p of available) {
+          const state = personnelState.get(p.personnel_id)!;
+          const virtualSlot: ShiftSlot = { ...slot, requirement_id: `aero04-${p.personnel_id}-${slot.date}` };
+          const violations = validateAllConstraints(p, virtualSlot, state.assignments);
+          if (!hasHardViolation(violations)) {
+            state.assignments.push({ 
+              date: slot.date, 
+              duration_hours: virtualSlot.shift_duration_hours, 
+              shift_start: virtualSlot.shift_start, 
+              shift_end: virtualSlot.shift_end 
+            });
+            assignments.push({ 
+              personnel_id: p.personnel_id, 
+              shift_id: slot.shift_id, 
+              date: slot.date, 
+              area_id: slot.area_id, 
+              position_id: slot.position_id, 
+              status: 'scheduled', 
+              is_locked: false, 
+              is_manual: false, 
+              frozen_by_rule: false 
+            });
+            break; // slot filled
+          }
+        }
       }
     }
   }
