@@ -595,9 +595,10 @@ export async function uploadSupervisorDocument(formData: FormData): Promise<{ su
   try {
     const { getUserRole } = await import('@/app/role-actions');
     const role = await getUserRole();
+    const authorizedRoles = ['ADMIN', 'HR', 'SUPERVISOR', 'SAFETY_OFFICER', 'AIRPORT_ASSISTANT', 'ASSISTANT'];
 
-    if (role !== 'ADMIN') {
-      return { success: false, error: 'Acceso denegado. Función reservada únicamente para Administradores.' };
+    if (!role || !authorizedRoles.includes(role)) {
+      return { success: false, error: 'Acceso denegado. No tiene permisos para subir documentos.' };
     }
 
     const supabase = createAdminClient();
@@ -647,7 +648,7 @@ export async function uploadSupervisorDocument(formData: FormData): Promise<{ su
       uploaded_at: new Date().toISOString()
     };
 
-    if (definitionId && definitionId !== 'undefined' && definitionId !== 'null') {
+    if (definitionId && definitionId !== 'undefined' && definitionId !== 'null' && !definitionId.startsWith('RIOHS_STEP_') && !definitionId.startsWith('MISSING_') && !definitionId.startsWith('EXPIRED_')) {
       docData.definition_id = definitionId;
     }
 
@@ -660,29 +661,54 @@ export async function uploadSupervisorDocument(formData: FormData): Promise<{ su
     // 3. Handle PdR / RIOHS sync if document matches RIOHS
     const isRiohsDoc = docTypeName.toUpperCase().includes('RIOHS') || docTypeName.toUpperCase().includes('REGLAMENTO');
     if (isRiohsDoc) {
+      const isStep4 = definitionId === 'RIOHS_STEP_4' || docTypeName.toUpperCase().includes('RECEPCION') || docTypeName.toUpperCase().includes('COMPROBANTE') || docTypeName.toUpperCase().includes('PASO 4');
+      
       const { data: existingRiohs } = await supabase
         .from('riohs_records')
         .select('*')
         .eq('personnel_id', personnelId)
         .maybeSingle();
 
-      if (existingRiohs) {
-        await supabase
-          .from('riohs_records')
-          .update({
-            riohs_status: 'COMPLETED',
-            reception_signed_file_url: fileUrl,
-            reception_uploaded_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq('personnel_id', personnelId);
-      } else {
-        await supabase.from('riohs_records').insert({
-          personnel_id: personnelId,
-          riohs_status: 'COMPLETED',
+      const nowIso = new Date().toISOString();
+
+      if (isStep4) {
+        // Step 4: Comprobante de Recepción Firmado -> COMPLETED
+        const updateData = {
+          status: 'COMPLETED',
           reception_signed_file_url: fileUrl,
-          reception_uploaded_at: new Date().toISOString()
-        });
+          reception_uploaded_at: nowIso,
+          updated_at: nowIso
+        };
+
+        if (existingRiohs) {
+          await supabase.from('riohs_records').update(updateData).eq('id', existingRiohs.id);
+        } else {
+          const { data: worker } = await supabase.from('personnel').select('company_id').eq('id', personnelId).single();
+          await supabase.from('riohs_records').insert({
+            personnel_id: personnelId,
+            company_id: worker?.company_id || '',
+            ...updateData
+          });
+        }
+      } else {
+        // Step 2: Autorización Firmada -> AUTH_UPLOADED
+        const updateData = {
+          status: 'AUTH_UPLOADED',
+          auth_signed_file_url: fileUrl,
+          auth_uploaded_at: nowIso,
+          updated_at: nowIso
+        };
+
+        if (existingRiohs) {
+          await supabase.from('riohs_records').update(updateData).eq('id', existingRiohs.id);
+        } else {
+          const { data: worker } = await supabase.from('personnel').select('company_id').eq('id', personnelId).single();
+          await supabase.from('riohs_records').insert({
+            personnel_id: personnelId,
+            company_id: worker?.company_id || '',
+            ...updateData
+          });
+        }
       }
     }
 
