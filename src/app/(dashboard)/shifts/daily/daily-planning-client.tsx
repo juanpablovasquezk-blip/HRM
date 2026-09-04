@@ -33,9 +33,9 @@ import type {
   Shift 
 } from '@/types/database';
 import { deleteAssignment, deleteRequirement } from '../actions';
-import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, resetDailyPlan, updateAssignmentShift, updateAssignmentDetails } from './actions';
+import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, reactivateAssignment, resetDailyPlan, updateAssignmentShift, updateAssignmentDetails } from './actions';
 import { sendDailyPlanScreenshotAction } from './publish-actions';
-import { RotateCcw, Mail, Copy, Camera } from 'lucide-react';
+import { RotateCcw, Mail, Copy, Camera, UserCheck } from 'lucide-react';
 import { 
   Dialog, 
   DialogContent, 
@@ -324,6 +324,7 @@ export default function DailyPlanningClient({
 
   // Filter out cancelled assignments for operational report display
   const activeAssignments = initialAssignments.filter(a => a.status !== 'cancelled');
+  const cancelledAssignments = initialAssignments.filter(a => a.status === 'cancelled');
 
   // GROUPING LOGIC (Mutually Exclusive) using activeAssignments
   const supervisors = sortByTime(activeAssignments.filter(a => a.position?.name.toUpperCase().includes('SUPERVISOR')));
@@ -370,6 +371,26 @@ export default function DailyPlanningClient({
     ((a.area?.name || '').toUpperCase().includes('BODEGA') || 
      (a.position?.name || '').toUpperCase().includes('BODEGA'))
   ));
+
+  const [isReactivatingId, setIsReactivatingId] = useState<string | null>(null);
+
+  const handleReactivateAssignment = async (id: string, name: string) => {
+    setIsReactivatingId(id);
+    const toastId = toast.loading(`Devolviendo a ${name} a su turno...`);
+    try {
+      const res = await reactivateAssignment(id);
+      if (res.success) {
+        toast.success(`${name} devuelto al turno exitosamente`, { id: toastId });
+        router.refresh();
+      } else {
+        toast.error(`Error: ${res.error}`, { id: toastId });
+      }
+    } catch (err: any) {
+      toast.error(`Error: ${err.message || String(err)}`, { id: toastId });
+    } finally {
+      setIsReactivatingId(null);
+    }
+  };
 
   const handleDeleteAssignment = async (id: string) => {
     if (confirm('¿Estás seguro de CANCELAR esta asignación? (Se mantendrá en el Roster pero se liberará a la persona para hoy)')) {
@@ -786,6 +807,66 @@ export default function DailyPlanningClient({
             <div><label className="block text-xs font-medium text-indigo-700 uppercase mb-1">Horario</label><select name="shift_id" className="w-full p-2 bg-white rounded-md border border-indigo-200">{shifts.map(s => <option key={s.id} value={s.id}>{s.name} ({s.start_time.substring(0,5)})</option>)}</select></div>
             <div className="flex items-end gap-2"><div className="flex-1"><label className="block text-xs font-medium text-indigo-700 uppercase mb-1">Cantidad</label><input type="number" name="count" defaultValue={1} min={1} className="w-full p-2 bg-white rounded-md border border-indigo-200" /></div><button type="submit" className="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700 font-medium">Agregar</button></div>
           </form>
+        </div>
+      )}
+
+      {/* CANCELLED ASSIGNMENTS PANEL (REACTIVE / RESTORE TO SHIFT) */}
+      {cancelledAssignments.length > 0 && (
+        <div className="bg-amber-50/90 border border-amber-200 rounded-xl p-4 no-print shadow-sm animate-in fade-in duration-300">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-3">
+            <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <span>Personal Cancelado / Fuera de Turno hoy ({cancelledAssignments.length})</span>
+            </div>
+            <span className="text-[11px] text-amber-700 font-medium">
+              Puedes reincorporar al personal a su turno con un solo clic.
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {cancelledAssignments.map(a => {
+              const pName = formatName(a.personnel);
+              const shiftTimes = a.shift ? `${a.shift.start_time.substring(0, 5)} - ${a.shift.end_time.substring(0, 5)}` : '';
+              const isCurrentLoading = isReactivatingId === a.id;
+
+              return (
+                <div 
+                  key={a.id} 
+                  className="flex items-center justify-between p-3 bg-white rounded-lg border border-amber-200 shadow-xs gap-3"
+                >
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-bold text-xs uppercase text-slate-800 truncate">
+                      {pName}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-medium truncate">
+                      {a.position?.name || 'Sin cargo'} {a.area?.name ? `• ${a.area.name}` : ''}
+                    </span>
+                    <span className="text-[9px] font-mono text-amber-800 font-semibold mt-0.5">
+                      Turno: {a.shift?.name || '-'} ({shiftTimes})
+                    </span>
+                  </div>
+
+                  {!readOnly && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={isCurrentLoading}
+                      onClick={() => handleReactivateAssignment(a.id, pName)}
+                      className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300 hover:border-emerald-400 font-bold text-xs h-8 px-2.5 flex-shrink-0 gap-1.5 shadow-2xs cursor-pointer"
+                      title="Devolver a este trabajador a su turno"
+                    >
+                      {isCurrentLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                      ) : (
+                        <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
+                      )}
+                      <span>Devolver a turno</span>
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

@@ -508,6 +508,49 @@ export async function cancelAssignment(id: string) {
   return { success: true };
 }
 
+/**
+ * Reactivate a cancelled assignment (return worker to shift)
+ */
+export async function reactivateAssignment(id: string) {
+  const supabase = createAdminClient();
+
+  const { data: assignment } = await supabase
+    .from('shift_assignments')
+    .select('*, personnel(first_name, last_name_father)')
+    .eq('id', id)
+    .single();
+
+  const { error } = await supabase
+    .from('shift_assignments')
+    .update({ 
+      status: 'scheduled',
+      is_manual: true 
+    })
+    .eq('id', id);
+
+  if (error) return { success: false, error: error.message };
+
+  if (assignment) {
+    try {
+      await supabase.from('roster_audit_logs').insert({
+        assignment_id: assignment.id,
+        personnel_id: assignment.personnel_id,
+        date: assignment.date,
+        previous_shift_id: assignment.shift_id,
+        new_shift_id: assignment.shift_id,
+        was_published: assignment.is_published === true,
+        reason: 'Reactivación / Devolución a turno desde planificación diaria',
+      });
+    } catch (auditErr) {
+      console.warn('[reactivateAssignment] Error inserting audit log:', auditErr);
+    }
+  }
+
+  revalidatePath('/shifts/daily');
+  revalidatePath('/shifts/roster');
+  return { success: true };
+}
+
 export async function resetDailyPlan(date: string) {
   const supabase = createAdminClient();
 
