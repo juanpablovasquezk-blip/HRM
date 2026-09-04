@@ -324,7 +324,7 @@ export default function DailyPlanningClient({
 
   // Filter out cancelled assignments for operational report display
   const activeAssignments = initialAssignments.filter(a => a.status !== 'cancelled');
-  const cancelledAssignments = initialAssignments.filter(a => a.status === 'cancelled');
+  const cancelledAssignments = initialAssignments.filter(a => a.status === 'cancelled' && !(a as any).is_on_leave);
 
   // GROUPING LOGIC (Mutually Exclusive) using activeAssignments
   const supervisors = sortByTime(activeAssignments.filter(a => a.position?.name.toUpperCase().includes('SUPERVISOR')));

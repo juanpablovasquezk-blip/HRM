@@ -85,6 +85,16 @@ export async function getDailyOperationalData(date: string) {
     .select('*, personnel:personnel(*), shift:shifts!shift_assignments_shift_id_fkey(*), area:areas(*), position:positions(*)')
     .eq('date', date);
 
+  // 1.1. Get all approved leaves for this day to exclude personnel with medical/vacation leaves
+  const { data: activeLeaves } = await supabase
+    .from('leaves')
+    .select('personnel_id')
+    .eq('status', 'approved')
+    .lte('start_date', date)
+    .gte('end_date', date);
+
+  const leavePersonnelIds = new Set((activeLeaves || []).map(l => l.personnel_id));
+
   // 2. Get all requirements (regular + extra) for this day
   const { data: requirements, error: reqErr } = await supabase
     .from('shift_requirements')
@@ -131,7 +141,12 @@ export async function getDailyOperationalData(date: string) {
       : 0,
   }));
 
-  const activeAssignments = (assignments || []).filter(a => {
+  const assignmentsWithLeave = (assignments || []).map(a => ({
+    ...a,
+    is_on_leave: leavePersonnelIds.has((a as any).personnel_id),
+  }));
+
+  const activeAssignments = assignmentsWithLeave.filter(a => {
     const p = a.personnel as any;
     if (!p) return false;
     if (p.termination_date && date > p.termination_date) return false;
@@ -519,6 +534,27 @@ export async function reactivateAssignment(id: string) {
     .select('*, personnel(first_name, last_name_father)')
     .eq('id', id)
     .single();
+
+  if (!assignment) {
+    return { success: false, error: 'Asignación no encontrada' };
+  }
+
+  // Prevent reactivating if the worker has an approved leave on this date
+  const { data: activeLeave } = await supabase
+    .from('leaves')
+    .select('id, type')
+    .eq('personnel_id', assignment.personnel_id)
+    .eq('status', 'approved')
+    .lte('start_date', assignment.date)
+    .gte('end_date', assignment.date)
+    .maybeSingle();
+
+  if (activeLeave) {
+    return {
+      success: false,
+      error: 'El trabajador se encuentra con licencia médica o permiso aprobado para esta fecha y no puede ser devuelto a turno.',
+    };
+  }
 
   const { error } = await supabase
     .from('shift_assignments')
