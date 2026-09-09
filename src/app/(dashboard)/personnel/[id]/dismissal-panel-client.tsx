@@ -202,25 +202,66 @@ export function DismissalPanelClient({
                     <Button 
                       variant="outline" 
                       size="sm"
-                      className="text-xs font-bold uppercase rounded-xl border-slate-200 text-slate-700 hover:bg-slate-100 flex-grow gap-1.5"
+                      className="text-xs font-bold uppercase rounded-xl border-slate-200 text-slate-700 hover:bg-slate-100 flex-1 gap-1.5"
                       onClick={() => handleDownloadActa(record)}
                     >
                       <Download className="h-3.5 w-3.5" />
                       Acta Original
                     </Button>
 
-                    {record.receipt_file_url && (
+                    {record.receipt_file_url ? (
                       <a 
                         href={record.receipt_file_url} 
                         target="_blank" 
                         rel="noopener noreferrer"
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold uppercase text-slate-700 hover:bg-slate-100 flex-grow"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold uppercase text-slate-700 hover:bg-slate-100 flex-1"
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                         Ver Acta Recepción
                       </a>
+                    ) : (
+                      <div className="relative flex-1">
+                        <input 
+                          type="file" 
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          onChange={(e) => handleFileChange(record.id, e)}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                          disabled={uploadingId !== null}
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={uploadingId !== null}
+                          className="text-xs font-bold uppercase rounded-xl border-emerald-300 text-emerald-700 bg-emerald-50/50 hover:bg-emerald-100/60 flex-1 w-full gap-1.5"
+                        >
+                          {uploadingId === record.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Upload className="h-3.5 w-3.5 text-emerald-600" />
+                          )}
+                          Subir Acta Firmada
+                        </Button>
+                      </div>
                     )}
                   </div>
+
+                  {record.receipt_file_url && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <span className="text-[10px] text-slate-400">Reemplazar recepción:</span>
+                      <div className="relative inline-block">
+                        <input 
+                          type="file" 
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          onChange={(e) => handleFileChange(record.id, e)}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                          disabled={uploadingId !== null}
+                        />
+                        <button className="text-[10px] font-bold text-emerald-600 hover:underline">
+                          Cambiar archivo
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
