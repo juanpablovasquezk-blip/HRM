@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useTransition, useEffect, memo, useCallback } from 'react';
+import { useState, useMemo, useTransition, useEffect, memo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   format, 
@@ -51,7 +51,10 @@ import {
   Briefcase,
   ChevronDown,
   MessageCircleOff,
-  Download
+  Download,
+  GripVertical,
+  Minimize2,
+  Maximize2
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -233,6 +236,54 @@ export function RosterGridClient({
 
   // Multi-selection state
   const [selectedCells, setSelectedCells] = useState<{ personId: string; dateStr: string }[]>([]);
+
+  // Floating selection bar state: position & minimization
+  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
+  const [isToolbarMinimized, setIsToolbarMinimized] = useState(false);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const isDraggingRef = useRef(false);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('[role="menuitem"]') || target.closest('[data-no-drag]')) {
+      return;
+    }
+
+    isDraggingRef.current = true;
+    const element = toolbarRef.current;
+    if (!element) return;
+
+    const rect = element.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const offsetY = e.clientY - rect.top;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      if (!isDraggingRef.current) return;
+      const el = toolbarRef.current;
+      const elWidth = el ? el.offsetWidth : rect.width;
+      const elHeight = el ? el.offsetHeight : rect.height;
+
+      const maxX = Math.max(10, window.innerWidth - elWidth - 10);
+      const maxY = Math.max(10, window.innerHeight - elHeight - 10);
+
+      const nextX = Math.min(Math.max(10, moveEvent.clientX - offsetX), maxX);
+      const nextY = Math.min(Math.max(10, moveEvent.clientY - offsetY), maxY);
+
+      setToolbarPos({ x: nextX, y: nextY });
+    };
+
+    const onPointerUp = () => {
+      isDraggingRef.current = false;
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+  }, []);
 
   // Coverage detail dialog state
   const [coverageDialog, setCoverageDialog] = useState<{ dateStr: string; day: Date } | null>(null);
@@ -2037,75 +2088,37 @@ export function RosterGridClient({
       
       {/* Selection Floating Bar */}
       {selectedCells.length > 0 && !selectedCell && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className="bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-6">
-            <div className="flex flex-col">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Selección</span>
-              <span className="text-lg font-black">{selectedCells.length} espacios marcados</span>
-            </div>
-            <div className="h-10 w-[1px] bg-slate-700" />
-            <div className="flex items-center gap-3">
-              <Button 
-                variant="ghost" 
-                className="text-white hover:bg-white/10"
-                onClick={() => {
-                  setSelectedCells([]);
-                }}
-              >
-                Limpiar
-              </Button>
-              <Button 
-                variant="outline"
-                className="text-red-400 border-red-500/50 hover:bg-red-500/10 hover:text-red-300 gap-2"
-                onClick={handleBulkDelete}
-              >
-                <Trash2 className="h-4 w-4" />
-                Eliminar
-              </Button>
-              <Button 
-                variant="outline"
-                className="text-indigo-400 border-indigo-500/50 hover:bg-indigo-50/10 hover:text-indigo-300 gap-2"
-                onClick={handleValidateSelection}
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                Validar
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-emerald-500/50 text-emerald-400 hover:bg-emerald-50/10 hover:text-emerald-300 h-9 px-4 gap-2"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  Publicar
-                  <ChevronDown className="h-3 w-3 opacity-60" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onClick={() => handlePublishSelection(false)} className="cursor-pointer">
-                    <Sparkles className="h-4 w-4 mr-2 text-emerald-600" />
-                    <div>
-                      <p className="font-medium">Publicar y Notificar</p>
-                      <p className="text-xs text-muted-foreground">Publica y envía WhatsApp</p>
-                    </div>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => handlePublishSelection(true)} className="cursor-pointer">
-                    <MessageCircleOff className="h-4 w-4 mr-2 text-slate-500" />
-                    <div>
-                      <p className="font-medium">Solo Publicar</p>
-                      <p className="text-xs text-muted-foreground">Sin enviar WhatsApp</p>
-                    </div>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button 
-                variant="outline"
-                className="text-slate-400 border-slate-500/50 hover:bg-slate-50/10 hover:text-slate-300 gap-2"
-                onClick={handleUnpublishSelection}
-              >
-                <EyeOff className="h-4 w-4" />
-                Despublicar
-              </Button>
-              <Button 
-                className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-8 shadow-[0_0_15px_rgba(249,115,22,0.4)]"
+        <div 
+          ref={toolbarRef}
+          style={toolbarPos ? { left: `${toolbarPos.x}px`, top: `${toolbarPos.y}px`, bottom: 'auto', transform: 'none' } : undefined}
+          className={cn(
+            "fixed z-50 select-none animate-in fade-in duration-200",
+            !toolbarPos && "bottom-6 left-1/2 -translate-x-1/2"
+          )}
+        >
+          {isToolbarMinimized ? (
+            /* Minimized compact pill */
+            <div 
+              onPointerDown={handlePointerDown}
+              className="bg-slate-900/95 backdrop-blur-md text-white px-3 py-1.5 rounded-full shadow-2xl border border-slate-700/90 flex items-center gap-2 cursor-grab active:cursor-grabbing hover:border-slate-500 transition-all"
+              title="Arrastra para mover la barra"
+            >
+              <div className="flex items-center text-slate-400 pl-0.5">
+                <GripVertical className="h-4 w-4" />
+              </div>
+              
+              <div className="flex items-center gap-1.5 px-1">
+                <span className="inline-flex items-center justify-center bg-orange-500/20 text-orange-400 text-xs font-bold px-2 py-0.5 rounded-full border border-orange-500/30">
+                  {selectedCells.length}
+                </span>
+                <span className="text-xs font-semibold text-slate-200">
+                  {selectedCells.length === 1 ? 'marcado' : 'marcados'}
+                </span>
+              </div>
+
+              <Button
+                size="sm"
+                className="h-7 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 rounded-full shadow-sm"
                 onClick={() => {
                   if (selectedCells.length > 0) {
                     const last = selectedCells[selectedCells.length - 1];
@@ -2117,10 +2130,154 @@ export function RosterGridClient({
                   }
                 }}
               >
-                Asignar Turno
+                Asignar
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-slate-300 hover:text-white hover:bg-slate-800 rounded-full"
+                onClick={() => setIsToolbarMinimized(false)}
+                title="Expandir opciones"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-full"
+                onClick={() => setSelectedCells([])}
+                title="Deseleccionar todo"
+              >
+                <X className="h-3.5 w-3.5" />
               </Button>
             </div>
-          </div>
+          ) : (
+            /* Full expanded compact toolbar */
+            <div 
+              onPointerDown={handlePointerDown}
+              className="bg-slate-900/95 backdrop-blur-md text-white px-3.5 py-2 rounded-2xl shadow-2xl border border-slate-700/90 flex items-center gap-3 cursor-grab active:cursor-grabbing hover:border-slate-500 transition-all max-w-[95vw] overflow-x-auto"
+            >
+              {/* Drag Handle & Info */}
+              <div 
+                className="flex items-center gap-2 pl-0.5 pr-1 shrink-0 cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-200"
+                title="Arrastra para mover la barra"
+              >
+                <div className="p-1 -ml-1">
+                  <GripVertical className="h-4 w-4" />
+                </div>
+
+                <div className="flex flex-col select-none">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none">Selección</span>
+                  <span className="text-sm font-black whitespace-nowrap leading-tight text-slate-100">
+                    {selectedCells.length} {selectedCells.length === 1 ? 'espacio' : 'espacios'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="h-6 w-[1px] bg-slate-700/80 shrink-0" />
+
+              {/* Actions */}
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  className="h-8 text-xs text-slate-300 hover:text-white hover:bg-slate-800 px-2.5"
+                  onClick={() => setSelectedCells([])}
+                >
+                  Limpiar
+                </Button>
+
+                <Button 
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs text-red-400 border-red-500/40 hover:bg-red-500/10 hover:text-red-300 gap-1.5 px-2.5"
+                  onClick={handleBulkDelete}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Eliminar</span>
+                </Button>
+
+                <Button 
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs text-indigo-400 border-indigo-500/40 hover:bg-indigo-500/10 hover:text-indigo-300 gap-1.5 px-2.5"
+                  onClick={handleValidateSelection}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Validar</span>
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    className="inline-flex items-center justify-center rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 h-8 px-2.5 gap-1.5"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span>Publicar</span>
+                    <ChevronDown className="h-3 w-3 opacity-60" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem onClick={() => handlePublishSelection(false)} className="cursor-pointer">
+                      <Sparkles className="h-4 w-4 mr-2 text-emerald-600" />
+                      <div>
+                        <p className="font-medium text-sm">Publicar y Notificar</p>
+                        <p className="text-xs text-muted-foreground">Publica y envía WhatsApp</p>
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handlePublishSelection(true)} className="cursor-pointer">
+                      <MessageCircleOff className="h-4 w-4 mr-2 text-slate-500" />
+                      <div>
+                        <p className="font-medium text-sm">Solo Publicar</p>
+                        <p className="text-xs text-muted-foreground">Sin enviar WhatsApp</p>
+                      </div>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button 
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs text-slate-400 border-slate-600/50 hover:bg-slate-800 hover:text-slate-300 gap-1.5 px-2.5"
+                  onClick={handleUnpublishSelection}
+                >
+                  <EyeOff className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Despublicar</span>
+                </Button>
+
+                <Button 
+                  size="sm"
+                  className="h-8 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 shadow-[0_0_12px_rgba(249,115,22,0.35)]"
+                  onClick={() => {
+                    if (selectedCells.length > 0) {
+                      const last = selectedCells[selectedCells.length - 1];
+                      const person = personnel.find(p => p.id === last.personId);
+                      if (person) {
+                        setSelectedCell({ person, date: new Date(last.dateStr + 'T00:00:00') });
+                        setIsAssignmentDialogOpen(true);
+                      }
+                    }
+                  }}
+                >
+                  Asignar Turno
+                </Button>
+
+                <div className="h-5 w-[1px] bg-slate-700/80 mx-0.5" />
+
+                {/* Minimize Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md"
+                  onClick={() => setIsToolbarMinimized(true)}
+                  title="Hacer más pequeño (minimizar)"
+                >
+                  <Minimize2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
