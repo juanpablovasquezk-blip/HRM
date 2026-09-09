@@ -58,11 +58,11 @@ export async function getWorkerSession() {
     if (user) {
       const { data: personnel } = await supabase
         .from('personnel')
-        .select('id')
+        .select('id, is_active')
         .eq('email', user.email?.trim().toLowerCase())
-        .single();
+        .maybeSingle();
       
-      if (personnel) {
+      if (personnel && personnel.is_active !== false) {
         id = personnel.id;
       }
     }
@@ -76,6 +76,12 @@ export async function getWorkerSession() {
     .eq('id', id)
     .single();
     
+  if (!data || data.is_active === false) {
+    cookieStore.delete('worker_email');
+    cookieStore.delete('worker_id');
+    return null;
+  }
+
   return data;
 }
 export async function getWorkerTomorrowData() {

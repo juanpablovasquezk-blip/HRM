@@ -154,10 +154,26 @@ async function checkAndCompleteDismissal(personnelId: string, adminClient: any) 
       .eq('status', 'pending');
 
     if (!pending || pending.length === 0) {
-      // All credentials completed! Let's close the dismissal
+      // Get worker user_id to revoke auth
+      const { data: pRec } = await adminClient
+        .from('personnel')
+        .select('user_id')
+        .eq('id', personnelId)
+        .single();
+
+      if (pRec?.user_id) {
+        try {
+          await adminClient.from('users').delete().eq('id', pRec.user_id);
+          await adminClient.auth.admin.deleteUser(pRec.user_id);
+        } catch (revokeErr) {
+          console.warn('Error deleting auth user on dismissal complete:', revokeErr);
+        }
+      }
+
+      // All credentials completed! Let's close the dismissal and ensure inactive
       const { error: pError } = await adminClient
         .from('personnel')
-        .update({ dismissal_status: 'completed' })
+        .update({ dismissal_status: 'completed', is_active: false, user_id: null })
         .eq('id', personnelId);
 
       if (pError) throw pError;

@@ -32,11 +32,17 @@ export default function RoleSelectionPage() {
         // Check if exists in personnel table
         const { data: personnel } = await supabase
           .from('personnel')
-          .select('id')
+          .select('id, is_active')
           .eq('email', user.email?.trim().toLowerCase())
           .maybeSingle();
 
-        const hasWorkerRole = !!personnel;
+        if (personnel && personnel.is_active === false && !isManagement) {
+          await supabase.auth.signOut();
+          router.push('/login?error=inactive');
+          return;
+        }
+
+        const hasWorkerRole = !!personnel && personnel.is_active !== false;
         const hasManagementRole = isManagement;
 
         setCanSupervisor(hasManagementRole);
@@ -49,8 +55,11 @@ export default function RoleSelectionPage() {
 
         if (hasManagementRole) {
           router.push(isMobileDevice ? '/supervisor' : '/dashboard');
-        } else {
+        } else if (hasWorkerRole) {
           router.push('/worker');
+        } else {
+          await supabase.auth.signOut();
+          router.push('/login?error=inactive');
         }
       } catch (error) {
         console.error('Role check error:', error);

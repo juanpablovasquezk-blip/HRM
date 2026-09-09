@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Shield } from 'lucide-react';
+import { Loader2, Shield, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
 
@@ -15,22 +15,53 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [inactiveError, setInactiveError] = useState(false);
   const router = useRouter();
   const supabase = createClient();
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('error') === 'inactive') {
+        setInactiveError(true);
+      }
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setInactiveError(false);
 
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim().toLowerCase(),
         password,
       });
 
       if (error) {
         toast.error('Error de acceso', {
           description: error.message,
+        });
+        return;
+      }
+
+      // Check if this worker account is inactive
+      const { data: personnel } = await supabase
+        .from('personnel')
+        .select('is_active')
+        .eq('email', email.trim().toLowerCase())
+        .maybeSingle();
+
+      const userRole = data.user?.user_metadata?.role;
+      const isManagement = ['ADMIN', 'HR', 'SUPERVISOR', 'SAFETY_OFFICER', 'AIRPORT_ASSISTANT', 'ASSISTANT'].includes(userRole);
+
+      if (personnel && personnel.is_active === false && !isManagement) {
+        await supabase.auth.signOut();
+        setInactiveError(true);
+        toast.error('Acceso denegado', {
+          description: 'Tu cuenta se encuentra inactiva o desvinculada. Contacta a Recursos Humanos.',
+          duration: 6000
         });
         return;
       }
@@ -62,6 +93,17 @@ export default function LoginPage() {
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-6">
+        {inactiveError && (
+          <div className="mb-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2.5">
+            <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-red-800">Acceso no disponible</p>
+              <p className="text-red-600 mt-0.5">
+                Esta cuenta se encuentra inactiva o desvinculada. Si crees que se trata de un error, contacta al área de Recursos Humanos.
+              </p>
+            </div>
+          </div>
+        )}
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email" className="text-sm font-medium">

@@ -91,7 +91,33 @@ export async function updateSession(request: NextRequest) {
       }
     }
     
-    if (!role) role = 'USER';
+    // Inactive Personnel Protection: Block dismissed or inactive workers from portal
+    if (user.email && role !== 'ADMIN' && role !== 'HR') {
+      const { createClient: createAdmin } = await import('@supabase/supabase-js');
+      const adminSupabase = createAdmin(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+
+      const { data: personnel } = await adminSupabase
+        .from('personnel')
+        .select('is_active')
+        .eq('email', user.email.trim().toLowerCase())
+        .maybeSingle();
+
+      if (personnel && personnel.is_active === false) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/login';
+        url.searchParams.set('error', 'inactive');
+        const redirectResponse = NextResponse.redirect(url);
+        request.cookies.getAll().forEach(cookie => {
+          if (cookie.name.includes('supabase') || cookie.name.includes('worker_') || cookie.name.includes('sb-')) {
+            redirectResponse.cookies.delete(cookie.name);
+          }
+        });
+        return redirectResponse;
+      }
+    }
 
     if (isAuthPage || isPublicPage) {
       const userAgent = request.headers.get('user-agent') || '';
