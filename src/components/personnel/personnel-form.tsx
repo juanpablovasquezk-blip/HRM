@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { DatePickerField } from '@/components/ui/date-picker-field';
 import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Loader2, CheckCircle2, XCircle, Phone, Mail } from 'lucide-react';
@@ -396,6 +397,13 @@ export function PersonnelForm({
     if (emailDisplay && !isValidEmail(emailDisplay)) {
       setEmailTouched(true);
       toast.error('El email no tiene un formato válido');
+      return;
+    }
+
+    // Only require inactive_reason if an ACTIVE worker is being deactivated right now
+    const wasActiveBefore = personnel ? (personnel.is_active ?? true) : true;
+    if (isEditing && wasActiveBefore && !isActive && !inactiveReason.trim()) {
+      toast.error('Por favor, ingresa el motivo de la baja para desactivar al trabajador');
       return;
     }
 
@@ -1086,45 +1094,62 @@ export function PersonnelForm({
             </div>
             <Switch id="requires_transport" checked={requiresTransport} onCheckedChange={setRequiresTransport} />
           </div>
-          {(!isEditing || !isActive) && (
-            <>
-              <Separator />
-              <div className="flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label htmlFor="is_active" className={!isActive ? 'text-red-600 font-bold' : ''}>Estado Activo</Label>
-                    <p className="text-xs text-muted-foreground">Si se desactiva, el trabajador no aparecerá en el roster ni en el listado principal</p>
-                  </div>
-                  <Switch 
-                    id="is_active" 
-                    checked={isActive} 
-                    onCheckedChange={(checked) => {
-                      setIsActive(checked);
-                      if (checked) {
-                        setInactiveReason('');
-                      }
-                    }} 
-                  />
+          <Separator />
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="is_active" className={!isActive ? 'text-red-600 font-bold' : 'font-bold'}>
+                    Estado del Colaborador
+                  </Label>
+                  <Badge variant="outline" className={isActive 
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] font-bold" 
+                    : "bg-red-50 text-red-700 border-red-200 text-[10px] font-bold"
+                  }>
+                    {isActive ? 'Activo' : 'Inactivo / Baja'}
+                  </Badge>
                 </div>
-                {!isActive && (
-                  <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                    <Label htmlFor="inactive_reason" className="text-red-600 font-bold">Motivo de la Baja *</Label>
-                    <textarea
-                      id="inactive_reason"
-                      placeholder="Por favor, ingresa el motivo por el cual estás dando de baja a este trabajador..."
-                      value={inactiveReason}
-                      onChange={(e) => setInactiveReason(e.target.value)}
-                      className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 placeholder:text-muted-foreground"
-                      required
-                    />
-                    <p className="text-xs text-red-500 font-semibold mt-1">
-                      ⚠️ Al desactivar al trabajador y guardar los cambios, se eliminarán permanentemente todos sus documentos y cartas del sistema para ahorrar espacio.
-                    </p>
-                  </div>
+                <p className="text-xs text-muted-foreground">
+                  {isActive 
+                    ? 'El colaborador está activo y habilitado para aparecer en el roster y turnos.'
+                    : 'El colaborador se encuentra inactivo. Activa el interruptor para reactivarlo en el sistema.'}
+                </p>
+              </div>
+              <Switch 
+                id="is_active" 
+                checked={isActive} 
+                onCheckedChange={(checked) => {
+                  setIsActive(checked);
+                  if (checked) {
+                    setInactiveReason('');
+                  }
+                }} 
+              />
+            </div>
+            {!isActive && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200 bg-red-50/50 dark:bg-red-950/20 p-4 rounded-xl border border-red-100 dark:border-red-900/30">
+                <Label htmlFor="inactive_reason" className="text-red-700 font-bold text-xs">
+                  {personnel?.is_active ? 'Motivo de la Baja *' : 'Motivo de la Baja registrado'}
+                </Label>
+                <textarea
+                  id="inactive_reason"
+                  placeholder="Ingresa el motivo de la baja..."
+                  value={inactiveReason}
+                  onChange={(e) => setInactiveReason(e.target.value)}
+                  className="flex min-h-[70px] w-full rounded-md border border-red-200 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 placeholder:text-muted-foreground"
+                />
+                {personnel?.is_active ? (
+                  <p className="text-[11px] text-red-600 font-medium">
+                    ⚠️ Al desactivar al trabajador y guardar los cambios, se eliminarán permanentemente todos sus documentos y cartas del sistema para ahorrar espacio.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-slate-500">
+                    💡 Para reactivar al colaborador, solo activa el interruptor de <strong>Estado del Colaborador</strong> arriba y presiona Guardar Cambios.
+                  </p>
                 )}
               </div>
-            </>
-          )}
+            )}
+          </div>
         </CardContent>
       </Card>
 
