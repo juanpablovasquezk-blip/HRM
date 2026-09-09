@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ArrowLeft, Edit, FileText, Cake, Moon, SunMedium, AlertTriangle, Mail, Repeat, CalendarCheck, Pin, ShieldCheck, User, Printer } from 'lucide-react';
+import { ArrowLeft, Edit, FileText, Cake, Moon, SunMedium, AlertTriangle, Mail, Repeat, CalendarCheck, Pin, ShieldCheck, ShieldOff, User, Printer } from 'lucide-react';
 
 import { format, differenceInDays, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -118,10 +118,17 @@ export default async function PersonnelDetailPage({
           <p className="text-muted-foreground text-sm mt-0.5">
             {person.rut} · {(person.company as { name: string } | null)?.name}
           </p>
-          {person.user_id && (
-            <Badge className="mt-2 bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200 flex w-fit items-center gap-1.5">
-              <ShieldCheck className="h-3 w-3" />
-              Acceso Habilitado
+          {person.is_active ? (
+            person.user_id ? (
+              <Badge className="mt-2 bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200 flex w-fit items-center gap-1.5">
+                <ShieldCheck className="h-3 w-3" />
+                Acceso Portal Habilitado
+              </Badge>
+            ) : null
+          ) : (
+            <Badge className="mt-2 bg-red-100 text-red-700 hover:bg-red-200 border-red-200 flex w-fit items-center gap-1.5 font-bold">
+              <ShieldOff className="h-3 w-3" />
+              Inactivo / Baja
             </Badge>
           )}
         </div>
@@ -324,11 +331,17 @@ export default async function PersonnelDetailPage({
                   <Separator className="opacity-50" />
                   <div className="space-y-1">
                     <p className="text-[10px] uppercase text-muted-foreground font-bold">Credenciales del Sistema</p>
-                    <AccessActions 
-                      personnelId={id} 
-                      hasAccess={!!person.user_id} 
-                      email={person.email} 
-                    />
+                    {person.is_active ? (
+                      <AccessActions 
+                        personnelId={id} 
+                        hasAccess={!!person.user_id} 
+                        email={person.email} 
+                      />
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic pt-1">
+                        Acceso deshabilitado (colaborador inactivo)
+                      </p>
+                    )}
                   </div>
                 </>
               )}
