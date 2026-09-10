@@ -20,6 +20,7 @@ import { format, differenceInDays, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { DocumentActions } from './document-actions';
 import { calculateDynamicExpiration, calculateIntervalExpiration } from '@/lib/utils/document-calc';
+import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 import { AccessActions } from './access-actions';
 import { LettersCard } from '@/components/personnel/letters-card';
 import { getUserRole } from '@/app/role-actions';
@@ -37,6 +38,9 @@ export default async function PersonnelDetailPage({
   const { id } = await params;
   const supabase = await createClient();
   const adminSupabase = createAdminClient();
+
+  // Sync dynamic expiration & clean duplicates on load
+  await syncDependentDocumentsExpiration(id, adminSupabase);
 
   const [
     { data: person, error }, 
@@ -82,9 +86,22 @@ export default async function PersonnelDetailPage({
     return def.applicable_positions.includes(person.main_position);
   });
 
-  const allDocuments = (person.documents as Array<{ id: string; definition_id: string; type: string; number?: string | null; expiration_date: string | null; file_url: string; uploaded_at: string; status: string }>) || [];
-  // Filter out RIOHS documents ONLY for the general documents table display
-  const generalDocuments = allDocuments.filter((doc) => !doc.type?.toUpperCase().startsWith('RIOHS'));
+  const rawDocuments = (person.documents as Array<{ id: string; definition_id: string; type: string; number?: string | null; expiration_date: string | null; file_url: string; uploaded_at: string; status: string }>) || [];
+  // Sort by uploaded_at DESC so newest documents are always first
+  const allDocuments = [...rawDocuments].sort((a, b) => new Date(b.uploaded_at || 0).getTime() - new Date(a.uploaded_at || 0).getTime());
+
+  // Deduplicate and filter out RIOHS documents for general documents table
+  const seenGeneralKeys = new Set<string>();
+  const generalDocuments = allDocuments
+    .filter((doc) => !doc.type?.toUpperCase().startsWith('RIOHS'))
+    .filter((doc) => {
+      const def = definitions.find(d => d.id === doc.definition_id)
+        || definitions.find(d => (d.name || '').toLowerCase().trim() === (doc.type || '').toLowerCase().trim());
+      const key = def ? `def_${def.id}` : `type_${(doc.type || '').toLowerCase().trim()}`;
+      if (seenGeneralKeys.has(key)) return false;
+      seenGeneralKeys.add(key);
+      return true;
+    });
 
   // Dynamic Missing Documents Logic
   // Match by definition_id for new uploads, OR by type name for legacy uploads
@@ -413,8 +430,23 @@ export default async function PersonnelDetailPage({
                   // If definition requires expiration, calculate it dynamically if there's a dependency,
                   // or if there's no manual expiry stored.
                   if (def?.requires_expiration) {
-                    if (def.depends_on_definition_id) {
-                      const anchorDoc = allDocuments.find(d => d.definition_id === def.depends_on_definition_id);
+                    const docNameLower = (doc.type || def?.name || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                    const pcpDef = definitions.find((d: any) => (d.name || '').toLowerCase().includes('pcp'));
+                    const ticaDef = definitions.find((d: any) => (d.name || '').toLowerCase().includes('tica'));
+
+                    let targetAnchorDefId = def.depends_on_definition_id;
+                    if (docNameLower.includes('hoja de vida') && pcpDef) {
+                      targetAnchorDefId = pcpDef.id;
+                    } else if (docNameLower.includes('antecedentes') && ticaDef) {
+                      targetAnchorDefId = ticaDef.id;
+                    }
+
+                    if (targetAnchorDefId) {
+                      const anchorDef = definitions.find(d => d.id === targetAnchorDefId);
+                      const anchorDoc = allDocuments.find(d => 
+                        d.definition_id === targetAnchorDefId ||
+                        (anchorDef && (d.type || '').toLowerCase().trim() === (anchorDef.name || '').toLowerCase().trim())
+                      );
                       if (anchorDoc?.expiration_date) {
                         displayExpiry = calculateDynamicExpiration(
                           parseISO(anchorDoc.expiration_date),

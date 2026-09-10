@@ -6,6 +6,7 @@ import type { Personnel } from '@/types/database';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createSupabaseAdminClient } from '@supabase/supabase-js';
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
+import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 
 function safeRevalidatePath(path: string) {
   try {
@@ -825,8 +826,11 @@ export async function deleteDocumentAction(
   const { error } = await adminClient.from('documents').delete().eq('id', id);
   if (error) return { success: false, error: error.message };
 
+  if (doc?.personnel_id) {
+    await syncDependentDocumentsExpiration(doc.personnel_id, adminClient);
+    safeRevalidatePath(`/personnel/${doc.personnel_id}`);
+  }
   safeRevalidatePath('/documents');
-  if (doc?.personnel_id) safeRevalidatePath(`/personnel/${doc.personnel_id}`);
   return { success: true, error: null };
 }
 

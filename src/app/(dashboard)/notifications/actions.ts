@@ -107,20 +107,37 @@ export async function getDashboardAlerts() {
   ]);
 
   const defs = definitions || [];
-  const docs = allDocs || [];
+  const docs = (allDocs || []).sort((a, b) => new Date(b.uploaded_at || 0).getTime() - new Date(a.uploaded_at || 0).getTime());
+
+  const pcpDef = defs.find((d: any) => (d.name || '').toLowerCase().includes('pcp'));
+  const ticaDef = defs.find((d: any) => (d.name || '').toLowerCase().includes('tica'));
 
   // Compute resolved expiration dates in memory
   const resolvedDocs = docs.map(doc => {
-    const def = defs.find(d => d.id === doc.definition_id);
+    const def = defs.find(d => d.id === doc.definition_id)
+      || defs.find(d => (d.name || '').toLowerCase().trim() === (doc.type || '').toLowerCase().trim());
     let expirationDateStr = doc.expiration_date;
 
-    if (def?.requires_expiration && def.depends_on_definition_id) {
-      const anchorDoc = docs.find(d => d.personnel_id === doc.personnel_id && d.definition_id === def.depends_on_definition_id);
+    const docNameLower = (doc.type || def?.name || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    let targetAnchorDefId = def?.depends_on_definition_id;
+    if (docNameLower.includes('hoja de vida') && pcpDef) {
+      targetAnchorDefId = pcpDef.id;
+    } else if (docNameLower.includes('antecedentes') && ticaDef) {
+      targetAnchorDefId = ticaDef.id;
+    }
+
+    if (targetAnchorDefId) {
+      const anchorDef = defs.find(d => d.id === targetAnchorDefId);
+      const anchorDoc = docs.find(d => 
+        d.personnel_id === doc.personnel_id && 
+        (d.definition_id === targetAnchorDefId || 
+         (anchorDef && (d.type || '').toLowerCase().trim() === (anchorDef.name || '').toLowerCase().trim()))
+      );
       if (anchorDoc?.expiration_date) {
         const calcDate = calculateDynamicExpiration(
           new Date(anchorDoc.expiration_date + 'T12:00:00'),
-          def.cycle_months || 6,
-          def.anchor_days_offset || 30
+          def?.cycle_months || 6,
+          def?.anchor_days_offset || 30
         );
         expirationDateStr = calcDate.toISOString().split('T')[0];
       }

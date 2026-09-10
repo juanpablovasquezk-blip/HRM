@@ -406,7 +406,8 @@ export async function getWorkerDocuments() {
   const { data } = await supabase
     .from('documents')
     .select('*')
-    .eq('personnel_id', session.id);
+    .eq('personnel_id', session.id)
+    .order('uploaded_at', { ascending: false });
   
   return data || [];
 }
@@ -481,30 +482,40 @@ export async function uploadDocumentRecord(record: any) {
     return { success: false, error: 'El archivo del documento es obligatorio' };
   }
 
-  // Delete previous document of same definition (upsert pattern without needing DB unique constraint)
-  if (record.definition_id) {
-    const { data: existing } = await adminClient
-      .from('documents')
-      .select('id, file_url')
-      .eq('personnel_id', session.id)
-      .eq('definition_id', record.definition_id);
+  // Delete previous document of same definition/type (upsert pattern)
+  const { data: allUserDocs } = await adminClient
+    .from('documents')
+    .select('id, file_url, type, definition_id')
+    .eq('personnel_id', session.id);
 
-    if (existing && existing.length > 0) {
-      // Remove old storage files
-      for (const old of existing) {
-        if (old.file_url) {
-          const marker = '/documents/';
-          const idx = old.file_url.lastIndexOf(marker);
-          if (idx !== -1) {
-            const storagePath = old.file_url.substring(idx + marker.length);
+  const normType = (record.type || '').toLowerCase().trim();
+
+  const existingDocs = (allUserDocs || []).filter((d: any) => {
+    if (record.definition_id && d.definition_id === record.definition_id) return true;
+    const dType = (d.type || '').toLowerCase().trim();
+    if (normType && dType === normType) return true;
+    return false;
+  });
+
+  if (existingDocs && existingDocs.length > 0) {
+    // Remove old storage files
+    for (const old of existingDocs) {
+      if (old.file_url) {
+        const marker = '/documents/';
+        const idx = old.file_url.lastIndexOf(marker);
+        if (idx !== -1) {
+          const storagePath = old.file_url.substring(idx + marker.length);
+          try {
             await adminClient.storage.from('documents').remove([storagePath]);
+          } catch (e) {
+            console.warn('Storage delete warning:', e);
           }
         }
       }
-      // Delete old DB records
-      const oldIds = existing.map((d: any) => d.id);
-      await adminClient.from('documents').delete().in('id', oldIds);
     }
+    // Delete old DB records
+    const oldIds = existingDocs.map((d: any) => d.id);
+    await adminClient.from('documents').delete().in('id', oldIds);
   }
 
   const dataToSave: any = {
@@ -725,7 +736,10 @@ export async function getWorkerDocsStatus() {
   const todayStr = new Date().toISOString().split('T')[0];
 
   const hasAlert = definitions.some(def => {
-    const doc = existingDocuments.find(d => d.definition_id === def.id);
+    const doc = existingDocuments.find(d => 
+      d.definition_id === def.id || 
+      (d.type || '').toLowerCase().trim() === (def.name || '').toLowerCase().trim()
+    );
     
     // 1. Missing and mandatory
     if (!doc) {
@@ -739,11 +753,26 @@ export async function getWorkerDocsStatus() {
     
     // 3. Expired
     let expirationDate = doc.expiration_date;
-    if (def.depends_on_definition_id) {
-      const anchorDoc = existingDocuments.find(d => d.definition_id === def.depends_on_definition_id);
+    const defNameLower = (def.name || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const pcpDef = definitions.find((d: any) => (d.name || '').toLowerCase().includes('pcp'));
+    const ticaDef = definitions.find((d: any) => (d.name || '').toLowerCase().includes('tica'));
+
+    let targetAnchorDefId = def.depends_on_definition_id;
+    if (defNameLower.includes('hoja de vida') && pcpDef) {
+      targetAnchorDefId = pcpDef.id;
+    } else if (defNameLower.includes('antecedentes') && ticaDef) {
+      targetAnchorDefId = ticaDef.id;
+    }
+
+    if (targetAnchorDefId) {
+      const anchorDef = definitions.find(d => d.id === targetAnchorDefId);
+      const anchorDoc = existingDocuments.find(d => 
+        d.definition_id === targetAnchorDefId ||
+        (anchorDef && (d.type || '').toLowerCase().trim() === (anchorDef.name || '').toLowerCase().trim())
+      );
       if (anchorDoc?.expiration_date) {
         const calcDate = calculateDynamicExpiration(
-          new Date(anchorDoc.expiration_date),
+          new Date(anchorDoc.expiration_date + 'T12:00:00'),
           def.cycle_months || 6,
           def.anchor_days_offset || 30
         );

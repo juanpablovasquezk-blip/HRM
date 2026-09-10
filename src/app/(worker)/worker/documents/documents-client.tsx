@@ -96,7 +96,11 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
   const supabase = createClient();
 
   const getDocStatus = (defId: string) => {
-    const doc = existingDocuments.find(d => d.definition_id === defId);
+    const def = definitions.find(d => d.id === defId);
+    const doc = existingDocuments.find(d => 
+      d.definition_id === defId ||
+      (def && (d.type || '').toLowerCase().trim() === (def.name || '').toLowerCase().trim())
+    );
     if (!doc) return { label: 'Faltante', color: 'bg-red-50 text-red-700', icon: AlertCircle, status: 'MISSING' };
     
     switch (doc.status) {
@@ -203,7 +207,10 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
         {definitions.map((def) => {
           const status = getDocStatus(def.id);
           const StatusIcon = status.icon;
-          const doc = existingDocuments.find(d => d.definition_id === def.id);
+          const doc = existingDocuments.find(d => 
+            d.definition_id === def.id || 
+            (d.type || '').toLowerCase().trim() === (def.name || '').toLowerCase().trim()
+          );
 
           return (
             <Card key={def.id} className="overflow-hidden border-none shadow-lg shadow-slate-200/50 rounded-3xl">
@@ -233,9 +240,22 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
                           def.depends_on_definition_id ? "text-indigo-400" : "text-slate-400"
                         )}>
                           {(() => {
-                            if (def.depends_on_definition_id) {
-                              const anchorDef = definitions.find(d => d.id === def.depends_on_definition_id);
-                              const hasAnchor = existingDocuments.some(d => d.definition_id === def.depends_on_definition_id);
+                            const defNameLower = (def.name || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                            const pcpDef = definitions.find((d: any) => (d.name || '').toLowerCase().includes('pcp'));
+                            const ticaDef = definitions.find((d: any) => (d.name || '').toLowerCase().includes('tica'));
+                            let targetAnchorDefId = def.depends_on_definition_id;
+                            if (defNameLower.includes('hoja de vida') && pcpDef) {
+                              targetAnchorDefId = pcpDef.id;
+                            } else if (defNameLower.includes('antecedentes') && ticaDef) {
+                              targetAnchorDefId = ticaDef.id;
+                            }
+
+                            if (targetAnchorDefId) {
+                              const anchorDef = definitions.find(d => d.id === targetAnchorDefId);
+                              const hasAnchor = existingDocuments.some(d => 
+                                d.definition_id === targetAnchorDefId ||
+                                (anchorDef && (d.type || '').toLowerCase().trim() === (anchorDef.name || '').toLowerCase().trim())
+                              );
                               return hasAnchor ? `Vencimiento Anclado a ${anchorDef?.name}` : 'Vencimiento por Ciclo (6 meses)';
                             }
                             return 'Fecha de Vencimiento';
@@ -244,8 +264,22 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
                         
                         {(() => {
                           // Calculation Logic for dependencies
-                          if (def.depends_on_definition_id) {
-                            const anchorDoc = existingDocuments.find(d => d.definition_id === def.depends_on_definition_id);
+                          const defNameLower = (def.name || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                          const pcpDef = definitions.find((d: any) => (d.name || '').toLowerCase().includes('pcp'));
+                          const ticaDef = definitions.find((d: any) => (d.name || '').toLowerCase().includes('tica'));
+                          let targetAnchorDefId = def.depends_on_definition_id;
+                          if (defNameLower.includes('hoja de vida') && pcpDef) {
+                            targetAnchorDefId = pcpDef.id;
+                          } else if (defNameLower.includes('antecedentes') && ticaDef) {
+                            targetAnchorDefId = ticaDef.id;
+                          }
+
+                          if (targetAnchorDefId) {
+                            const anchorDef = definitions.find(d => d.id === targetAnchorDefId);
+                            const anchorDoc = existingDocuments.find(d => 
+                              d.definition_id === targetAnchorDefId ||
+                              (anchorDef && (d.type || '').toLowerCase().trim() === (anchorDef.name || '').toLowerCase().trim())
+                            );
                             if (anchorDoc?.expiration_date) {
                               const calcDate = calculateDynamicExpiration(
                                 parseISO(anchorDoc.expiration_date),

@@ -7,6 +7,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { format, addDays, parseISO } from 'date-fns';
 import { sendWhatsAppMessage, getSystemSettings } from '@/lib/ultramsg';
+import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 
 export async function loginAsSupervisor(email: string) {
   const supabase = await createClient();
@@ -637,6 +638,29 @@ export async function uploadSupervisorDocument(formData: FormData): Promise<{ su
     const fileUrl = publicUrlData.publicUrl;
 
     // 2. Insert into documents table with status = 'APPROVED'
+    const isRiohsDoc = docTypeName.toUpperCase().includes('RIOHS') || docTypeName.toUpperCase().includes('REGLAMENTO');
+    
+    // If not a RIOHS step doc, clean up previous versions of this doc
+    if (!isRiohsDoc) {
+      const { data: allUserDocs } = await supabase
+        .from('documents')
+        .select('id, file_url, type, definition_id')
+        .eq('personnel_id', personnelId);
+
+      const normType = docTypeName.toLowerCase().trim();
+      const existingDocs = (allUserDocs || []).filter((d: any) => {
+        if (definitionId && !definitionId.startsWith('RIOHS_') && !definitionId.startsWith('MISSING_') && !definitionId.startsWith('EXPIRED_') && d.definition_id === definitionId) return true;
+        const dType = (d.type || '').toLowerCase().trim();
+        if (normType && dType === normType) return true;
+        return false;
+      });
+
+      if (existingDocs.length > 0) {
+        const oldIds = existingDocs.map((d: any) => d.id);
+        await supabase.from('documents').delete().in('id', oldIds);
+      }
+    }
+
     const docData: any = {
       personnel_id: personnelId,
       type: docTypeName,
@@ -658,8 +682,7 @@ export async function uploadSupervisorDocument(formData: FormData): Promise<{ su
       return { success: false, error: `Error registrando documento: ${dbErr.message}` };
     }
 
-    // 3. Handle PdR / RIOHS sync if document matches RIOHS
-    const isRiohsDoc = docTypeName.toUpperCase().includes('RIOHS') || docTypeName.toUpperCase().includes('REGLAMENTO');
+    await syncDependentDocumentsExpiration(personnelId, supabase);
     if (isRiohsDoc) {
       const isStep4 = definitionId === 'RIOHS_STEP_4' || docTypeName.toUpperCase().includes('RECEPCION') || docTypeName.toUpperCase().includes('COMPROBANTE') || docTypeName.toUpperCase().includes('PASO 4');
       

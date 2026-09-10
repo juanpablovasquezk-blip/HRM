@@ -107,12 +107,17 @@ export async function uploadDocument(
 
     // If it depends on an anchor document and we have no input ticaDateStr, try to use existing anchor document expiration
     if (dependsOnDefinitionId && !ticaDateStr) {
-      const { data: anchorDoc } = await adminClient
+      const { data: allAnchorCandidates } = await adminClient
         .from('documents')
-        .select('expiration_date')
+        .select('definition_id, type, expiration_date, uploaded_at')
         .eq('personnel_id', personnelId)
-        .eq('definition_id', dependsOnDefinitionId)
-        .maybeSingle();
+        .order('uploaded_at', { ascending: false });
+
+      const anchorDoc = (allAnchorCandidates || []).find((d: any) => 
+        d.definition_id === dependsOnDefinitionId ||
+        (d.type || '').toLowerCase().trim().includes('tica') ||
+        (d.type || '').toLowerCase().trim().includes('pcp')
+      );
 
       if (anchorDoc?.expiration_date) {
         const calcDate = calculateDynamicExpiration(
@@ -136,17 +141,22 @@ export async function uploadDocument(
   }
 
   // ── Upsert logic: delete previous document of same type/definition ────────
-  // Find existing doc(s) of the same type for this person
-  const dupQuery = adminClient
+  // Find existing doc(s) of the same type or definition for this person
+  const { data: allUserDocs } = await adminClient
     .from('documents')
-    .select('id, file_url')
+    .select('id, file_url, type, definition_id')
     .eq('personnel_id', personnelId);
 
-  const dupFilter = definitionId
-    ? dupQuery.eq('definition_id', definitionId)
-    : dupQuery.eq('type', type);
+  const normType = (type || '').toLowerCase().trim();
+  const normDefName = (defName || '').toLowerCase().trim();
 
-  const { data: existingDocs } = await dupFilter;
+  const existingDocs = (allUserDocs || []).filter((d: any) => {
+    if (definitionId && d.definition_id === definitionId) return true;
+    const dType = (d.type || '').toLowerCase().trim();
+    if (normType && dType === normType) return true;
+    if (normDefName && dType === normDefName) return true;
+    return false;
+  });
 
   if (existingDocs && existingDocs.length > 0) {
     // Delete storage files for old documents
@@ -161,7 +171,11 @@ export async function uploadDocument(
       .filter(Boolean) as string[];
 
     if (oldPaths.length > 0) {
-      await adminClient.storage.from('documents').remove(oldPaths);
+      try {
+        await adminClient.storage.from('documents').remove(oldPaths);
+      } catch (e) {
+        console.warn('Failed removing old storage files:', e);
+      }
     }
 
     // Delete old DB records
