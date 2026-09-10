@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useTransition } from 'react';
+import { useState, useEffect, useTransition, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -12,7 +12,7 @@ import {
   endOfMonth,
 } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Printer, Search, Loader2, Check, DollarSign, Calendar, Landmark, AlertCircle, RefreshCw, Download } from 'lucide-react';
+import { Printer, Search, Loader2, Check, DollarSign, Calendar, Landmark, AlertCircle, RefreshCw, Download, Plus, Pencil, Trash2, Gift, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
@@ -20,7 +20,12 @@ import {
   getBonosReportData,
   updateShiftPaidMonth,
   updateTransportPaidMonth,
-  bulkUpdatePaidMonth
+  updateSpecialBonusPaidMonth,
+  createSpecialBonus,
+  updateSpecialBonus,
+  deleteSpecialBonus,
+  bulkUpdatePaidMonth,
+  searchPersonnel
 } from './actions';
 
 interface BonosReportClientProps {
@@ -44,6 +49,7 @@ export function BonosReportClient({
   
   const [shifts, setShifts] = useState<any[]>([]);
   const [transports, setTransports] = useState<any[]>([]);
+  const [specialBonuses, setSpecialBonuses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [reportView, setReportView] = useState<'detailed' | 'summary'>('detailed');
   const [isPending, startTransition] = useTransition();
@@ -57,6 +63,18 @@ export function BonosReportClient({
   // Local state for selected items per personnel ID
   const [selectedShifts, setSelectedShifts] = useState<Record<string, string[]>>({});
   const [selectedTransports, setSelectedTransports] = useState<Record<string, string[]>>({});
+  const [selectedBonuses, setSelectedBonuses] = useState<Record<string, string[]>>({});
+
+  // Special bonus modal state
+  const [showBonusModal, setShowBonusModal] = useState(false);
+  const [editingBonus, setEditingBonus] = useState<any>(null);
+  const [bonusForm, setBonusForm] = useState({ personnel_id: '', date: '', reason: '', amount: '' });
+  const [personnelSearch, setPersonnelSearch] = useState('');
+  const [personnelResults, setPersonnelResults] = useState<any[]>([]);
+  const [selectedPersonnel, setSelectedPersonnel] = useState<any>(null);
+  const [searchingPersonnel, setSearchingPersonnel] = useState(false);
+  const [savingBonus, setSavingBonus] = useState(false);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchData = async (currentFrom: string, currentTo: string, currentCompanyId: string) => {
     setLoading(true);
@@ -72,9 +90,11 @@ export function BonosReportClient({
       } else {
         setShifts(res.shifts || []);
         setTransports(res.transports || []);
+        setSpecialBonuses(res.specialBonuses || []);
         // Reset selections on new search
         setSelectedShifts({});
         setSelectedTransports({});
+        setSelectedBonuses({});
       }
     } catch (error: any) {
       toast.error(`Error inesperado: ${error.message}`);
@@ -182,9 +202,10 @@ export function BonosReportClient({
 
     const shiftIds = selectedShifts[personnelId] || [];
     const transportIds = selectedTransports[personnelId] || [];
+    const bonusIds = selectedBonuses[personnelId] || [];
 
-    if (shiftIds.length === 0 && transportIds.length === 0) {
-      toast.error('No has seleccionado ningún turno o transporte para actualizar.');
+    if (shiftIds.length === 0 && transportIds.length === 0 && bonusIds.length === 0) {
+      toast.error('No has seleccionado ningún registro para actualizar.');
       return;
     }
 
@@ -192,11 +213,12 @@ export function BonosReportClient({
       const next = { ...prev };
       shiftIds.forEach(id => { next[id] = true; });
       transportIds.forEach(id => { next[id] = true; });
+      bonusIds.forEach(id => { next[id] = true; });
       return next;
     });
 
     try {
-      const res = await bulkUpdatePaidMonth(shiftIds, transportIds, month);
+      const res = await bulkUpdatePaidMonth(shiftIds, transportIds, bonusIds, month);
       if (res.success) {
         setShifts(prev =>
           prev.map(s => (shiftIds.includes(s.id) ? { ...s, paid_month: month } : s))
@@ -204,10 +226,14 @@ export function BonosReportClient({
         setTransports(prev =>
           prev.map(t => (transportIds.includes(t.id) ? { ...t, paid_month: month } : t))
         );
+        setSpecialBonuses(prev =>
+          prev.map(b => (bonusIds.includes(b.id) ? { ...b, paid_month: month } : b))
+        );
         
         // Clear selection after update
         setSelectedShifts(prev => ({ ...prev, [personnelId]: [] }));
         setSelectedTransports(prev => ({ ...prev, [personnelId]: [] }));
+        setSelectedBonuses(prev => ({ ...prev, [personnelId]: [] }));
         
         toast.success(`Se aplicó el mes de pago "${month}" a los registros seleccionados.`);
       } else {
@@ -220,8 +246,166 @@ export function BonosReportClient({
         const next = { ...prev };
         shiftIds.forEach(id => { next[id] = false; });
         transportIds.forEach(id => { next[id] = false; });
+        bonusIds.forEach(id => { next[id] = false; });
         return next;
       });
+    }
+  };
+
+  // --- Special Bonus Handlers ---
+
+  const toggleBonusSelection = (personnelId: string, bonusId: string) => {
+    setSelectedBonuses(prev => {
+      const current = prev[personnelId] || [];
+      const updated = current.includes(bonusId)
+        ? current.filter(id => id !== bonusId)
+        : [...current, bonusId];
+      return { ...prev, [personnelId]: updated };
+    });
+  };
+
+  const toggleAllBonuses = (personnelId: string, personBonuses: any[]) => {
+    const allIds = personBonuses.map(b => b.id);
+    setSelectedBonuses(prev => {
+      const current = prev[personnelId] || [];
+      const areAllSelected = allIds.length > 0 && allIds.every(id => current.includes(id));
+      const updated = areAllSelected ? [] : allIds;
+      return { ...prev, [personnelId]: updated };
+    });
+  };
+
+  const handleUpdateSpecialBonusPaidMonth = async (bonusId: string, value: string) => {
+    setSavingRows(prev => ({ ...prev, [bonusId]: true }));
+    try {
+      const res = await updateSpecialBonusPaidMonth(bonusId, value || null);
+      if (res.success) {
+        setSpecialBonuses(prev =>
+          prev.map(b => (b.id === bonusId ? { ...b, paid_month: value || null } : b))
+        );
+        toast.success('Mes de pago actualizado.');
+      } else {
+        toast.error(`Error al guardar: ${res.error}`);
+      }
+    } catch (err: any) {
+      toast.error(`Error: ${err.message}`);
+    } finally {
+      setSavingRows(prev => ({ ...prev, [bonusId]: false }));
+    }
+  };
+
+  const handleSearchPersonnel = (query: string) => {
+    setPersonnelSearch(query);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    if (query.length < 2) {
+      setPersonnelResults([]);
+      return;
+    }
+    setSearchingPersonnel(true);
+    searchTimeoutRef.current = setTimeout(async () => {
+      const res = await searchPersonnel(query);
+      if (res.data) setPersonnelResults(res.data);
+      setSearchingPersonnel(false);
+    }, 300);
+  };
+
+  const openBonusModal = (bonus?: any) => {
+    if (bonus) {
+      setEditingBonus(bonus);
+      setBonusForm({
+        personnel_id: bonus.personnel_id,
+        date: bonus.date,
+        reason: bonus.reason,
+        amount: String(bonus.amount)
+      });
+      setSelectedPersonnel(bonus.personnel);
+      setPersonnelSearch(`${bonus.personnel?.first_name} ${bonus.personnel?.last_name_father} ${bonus.personnel?.last_name_mother || ''}`);
+    } else {
+      setEditingBonus(null);
+      setBonusForm({ personnel_id: '', date: format(new Date(), 'yyyy-MM-dd'), reason: '', amount: '' });
+      setSelectedPersonnel(null);
+      setPersonnelSearch('');
+    }
+    setPersonnelResults([]);
+    setShowBonusModal(true);
+  };
+
+  const closeBonusModal = () => {
+    setShowBonusModal(false);
+    setEditingBonus(null);
+    setBonusForm({ personnel_id: '', date: '', reason: '', amount: '' });
+    setSelectedPersonnel(null);
+    setPersonnelSearch('');
+    setPersonnelResults([]);
+  };
+
+  const handleSaveBonus = async () => {
+    if (!bonusForm.personnel_id || !bonusForm.date || !bonusForm.reason.trim() || !bonusForm.amount) {
+      toast.error('Todos los campos son obligatorios.');
+      return;
+    }
+    const amountNum = parseInt(bonusForm.amount, 10);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      toast.error('El monto debe ser un número positivo.');
+      return;
+    }
+
+    setSavingBonus(true);
+    try {
+      if (editingBonus) {
+        const res = await updateSpecialBonus(editingBonus.id, {
+          date: bonusForm.date,
+          reason: bonusForm.reason.trim(),
+          amount: amountNum
+        });
+        if (res.success) {
+          setSpecialBonuses(prev =>
+            prev.map(b => b.id === editingBonus.id
+              ? { ...b, date: bonusForm.date, reason: bonusForm.reason.trim(), amount: amountNum }
+              : b
+            )
+          );
+          toast.success('Bono especial actualizado.');
+          closeBonusModal();
+        } else {
+          toast.error(res.error || 'Error al actualizar.');
+        }
+      } else {
+        const res = await createSpecialBonus({
+          personnel_id: bonusForm.personnel_id,
+          date: bonusForm.date,
+          reason: bonusForm.reason.trim(),
+          amount: amountNum
+        });
+        if (res.success) {
+          toast.success('Bono especial creado.');
+          closeBonusModal();
+          await fetchData(from, to, companyId);
+        } else {
+          toast.error(res.error || 'Error al crear.');
+        }
+      }
+    } catch (err: any) {
+      toast.error(`Error: ${err.message}`);
+    } finally {
+      setSavingBonus(false);
+    }
+  };
+
+  const handleDeleteBonus = async (bonusId: string) => {
+    if (!confirm('¿Estás seguro de eliminar este bono especial?')) return;
+    setSavingRows(prev => ({ ...prev, [bonusId]: true }));
+    try {
+      const res = await deleteSpecialBonus(bonusId);
+      if (res.success) {
+        setSpecialBonuses(prev => prev.filter(b => b.id !== bonusId));
+        toast.success('Bono especial eliminado.');
+      } else {
+        toast.error(res.error || 'Error al eliminar.');
+      }
+    } catch (err: any) {
+      toast.error(`Error: ${err.message}`);
+    } finally {
+      setSavingRows(prev => ({ ...prev, [bonusId]: false }));
     }
   };
 
@@ -250,7 +434,7 @@ export function BonosReportClient({
       const excelData = groupedList.map(person => {
         const shiftVal = person.shiftsCount * 40000;
         const transportVal = person.transportsCount * 14000;
-        const totalVal = shiftVal + transportVal;
+        const totalVal = shiftVal + transportVal + person.bonusesTotal;
 
         return {
           'Colaborador': `${person.first_name} ${person.last_name_father} ${person.last_name_mother}`.toUpperCase(),
@@ -260,6 +444,8 @@ export function BonosReportClient({
           'Valor Turnos': shiftVal,
           'Cant. Transportes': person.transportsCount,
           'Valor Transportes': transportVal,
+          'Cant. Bonos Esp.': person.bonusesCount,
+          'Valor Bonos Esp.': person.bonusesTotal,
           'Total Líquido': totalVal
         };
       });
@@ -269,7 +455,9 @@ export function BonosReportClient({
       const totalShiftVal = totalShifts * 40000;
       const totalTransports = groupedList.reduce((acc, p) => acc + p.transportsCount, 0);
       const totalTransportVal = totalTransports * 14000;
-      const grandTotal = totalShiftVal + totalTransportVal;
+      const totalBonuses = groupedList.reduce((acc, p) => acc + p.bonusesCount, 0);
+      const totalBonusesVal = groupedList.reduce((acc, p) => acc + p.bonusesTotal, 0);
+      const grandTotal = totalShiftVal + totalTransportVal + totalBonusesVal;
 
       excelData.push({
         'Colaborador': 'TOTAL GENERAL',
@@ -279,6 +467,8 @@ export function BonosReportClient({
         'Valor Turnos': totalShiftVal,
         'Cant. Transportes': totalTransports,
         'Valor Transportes': totalTransportVal,
+        'Cant. Bonos Esp.': totalBonuses,
+        'Valor Bonos Esp.': totalBonusesVal,
         'Total Líquido': grandTotal
       });
 
@@ -295,6 +485,8 @@ export function BonosReportClient({
         { wch: 15 }, // Valor Turnos
         { wch: 16 }, // Cant. Transportes
         { wch: 18 }, // Valor Transportes
+        { wch: 16 }, // Cant. Bonos Esp.
+        { wch: 18 }, // Valor Bonos Esp.
         { wch: 18 }  // Total Líquido
       ];
       ws['!cols'] = maxColWidths;
@@ -307,7 +499,7 @@ export function BonosReportClient({
     }
   };
 
-  // Helper to group shifts and transports by personnel
+  // Helper to group shifts, transports and special bonuses by personnel
   const getGroupedData = () => {
     const grouped: Record<string, {
       id: string;
@@ -318,11 +510,10 @@ export function BonosReportClient({
       companyName: string;
       shifts: any[];
       transports: any[];
+      bonuses: any[];
     }> = {};
 
-    shifts.forEach(s => {
-      const p = s.personnel;
-      if (!p) return;
+    const ensureGroup = (p: any) => {
       if (!grouped[p.id]) {
         grouped[p.id] = {
           id: p.id,
@@ -332,66 +523,68 @@ export function BonosReportClient({
           rut: p.rut,
           companyName: p.company?.name || 'Sin Empresa',
           shifts: [],
-          transports: []
+          transports: [],
+          bonuses: []
         };
       }
+    };
+
+    shifts.forEach(s => {
+      const p = s.personnel;
+      if (!p) return;
+      ensureGroup(p);
       grouped[p.id].shifts.push(s);
     });
 
     transports.forEach(t => {
       const p = t.personnel;
       if (!p) return;
-      if (!grouped[p.id]) {
-        grouped[p.id] = {
-          id: p.id,
-          first_name: p.first_name,
-          last_name_father: p.last_name_father,
-          last_name_mother: p.last_name_mother || '',
-          rut: p.rut,
-          companyName: p.company?.name || 'Sin Empresa',
-          shifts: [],
-          transports: []
-        };
-      }
+      ensureGroup(p);
       grouped[p.id].transports.push(t);
+    });
+
+    specialBonuses.forEach(b => {
+      const p = b.personnel;
+      if (!p) return;
+      ensureGroup(p);
+      grouped[p.id].bonuses.push(b);
     });
 
     // Extract unique payment months from database data for filter selection
     const uniqueMonths = new Set<string>();
     shifts.forEach(s => { if (s.paid_month) uniqueMonths.add(s.paid_month); });
     transports.forEach(t => { if (t.paid_month) uniqueMonths.add(t.paid_month); });
+    specialBonuses.forEach(b => { if (b.paid_month) uniqueMonths.add(b.paid_month); });
     const sortedUniqueMonths = Array.from(uniqueMonths).sort();
+
+    const filterByPaymentStatus = (item: any) => {
+      if (paymentStatus === 'pendientes') return !item.paid_month;
+      if (paymentStatus === 'pagados') return !!item.paid_month;
+      if (paymentStatus !== 'todos' && paymentStatus !== '') {
+        return item.paid_month === paymentStatus;
+      }
+      return true;
+    };
 
     // Map, Filter, and Sort the grouped data
     const groupedList = Object.values(grouped)
       .map(p => {
-        // Filter shifts by payment status
-        const filteredShifts = p.shifts.filter(s => {
-          if (paymentStatus === 'pendientes') return !s.paid_month;
-          if (paymentStatus === 'pagados') return !!s.paid_month;
-          if (paymentStatus !== 'todos' && paymentStatus !== '') {
-            return s.paid_month === paymentStatus;
-          }
-          return true;
-        });
+        const filteredShifts = p.shifts.filter(filterByPaymentStatus);
+        const filteredTransports = p.transports.filter(filterByPaymentStatus);
+        const filteredBonuses = p.bonuses.filter(filterByPaymentStatus);
 
-        // Filter transports by payment status
-        const filteredTransports = p.transports.filter(t => {
-          if (paymentStatus === 'pendientes') return !t.paid_month;
-          if (paymentStatus === 'pagados') return !!t.paid_month;
-          if (paymentStatus !== 'todos' && paymentStatus !== '') {
-            return t.paid_month === paymentStatus;
-          }
-          return true;
-        });
+        const bonusesTotal = filteredBonuses.reduce((acc: number, b: any) => acc + (b.amount || 0), 0);
 
         return {
           ...p,
           shifts: filteredShifts,
           transports: filteredTransports,
+          bonuses: filteredBonuses,
           shiftsCount: filteredShifts.length,
           transportsCount: filteredTransports.length,
-          totalCount: filteredShifts.length + filteredTransports.length
+          bonusesCount: filteredBonuses.length,
+          bonusesTotal,
+          totalCount: filteredShifts.length + filteredTransports.length + filteredBonuses.length
         };
       })
       .filter(p => p.totalCount > 0)
@@ -586,7 +779,16 @@ export function BonosReportClient({
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => openBonusModal()}
+                className="h-9 bg-emerald-600 text-white hover:bg-emerald-700 font-semibold no-print shadow-sm"
+              >
+                <Plus className="h-4 w-4 mr-1.5" />
+                Agregar Bono Especial
+              </Button>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -616,7 +818,7 @@ export function BonosReportClient({
                 size="sm"
                 onClick={handleDownloadExcel}
                 disabled={groupedList.length === 0}
-                className="h-9 bg-emerald-600 text-white hover:bg-emerald-700 no-print"
+                className="h-9 bg-emerald-700 text-white hover:bg-emerald-800 no-print"
               >
                 <Download className="h-4 w-4 mr-2" />
                 Descargar Excel
@@ -669,6 +871,8 @@ export function BonosReportClient({
                         <th className="px-4 py-2.5 text-right border-r border-slate-200 dark:border-slate-800">Valor Turnos</th>
                         <th className="px-4 py-2.5 text-center border-r border-slate-200 dark:border-slate-800">Transportes</th>
                         <th className="px-4 py-2.5 text-right border-r border-slate-200 dark:border-slate-800">Valor Transp.</th>
+                        <th className="px-4 py-2.5 text-center border-r border-slate-200 dark:border-slate-800">Bonos Esp.</th>
+                        <th className="px-4 py-2.5 text-right border-r border-slate-200 dark:border-slate-800">Valor Bonos Esp.</th>
                         <th className="px-4 py-2.5 text-right">Total a Pago</th>
                       </tr>
                     </thead>
@@ -676,7 +880,7 @@ export function BonosReportClient({
                       {groupedList.map((person) => {
                         const shiftVal = person.shiftsCount * 40000;
                         const transportVal = person.transportsCount * 14000;
-                        const totalVal = shiftVal + transportVal;
+                        const totalVal = shiftVal + transportVal + person.bonusesTotal;
 
                         return (
                           <tr key={person.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-colors">
@@ -700,6 +904,12 @@ export function BonosReportClient({
                             </td>
                             <td className="px-4 py-3 text-right font-mono text-slate-700 dark:text-slate-300 border-r border-slate-100 dark:border-slate-900">
                               {formatCurrency(transportVal)}
+                            </td>
+                            <td className="px-4 py-3 text-center font-bold border-r border-slate-100 dark:border-slate-900 text-emerald-700 dark:text-emerald-400">
+                              {person.bonusesCount}
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono text-slate-700 dark:text-slate-300 border-r border-slate-100 dark:border-slate-900">
+                              {formatCurrency(person.bonusesTotal)}
                             </td>
                             <td className="px-4 py-3 text-right font-black text-emerald-600 dark:text-emerald-400">
                               {formatCurrency(totalVal)}
@@ -725,8 +935,14 @@ export function BonosReportClient({
                         <td className="px-4 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200">
                           {formatCurrency(groupedList.reduce((acc, p) => acc + p.transportsCount * 14000, 0))}
                         </td>
+                        <td className="px-4 py-3 text-center border-r border-slate-200 dark:border-slate-800 text-emerald-700 dark:text-emerald-400">
+                          {groupedList.reduce((acc, p) => acc + p.bonusesCount, 0)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200">
+                          {formatCurrency(groupedList.reduce((acc, p) => acc + p.bonusesTotal, 0))}
+                        </td>
                         <td className="px-4 py-3 text-right font-mono text-emerald-600 dark:text-emerald-400 text-sm">
-                          {formatCurrency(groupedList.reduce((acc, p) => acc + (p.shiftsCount * 40000 + p.transportsCount * 14000), 0))}
+                          {formatCurrency(groupedList.reduce((acc, p) => acc + (p.shiftsCount * 40000 + p.transportsCount * 14000 + p.bonusesTotal), 0))}
                         </td>
                       </tr>
                     </tbody>
@@ -738,11 +954,12 @@ export function BonosReportClient({
             groupedList.map((person, index) => {
               const shiftVal = person.shiftsCount * 40000;
               const transportVal = person.transportsCount * 14000;
-              const totalVal = shiftVal + transportVal;
+              const totalVal = shiftVal + transportVal + person.bonusesTotal;
 
               const selectedShiftsCount = (selectedShifts[person.id] || []).length;
               const selectedTransportsCount = (selectedTransports[person.id] || []).length;
-              const totalSelected = selectedShiftsCount + selectedTransportsCount;
+              const selectedBonusesCount = (selectedBonuses[person.id] || []).length;
+              const totalSelected = selectedShiftsCount + selectedTransportsCount + selectedBonusesCount;
 
               return (
                 <div
@@ -771,7 +988,7 @@ export function BonosReportClient({
                   </div>
 
                   {/* 2. Resumen de Pago (Arriba del reporte) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 my-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 my-6">
                     
                     <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 flex items-start gap-3">
                       <div className="p-2 bg-orange-50 dark:bg-orange-950/30 rounded-lg text-orange-600 dark:text-orange-400">
@@ -803,7 +1020,22 @@ export function BonosReportClient({
                       </div>
                     </div>
 
-                    <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/20 dark:bg-emerald-950/10 flex items-start gap-3 sm:col-span-1">
+                    <div className="p-4 rounded-xl border border-teal-200 dark:border-teal-900 bg-teal-50/20 dark:bg-teal-950/10 flex items-start gap-3">
+                      <div className="p-2 bg-teal-500/10 rounded-lg text-teal-600 dark:text-teal-400">
+                        <Gift className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Bonos Especiales</div>
+                        <div className="text-lg font-black text-slate-800 dark:text-slate-100 mt-0.5">
+                          {person.bonusesCount} <span className="text-xs font-medium text-slate-400">c/u</span>
+                        </div>
+                        <div className="text-xs font-bold text-teal-600 dark:text-teal-400 mt-0.5">
+                          {formatCurrency(person.bonusesTotal)} <span className="text-[9px] text-slate-400 dark:text-slate-500 font-normal">({person.bonusesCount} reg.)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/20 dark:bg-emerald-950/10 flex items-start gap-3">
                       <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-600 dark:text-emerald-400 animate-pulse">
                         <DollarSign className="w-5 h-5" />
                       </div>
@@ -825,7 +1057,7 @@ export function BonosReportClient({
                       <span className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Acción en lote:</span>
                       <span className="text-xs text-slate-500">
                         {totalSelected > 0 
-                          ? `Aplicar mes a los ${totalSelected} registros seleccionados (${selectedShiftsCount} turnos, ${selectedTransportsCount} transportes)` 
+                          ? `Aplicar mes a los ${totalSelected} registros seleccionados (${selectedShiftsCount} turnos, ${selectedTransportsCount} transportes, ${selectedBonusesCount} bonos esp.)` 
                           : 'Selecciona registros con las casillas de la tabla para aplicar acción en lote'}
                       </span>
                     </div>
@@ -1037,10 +1269,298 @@ export function BonosReportClient({
                       </div>
                     </div>
                   )}
+
+                  {/* 6. Tabla de Bonos Especiales */}
+                  {person.bonusesCount > 0 && (
+                    <div className="mt-6 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-black text-slate-900 dark:text-slate-200 uppercase tracking-wider border-l-2 border-teal-500 pl-2">
+                          Detalle de Bonos Especiales
+                        </h3>
+                        <span className="text-[11px] text-slate-500 font-medium no-print">
+                          Total Bonos: <strong className="text-teal-600 dark:text-teal-400 font-bold">{formatCurrency(person.bonusesTotal)}</strong>
+                        </span>
+                      </div>
+                      <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden bg-white dark:bg-slate-950">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 dark:bg-slate-900 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                              <th className="px-3 py-2 w-[40px] text-center no-print border-r border-slate-200 dark:border-slate-800">
+                                <input
+                                  type="checkbox"
+                                  checked={person.bonuses.length > 0 && (selectedBonuses[person.id] || []).length === person.bonuses.length}
+                                  onChange={() => toggleAllBonuses(person.id, person.bonuses)}
+                                  className="rounded border-slate-350 focus:ring-0 cursor-pointer h-3.5 w-3.5 text-teal-600"
+                                />
+                              </th>
+                              <th className="px-4 py-2 border-r border-slate-200 dark:border-slate-800">Fecha</th>
+                              <th className="px-4 py-2 border-r border-slate-200 dark:border-slate-800">Motivo del Bono</th>
+                              <th className="px-4 py-2 text-right border-r border-slate-200 dark:border-slate-800">Monto</th>
+                              <th className="px-4 py-2 w-[180px] border-r border-slate-200 dark:border-slate-800">Mes de Pago</th>
+                              <th className="px-3 py-2 w-[90px] text-center no-print">Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-900 text-xs">
+                            {person.bonuses.map((b: any) => {
+                              const isSaving = savingRows[b.id];
+                              const isSelected = (selectedBonuses[person.id] || []).includes(b.id);
+                              const isLiquidated = !!b.paid_month;
+
+                              return (
+                                <tr key={b.id} className={cn(
+                                  "hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-colors",
+                                  isSelected && "bg-teal-50/20 dark:bg-teal-950/5"
+                                )}>
+                                  <td className="px-3 py-2 text-center no-print border-r border-slate-100 dark:border-slate-900">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => toggleBonusSelection(person.id, b.id)}
+                                      disabled={isSaving}
+                                      className="rounded border-slate-350 focus:ring-0 cursor-pointer h-3.5 w-3.5 text-teal-600"
+                                    />
+                                  </td>
+                                  <td className="px-4 py-2 font-medium capitalize border-r border-slate-100 dark:border-slate-900">
+                                    {format(parseISO(b.date), "eeee dd/MM/yyyy", { locale: es })}
+                                  </td>
+                                  <td className="px-4 py-2 font-semibold text-slate-800 dark:text-slate-200 border-r border-slate-100 dark:border-slate-900">
+                                    {b.reason}
+                                  </td>
+                                  <td className="px-4 py-2 text-right font-mono font-bold text-teal-700 dark:text-teal-400 border-r border-slate-100 dark:border-slate-900">
+                                    {formatCurrency(b.amount)}
+                                  </td>
+                                  <td className="px-4 py-1.5 border-r border-slate-100 dark:border-slate-900">
+                                    {/* Print Mode Text */}
+                                    <span className="hidden print-text-only text-xs font-bold text-slate-700 dark:text-slate-300">
+                                      {formatMonthName(b.paid_month)}
+                                    </span>
+
+                                    {/* Interactive Input (no-print) */}
+                                    <div className="flex items-center gap-1 w-full print-hidden-input">
+                                      <Input
+                                        type="month"
+                                        value={b.paid_month || ''}
+                                        onChange={e => handleUpdateSpecialBonusPaidMonth(b.id, e.target.value)}
+                                        disabled={isSaving}
+                                        className="h-7 text-xs flex-grow py-0 px-2"
+                                      />
+                                      {isSaving ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />
+                                      ) : b.paid_month ? (
+                                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                                      ) : null}
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-1.5 text-center no-print">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        disabled={isLiquidated || isSaving}
+                                        onClick={() => openBonusModal({ ...b, personnel: person })}
+                                        title={isLiquidated ? "Liquidado (No se puede editar)" : "Editar bono"}
+                                        className="h-7 w-7 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 disabled:opacity-30"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        disabled={isLiquidated || isSaving}
+                                        onClick={() => handleDeleteBonus(b.id)}
+                                        title={isLiquidated ? "Liquidado (No se puede eliminar)" : "Eliminar bono"}
+                                        className="h-7 w-7 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-30"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })
           )}
+        </div>
+      )}
+
+      {/* SPECIAL BONUS MODAL (no-print) */}
+      {showBonusModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-950/20">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-teal-50 dark:bg-teal-950/40 rounded-lg text-teal-600 dark:text-teal-400">
+                  <Gift className="h-4 w-4" />
+                </div>
+                <h3 className="font-bold text-base text-slate-800 dark:text-slate-100">
+                  {editingBonus ? 'Editar Bono Especial' : 'Registrar Bono Especial'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeBonusModal}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              {/* Personnel Field */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Colaborador <span className="text-rose-500">*</span>
+                </Label>
+                {editingBonus ? (
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-850 rounded-md border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                    {editingBonus.personnel?.first_name} {editingBonus.personnel?.last_name_father} {editingBonus.personnel?.last_name_mother || ''} ({editingBonus.personnel?.rut})
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Input
+                      type="text"
+                      placeholder="Buscar por nombre o RUT..."
+                      value={personnelSearch}
+                      onChange={e => handleSearchPersonnel(e.target.value)}
+                      className="h-9 text-xs"
+                    />
+                    {searchingPersonnel && (
+                      <Loader2 className="absolute right-2.5 top-2.5 h-4 w-4 animate-spin text-slate-400" />
+                    )}
+
+                    {personnelResults.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 z-20 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg max-h-48 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                        {personnelResults.map(p => (
+                          <div
+                            key={p.id}
+                            onClick={() => {
+                              setSelectedPersonnel(p);
+                              setBonusForm(prev => ({ ...prev, personnel_id: p.id }));
+                              setPersonnelSearch(`${p.first_name} ${p.last_name_father} ${p.last_name_mother || ''} (${p.rut})`);
+                              setPersonnelResults([]);
+                            }}
+                            className="p-2.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer flex flex-col"
+                          >
+                            <span className="font-bold text-slate-800 dark:text-slate-200 uppercase">
+                              {p.first_name} {p.last_name_father} {p.last_name_mother || ''}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              RUT: {p.rut} {p.company?.name ? `• ${p.company.name}` : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {selectedPersonnel && !personnelResults.length && (
+                      <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-medium">
+                        ✓ Seleccionado: {selectedPersonnel.first_name} {selectedPersonnel.last_name_father}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Date Field */}
+              <div className="space-y-1.5">
+                <Label htmlFor="bonus-date" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Fecha del Bono <span className="text-rose-500">*</span>
+                </Label>
+                <Input
+                  id="bonus-date"
+                  type="date"
+                  value={bonusForm.date}
+                  onChange={e => setBonusForm(prev => ({ ...prev, date: e.target.value }))}
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              {/* Reason Field */}
+              <div className="space-y-1.5">
+                <Label htmlFor="bonus-reason" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Motivo del Bono <span className="text-rose-500">*</span>
+                </Label>
+                <Input
+                  id="bonus-reason"
+                  type="text"
+                  placeholder="Ej: Trabajo adicional montaje, bono cumplimiento, etc."
+                  value={bonusForm.reason}
+                  onChange={e => setBonusForm(prev => ({ ...prev, reason: e.target.value }))}
+                  className="h-9 text-xs"
+                  required
+                />
+              </div>
+
+              {/* Amount Field */}
+              <div className="space-y-1.5">
+                <Label htmlFor="bonus-amount" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Monto en CLP ($) <span className="text-rose-500">*</span>
+                </Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">$</span>
+                  <Input
+                    id="bonus-amount"
+                    type="number"
+                    min="1"
+                    placeholder="50000"
+                    value={bonusForm.amount}
+                    onChange={e => setBonusForm(prev => ({ ...prev, amount: e.target.value }))}
+                    className="h-9 text-xs pl-7 font-mono"
+                    required
+                  />
+                </div>
+                {bonusForm.amount && !isNaN(parseInt(bonusForm.amount, 10)) && (
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    = {formatCurrency(parseInt(bonusForm.amount, 10))}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-950/40 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={closeBonusModal}
+                disabled={savingBonus}
+                className="h-8 text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSaveBonus}
+                disabled={savingBonus}
+                className="h-8 text-xs bg-teal-600 hover:bg-teal-700 text-white font-semibold"
+              >
+                {savingBonus ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                    Guardando...
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-3.5 w-3.5 mr-1.5" />
+                    {editingBonus ? 'Guardar Cambios' : 'Registrar Bono'}
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

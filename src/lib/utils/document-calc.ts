@@ -11,33 +11,28 @@ export function calculateDynamicExpiration(
   anchorDaysOffset: number = 30
 ): Date {
   // Start date: TICA Expiry minus the initial buffer (e.g., 30 days)
-  let baseDate = subDays(anchorExpiry, anchorDaysOffset);
+  const baseDate = subDays(anchorExpiry, anchorDaysOffset);
   const now = new Date();
 
-  // If the base date itself is in the past, we need to go forward? 
-  // No, the requirement is "restar 6 meses".
-  // Actually, if the TICA expires in 2 years, the milestones are:
-  // TICA - 30d
-  // TICA - 30d - 6m
-  // TICA - 30d - 12m
-  // TICA - 30d - 18m
-  
-  // We want the closest milestone that is in the FUTURE.
   let currentMilestone = baseDate;
-  
-  // If the baseDate is already past, we can't subtract more to find a future date.
-  // This would mean the TICA is already too close to expiring or expired.
-  
-  // However, usually we start from the furthest point and go backwards or start from now and find next.
-  // Let's iterate:
-  while (isAfter(currentMilestone, now)) {
-    let nextMilestone = addMonths(currentMilestone, -cycleMonths);
-    if (isBefore(nextMilestone, now)) {
-      break; // currentMilestone is the next future one
+
+  if (isAfter(currentMilestone, now)) {
+    // If baseDate is in the future, step backwards to find the closest milestone that is still in the future
+    while (isAfter(currentMilestone, now)) {
+      const prevMilestone = addMonths(currentMilestone, -cycleMonths);
+      if (isBefore(prevMilestone, now)) {
+        break; // currentMilestone is the closest future milestone
+      }
+      currentMilestone = prevMilestone;
     }
-    currentMilestone = nextMilestone;
+  } else {
+    // If baseDate is already past (e.g. TICA is expiring in < 30 days or has passed),
+    // a newly uploaded document covers the forward cycle from the anchor milestone.
+    while (!isAfter(currentMilestone, now)) {
+      currentMilestone = addMonths(currentMilestone, cycleMonths);
+    }
   }
-  
+
   return currentMilestone;
 }
 

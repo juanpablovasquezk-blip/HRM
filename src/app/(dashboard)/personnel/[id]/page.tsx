@@ -29,6 +29,7 @@ import { ContractDownloadButton } from './contract-download-button';
 import { TicaLetterDownloadButton } from './tica-letter-download-button';
 import { DismissalPanelClient } from './dismissal-panel-client';
 import { RiohsGadget } from './riohs/riohs-gadget';
+import { PersonnelBonusesCard } from './personnel-bonuses-card';
 
 export default async function PersonnelDetailPage({
   params,
@@ -49,6 +50,7 @@ export default async function PersonnelDetailPage({
     { data: lettersData },
     { data: riohsRecord },
     { data: companyDocsData },
+    { data: bonusesData },
     role
   ] = await Promise.all([
     supabase.from('personnel').select('*, company:companies(id, name, rut, legal_name), documents(*)').eq('id', id).single(),
@@ -57,6 +59,7 @@ export default async function PersonnelDetailPage({
     supabase.from('personnel_letters').select('*').eq('personnel_id', id).order('date', { ascending: false }),
     adminSupabase.from('riohs_records').select('*').eq('personnel_id', id).maybeSingle(),
     supabase.from('company_documents').select('*'),
+    adminSupabase.from('special_bonuses').select('*').eq('personnel_id', id).order('date', { ascending: false }),
     getUserRole()
   ]);
 
@@ -454,6 +457,12 @@ export default async function PersonnelDetailPage({
                           def.anchor_days_offset || 30
                         );
                         isCalculated = true;
+                      } else if (!displayExpiry && doc.uploaded_at) {
+                        displayExpiry = calculateIntervalExpiration(
+                          parseISO(doc.uploaded_at),
+                          def.cycle_months || 6
+                        );
+                        isCalculated = true;
                       }
                     } else if (!displayExpiry && doc.uploaded_at) {
                       displayExpiry = calculateIntervalExpiration(
@@ -557,6 +566,14 @@ export default async function PersonnelDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {/* Bonos Especiales */}
+      <PersonnelBonusesCard
+        personnelId={id}
+        workerName={`${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`}
+        initialBonuses={bonusesData || []}
+        canEdit={canEdit}
+      />
 
       {/* Gadget Prevención de riesgos (RIOHS) */}
       {(() => {

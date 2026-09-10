@@ -365,3 +365,15 @@ export interface DismissalRecord {
   completed_at: string | null;
   created_by: string | null;
 }
+
+export interface SpecialBonus {
+  id: string;
+  personnel_id: string;
+  date: string;
+  reason: string;
+  amount: number;
+  paid_month: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
