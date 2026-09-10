@@ -233,7 +233,7 @@ export async function generateDismissalActa(params: GenerateActaParams) {
       doc.text(splitP2, 25, currentY);
       currentY += (splitP2.length * 5) + 5;
 
-      const p3 = `Por lo anterior, y con el objeto de resguardar la seguridad de las operaciones aeroportuarias y evitar cualquier uso indebido o no autorizado, solicitamos a la DGAC proceder con el BLOQUEO, ANULACIÓN E INHABILITACIÓN TÉCNICA INMEDIATA de la referida credencial en los sistemas de control de acceso del Aeropuerto.`;
+      const p3 = `Por lo anterior, y con el objeto de resguardar la seguridad de las operaciones aeroportuarias y evitar cualquier uso indebido o no autorizado, solicitamos a la DGAC proceder con lo que sea necesario para que esto no afecte en la seguridad del aeropuerto.`;
       const splitP3 = doc.splitTextToSize(p3, 165);
       doc.text(splitP3, 25, currentY);
       currentY += (splitP3.length * 5) + 6;
