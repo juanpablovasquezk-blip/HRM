@@ -123,6 +123,7 @@ export default function DocumentCapture({
     }
     const canvasHeight = Math.round(canvasWidth / targetRatio);
 
+    const canvas = document.createElement('canvas');
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
 
