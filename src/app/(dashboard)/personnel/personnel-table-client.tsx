@@ -8,6 +8,7 @@ import {
   FileSpreadsheet, 
   Edit, 
   ShieldCheck, 
+  ShieldAlert,
   FileText, 
   Settings2,
   Check,
@@ -102,6 +103,18 @@ interface Personnel {
   ticaUrl?: string;
   pcpUrl?: string;
   dismissal_status?: 'pending' | 'completed' | null;
+  ticaDismissal?: {
+    id: string;
+    refused_to_return: boolean;
+    receipt_file_url: string | null;
+    status: string;
+  } | null;
+  pcpDismissal?: {
+    id: string;
+    refused_to_return: boolean;
+    receipt_file_url: string | null;
+    status: string;
+  } | null;
 }
 
 
@@ -689,6 +702,44 @@ export default function PersonnelTableClient({
                                 }
                               </Badge>
                             )}
+
+                            {/* TICA dismissal badge for inactive personnel */}
+                            {!person.is_active && person.ticaDismissal && (
+                              <Badge
+                                variant="outline"
+                                className={
+                                  person.ticaDismissal.receipt_file_url
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 text-[10px] py-0 px-1.5 font-bold h-5 flex items-center gap-1"
+                                    : person.ticaDismissal.refused_to_return
+                                      ? "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 text-[10px] py-0 px-1.5 font-bold h-5 flex items-center gap-1"
+                                      : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 text-[10px] py-0 px-1.5 font-bold h-5 flex items-center gap-1"
+                                }
+                                title={
+                                  person.ticaDismissal.receipt_file_url
+                                    ? "Recepción timbrada por DGAC guardada"
+                                    : person.ticaDismissal.refused_to_return
+                                      ? "El trabajador no entregó la TICA. Se solicita bloqueo a DGAC."
+                                      : "TICA entregada físicamente. Falta subir recepción DGAC."
+                                }
+                              >
+                                {person.ticaDismissal.receipt_file_url ? (
+                                  <>
+                                    <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                                    {person.ticaDismissal.refused_to_return ? 'TICA Bloqueada (DGAC)' : 'TICA Devuelta (DGAC)'}
+                                  </>
+                                ) : person.ticaDismissal.refused_to_return ? (
+                                  <>
+                                    <ShieldAlert className="h-3 w-3 text-rose-600" />
+                                    TICA No Entregada (Bloqueo)
+                                  </>
+                                ) : (
+                                  <>
+                                    <ShieldCheck className="h-3 w-3 text-amber-600" />
+                                    TICA Entregada (Falta DGAC)
+                                  </>
+                                )}
+                              </Badge>
+                            )}
                           </div>
                           {!person.is_active && person.onboarding_status === 'rejected' && person.rejection_reason && (
                             <p className="text-[11px] text-red-600 font-medium italic" title={person.rejection_reason}>
@@ -1259,7 +1310,7 @@ export default function PersonnelTableClient({
                   className="mt-0.5"
                 />
                 <Label htmlFor="refuse-tica" className="text-xs font-semibold text-amber-800 dark:text-amber-400 cursor-pointer select-none leading-tight">
-                  El trabajador se niega a entregar su credencial TICA física. (Se dejará constancia en el acta).
+                  El trabajador NO entregó / se niega a entregar su credencial TICA física. (Se generará la <strong>Notificación de Solicitud de Bloqueo a la DGAC</strong>).
                 </Label>
               </div>
             )}
@@ -1274,7 +1325,7 @@ export default function PersonnelTableClient({
                   className="mt-0.5"
                 />
                 <Label htmlFor="refuse-pcp" className="text-xs font-semibold text-amber-800 dark:text-amber-400 cursor-pointer select-none leading-tight">
-                  El trabajador se niega a entregar su credencial PCP física. (Se dejará constancia en el acta).
+                  El trabajador NO entregó / se niega a entregar su credencial PCP física. (Se generará la <strong>Notificación de Solicitud de Bloqueo a la DGAC</strong>).
                 </Label>
               </div>
             )}

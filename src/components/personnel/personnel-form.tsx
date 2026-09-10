@@ -1233,7 +1233,7 @@ export function PersonnelForm({
                   className="mt-0.5"
                 />
                 <Label htmlFor="deliver-tica" className="text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer select-none leading-tight">
-                  El trabajador entregó su credencial TICA física. (Si no la entregó, desmarca esta opción para dejar constancia de que se negó en el acta).
+                  El trabajador entregó su credencial TICA física. (Si no la entregó o se negó, desmarca esta opción para generar la <strong>Notificación de Solicitud de Bloqueo a la DGAC</strong>).
                 </Label>
               </div>
             )}
@@ -1248,7 +1248,7 @@ export function PersonnelForm({
                   className="mt-0.5"
                 />
                 <Label htmlFor="deliver-pcp" className="text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer select-none leading-tight">
-                  El trabajador entregó su credencial PCP física. (Si no la entregó, desmarca esta opción para dejar constancia de que se negó en el acta).
+                  El trabajador entregó su credencial PCP física. (Si no la entregó o se negó, desmarca esta opción para generar la <strong>Notificación de Solicitud de Bloqueo a la DGAC</strong>).
                 </Label>
               </div>
             )}

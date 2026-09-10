@@ -112,7 +112,7 @@ export default async function PersonnelPage({
   let displayPersonnel: any[] = personnel || [];
 
   if (displayPersonnel.length > 0) {
-    const [{ data: mandatoryDefs }, { data: existingDocs }] = await Promise.all([
+    const [{ data: mandatoryDefs }, { data: existingDocs }, { data: dismissalRecs }] = await Promise.all([
       supabase
         .from('document_definitions')
         .select('id, name, applicable_positions')
@@ -121,11 +121,16 @@ export default async function PersonnelPage({
       supabase
         .from('documents')
         .select('definition_id, personnel_id, file_url, number, expiration_date')
+        .in('personnel_id', displayPersonnel.map(w => w.id)),
+      supabase
+        .from('dismissal_records')
+        .select('id, personnel_id, credential_type, refused_to_return, receipt_file_url, status')
         .in('personnel_id', displayPersonnel.map(w => w.id))
     ]);
 
     const mDefs = mandatoryDefs || [];
     const eDocs = existingDocs || [];
+    const dRecs = dismissalRecs || [];
 
     displayPersonnel = displayPersonnel.map(worker => {
       // 1. Missing fields (Ficha Incompleta)
@@ -183,6 +188,9 @@ export default async function PersonnelPage({
       const ticaUrl = ticaDoc?.file_url || '';
       const pcpUrl = pcpDoc?.file_url || '';
 
+      const ticaDismissal = dRecs.find(r => r.personnel_id === worker.id && r.credential_type === 'TICA');
+      const pcpDismissal = dRecs.find(r => r.personnel_id === worker.id && r.credential_type === 'PCP');
+
       return {
         ...worker,
         missingFields,
@@ -194,7 +202,9 @@ export default async function PersonnelPage({
         ticaExpiry,
         pcpExpiry,
         ticaUrl,
-        pcpUrl
+        pcpUrl,
+        ticaDismissal,
+        pcpDismissal
       };
     });
 

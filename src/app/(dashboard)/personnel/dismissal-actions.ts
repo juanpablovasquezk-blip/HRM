@@ -110,10 +110,17 @@ export async function markRefusedToReturn(
   recordId: string,
   refused: boolean
 ): Promise<{ success: boolean; error: string | null }> {
+  return updateCredentialDeliveryStatus(recordId, !refused);
+}
+
+export async function updateCredentialDeliveryStatus(
+  recordId: string,
+  delivered: boolean
+): Promise<{ success: boolean; error: string | null }> {
   const adminClient = createAdminClient();
   const { data: record, error: recError } = await adminClient
     .from('dismissal_records')
-    .select('personnel_id')
+    .select('personnel_id, credential_type')
     .eq('id', recordId)
     .single();
 
@@ -123,15 +130,16 @@ export async function markRefusedToReturn(
 
   const { error: updateError } = await adminClient
     .from('dismissal_records')
-    .update({ refused_to_return: refused })
+    .update({ refused_to_return: !delivered })
     .eq('id', recordId);
 
   if (updateError) {
-    console.error('[DISMISSAL-ACTIONS] Error marking refusal:', updateError);
+    console.error('[DISMISSAL-ACTIONS] Error updating delivery status:', updateError);
     return { success: false, error: updateError.message };
   }
 
   safeRevalidatePath(`/personnel/${record.personnel_id}`);
+  safeRevalidatePath('/personnel');
   return { success: true, error: null };
 }
 

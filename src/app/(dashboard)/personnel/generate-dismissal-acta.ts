@@ -168,77 +168,120 @@ export async function generateDismissalActa(params: GenerateActaParams) {
 
     // Title
     currentY += 15;
-    doc.setFontSize(14);
+    doc.setFontSize(13);
     doc.setFont('Helvetica', 'bold');
-    const titleText = isTica ? 'ACTA DE ENTREGA DE CREDENCIAL TICA' : 'ACTA DE ENTREGA DE CREDENCIAL PCP';
+    
+    let titleText = '';
+    if (params.refused_to_return) {
+      titleText = isTica 
+        ? 'NOTIFICACIÓN DE NO ENTREGA Y SOLICITUD DE BLOQUEO DE TICA' 
+        : 'NOTIFICACIÓN DE NO ENTREGA Y SOLICITUD DE BLOQUEO DE PCP';
+    } else {
+      titleText = isTica 
+        ? 'ACTA DE ENTREGA Y DEVOLUCIÓN DE CREDENCIAL TICA' 
+        : 'ACTA DE ENTREGA Y DEVOLUCIÓN DE CREDENCIAL PCP';
+    }
+    
     doc.text(titleText, 105, currentY, { align: 'center' });
 
     // Underline title
     doc.setLineWidth(0.4);
-    doc.line(45, currentY + 1.5, 165, currentY + 1.5);
+    doc.line(25, currentY + 1.5, 185, currentY + 1.5);
 
-    // Main paragraph
+    // Main text
     currentY += 12;
     doc.setFontSize(11);
     doc.setFont('Helvetica', 'normal');
     const recipientOfficeName = isTica ? 'Oficina de Credenciales' : 'Oficina de Fiscalización';
-    
-    const introText = `En la ciudad de Santiago, a ${capitalizedDate}, en dependencias de la ${recipientOfficeName} de la Dirección General de Aeronáutica Civil (DGAC) del Aeropuerto Arturo Merino Benítez, comparece en representación de Minerquim Ltda., RUT 76.135.448-5, don Juan Pablo Vásquez K., en su calidad de Gerente de Operaciones, con el objeto de hacer entrega formal de la siguiente credencial:`;
-    
-    const splitIntro = doc.splitTextToSize(introText, 165);
-    doc.text(splitIntro, 25, currentY);
-    currentY += (splitIntro.length * 5) + 6;
 
-    // 1. Details section
-    doc.setFont('Helvetica', 'bold');
-    const section1Title = isTica ? '1. Detalle de TICA entregada:' : '1. Detalle de PCP entregada:';
-    doc.text(section1Title, 25, currentY);
-    currentY += 7;
-
-    doc.setFont('Helvetica', 'normal');
-    const labelCard = isTica ? 'TICA N°' : 'PCP N°';
     const cardNumText = params.credential_number || 'N/A';
     const expiryText = params.credential_expiry 
       ? new Date(params.credential_expiry).toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' })
       : 'N/A';
 
-    let detailsText = `${labelCard} ${cardNumText}, correspondiente al Sr.(a) ${workerFullName}, RUT ${params.rut}, con vigencia hasta el ${expiryText}.`;
-    
-    // Add special clause if refused to return
     if (params.refused_to_return) {
-      detailsText = `Se deja expresa constancia que el/la trabajador(a) ${workerFullName}, RUT ${params.rut}, se negó a hacer entrega de su credencial ${params.credential_type}, quedando bajo su exclusiva responsabilidad la devolución directa a la autoridad competente.`;
+      // FORMAT B: REFUSAL & BLOCK REQUEST
+      const p1 = `En la ciudad de Santiago, a ${capitalizedDate}, mediante la presente comunicación, Minerquim Ltda., RUT 76.135.448-5, representada por don Juan Pablo Vásquez K., en su calidad de Gerente de Operaciones, informa formalmente a la ${recipientOfficeName} de la Dirección General de Aeronáutica Civil (DGAC) del Aeropuerto Arturo Merino Benítez, lo siguiente:`;
+      const splitP1 = doc.splitTextToSize(p1, 165);
+      doc.text(splitP1, 25, currentY);
+      currentY += (splitP1.length * 5) + 6;
+
+      doc.setFont('Helvetica', 'bold');
+      doc.text('1. Antecedentes del trabajador desvinculado:', 25, currentY);
+      currentY += 6;
+
+      doc.setFont('Helvetica', 'normal');
+      const detailsLines = [
+        `• Nombre Completo: ${workerFullName}`,
+        `• Cédula de Identidad (RUT): ${params.rut}`,
+        `• Cargo desempeñado: ${params.main_position_name || 'Operador de Servicios'}`,
+        `• Credencial asignada: ${params.credential_type} N° ${cardNumText} (Vigencia registrada: ${expiryText})`
+      ];
+      detailsLines.forEach(line => {
+        doc.text(line, 28, currentY);
+        currentY += 5;
+      });
+      currentY += 3;
+
+      doc.setFont('Helvetica', 'bold');
+      doc.text('2. Constancia de No Devolución y Solicitud de Bloqueo:', 25, currentY);
+      currentY += 6;
+
+      doc.setFont('Helvetica', 'normal');
+      const p2 = `Se deja expresa constancia de que el trabajador individualizado ya no presta servicios para nuestra empresa. Habiéndosele requerido formalmente la restitución de su credencial institucional al momento de su desvinculación, el trabajador SE NEGÓ A HACER ENTREGA FÍSICA DE LA MISMA / NO EFECTUÓ SU DEVOLUCIÓN.`;
+      const splitP2 = doc.splitTextToSize(p2, 165);
+      doc.text(splitP2, 25, currentY);
+      currentY += (splitP2.length * 5) + 5;
+
+      const p3 = `Por lo anterior, y con el objeto de resguardar la seguridad de las operaciones aeroportuarias y evitar cualquier uso indebido o no autorizado, solicitamos a la DGAC proceder con el BLOQUEO, ANULACIÓN E INHABILITACIÓN TÉCNICA INMEDIATA de la referida credencial en los sistemas de control de acceso del Aeropuerto.`;
+      const splitP3 = doc.splitTextToSize(p3, 165);
+      doc.text(splitP3, 25, currentY);
+      currentY += (splitP3.length * 5) + 6;
+
+    } else {
+      // FORMAT A: PHYSICAL DELIVERY ACTA
+      const p1 = `En la ciudad de Santiago, a ${capitalizedDate}, en dependencias de la ${recipientOfficeName} de la Dirección General de Aeronáutica Civil (DGAC) del Aeropuerto Arturo Merino Benítez, comparece en representación de Minerquim Ltda., RUT 76.135.448-5, don Juan Pablo Vásquez K., en su calidad de Gerente de Operaciones, con el objeto de hacer entrega formal y material de la siguiente credencial:`;
+      const splitP1 = doc.splitTextToSize(p1, 165);
+      doc.text(splitP1, 25, currentY);
+      currentY += (splitP1.length * 5) + 6;
+
+      doc.setFont('Helvetica', 'bold');
+      doc.text('1. Detalle de credencial entregada:', 25, currentY);
+      currentY += 6;
+
+      doc.setFont('Helvetica', 'normal');
+      const labelCard = isTica ? 'TICA N°' : 'PCP N°';
+      const detailsText = `${labelCard} ${cardNumText}, correspondiente al Sr.(a) ${workerFullName}, RUT ${params.rut}, con vigencia hasta el ${expiryText}.`;
+      const splitDetails = doc.splitTextToSize(detailsText, 165);
+      doc.text(splitDetails, 25, currentY);
+      currentY += (splitDetails.length * 5) + 5;
+
+      const requestText = `Se deja constancia de que este colaborador ya no presta servicios en Minerquim Ltda., por lo que se hace entrega física de la tarjeta y se solicita a la DGAC proceder a la baja administrativa y técnica correspondiente en los registros aeroportuarios.`;
+      const splitRequest = doc.splitTextToSize(requestText, 165);
+      doc.text(splitRequest, 25, currentY);
+      currentY += (splitRequest.length * 5) + 6;
     }
 
-    const splitDetails = doc.splitTextToSize(detailsText, 165);
-    doc.text(splitDetails, 25, currentY);
-    currentY += (splitDetails.length * 5) + 6;
-
-    // Request clause
-    const requestText = `Se deja constancia que este trabajador ya no presta servicios en Minerquim Ltda., por lo que se solicita expresamente a la DGAC proceder a la baja administrativa y técnica de la mencionada credencial, a fin de evitar su uso no autorizado y mantener actualizados los registros de control.`;
-    const splitRequest = doc.splitTextToSize(requestText, 165);
-    doc.text(splitRequest, 25, currentY);
-    currentY += (splitRequest.length * 5) + 8;
-
-    // 2. Delivery & Reception section
+    // 2. Signatures section
     doc.setFont('Helvetica', 'bold');
-    doc.text('2. Entrega y recepción:', 25, currentY);
+    doc.text(params.refused_to_return ? '3. Constancia de emisión y recepción:' : '2. Entrega y recepción:', 25, currentY);
     currentY += 5;
 
-    // Draw signature of Juan Pablo K. in between
+    // Draw signature of Juan Pablo K.
     if (signatureBase64) {
       const sigWidth = 35;
       const sigHeight = 35 / 3.29;
       doc.addImage(signatureBase64, 'PNG', 25, currentY + 1, sigWidth, sigHeight);
-      currentY += sigHeight + 4; // Shift down below signature block
+      currentY += sigHeight + 4;
     } else {
       currentY += 7;
     }
 
     const initialYForSigs = currentY;
     
-    // Left column: Minerquim / Juan Pablo
+    // Left column: Minerquim
     doc.setFont('Helvetica', 'bold');
-    doc.text('Entregado por:', 25, currentY);
+    doc.text(params.refused_to_return ? 'Emitido y Notificado por:' : 'Entregado por:', 25, currentY);
     currentY += 5;
     doc.setFont('Helvetica', 'normal');
     doc.text('Nombre: Juan Pablo Vásquez K.', 25, currentY);
@@ -250,33 +293,25 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     // Right column: Recipient (DGAC)
     let dgacY = initialYForSigs;
     doc.setFont('Helvetica', 'bold');
-    doc.text('Recibido por:', 110, dgacY);
+    doc.text('Recepción D.G.A.C.:', 110, dgacY);
     dgacY += 5;
     doc.setFont('Helvetica', 'normal');
     doc.text('Nombre: ________________________', 110, dgacY);
     dgacY += 5;
     doc.text('RUT:    ________________________', 110, dgacY);
     dgacY += 5;
-    doc.text('D.G.A.C.', 110, dgacY);
-
-    // Signature line for worker in case of refusal
-    currentY += 20;
-    if (params.refused_to_return) {
-      doc.setFont('Helvetica', 'bold');
-      doc.text('Firma Trabajador:', 25, currentY + 5);
-      doc.setFont('Helvetica', 'bold');
-      doc.setTextColor(220, 38, 38); // red color
-      doc.text('SE NEGÓ A FIRMAR / ENTREGAR', 65, currentY + 5);
-      doc.setTextColor(0, 0, 0); // reset
-    }
+    doc.text('Fecha / Timbre: _______________', 110, dgacY);
 
     // Y coordinate reset
-    currentY = Math.max(currentY + 12, dgacY + 15);
+    currentY = Math.max(currentY + 10, dgacY + 10);
 
     // Closing footer
-    const closeText = 'En constancia de lo anterior, se firma la presente acta en dos ejemplares de igual tenor y fecha, quedando uno en poder de la DGAC y otro en poder de Minerquim Ltda.';
+    const closeText = params.refused_to_return
+      ? 'La presente notificación se emite en dos ejemplares de igual tenor para constancia y registro del proceso de baja y bloqueo de credencial.'
+      : 'En constancia de lo anterior, se firma la presente acta en dos ejemplares de igual tenor y fecha, quedando uno en poder de la DGAC y otro en poder de Minerquim Ltda.';
     const splitClose = doc.splitTextToSize(closeText, 165);
     doc.setFont('Helvetica', 'italic');
+    doc.setFontSize(10);
     doc.text(splitClose, 25, currentY);
 
     // PAGE 2: Digital copy of credential card (if exists)
@@ -287,11 +322,14 @@ export async function generateDismissalActa(params: GenerateActaParams) {
         
         // Page 2 header
         doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(14);
-        doc.text('ANEXO: COPIA DE CREDENCIAL ENTREGADA', 105, 25, { align: 'center' });
+        doc.setFontSize(13);
+        const anexoTitle = params.refused_to_return 
+          ? `ANEXO: COPIA DE CREDENCIAL ${params.credential_type} A BLOQUEAR`
+          : `ANEXO: COPIA DE CREDENCIAL ${params.credential_type} ENTREGADA`;
+        doc.text(anexoTitle, 105, 25, { align: 'center' });
         
         doc.setLineWidth(0.4);
-        doc.line(45, 27, 165, 27);
+        doc.line(25, 27, 185, 27);
         
         doc.setFont('Helvetica', 'normal');
         doc.setFontSize(11);
@@ -325,7 +363,6 @@ export async function generateDismissalActa(params: GenerateActaParams) {
         doc.addImage(cardBase64, 'JPEG', cardX, 65, cardWidth, cardHeight);
       } catch (imgError: any) {
         console.warn('Error loading card copy image for PDF page 2:', imgError);
-        // Fallback: draw warning message
         doc.setFont('Helvetica', 'bold');
         doc.setTextColor(220, 38, 38);
         doc.text('ERROR: NO SE PUDO RENDERIZAR LA IMAGEN DE LA CREDENCIAL', 25, 70);
@@ -338,8 +375,17 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     }
 
     const fileSuffix = `${params.first_name}_${params.last_name_father}`.toUpperCase().trim().replace(/\s+/g, '_');
-    doc.save(`ACTA_ENTREGA_${params.credential_type}_${fileSuffix}.pdf`);
-    toast.success(`Acta de entrega ${params.credential_type} descargada correctamente`);
+    const docName = params.refused_to_return 
+      ? `SOLICITUD_BLOQUEO_${params.credential_type}_${fileSuffix}.pdf`
+      : `ACTA_ENTREGA_${params.credential_type}_${fileSuffix}.pdf`;
+
+    doc.save(docName);
+    
+    if (params.refused_to_return) {
+      toast.success(`Notificación de bloqueo de ${params.credential_type} descargada correctamente`);
+    } else {
+      toast.success(`Acta de entrega física de ${params.credential_type} descargada correctamente`);
+    }
   } catch (error: any) {
     console.error('Error generating dismissal acta:', error);
     toast.error('Error al generar el acta PDF', {
