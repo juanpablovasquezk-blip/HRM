@@ -12,7 +12,6 @@ import { toast } from 'sonner';
 import { uploadDocument } from '@/app/(dashboard)/documents/actions';
 import { DocumentDefinition } from '@/types/database';
 import { labelSelfie } from '@/lib/documents/selfie-labeler';
-import { compileSingleCardPdf } from '@/lib/documents/pdf-compiler';
 
 interface Personnel {
   id: string;
@@ -129,7 +128,7 @@ function DocumentUploadForm({ personnelList, documentDefinitions, existingDocume
         const isImage = selectedFile.type.startsWith('image/');
         const docNameLower = selectedDef.name.toLowerCase();
 
-        // 1. If it's a selfie with white background, label it with name and RUT
+        // 1. If it's explicitly a profile selfie with white background, label it with name and RUT
         if (isImage && (docNameLower.includes('foto con fondo blanco') || docNameLower === 'foto de perfil')) {
           if (!selectedPersonnel) throw new Error('No se ha seleccionado el trabajador');
           const base64 = await fileToBase64(selectedFile);
@@ -142,22 +141,8 @@ function DocumentUploadForm({ personnelList, documentDefinitions, existingDocume
           fileToUpload = base64ToFile(labeledBase64, `FOTO_NOMBRE_${fileSuffix}.jpg`);
         }
 
-        // 2. If it's a card (Cedula, Licencia, TICA) and it's an image, compile to PDF
-        else if (isImage && (docNameLower.includes('cedula') || docNameLower.includes('licencia') || docNameLower.includes('tica'))) {
-          if (!selectedPersonnel) throw new Error('No se ha seleccionado el trabajador');
-          const base64 = await fileToBase64(selectedFile);
-          const pdfBase64 = await compileSingleCardPdf(base64);
-          const fileSuffix = `${selectedPersonnel.first_name}_${selectedPersonnel.last_name_father}`
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/[^a-zA-Z0-9]/g, '_');
-          const sanitizedType = selectedDef.name
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/[^a-zA-Z0-9]/g, '_')
-            .toUpperCase();
-          fileToUpload = base64ToFile(pdfBase64, `${sanitizedType}_${fileSuffix}.pdf`);
-        }
+        // 2. For all other documents (TICA, PCP, Cédula, Licencia, etc.):
+        // Preserve the original file as uploaded by the user with 100% fidelity without any distortion or alterations.
 
         formData.set('file', fileToUpload);
         formData.set('type', selectedDef.name);
