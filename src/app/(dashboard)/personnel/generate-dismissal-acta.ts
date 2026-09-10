@@ -69,14 +69,32 @@ async function renderPdfPageToImage(pdfUrl: string): Promise<string> {
   });
 }
 
-async function getImageDimensions(base64: string): Promise<{ width: number; height: number }> {
+async function loadImageElementAndDimensions(url: string): Promise<{ base64: string; width: number; height: number; format: 'JPEG' | 'PNG' }> {
+  const isPdf = url.toLowerCase().includes('.pdf');
+  let base64 = '';
+  let format: 'JPEG' | 'PNG' = 'JPEG';
+
+  if (isPdf) {
+    base64 = await renderPdfPageToImage(url);
+    format = 'JPEG';
+  } else {
+    base64 = await imageUrlToBase64(url);
+    if (base64.startsWith('data:image/png')) {
+      format = 'PNG';
+    }
+  }
+
   return new Promise((resolve) => {
     const img = new Image();
+    img.crossOrigin = 'anonymous';
     img.onload = () => {
-      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      const width = img.naturalWidth || img.width || 600;
+      const height = img.naturalHeight || img.height || 950;
+      resolve({ base64, width, height, format });
     };
     img.onerror = () => {
-      resolve({ width: 100, height: 100 }); // fallback
+      // Fallback to standard vertical ID card proportion if load fails
+      resolve({ base64, width: 600, height: 950, format });
     };
     img.src = base64;
   });
@@ -318,49 +336,106 @@ export async function generateDismissalActa(params: GenerateActaParams) {
     if (params.credential_image_url) {
       try {
         const isPdf = params.credential_image_url.toLowerCase().includes('.pdf');
+        if (isPdf) {
+          toast.info('Renderizando credencial PDF para impresión...');
+        }
+
+        const cardData = await loadImageElementAndDimensions(params.credential_image_url);
+
         doc.addPage();
         
-        // Page 2 header
+        // 1. Logo Minerquim on Page 2 header
+        if (logoBase64) {
+          const logoWidth = 35;
+          const logoHeight = 35 / 2.04;
+          doc.addImage(logoBase64, 'PNG', 25, 14, logoWidth, logoHeight);
+        }
+
+        // 2. Page 2 Header Title
         doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(13);
+        doc.setFontSize(12);
+        doc.setTextColor(15, 23, 42); // slate-900
         const anexoTitle = params.refused_to_return 
           ? `ANEXO: COPIA DE CREDENCIAL ${params.credential_type} A BLOQUEAR`
           : `ANEXO: COPIA DE CREDENCIAL ${params.credential_type} ENTREGADA`;
-        doc.text(anexoTitle, 105, 25, { align: 'center' });
-        
-        doc.setLineWidth(0.4);
-        doc.line(25, 27, 185, 27);
-        
+        doc.text(anexoTitle, 105, 22, { align: 'center' });
+
         doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(11);
-        doc.text(`Trabajador: ${workerFullName}`, 25, 38);
-        doc.text(`RUT: ${params.rut}`, 25, 44);
-        doc.text(`Tipo de Documento: Copia de Credencial ${params.credential_type}`, 25, 50);
+        doc.setFontSize(9);
+        doc.setTextColor(100, 116, 139); // slate-500
+        doc.text('Dirección General de Aeronáutica Civil (DGAC) - AMB', 105, 27, { align: 'center' });
+        
+        doc.setDrawColor(226, 232, 240); // slate-200
+        doc.setLineWidth(0.4);
+        doc.line(25, 31, 190, 31);
 
-        let cardBase64 = '';
-        if (isPdf) {
-          toast.info('Renderizando credencial PDF para impresión...');
-          cardBase64 = await renderPdfPageToImage(params.credential_image_url);
-        } else {
-          cardBase64 = await imageUrlToBase64(params.credential_image_url);
+        // 3. Employee & Credential summary card
+        doc.setFillColor(248, 250, 252); // slate-50
+        doc.roundedRect(25, 35, 165, 21, 2, 2, 'F');
+        doc.setDrawColor(226, 232, 240);
+        doc.roundedRect(25, 35, 165, 21, 2, 2, 'D');
+
+        doc.setFontSize(9);
+        doc.setFont('Helvetica', 'bold');
+        doc.setTextColor(51, 65, 85); // slate-700
+        doc.text('Trabajador:', 29, 42);
+        doc.setFont('Helvetica', 'normal');
+        doc.text(workerFullName, 51, 42);
+
+        doc.setFont('Helvetica', 'bold');
+        doc.text('RUT:', 29, 49);
+        doc.setFont('Helvetica', 'normal');
+        doc.text(params.rut, 51, 49);
+
+        doc.setFont('Helvetica', 'bold');
+        doc.text('Credencial:', 118, 42);
+        doc.setFont('Helvetica', 'normal');
+        doc.text(`${params.credential_type} N° ${cardNumText}`, 138, 42);
+
+        doc.setFont('Helvetica', 'bold');
+        doc.text('Vigencia:', 118, 49);
+        doc.setFont('Helvetica', 'normal');
+        doc.text(expiryText, 138, 49);
+
+        // 4. Calculate optimal card image dimensions preserving strict aspect ratio
+        const maxAreaW = 115;  // mm
+        const maxAreaH = 165;  // mm
+        const aspect = cardData.width / cardData.height;
+
+        let cardW = maxAreaW;
+        let cardH = maxAreaW / aspect;
+
+        if (cardH > maxAreaH) {
+          cardH = maxAreaH;
+          cardW = maxAreaH * aspect;
         }
 
-        // Add Card Image (Centered with dynamic aspect ratio to avoid distortion)
-        const dims = await getImageDimensions(cardBase64);
-        const aspectRatio = dims.width / dims.height;
+        // Center within available bounds (Y from 60 to 240)
+        const cardX = (215.9 - cardW) / 2;
+        const availableHeight = 240 - 60;
+        const cardY = 60 + (availableHeight - cardH) / 2;
 
-        let cardWidth = 100;
-        let cardHeight = 100 / aspectRatio;
+        // Draw clean border/shadow frame around the badge
+        doc.setFillColor(241, 245, 249); // slate-100
+        doc.roundedRect(cardX - 1.5, cardY - 1.5, cardW + 3, cardH + 3, 2, 2, 'F');
+        doc.setDrawColor(203, 213, 225); // slate-300
+        doc.setLineWidth(0.4);
+        doc.roundedRect(cardX - 1.5, cardY - 1.5, cardW + 3, cardH + 3, 2, 2, 'D');
 
-        // If it fits portrait better, constrain by height
-        if (cardHeight > 130) {
-          cardHeight = 130;
-          cardWidth = 130 * aspectRatio;
-        }
+        // Draw image cleanly
+        doc.addImage(cardData.base64, cardData.format, cardX, cardY, cardW, cardH, undefined, 'SLOW');
 
-        // Render it centered on page (letter page width is 215.9mm)
-        const cardX = (215.9 - cardWidth) / 2;
-        doc.addImage(cardBase64, 'JPEG', cardX, 65, cardWidth, cardHeight);
+        // 5. Clean footer on Page 2
+        doc.setFont('Helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184); // slate-400
+        doc.text(
+          'Documento anexo emitido por Minerquim Ltda. para respaldo y control de credenciales aeroportuarias.',
+          105,
+          255,
+          { align: 'center' }
+        );
+
       } catch (imgError: any) {
         console.warn('Error loading card copy image for PDF page 2:', imgError);
         doc.setFont('Helvetica', 'bold');
@@ -368,7 +443,7 @@ export async function generateDismissalActa(params: GenerateActaParams) {
         doc.text('ERROR: NO SE PUDO RENDERIZAR LA IMAGEN DE LA CREDENCIAL', 25, 70);
         doc.setFont('Helvetica', 'normal');
         doc.setTextColor(0, 0, 0);
-        doc.text('El documento está en formato PDF. Descárgalo desde el sistema para imprimirlo:', 25, 80);
+        doc.text('El documento está en formato PDF o no se pudo cargar. Descárgalo desde el sistema:', 25, 80);
         doc.setTextColor(37, 99, 235);
         doc.text(params.credential_image_url || '', 25, 86);
       }
