@@ -4,16 +4,32 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { partialRecalculate } from '@/lib/scheduler';
+import { resolveLeaveOverlap } from '@/lib/leaves/leave-overlap';
 
 export async function requestLeave(formData: FormData) {
   const supabaseAdmin = createAdminClient();
 
   const personnelId = formData.get('personnel_id') as string;
   const type = formData.get('type') as string;
-  const startDate = formData.get('start_date') as string;
-  const endDate = formData.get('end_date') as string;
+  const rawStartDate = formData.get('start_date') as string;
+  const rawEndDate = formData.get('end_date') as string;
   const reason = (formData.get('reason') as string) || null;
   const status = (formData.get('status') as string) || 'pending';
+
+  // Automatically resolve overlaps: if continues an existing leave, shift start_date to prevent day superposition
+  const overlapCheck = await resolveLeaveOverlap(
+    supabaseAdmin,
+    personnelId,
+    rawStartDate,
+    rawEndDate
+  );
+
+  if (overlapCheck.error) {
+    return { success: false, error: overlapCheck.error };
+  }
+
+  const startDate = overlapCheck.adjustedStartDate;
+  const endDate = overlapCheck.adjustedEndDate;
 
   const { error } = await supabaseAdmin.from('leaves').insert({
     personnel_id: personnelId,
@@ -58,7 +74,12 @@ export async function requestLeave(formData: FormData) {
   revalidatePath('/shifts/roster');
   revalidatePath('/shifts/daily');
   revalidatePath('/dashboard');
-  return { success: true, error: null };
+  return { 
+    success: true, 
+    error: null, 
+    adjusted: overlapCheck.wasAdjusted, 
+    message: overlapCheck.adjustmentReason 
+  };
 }
 
 export async function approveLeave(leaveId: string) {
@@ -135,20 +156,40 @@ export async function approveLeave(leaveId: string) {
 export async function updateLeave(id: string, formData: FormData) {
   const supabaseAdmin = createAdminClient();
 
-  const updateData = {
-    type: formData.get('type') as string,
-    start_date: formData.get('start_date') as string,
-    end_date: formData.get('end_date') as string,
-    reason: (formData.get('reason') as string) || null,
-    status: (formData.get('status') as string) || 'pending',
-  };
-
   // Get current leave details to know the personnel_id before update
   const { data: oldLeave } = await supabaseAdmin
     .from('leaves')
     .select('personnel_id')
     .eq('id', id)
     .single();
+
+  if (!oldLeave) {
+    return { success: false, error: 'Ausencia no encontrada.' };
+  }
+
+  const rawStartDate = formData.get('start_date') as string;
+  const rawEndDate = formData.get('end_date') as string;
+
+  // Resolve overlaps with other leaves (excluding current leave)
+  const overlapCheck = await resolveLeaveOverlap(
+    supabaseAdmin,
+    oldLeave.personnel_id,
+    rawStartDate,
+    rawEndDate,
+    id
+  );
+
+  if (overlapCheck.error) {
+    return { success: false, error: overlapCheck.error };
+  }
+
+  const updateData = {
+    type: formData.get('type') as string,
+    start_date: overlapCheck.adjustedStartDate,
+    end_date: overlapCheck.adjustedEndDate,
+    reason: (formData.get('reason') as string) || null,
+    status: (formData.get('status') as string) || 'pending',
+  };
 
   const { error } = await supabaseAdmin
     .from('leaves')
@@ -205,7 +246,12 @@ export async function updateLeave(id: string, formData: FormData) {
   revalidatePath('/shifts/roster');
   revalidatePath('/shifts/daily');
   revalidatePath('/dashboard');
-  return { success: true, error: null };
+  return { 
+    success: true, 
+    error: null,
+    adjusted: overlapCheck.wasAdjusted,
+    message: overlapCheck.adjustmentReason
+  };
 }
 
 export async function rejectLeave(leaveId: string) {

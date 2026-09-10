@@ -16,13 +16,17 @@ import { PendingTransportsCard } from '@/components/dashboard/pending-transports
 
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { deactivateExpiredPersonnel } from '@/lib/deactivate-expired';
+import { reconcileAllOverlappingLeaves } from '@/lib/leaves/leave-overlap';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
   // Auto-deactivate personnel whose termination date has arrived (fire-and-forget)
   deactivateExpiredPersonnel().catch(() => {});
+  // Auto-reconcile overlapping leaves in the background (fire-and-forget)
+  reconcileAllOverlappingLeaves(createAdminClient()).catch(() => {});
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

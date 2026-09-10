@@ -52,7 +52,14 @@ export function LeaveForm({ personnel, leave }: { personnel: Person[], leave?: L
       if (result.error) {
         toast.error('Error', { description: result.error });
       } else {
-        toast.success(isEditing ? 'Registro actualizado' : 'Solicitud enviada correctamente');
+        if ((result as any).adjusted && (result as any).message) {
+          toast.info('Continuidad de Licencia Aplicada', {
+            description: (result as any).message,
+            duration: 5000,
+          });
+        } else {
+          toast.success(isEditing ? 'Registro actualizado' : 'Solicitud enviada correctamente');
+        }
         router.push('/leaves');
         router.refresh();
       }
