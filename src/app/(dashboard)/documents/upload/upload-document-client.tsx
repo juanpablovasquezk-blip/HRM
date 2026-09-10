@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { uploadDocument } from '@/app/(dashboard)/documents/actions';
 import { DocumentDefinition } from '@/types/database';
 import { labelSelfie } from '@/lib/documents/selfie-labeler';
+import { compileSingleCardPdf } from '@/lib/documents/pdf-compiler';
 
 interface Personnel {
   id: string;
@@ -132,7 +133,7 @@ function DocumentUploadForm({ personnelList, documentDefinitions, existingDocume
         if (isImage && (docNameLower.includes('foto con fondo blanco') || docNameLower === 'foto de perfil')) {
           if (!selectedPersonnel) throw new Error('No se ha seleccionado el trabajador');
           const base64 = await fileToBase64(selectedFile);
-          const fullName = `${selectedPersonnel.first_name} ${selectedPersonnel.last_name_father} ${selectedPersonnel.last_name_mother || ''}`;
+          const fullName = `${selectedPersonnel.first_name} ${selectedPersonnel.last_name_father} ${selectedPersonnel.last_name_mother || ''}`.trim();
           const labeledBase64 = await labelSelfie(base64, fullName, selectedPersonnel.rut || '');
           const fileSuffix = `${selectedPersonnel.first_name}_${selectedPersonnel.last_name_father}`
             .normalize("NFD")
@@ -141,8 +142,34 @@ function DocumentUploadForm({ personnelList, documentDefinitions, existingDocume
           fileToUpload = base64ToFile(labeledBase64, `FOTO_NOMBRE_${fileSuffix}.jpg`);
         }
 
-        // 2. For all other documents (TICA, PCP, Cédula, Licencia, etc.):
-        // Preserve the original file as uploaded by the user with 100% fidelity without any distortion or alterations.
+        // 2. If it's a TICA, PCP, Cédula or card image, compile into an executive PDF with Minerquim logo, title and worker details without ANY image distortion
+        else if (isImage && (docNameLower.includes('tica') || docNameLower.includes('pcp') || docNameLower.includes('credencial') || docNameLower.includes('cedula') || docNameLower.includes('licencia'))) {
+          if (!selectedPersonnel) throw new Error('No se ha seleccionado el trabajador');
+          const base64 = await fileToBase64(selectedFile);
+          const fullName = `${selectedPersonnel.first_name} ${selectedPersonnel.last_name_father} ${selectedPersonnel.last_name_mother || ''}`.trim();
+          const expDate = (formData.get('expiration_date') as string) || '';
+          const docNum = (formData.get('document_number') as string) || '';
+
+          const pdfBase64 = await compileSingleCardPdf(base64, {
+            workerFullName: fullName,
+            rut: selectedPersonnel.rut || '',
+            docTitle: selectedDef.name,
+            docNumber: docNum || undefined,
+            expirationDate: expDate ? new Date(expDate + 'T12:00:00').toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' }) : undefined,
+            companyName: 'Grupo Minerquim'
+          });
+
+          const fileSuffix = `${selectedPersonnel.first_name}_${selectedPersonnel.last_name_father}`
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-zA-Z0-9]/g, '_');
+          const sanitizedType = selectedDef.name
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-zA-Z0-9]/g, '_')
+            .toUpperCase();
+          fileToUpload = base64ToFile(pdfBase64, `${sanitizedType}_${fileSuffix}.pdf`);
+        }
 
         formData.set('file', fileToUpload);
         formData.set('type', selectedDef.name);

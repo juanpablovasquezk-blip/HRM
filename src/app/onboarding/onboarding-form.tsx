@@ -380,13 +380,24 @@ export default function OnboardingForm({ token, companyName }: OnboardingFormPro
       try {
         toast.info('Procesando imágenes y compilando documentos. Por favor, espera...');
         
-        // Generar el PDF de la cédula
-        const compiledCedula = await compileFrontBackPdf(cedulaFront, cedulaBack);
+        const fullName = `${firstName} ${lastNameFather} ${lastNameMother}`.trim();
+
+        // Generar el PDF de la cédula con membrete oficial
+        const compiledCedula = await compileFrontBackPdf(cedulaFront, cedulaBack, {
+          workerFullName: fullName,
+          rut: rut,
+          docTitle: 'CÉDULA NACIONAL DE IDENTIDAD',
+        });
 
         // Generar el PDF de la licencia (si aplica)
         let compiledLicencia = null;
         if (hasDriverLicense && licenciaFront && licenciaBack) {
-          compiledLicencia = await compileFrontBackPdf(licenciaFront, licenciaBack);
+          compiledLicencia = await compileFrontBackPdf(licenciaFront, licenciaBack, {
+            workerFullName: fullName,
+            rut: rut,
+            docTitle: 'LICENCIA DE CONDUCIR',
+            expirationDate: licenciaExpiration ? new Date(licenciaExpiration + 'T12:00:00').toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' }) : undefined,
+          });
         }
 
         // Generar selfie etiquetada (con banner negro e información)

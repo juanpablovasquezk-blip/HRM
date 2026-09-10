@@ -156,11 +156,25 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
     try {
       let base64Data: string;
 
-      if (captureType === 'card') {
+      if (captureType === 'card' || captureType === 'vertical_card') {
+        const fullName = `${personnel.first_name} ${personnel.last_name_father} ${personnel.last_name_mother || ''}`.trim();
+        const formattedExp = expiryDate ? new Date(expiryDate + 'T12:00:00').toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' }) : undefined;
+
         if (isSingle) {
-          base64Data = await compileSingleCardPdf(capturedValue!);
+          base64Data = await compileSingleCardPdf(capturedValue!, {
+            workerFullName: fullName,
+            rut: personnel.rut,
+            docTitle: selectedDef.name,
+            docNumber: docNumber || undefined,
+            expirationDate: formattedExp,
+          });
         } else {
-          base64Data = await compileFrontBackPdf(capturedFront!, capturedBack!);
+          base64Data = await compileFrontBackPdf(capturedFront!, capturedBack!, {
+            workerFullName: fullName,
+            rut: personnel.rut,
+            docTitle: selectedDef.name,
+            expirationDate: formattedExp,
+          });
         }
       } else {
         base64Data = capturedValue!;
