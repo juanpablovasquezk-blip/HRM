@@ -46,17 +46,18 @@ interface WorkerDocumentsClientProps {
   personnel: any;
 }
 
-const getCaptureType = (defName: string): 'card' | 'selfie' | 'pdf' => {
+const getCaptureType = (defName: string): 'card' | 'vertical_card' | 'selfie' | 'pdf' => {
   const name = defName.toLowerCase();
+  if (name.includes('pcp') || name.includes('tica')) {
+    return 'vertical_card';
+  }
   if (
     name.includes('cedula') ||
     name.includes('cédula') ||
     name.includes('licencia') ||
     name.includes('credencial') ||
     name.includes('carnet') ||
-    name.includes('tarjeta') ||
-    name.includes('pcp') ||
-    name.includes('tica')
+    name.includes('tarjeta')
   ) {
     return 'card';
   }
@@ -436,13 +437,13 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
               </div>
             )}
 
-            {selectedDef && getCaptureType(selectedDef.name) === 'card' ? (
+            {selectedDef && (getCaptureType(selectedDef.name) === 'card' || getCaptureType(selectedDef.name) === 'vertical_card') ? (
               isSingleCard(selectedDef.name) ? (
                 <DocumentCapture
                   id={selectedDef.id}
-                  label="Parte Delantera *"
-                  description={`Foto frontal de tu ${selectedDef.name}.`}
-                  type="card"
+                  label="Foto Frontal de la Credencial *"
+                  description={`Foto vertical nítida de tu ${selectedDef.name} (TICA / PCP).`}
+                  type="vertical_card"
                   value={capturedValue}
                   onChange={setCapturedValue}
                 />

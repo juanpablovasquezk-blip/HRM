@@ -2,16 +2,17 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Camera, Upload, Check, Trash2, ZoomIn, AlertCircle } from 'lucide-react';
+import { Camera, Upload, Check, Trash2, ZoomIn, AlertCircle, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface DocumentCaptureProps {
   id: string;
   label: string;
   description: string;
-  type: 'card' | 'selfie' | 'pdf';
+  type: 'card' | 'vertical_card' | 'selfie' | 'pdf';
   value: string | null; // Base64 del documento / PDF
   onChange: (value: string | null) => void;
+  orientation?: 'landscape' | 'portrait';
 }
 
 export default function DocumentCapture({
@@ -21,18 +22,26 @@ export default function DocumentCapture({
   type,
   value,
   onChange,
+  orientation,
 }: DocumentCaptureProps) {
+  const isInitiallyVertical = type === 'vertical_card' || 
+    orientation === 'portrait' || 
+    label.toLowerCase().includes('tica') || 
+    label.toLowerCase().includes('pcp');
+
   const [sourceImage, setSourceImage] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(1);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const [isVertical, setIsVertical] = useState<boolean>(isInitiallyVertical);
   const dragStart = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Aspect ratios: 1.586 for cards (ID/License), 1.0 for selfie
-  const targetRatio = type === 'card' ? 1.586 : 1.0;
+  // Aspect ratios: 0.630 for vertical cards (TICA/PCP), 1.586 for horizontal cards (ID/License), 1.0 for selfie
+  const isCardType = type === 'card' || type === 'vertical_card';
+  const targetRatio = type === 'selfie' ? 1.0 : (isVertical ? 0.630 : 1.586);
 
   // Reset editor states
   const resetEditor = () => {
@@ -105,9 +114,13 @@ export default function DocumentCapture({
     const img = imageRef.current;
 
     // Create canvas
-    const canvas = document.createElement('canvas');
-    // Target resolution: 800px width for cards, 600px width for selfie
-    const canvasWidth = type === 'card' ? 800 : 600;
+    // Target resolution: 600x952 for vertical card, 856x540 for horizontal card, 600x600 for selfie
+    let canvasWidth = 856;
+    if (type === 'selfie') {
+      canvasWidth = 600;
+    } else if (isVertical) {
+      canvasWidth = 600;
+    }
     const canvasHeight = Math.round(canvasWidth / targetRatio);
 
     canvas.width = canvasWidth;
@@ -140,7 +153,7 @@ export default function DocumentCapture({
     ctx.drawImage(img, dx, dy, dw, dh);
 
     // Output Base64
-    const croppedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+    const croppedBase64 = canvas.toDataURL('image/jpeg', 0.90);
     onChange(croppedBase64);
     resetEditor();
   };
@@ -179,8 +192,8 @@ export default function DocumentCapture({
                   <Check className="h-5 w-5" />
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">Documento Cargado</p>
-                  <p className="text-[10px] text-emerald-600 dark:text-emerald-500">Formato PDF Validado</p>
+                  <p className="text-xs font-bold text-emerald-800 dark:text-emerald-200">Archivo PDF Cargado</p>
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400">Documento listo para envío</p>
                 </div>
               </div>
               <Button
@@ -194,77 +207,95 @@ export default function DocumentCapture({
               </Button>
             </div>
           ) : (
-            <label
-              htmlFor={`file-upload-${id}`}
-              className="flex flex-col items-center gap-2 cursor-pointer w-full text-center hover:opacity-80 transition"
-            >
-              <div className="h-10 w-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-400">
-                <Upload className="h-5 w-5" />
+            <div className="text-center space-y-3">
+              <div className="mx-auto w-12 h-12 rounded-full bg-orange-100 dark:bg-orange-950/40 text-orange-600 flex items-center justify-center">
+                <Upload className="h-6 w-6" />
               </div>
-              <span className="text-xs font-semibold text-orange-500">Seleccionar Certificado PDF</span>
-              <span className="text-[10px] text-slate-400">Solo archivos PDF (máx. 5MB)</span>
-            </label>
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                Selecciona tu archivo PDF (máx. 10MB)
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-xl border-orange-500/30 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/20 font-bold text-xs"
+              >
+                Seleccionar PDF
+              </Button>
+            </div>
           )}
         </div>
       )}
 
-      {/* 2. Image Capture Mode (Cards & Selfie) */}
-      {type !== 'pdf' && !value && !sourceImage && (
-        <div className="grid grid-cols-2 gap-3">
+      {/* 2. Image/Card/Selfie Selection Trigger (Hidden if file loaded or currently cropping) */}
+      {type !== 'pdf' && !sourceImage && !value && (
+        <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-6 bg-slate-50/50 dark:bg-slate-900/30">
           <input
             type="file"
             ref={fileInputRef}
             onChange={handleFileChange}
             accept="image/*"
             className="hidden"
-            id={`file-img-${id}`}
+            id={`image-upload-${id}`}
           />
-          <input
-            type="file"
-            onChange={handleFileChange}
-            accept="image/*"
-            capture={type === 'selfie' ? 'user' : 'environment'}
-            className="hidden"
-            id={`camera-img-${id}`}
-          />
-
-          <label
-            htmlFor={`camera-img-${id}`}
-            className="flex flex-col items-center justify-center gap-2 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition text-center"
-          >
-            <div className="h-10 w-10 rounded-full bg-orange-50 dark:bg-orange-950/30 text-orange-500 flex items-center justify-center">
-              <Camera className="h-5 w-5" />
+          <div className="text-center space-y-3">
+            <div className="mx-auto w-12 h-12 rounded-full bg-orange-100 dark:bg-orange-950/40 text-orange-600 flex items-center justify-center">
+              {type === 'selfie' ? <Camera className="h-6 w-6" /> : <Upload className="h-6 w-6" />}
             </div>
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Tomar Foto</span>
-          </label>
-
-          <label
-            htmlFor={`file-img-${id}`}
-            className="flex flex-col items-center justify-center gap-2 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition text-center"
-          >
-            <div className="h-10 w-10 rounded-full bg-slate-50 dark:bg-slate-800 text-slate-500 flex items-center justify-center">
-              <Upload className="h-5 w-5" />
+            <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              {isVertical ? 'Foto vertical de la credencial' : 'Foto frontal del documento'}
+            </p>
+            <div className="flex gap-2 justify-center">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-xl border-orange-500/30 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/20 font-bold text-xs"
+              >
+                Subir o Tomar Foto
+              </Button>
             </div>
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Subir Archivo</span>
-          </label>
+          </div>
         </div>
       )}
 
       {/* 3. Interactive Cropper Modal/View */}
       {sourceImage && (
         <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-slate-950 p-4 space-y-4">
-          <div className="text-center">
-            <span className="text-[10px] uppercase font-bold text-orange-500">Encuadra la Cédula/Foto</span>
+          <div className="text-center space-y-1">
+            <span className="text-[10px] uppercase font-bold text-orange-500">
+              {isVertical ? 'Encuadra la Credencial Vertical (TICA / PCP)' : 'Encuadra el Documento'}
+            </span>
             <p className="text-[9px] text-slate-400">Arrastra para mover la imagen y usa el deslizador para hacer zoom.</p>
+            {isCardType && (
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setIsVertical(!isVertical);
+                    setPosition({ x: 0, y: 0 });
+                    setZoom(1);
+                  }}
+                  className="text-[11px] text-orange-400 hover:text-orange-300 font-semibold gap-1.5 h-6 px-2"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  {isVertical ? 'Cambiar a Horizontal' : 'Cambiar a Vertical (TICA/PCP)'}
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Viewport Box */}
           <div
             ref={containerRef}
-            className="w-full bg-slate-900 relative overflow-hidden mx-auto border border-dashed border-slate-700 select-none touch-none"
+            className="w-full bg-slate-900 relative overflow-hidden mx-auto border border-dashed border-slate-700 select-none touch-none rounded-lg"
             style={{
               aspectRatio: targetRatio,
-              maxWidth: '360px',
+              maxWidth: isVertical ? '260px' : '360px',
             }}
             onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
             onMouseMove={(e) => handleMove(e.clientX, e.clientY)}
@@ -288,11 +319,20 @@ export default function DocumentCapture({
             />
 
             {/* Visual Guidelines */}
-            <div className="absolute inset-0 border-2 border-orange-500 pointer-events-none rounded-sm"></div>
-            {type === 'card' && (
-              <div className="absolute inset-0 bg-transparent flex flex-col justify-between p-4 pointer-events-none">
-                <div className="w-12 h-12 border-t-4 border-l-4 border-white"></div>
-                <div className="self-end w-12 h-12 border-b-4 border-r-4 border-white"></div>
+            <div className="absolute inset-0 border-2 border-orange-500 pointer-events-none rounded-lg"></div>
+            {isCardType && (
+              <div className="absolute inset-0 bg-transparent flex flex-col justify-between p-3 pointer-events-none">
+                {isVertical && (
+                  <div className="w-10 h-2 border border-white/40 rounded-full mx-auto mt-1"></div>
+                )}
+                <div className="flex justify-between w-full">
+                  <div className="w-8 h-8 border-t-2 border-l-2 border-white/70"></div>
+                  <div className="w-8 h-8 border-t-2 border-r-2 border-white/70"></div>
+                </div>
+                <div className="flex justify-between w-full">
+                  <div className="w-8 h-8 border-b-2 border-l-2 border-white/70"></div>
+                  <div className="w-8 h-8 border-b-2 border-r-2 border-white/70"></div>
+                </div>
               </div>
             )}
             {type === 'selfie' && (
@@ -344,13 +384,15 @@ export default function DocumentCapture({
       {type !== 'pdf' && value && (
         <div className="w-full flex items-center justify-between border border-slate-200 dark:border-slate-800 rounded-2xl p-3 bg-slate-50/50 dark:bg-slate-900/30">
           <div className="flex items-center gap-3">
-            <div className="relative h-14 w-14 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-white">
-              <img src={value} alt="Preview" className="h-full w-full object-cover" />
+            <div className={`relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800 flex items-center justify-center ${isVertical ? 'h-20 w-13 p-0.5' : 'h-14 w-20 p-0.5'}`}>
+              <img src={value} alt="Preview" className="h-full w-full object-contain" />
             </div>
             <div>
-              <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Foto Procesada</p>
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                {isVertical ? 'Credencial Vertical (TICA)' : 'Foto Procesada'}
+              </p>
               <p className="text-[10px] text-emerald-500 flex items-center gap-1 font-semibold">
-                <Check className="h-3 w-3" /> Lista para subir
+                <Check className="h-3 w-3" /> Lista para guardar
               </p>
             </div>
           </div>
