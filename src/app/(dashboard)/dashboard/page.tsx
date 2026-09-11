@@ -81,15 +81,15 @@ export default async function DashboardPage() {
     const { data: profile } = await supabase
       .from('users').select('company_id').eq('id', user.id).single();
 
-    if (profile?.company_id) {
+    const companyId = profile?.company_id || 'c0cc0000-0000-0000-0000-000000000000';
 
-      // ── 1. Personal total ──────────────────────────────────────────────────
-      const { count: staffCount } = await supabase
-        .from('personnel').select('id', { count: 'exact', head: true })
-        .eq('company_id', profile.company_id)
-        .eq('is_active', true)
-        .or('onboarding_status.is.null,onboarding_status.eq.approved');
-      totalPersonnel = staffCount || 0;
+    // ── 1. Personal total ──────────────────────────────────────────────────
+    const { count: staffCount } = await supabase
+      .from('personnel').select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .eq('is_active', true)
+      .or('onboarding_status.is.null,onboarding_status.eq.approved');
+    totalPersonnel = staffCount || 0;
 
       // ── 2. Turnos extra (mes actual vs mes anterior) ────────────────────────
       const [{ count: extraCurr }, { count: extraPrev }] = await Promise.all([
@@ -155,7 +155,7 @@ export default async function DashboardPage() {
       const { count: pendingDismissalsCount } = await supabase
         .from('personnel')
         .select('id', { count: 'exact', head: true })
-        .eq('company_id', profile.company_id)
+        .eq('company_id', companyId)
         .eq('is_active', false)
         .eq('dismissal_status', 'pending');
       pendingDismissals = pendingDismissalsCount || 0;
@@ -296,7 +296,7 @@ export default async function DashboardPage() {
         .from('documents')
         .select('id, type, personnel!inner(id, first_name, last_name_father, is_active, company_id)', { count: 'exact' })
         .eq('personnel.is_active', true)
-        .eq('personnel.company_id', profile.company_id)
+        .eq('personnel.company_id', companyId)
         .eq('status', 'PENDING')
         .order('uploaded_at', { ascending: false })
         .limit(5);
@@ -307,7 +307,7 @@ export default async function DashboardPage() {
       const { data: incPers, count: incCount } = await supabase
         .from('personnel')
         .select('id, first_name, last_name_father, rut', { count: 'exact' })
-        .eq('company_id', profile.company_id)
+        .eq('company_id', companyId)
         .eq('is_active', true)
         .or('onboarding_status.is.null,onboarding_status.eq.approved')
         .or('afp.is.null,health_system.is.null,bank_account_number.is.null,emergency_contact_phone.is.null,gender.is.null,marital_status.is.null,phone.is.null,afp.eq.,health_system.eq.,bank_account_number.eq.,emergency_contact_phone.eq.,gender.eq.,marital_status.eq.,phone.eq.')
@@ -321,7 +321,7 @@ export default async function DashboardPage() {
         supabase
           .from('personnel')
           .select('id, first_name, last_name_father, email, rut, phone, afp, health_system, bank_account_number, emergency_contact_phone, gender, marital_status, main_position, secondary_positions')
-          .eq('company_id', profile.company_id)
+          .eq('company_id', companyId)
           .eq('is_active', true)
           .or('onboarding_status.is.null,onboarding_status.eq.approved'),
         supabase
@@ -431,7 +431,6 @@ export default async function DashboardPage() {
       }
       monthlyData = months;
     }
-  }
 
   // ── Trend helpers ─────────────────────────────────────────────────────────────
   const trendValue = (curr: number, prev: number, lowerIsBetter = false) => {

@@ -20,11 +20,6 @@ export default async function DailyPlanningPage(props: {
   // Fetch baseline data
   let { assignments, requirements, error } = await getDailyOperationalData(date);
   
-  // Filter for Administrative Assistant: Only see confirmed/validated data
-  if (role === 'AIRPORT_ASSISTANT' && assignments) {
-    assignments = assignments.filter(a => a.is_confirmed);
-  }
-  
   // Fetch metadata for the "Add Extra" form
   const { data: areas } = await supabase.from('areas').select('*').order('name');
   const { data: positions } = await supabase.from('positions').select('*').order('name');

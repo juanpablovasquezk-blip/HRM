@@ -52,6 +52,9 @@ export function useUser(): UseUserReturn {
           }
         } else {
           const profileData = profile as any;
+          if (profileData.role === 'ASSISTANT') {
+            profileData.role = 'AIRPORT_ASSISTANT';
+          }
           // Apply override even if profile exists
           if (authUser.email?.toUpperCase().includes('MARCELA')) {
             profileData.role = 'AIRPORT_ASSISTANT';

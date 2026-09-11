@@ -33,13 +33,13 @@ export async function getUserRole() {
       const ASSISTANT_UUID = '62575116-4546-44a7-bb06-d0e3a8ad4df9';
       const SUPERVISOR_UUID = '17153543-abd7-43d1-9d0d-93b2353967d0';
 
-      if (posId === ASSISTANT_UUID) return 'ASSISTANT';
+      if (posId === ASSISTANT_UUID) return 'AIRPORT_ASSISTANT';
       if (posId === SUPERVISOR_UUID) return 'SUPERVISOR';
 
       // Fallback: check names
       const { data: posData } = await adminSupabase.from('positions').select('name').eq('id', posId).single();
       const posName = (posData?.name || '').toUpperCase();
-      if (posName.includes('ASISTENTE') || posName.includes('ASSISTANT')) return 'ASSISTANT';
+      if (posName.includes('ASISTENTE') || posName.includes('ASSISTANT')) return 'AIRPORT_ASSISTANT';
       if (posName.includes('SUPERVISOR')) return 'SUPERVISOR';
     }
     return 'USER';
@@ -65,6 +65,10 @@ export async function getUserRole() {
   const dbRole = (dbUser?.role || '').toUpperCase().trim();
   let finalRole = (metaRole && metaRole !== 'USER' ? metaRole : dbRole || metaRole || 'USER');
   
+  if (finalRole === 'ASSISTANT') {
+    finalRole = 'AIRPORT_ASSISTANT';
+  }
+
   // Emergency override for Marcela (Management access)
   if (user.email?.toUpperCase().includes('MARCELA') && finalRole !== 'ADMIN' && finalRole !== 'HR') {
     finalRole = 'AIRPORT_ASSISTANT';

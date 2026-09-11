@@ -84,7 +84,7 @@ export async function updateSession(request: NextRequest) {
           const AIRPORT_ASSISTANT_UUID = '9a266902-5fce-425f-bca5-6c46787de302';
           const SUPERVISOR_UUID = '17153543-abd7-43d1-9d0d-93b2353967d0';
 
-          if (personnel.main_position === ASSISTANT_UUID) role = 'ASSISTANT';
+          if (personnel.main_position === ASSISTANT_UUID) role = 'AIRPORT_ASSISTANT';
           else if (personnel.main_position === SUPERVISOR_UUID) role = 'SUPERVISOR';
           else if (personnel.main_position === AIRPORT_ASSISTANT_UUID) role = 'AIRPORT_ASSISTANT';
         }
@@ -124,7 +124,7 @@ export async function updateSession(request: NextRequest) {
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
 
       const url = request.nextUrl.clone();
-      if (role === 'ADMIN' || role === 'HR' || role === 'SUPERVISOR' || role === 'SAFETY_OFFICER' || role === 'ASSISTANT') {
+      if (role === 'ADMIN' || role === 'HR' || role === 'SUPERVISOR' || role === 'SAFETY_OFFICER' || role === 'ASSISTANT' || role === 'AIRPORT_ASSISTANT') {
         url.pathname = isMobile ? '/supervisor' : '/dashboard';
       } else {
         url.pathname = '/worker';
@@ -132,8 +132,8 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // Define restricted paths per role
-    const adminOnlyPaths = ['/personnel', '/documents', '/settings', '/dashboard', '/shifts/roster'];
+    // Define restricted paths per role (Settings is Admin & HR only)
+    const adminOnlyPaths = ['/settings'];
     const isAdminOnlyPath = adminOnlyPaths.some(p => pathname.startsWith(p));
 
     // Role Selection & Management Path Protection
@@ -147,13 +147,10 @@ export async function updateSession(request: NextRequest) {
         return NextResponse.redirect(url);
       }
 
-      // 2. Granular role protection
-      if (isAdminOnlyPath && role !== 'ADMIN' && role !== 'HR' && role !== 'SAFETY_OFFICER' && !isMarcela) {
+      // 2. Settings protection (Only Admin and HR)
+      if (isAdminOnlyPath && role !== 'ADMIN' && role !== 'HR' && !isMarcela) {
         const url = request.nextUrl.clone();
-        // Redirect non-admins to their specific dashboard or worker view
-        url.pathname = (role === 'SUPERVISOR') ? '/supervisor' : 
-                       (role === 'AIRPORT_ASSISTANT' || role === 'ADMIN' || role === 'HR') ? '/dashboard' : 
-                       '/worker';
+        url.pathname = (role === 'SUPERVISOR') ? '/supervisor' : '/dashboard';
         return NextResponse.redirect(url);
       }
     }
@@ -161,7 +158,7 @@ export async function updateSession(request: NextRequest) {
     // Supervisor path protection
     if (pathname.startsWith('/supervisor')) {
       const isMarcela = user.email?.toUpperCase().includes('MARCELA');
-      if (role !== 'SUPERVISOR' && role !== 'ADMIN' && role !== 'AIRPORT_ASSISTANT' && !isMarcela) {
+      if (role !== 'SUPERVISOR' && role !== 'ADMIN' && role !== 'AIRPORT_ASSISTANT' && role !== 'ASSISTANT' && !isMarcela) {
         const url = request.nextUrl.clone();
         url.pathname = '/worker';
         return NextResponse.redirect(url);
@@ -173,7 +170,7 @@ export async function updateSession(request: NextRequest) {
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
     const forceDesktop = request.nextUrl.searchParams.get('force') === 'desktop';
 
-    if (pathname === '/dashboard' && isMobile && !forceDesktop && (role === 'SUPERVISOR' || role === 'ADMIN' || role === 'HR' || role === 'SAFETY_OFFICER' || role === 'ASSISTANT')) {
+    if (pathname === '/dashboard' && isMobile && !forceDesktop && (role === 'SUPERVISOR' || role === 'ADMIN' || role === 'HR' || role === 'SAFETY_OFFICER' || role === 'ASSISTANT' || role === 'AIRPORT_ASSISTANT')) {
       const url = request.nextUrl.clone();
       url.pathname = '/supervisor';
       return NextResponse.redirect(url);
