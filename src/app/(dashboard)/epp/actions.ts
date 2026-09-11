@@ -910,7 +910,7 @@ export async function saveProductCatalogItem(payload: {
         size_field: payload.usesSizes ? payload.sizeField : null,
         size_type: payload.usesSizes ? (payload.sizeType || 'LETTER') : null,
         contract_eligibility: contractEligibility,
-        renewal_days: contractEligibility === 'PLAZO_FIJO' ? 0 : payload.renewalDays,
+        renewal_days: payload.renewalDays && payload.renewalDays > 0 ? payload.renewalDays : 180,
       })
       .eq('id', payload.id);
     error = err;
@@ -924,7 +924,7 @@ export async function saveProductCatalogItem(payload: {
         size_field: payload.usesSizes ? payload.sizeField : null,
         size_type: payload.usesSizes ? (payload.sizeType || 'LETTER') : null,
         contract_eligibility: contractEligibility,
-        renewal_days: contractEligibility === 'PLAZO_FIJO' ? 0 : payload.renewalDays,
+        renewal_days: payload.renewalDays && payload.renewalDays > 0 ? payload.renewalDays : 180,
       }]);
     error = err;
   }

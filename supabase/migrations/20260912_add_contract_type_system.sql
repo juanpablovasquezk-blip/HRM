@@ -78,3 +78,7 @@ ALTER TABLE public.epp_product_catalog ADD COLUMN IF NOT EXISTS contract_eligibi
   DEFAULT 'AMBOS';
 
 CREATE INDEX IF NOT EXISTS idx_epp_catalog_contract ON public.epp_product_catalog(contract_eligibility);
+
+-- Relax renewal_days constraint to allow >= 0 (e.g. 0 for plazo fijo items)
+ALTER TABLE public.epp_product_catalog DROP CONSTRAINT IF EXISTS epp_product_catalog_renewal_days_check;
+ALTER TABLE public.epp_product_catalog ADD CONSTRAINT epp_product_catalog_renewal_days_check CHECK (renewal_days >= 0);
