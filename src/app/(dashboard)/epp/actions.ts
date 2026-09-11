@@ -67,6 +67,29 @@ export interface DeliveryItemInput {
   renewalDays: number;
 }
 
+export interface EPPSupplier {
+  id: string;
+  name: string;
+  rut: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProductSupplierCode {
+  id: string;
+  supplier_id: string;
+  product_catalog_id: string;
+  size: string;
+  supplier_code: string;
+  supplier_item_name: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // --- 1. Inventory Actions ---
 
 export async function getEPPInventory(): Promise<{ data: InventoryItem[]; error: string | null }> {
@@ -669,24 +692,42 @@ export async function uploadEPPReceiptFile(
 // --- 7. Monthly Forecast / Purchase Report ---
 
 export interface ForecastReportItem {
+  productCatalogId?: string;
   productName: string;
   productType: 'UNIFORM' | 'EPP';
   size: string;
   qtyNeeded: number;
   qtyInStock: number;
   qtyToPurchase: number;
+  supplierCode?: string | null;
+  supplierItemName?: string | null;
 }
 
 export async function getMonthlyEPPForecastReport(
-  monthStr: string // e.g. "2026-08"
+  monthStr: string, // e.g. "2026-08"
+  supplierId?: string // Optional filter/enrichment by supplier
 ): Promise<{ data: ForecastReportItem[]; error: string | null }> {
-  const dataResult = await getEPPPersonnelData();
+  const [dataResult, catalogResult] = await Promise.all([
+    getEPPPersonnelData(),
+    getProductCatalog(),
+  ]);
+
   if (dataResult.error || !dataResult.data) {
     return { data: [], error: dataResult.error };
   }
 
   const { personnel, inventory } = dataResult.data;
+  const catalog = catalogResult.data || [];
   const targetYearMonth = monthStr; // e.g. "2026-08"
+
+  // Fetch supplier codes if supplierId is provided
+  let supplierCodes: ProductSupplierCode[] = [];
+  if (supplierId && supplierId !== 'all' && supplierId !== 'generic') {
+    const codesRes = await getProductSupplierCodes(supplierId);
+    if (codesRes.data) {
+      supplierCodes = codesRes.data;
+    }
+  }
 
   // We need to gather requirements that require delivery in this target month
   // E.g. nextDeliveryDate falls in targetYearMonth OR it is already expired/pending (nextDeliveryDate < monthStart and never delivered)
@@ -739,13 +780,39 @@ export async function getMonthlyEPPForecastReport(
 
     const deficit = Math.max(0, req.qty - matchingStock);
 
+    // Find catalog item
+    const catItem = catalog.find(c => c.name.toLowerCase().trim() === req.name.toLowerCase().trim());
+    
+    let supplierCode: string | null = null;
+    let supplierItemName: string | null = null;
+
+    if (supplierCodes.length > 0 && catItem) {
+      // 1. Try exact match by size
+      const exactCode = supplierCodes.find(
+        sc => sc.product_catalog_id === catItem.id && sc.size === req.size
+      );
+      // 2. Fallback to general code (size 'Única' or 'ALL')
+      const generalCode = supplierCodes.find(
+        sc => sc.product_catalog_id === catItem.id && (sc.size === 'Única' || sc.size === 'ALL')
+      );
+
+      const matched = exactCode || generalCode;
+      if (matched) {
+        supplierCode = matched.supplier_code;
+        supplierItemName = matched.supplier_item_name;
+      }
+    }
+
     return {
+      productCatalogId: catItem?.id,
       productName: req.name,
       productType: req.type,
       size: req.size,
       qtyNeeded: req.qty,
       qtyInStock: matchingStock,
       qtyToPurchase: deficit,
+      supplierCode,
+      supplierItemName,
     };
   });
 
@@ -1296,3 +1363,163 @@ export async function registerBulkHistoricalDelivery(
   safeRevalidatePath('/epp');
   return { success: eventCount > 0, eventCount, error: eventCount === 0 ? 'No se pudo registrar ningún evento' : null };
 }
+
+// --- 15. Supplier and SKU Codes Actions ---
+
+export async function getEPPSuppliers(): Promise<{ data: EPPSupplier[]; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('epp_suppliers')
+      .select('*')
+      .eq('is_active', true)
+      .order('name', { ascending: true });
+
+    if (error) {
+      if (error.code === '42P01' || error.message.includes('schema cache') || error.message.includes('does not exist')) {
+        return { data: [], error: null };
+      }
+      return { data: [], error: error.message };
+    }
+    return { data: (data || []) as EPPSupplier[], error: null };
+  } catch (err: any) {
+    return { data: [], error: err?.message || 'Error al obtener proveedores' };
+  }
+}
+
+export async function saveEPPSupplier(payload: {
+  id?: string;
+  name: string;
+  rut?: string | null;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+}): Promise<{ success: boolean; data?: EPPSupplier; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    let res;
+    if (payload.id) {
+      res = await supabase
+        .from('epp_suppliers')
+        .update({
+          name: payload.name.trim(),
+          rut: payload.rut?.trim() || null,
+          contact_name: payload.contactName?.trim() || null,
+          contact_email: payload.contactEmail?.trim() || null,
+          contact_phone: payload.contactPhone?.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', payload.id)
+        .select()
+        .single();
+    } else {
+      res = await supabase
+        .from('epp_suppliers')
+        .insert([{
+          name: payload.name.trim(),
+          rut: payload.rut?.trim() || null,
+          contact_name: payload.contactName?.trim() || null,
+          contact_email: payload.contactEmail?.trim() || null,
+          contact_phone: payload.contactPhone?.trim() || null,
+        }])
+        .select()
+        .single();
+    }
+
+    if (res.error) {
+      if (res.error.code === '42P01' || res.error.message.includes('does not exist')) {
+        return { success: false, error: 'La tabla epp_suppliers no existe en la base de datos. Por favor ejecuta la migración SQL.' };
+      }
+      return { success: false, error: res.error.message };
+    }
+    safeRevalidatePath('/epp');
+    return { success: true, data: res.data as EPPSupplier, error: null };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error al guardar proveedor' };
+  }
+}
+
+export async function deleteEPPSupplier(id: string): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from('epp_suppliers')
+      .update({ is_active: false })
+      .eq('id', id);
+
+    if (error) return { success: false, error: error.message };
+    safeRevalidatePath('/epp');
+    return { success: true, error: null };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error al eliminar proveedor' };
+  }
+}
+
+export async function getProductSupplierCodes(supplierId?: string): Promise<{ data: ProductSupplierCode[]; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    let query = supabase.from('epp_product_supplier_codes').select('*');
+    if (supplierId) {
+      query = query.eq('supplier_id', supplierId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      if (error.code === '42P01' || error.message.includes('schema cache') || error.message.includes('does not exist')) {
+        return { data: [], error: null };
+      }
+      return { data: [], error: error.message };
+    }
+    return { data: (data || []) as ProductSupplierCode[], error: null };
+  } catch (err: any) {
+    return { data: [], error: err?.message || 'Error al obtener códigos SKU' };
+  }
+}
+
+export async function bulkSaveSupplierCodes(
+  supplierId: string,
+  codes: { productCatalogId: string; size: string; supplierCode: string; supplierItemName?: string }[]
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const supabase = await createClient();
+
+    // 1. Delete existing codes for this supplier
+    const { error: delErr } = await supabase
+      .from('epp_product_supplier_codes')
+      .delete()
+      .eq('supplier_id', supplierId);
+
+    if (delErr) {
+      if (delErr.code === '42P01' || delErr.message.includes('does not exist')) {
+        return { success: false, error: 'La tabla epp_product_supplier_codes no existe en la base de datos. Por favor ejecuta la migración SQL.' };
+      }
+      return { success: false, error: delErr.message };
+    }
+
+    // 2. Insert valid non-empty codes
+    const validCodes = codes
+      .filter(c => c.supplierCode && c.supplierCode.trim() !== '')
+      .map(c => ({
+        supplier_id: supplierId,
+        product_catalog_id: c.productCatalogId,
+        size: c.size || 'Única',
+        supplier_code: c.supplierCode.trim(),
+        supplier_item_name: c.supplierItemName?.trim() || null,
+        updated_at: new Date().toISOString(),
+      }));
+
+    if (validCodes.length > 0) {
+      const { error: insertErr } = await supabase
+        .from('epp_product_supplier_codes')
+        .insert(validCodes);
+
+      if (insertErr) return { success: false, error: insertErr.message };
+    }
+
+    safeRevalidatePath('/epp');
+    return { success: true, error: null };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error al guardar códigos' };
+  }
+}
+

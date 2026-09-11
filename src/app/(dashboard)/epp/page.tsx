@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useTransition, useMemo } from 'react';
 import { jsPDF } from 'jspdf';
+import * as XLSX from 'xlsx';
 import { 
   Shirt, 
   Users, 
@@ -10,6 +11,7 @@ import {
   ChevronDown, 
   Calendar, 
   Building, 
+  Building2,
   CheckCircle2, 
   AlertTriangle, 
   Clock, 
@@ -27,7 +29,13 @@ import {
   Save,
   Edit,
   Grid3X3,
-  Link2
+  Link2,
+  Tag,
+  Barcode,
+  FileSpreadsheet,
+  Copy,
+  PlusCircle,
+  Check
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 
@@ -89,7 +97,14 @@ import {
   ProductCatalogItem,
   registerBulkHistoricalDelivery,
   HistoricalItemInput,
-  deleteDeliveryEvent
+  deleteDeliveryEvent,
+  getEPPSuppliers,
+  saveEPPSupplier,
+  deleteEPPSupplier,
+  getProductSupplierCodes,
+  bulkSaveSupplierCodes,
+  EPPSupplier,
+  ProductSupplierCode
 } from './actions';
 import { generateDeliveryFormPDF } from './generate-delivery-pdf';
 
@@ -107,6 +122,28 @@ export default function EPPPage() {
   const [inventory, setInventory] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   
+  // Suppliers & SKU Codes Data
+  const [suppliers, setSuppliers] = useState<EPPSupplier[]>([]);
+  const [selectedSupplierIdForCodes, setSelectedSupplierIdForCodes] = useState<string>('');
+  const [supplierCodesMap, setSupplierCodesMap] = useState<Record<string, { code: string; itemName?: string }>>({});
+  const [originalSupplierCodesMap, setOriginalSupplierCodesMap] = useState<Record<string, { code: string; itemName?: string }>>({});
+  const [savingSupplierCodes, setSavingSupplierCodes] = useState(false);
+  const [skuSearchQuery, setSkuSearchQuery] = useState('');
+  
+  // Supplier Dialog States
+  const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<EPPSupplier | null>(null);
+  const [supplierForm, setSupplierForm] = useState({
+    name: '',
+    rut: '',
+    contactName: '',
+    contactEmail: '',
+    contactPhone: '',
+  });
+
+  // Forecast Supplier Filter (in Reports tab)
+  const [forecastSupplierId, setForecastSupplierId] = useState<string>('generic');
+
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCompanyId, setSelectedCompanyId] = useState('all');
@@ -329,10 +366,11 @@ export default function EPPPage() {
 
   // Fetch initial data
   const fetchData = async () => {
-    const [res, catRes, posRes] = await Promise.all([
+    const [res, catRes, posRes, suppRes] = await Promise.all([
       getEPPPersonnelData(),
       getProductCatalog(),
       getAllPositionsWithAreas(),
+      getEPPSuppliers(),
     ]);
 
     if (res.error) {
@@ -370,6 +408,180 @@ export default function EPPPage() {
 
     if (catRes.data) setCatalog(catRes.data);
     if (posRes.data) setAllPositions(posRes.data);
+    if (suppRes.data) {
+      setSuppliers(suppRes.data);
+      if (suppRes.data.length > 0 && !selectedSupplierIdForCodes) {
+        setSelectedSupplierIdForCodes(suppRes.data[0].id);
+      }
+    }
+  };
+
+  const loadSupplierCodes = async (suppId: string) => {
+    if (!suppId) {
+      setSupplierCodesMap({});
+      setOriginalSupplierCodesMap({});
+      return;
+    }
+    const res = await getProductSupplierCodes(suppId);
+    if (res.data) {
+      const map: Record<string, { code: string; itemName?: string }> = {};
+      res.data.forEach(sc => {
+        map[`${sc.product_catalog_id}__${sc.size}`] = {
+          code: sc.supplier_code,
+          itemName: sc.supplier_item_name || '',
+        };
+      });
+      setSupplierCodesMap(map);
+      setOriginalSupplierCodesMap(JSON.parse(JSON.stringify(map)));
+    }
+  };
+
+  useEffect(() => {
+    if (selectedSupplierIdForCodes) {
+      loadSupplierCodes(selectedSupplierIdForCodes);
+    }
+  }, [selectedSupplierIdForCodes]);
+
+  const supplierCodesHaveChanges = JSON.stringify(supplierCodesMap) !== JSON.stringify(originalSupplierCodesMap);
+
+  const handleSupplierCodeChange = (productCatalogId: string, size: string, code: string, itemName?: string) => {
+    const key = `${productCatalogId}__${size}`;
+    setSupplierCodesMap(prev => ({
+      ...prev,
+      [key]: {
+        code,
+        itemName: itemName !== undefined ? itemName : (prev[key]?.itemName || ''),
+      }
+    }));
+  };
+
+  const handleCopyCodeToAllSizes = (catItem: ProductCatalogItem, sourceCode: string) => {
+    if (!sourceCode.trim()) {
+      toast.info('Ingresa primero un código para copiarlo a las demás tallas');
+      return;
+    }
+    const sizes = getItemSizeOptions(catItem);
+    setSupplierCodesMap(prev => {
+      const next = { ...prev };
+      sizes.forEach(size => {
+        const key = `${catItem.id}__${size}`;
+        next[key] = {
+          code: sourceCode.trim(),
+          itemName: prev[key]?.itemName || '',
+        };
+      });
+      return next;
+    });
+    toast.success(`Código "${sourceCode}" copiado a todas las tallas de ${catItem.name}`);
+  };
+
+  const handleSaveSupplierCodes = async () => {
+    if (!selectedSupplierIdForCodes) return;
+    setSavingSupplierCodes(true);
+    try {
+      const codesToSave: { productCatalogId: string; size: string; supplierCode: string; supplierItemName?: string }[] = [];
+      for (const [key, val] of Object.entries(supplierCodesMap)) {
+        if (val && val.code && val.code.trim()) {
+          const [catId, size] = key.split('__');
+          codesToSave.push({
+            productCatalogId: catId,
+            size: size || 'Única',
+            supplierCode: val.code.trim(),
+            supplierItemName: val.itemName?.trim() || undefined,
+          });
+        }
+      }
+
+      const res = await bulkSaveSupplierCodes(selectedSupplierIdForCodes, codesToSave);
+      if (res.success) {
+        toast.success('Códigos SKU del proveedor guardados correctamente');
+        setOriginalSupplierCodesMap(JSON.parse(JSON.stringify(supplierCodesMap)));
+        if (forecastMonth) handleGenerateForecast();
+      } else {
+        toast.error('Error al guardar códigos: ' + res.error);
+      }
+    } catch (err: any) {
+      toast.error('Error al guardar: ' + (err?.message || err));
+    } finally {
+      setSavingSupplierCodes(false);
+    }
+  };
+
+  const openCreateSupplier = () => {
+    setEditingSupplier(null);
+    setSupplierForm({
+      name: '',
+      rut: '',
+      contactName: '',
+      contactEmail: '',
+      contactPhone: '',
+    });
+    setIsSupplierDialogOpen(true);
+  };
+
+  const openEditSupplier = (supp: EPPSupplier) => {
+    setEditingSupplier(supp);
+    setSupplierForm({
+      name: supp.name,
+      rut: supp.rut || '',
+      contactName: supp.contact_name || '',
+      contactEmail: supp.contact_email || '',
+      contactPhone: supp.contact_phone || '',
+    });
+    setIsSupplierDialogOpen(true);
+  };
+
+  const handleSupplierFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supplierForm.name.trim()) {
+      toast.error('El nombre del proveedor es obligatorio');
+      return;
+    }
+
+    startTransition(async () => {
+      const res = await saveEPPSupplier({
+        id: editingSupplier?.id,
+        name: supplierForm.name,
+        rut: supplierForm.rut,
+        contactName: supplierForm.contactName,
+        contactEmail: supplierForm.contactEmail,
+        contactPhone: supplierForm.contactPhone,
+      });
+
+      if (res.success) {
+        toast.success(editingSupplier ? 'Proveedor actualizado' : 'Proveedor creado exitosamente');
+        setIsSupplierDialogOpen(false);
+        const suppRes = await getEPPSuppliers();
+        if (suppRes.data) {
+          setSuppliers(suppRes.data);
+          if (!selectedSupplierIdForCodes && res.data) {
+            setSelectedSupplierIdForCodes(res.data.id);
+          }
+        }
+      } else {
+        toast.error('Error: ' + res.error);
+      }
+    });
+  };
+
+  const handleDeleteSupplierConfirm = async (id: string, name: string) => {
+    if (!confirm(`¿Estás seguro de eliminar al proveedor "${name}"? Se mantendrá el historial pero no estará activo.`)) return;
+
+    startTransition(async () => {
+      const res = await deleteEPPSupplier(id);
+      if (res.success) {
+        toast.success('Proveedor eliminado');
+        const suppRes = await getEPPSuppliers();
+        if (suppRes.data) {
+          setSuppliers(suppRes.data);
+          if (selectedSupplierIdForCodes === id) {
+            setSelectedSupplierIdForCodes(suppRes.data[0]?.id || '');
+          }
+        }
+      } else {
+        toast.error('Error al eliminar: ' + res.error);
+      }
+    });
   };
 
   useEffect(() => {
@@ -900,7 +1112,7 @@ export default function EPPPage() {
   // Get Monthly Forecast report helper
   const handleGenerateForecast = async () => {
     setGeneratingForecast(true);
-    const res = await getMonthlyEPPForecastReport(forecastMonth);
+    const res = await getMonthlyEPPForecastReport(forecastMonth, forecastSupplierId);
     if (res.error) {
       toast.error('Error: ' + res.error);
     } else if (res.data) {
@@ -1117,7 +1329,7 @@ export default function EPPPage() {
     doc.save(`Informe_EPP_${monthName}.pdf`);
   };
 
-  // Generate Quotation Request PDF (Simplified: Implement, Size, Qty to Purchase)
+  // Generate Quotation Request PDF (Simplified: SKU Code (if supplier), Implement, Size, Qty to Purchase)
   const downloadQuotationPDF = () => {
     if (forecastData.length === 0) return;
 
@@ -1128,6 +1340,9 @@ export default function EPPPage() {
       toast.info('No hay implementos con déficit de stock requeridos para comprar en este mes.');
       return;
     }
+
+    const supplier = suppliers.find(s => s.id === forecastSupplierId);
+    const isSupplierSelected = !!supplier && forecastSupplierId !== 'generic' && forecastSupplierId !== 'all';
 
     const doc = new jsPDF({
       orientation: 'portrait',
@@ -1147,7 +1362,11 @@ export default function EPPPage() {
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    doc.text('SOLICITUD DE COTIZACIÓN - EPP Y UNIFORMES', margin + usableW / 2, y + 6.5, { align: 'center' });
+
+    const bannerTitle = isSupplierSelected
+      ? `SOLICITUD DE COTIZACIÓN - ${supplier.name.toUpperCase()}`
+      : 'SOLICITUD DE COTIZACIÓN - EPP Y UNIFORMES';
+    doc.text(bannerTitle, margin + usableW / 2, y + 6.5, { align: 'center' });
 
     y += 14;
     doc.setTextColor(50, 50, 50);
@@ -1161,6 +1380,19 @@ export default function EPPPage() {
     doc.text(`Período Requerido: ${forecastMonth}`, margin, y);
     doc.text(`Fecha Emisión: ${format(new Date(), 'dd/MM/yyyy')}`, pageW - margin, y, { align: 'right' });
 
+    if (isSupplierSelected && (supplier.rut || supplier.contact_name || supplier.contact_email || supplier.contact_phone)) {
+      y += 4.5;
+      const contactBits = [
+        supplier.rut ? `RUT: ${supplier.rut}` : null,
+        supplier.contact_name ? `Contacto: ${supplier.contact_name}` : null,
+        supplier.contact_email ? `Email: ${supplier.contact_email}` : null,
+        supplier.contact_phone ? `Tel: ${supplier.contact_phone}` : null,
+      ].filter(Boolean).join(' | ');
+      doc.setTextColor(90, 90, 90);
+      doc.setFontSize(7.5);
+      doc.text(contactBits, margin, y);
+    }
+
     y += 6;
 
     // Table Header
@@ -1173,9 +1405,16 @@ export default function EPPPage() {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
 
-    doc.text('IMPLEMENTO', margin + 5, y + 4.8);
-    doc.text('TALLA', margin + 110, y + 4.8, { align: 'center' });
-    doc.text('CANTIDAD A COMPRAR', margin + 160, y + 4.8, { align: 'center' });
+    if (isSupplierSelected) {
+      doc.text('CÓDIGO SKU', margin + 4, y + 4.8);
+      doc.text('IMPLEMENTO', margin + 45, y + 4.8);
+      doc.text('TALLA', margin + 125, y + 4.8, { align: 'center' });
+      doc.text('CANTIDAD A COTIZAR', margin + 165, y + 4.8, { align: 'center' });
+    } else {
+      doc.text('IMPLEMENTO', margin + 5, y + 4.8);
+      doc.text('TALLA', margin + 110, y + 4.8, { align: 'center' });
+      doc.text('CANTIDAD A COMPRAR', margin + 160, y + 4.8, { align: 'center' });
+    }
 
     y += 7;
     doc.setFont('helvetica', 'normal');
@@ -1197,9 +1436,16 @@ export default function EPPPage() {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8.5);
 
-        doc.text('IMPLEMENTO', margin + 5, y + 4.8);
-        doc.text('TALLA', margin + 110, y + 4.8, { align: 'center' });
-        doc.text('CANTIDAD A COMPRAR', margin + 160, y + 4.8, { align: 'center' });
+        if (isSupplierSelected) {
+          doc.text('CÓDIGO SKU', margin + 4, y + 4.8);
+          doc.text('IMPLEMENTO', margin + 45, y + 4.8);
+          doc.text('TALLA', margin + 125, y + 4.8, { align: 'center' });
+          doc.text('CANTIDAD A COTIZAR', margin + 165, y + 4.8, { align: 'center' });
+        } else {
+          doc.text('IMPLEMENTO', margin + 5, y + 4.8);
+          doc.text('TALLA', margin + 110, y + 4.8, { align: 'center' });
+          doc.text('CANTIDAD A COMPRAR', margin + 160, y + 4.8, { align: 'center' });
+        }
 
         y += 7;
         doc.setFont('helvetica', 'normal');
@@ -1214,16 +1460,26 @@ export default function EPPPage() {
       }
       doc.rect(margin, y, usableW, 6.5);
 
-      doc.setFont('helvetica', 'bold');
-      doc.text(item.productName, margin + 5, y + 4.3);
-      doc.setFont('helvetica', 'normal');
-      doc.text(item.size, margin + 110, y + 4.3, { align: 'center' });
+      if (isSupplierSelected) {
+        doc.setFont('helvetica', 'bold');
+        doc.text(item.supplierCode || '—', margin + 4, y + 4.3);
+        doc.setFont('helvetica', 'normal');
+        doc.text(item.productName, margin + 45, y + 4.3);
+        doc.text(item.size, margin + 125, y + 4.3, { align: 'center' });
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(220, 38, 38);
+        doc.text(item.qtyToPurchase.toString(), margin + 165, y + 4.3, { align: 'center' });
+      } else {
+        doc.setFont('helvetica', 'bold');
+        doc.text(item.productName, margin + 5, y + 4.3);
+        doc.setFont('helvetica', 'normal');
+        doc.text(item.size, margin + 110, y + 4.3, { align: 'center' });
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(220, 38, 38);
+        doc.text(item.qtyToPurchase.toString(), margin + 160, y + 4.3, { align: 'center' });
+      }
 
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(220, 38, 38);
-      doc.text(item.qtyToPurchase.toString(), margin + 160, y + 4.3, { align: 'center' });
       doc.setTextColor(30, 30, 30);
-
       y += 6.5;
     });
 
@@ -1233,13 +1489,83 @@ export default function EPPPage() {
     doc.rect(margin, y, usableW, 7.5);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.text('TOTAL UNIDADES A COMPRAR', margin + 5, y + 5);
+    doc.text('TOTAL UNIDADES A COTIZAR', margin + 5, y + 5);
     doc.setTextColor(220, 38, 38);
-    doc.text(totalUnitsToPurchase.toString(), margin + 160, y + 5, { align: 'center' });
+    const totalXPos = isSupplierSelected ? 165 : 160;
+    doc.text(totalUnitsToPurchase.toString(), margin + totalXPos, y + 5, { align: 'center' });
 
     const parsedMonth = parseISO(`${forecastMonth}-01`);
     const monthName = format(parsedMonth, 'MMMM_yyyy', { locale: es });
-    doc.save(`Cotizacion_EPP_${monthName}.pdf`);
+    const fileName = isSupplierSelected
+      ? `Cotizacion_${supplier.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_${monthName}.pdf`
+      : `Cotizacion_EPP_${monthName}.pdf`;
+    doc.save(fileName);
+  };
+
+  // Generate Quotation Request Excel (.xlsx)
+  const downloadQuotationExcel = () => {
+    if (forecastData.length === 0) return;
+
+    const itemsToQuote = forecastData.filter(i => i.qtyToPurchase > 0);
+    if (itemsToQuote.length === 0) {
+      toast.info('No hay implementos con déficit de stock requeridos para comprar en este mes.');
+      return;
+    }
+
+    const supplier = suppliers.find(s => s.id === forecastSupplierId);
+    const isSupplierSelected = !!supplier && forecastSupplierId !== 'generic' && forecastSupplierId !== 'all';
+    const parsedMonth = parseISO(`${forecastMonth}-01`);
+    const monthName = format(parsedMonth, 'MMMM_yyyy', { locale: es });
+
+    let sheetData: any[] = [];
+    if (isSupplierSelected) {
+      sheetData = [
+        ['SOLICITUD DE COTIZACIÓN - EPP Y UNIFORMES'],
+        [`Proveedor: ${supplier.name}`, `RUT: ${supplier.rut || '—'}`, `Contacto: ${supplier.contact_name || supplier.contact_email || '—'}`],
+        [`Período Requerido: ${forecastMonth}`, `Fecha de Emisión: ${format(new Date(), 'dd/MM/yyyy')}`],
+        [],
+        ['Código Proveedor (SKU)', 'Implemento / Producto', 'Tipo', 'Talla', 'Cantidad a Comprar']
+      ];
+      itemsToQuote.forEach(i => {
+        sheetData.push([
+          i.supplierCode || 'Sin código',
+          i.productName,
+          i.productType === 'UNIFORM' ? 'Uniforme' : 'EPP',
+          i.size,
+          i.qtyToPurchase
+        ]);
+      });
+    } else {
+      sheetData = [
+        ['SOLICITUD DE COTIZACIÓN - EPP Y UNIFORMES (CONSOLIDADO GENERAL)'],
+        [`Período Requerido: ${forecastMonth}`, `Fecha de Emisión: ${format(new Date(), 'dd/MM/yyyy')}`],
+        [],
+        ['Implemento / Producto', 'Tipo', 'Talla', 'Cantidad Requerida', 'En Stock Bodega', 'Cantidad a Comprar']
+      ];
+      itemsToQuote.forEach(i => {
+        sheetData.push([
+          i.productName,
+          i.productType === 'UNIFORM' ? 'Uniforme' : 'EPP',
+          i.size,
+          i.qtyNeeded,
+          i.qtyInStock,
+          i.qtyToPurchase
+        ]);
+      });
+    }
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+    ws['!cols'] = isSupplierSelected
+      ? [{ wch: 22 }, { wch: 35 }, { wch: 14 }, { wch: 10 }, { wch: 18 }]
+      : [{ wch: 35 }, { wch: 14 }, { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 18 }];
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Cotización');
+    const fileName = isSupplierSelected 
+      ? `Cotizacion_${supplier.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_${monthName}.xlsx`
+      : `Cotizacion_EPP_${monthName}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    toast.success('Archivo Excel descargado exitosamente');
   };
 
   return (
@@ -1294,6 +1620,10 @@ export default function EPPPage() {
               <TabsTrigger value="requirements" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
                 <Settings2 className="h-4 w-4" />
                 Requerimientos de Cargos
+              </TabsTrigger>
+              <TabsTrigger value="suppliers" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
+                <Tag className="h-4 w-4" />
+                Proveedores y Códigos SKU
               </TabsTrigger>
               <TabsTrigger value="reports" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
                 <History className="h-4 w-4" />
@@ -1987,6 +2317,283 @@ export default function EPPPage() {
           </Card>
         </TabsContent>
 
+        {/* --- TAB 3.5: SUPPLIERS & SKU CODES --- */}
+        <TabsContent value="suppliers" className="space-y-6">
+          {/* Section 1: Supplier Companies Management */}
+          <Card className="border-slate-200/60 dark:border-slate-800 shadow-md">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <Building2 className="h-5 w-5 text-orange-600" />
+                  Empresas Proveedoras
+                </span>
+                <Button 
+                  onClick={openCreateSupplier}
+                  className="bg-orange-600 hover:bg-orange-700 text-white flex items-center gap-1.5 h-8 text-xs font-semibold shadow-sm"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Nuevo Proveedor
+                </Button>
+              </CardTitle>
+              <CardDescription>
+                Administra las empresas proveedoras (ej. Maritex, Treck, 3M, Steelpro) a las que solicitas cotizaciones y compras de EPP/Uniformes.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {suppliers.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground border border-dashed rounded-lg bg-slate-50/50 dark:bg-slate-950/20 text-xs">
+                  No hay proveedores registrados aún. Haz clic en "Nuevo Proveedor" para agregar el primero (ej. Maritex).
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {suppliers.map(supp => {
+                    const isSelected = selectedSupplierIdForCodes === supp.id;
+                    return (
+                      <div 
+                        key={supp.id} 
+                        className={`p-3.5 rounded-xl border transition-all duration-150 cursor-pointer ${
+                          isSelected 
+                            ? 'border-orange-500 bg-orange-50/40 dark:bg-orange-950/20 ring-1 ring-orange-400 shadow-xs' 
+                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                        }`}
+                        onClick={() => setSelectedSupplierIdForCodes(supp.id)}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-bold text-sm text-slate-900 dark:text-white">{supp.name}</p>
+                              {isSelected && (
+                                <Badge className="bg-orange-600 text-white text-[10px] px-1.5 py-0">Seleccionado</Badge>
+                              )}
+                            </div>
+                            {supp.rut && (
+                              <p className="text-xs text-muted-foreground font-mono mt-0.5">RUT: {supp.rut}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-slate-500 hover:text-orange-600"
+                              onClick={() => openEditSupplier(supp)}
+                              title="Editar datos del proveedor"
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-red-500 hover:text-red-700"
+                              onClick={() => handleDeleteSupplierConfirm(supp.id, supp.name)}
+                              title="Eliminar proveedor"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400 space-y-0.5">
+                          {supp.contact_name && <p>👤 {supp.contact_name}</p>}
+                          {supp.contact_email && <p>✉️ {supp.contact_email}</p>}
+                          {supp.contact_phone && <p>📞 {supp.contact_phone}</p>}
+                          {!supp.contact_name && !supp.contact_email && !supp.contact_phone && (
+                            <p className="text-muted-foreground italic">Sin datos de contacto adicionales</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Section 2: SKU Codes Matrix by Selected Supplier */}
+          {suppliers.length > 0 && (
+            <Card className="border-slate-200/60 dark:border-slate-800 shadow-md relative">
+              <CardHeader>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Barcode className="h-5 w-5 text-orange-600" />
+                      Códigos de Implemento para: <span className="text-orange-600">{suppliers.find(s => s.id === selectedSupplierIdForCodes)?.name}</span>
+                    </CardTitle>
+                    <CardDescription>
+                      Ingresa los códigos SKU específicos de este proveedor por cada implemento y talla (ej. Polera ML Talla M: 210422). Al cotizar, saldrán listos con estos códigos.
+                    </CardDescription>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="w-[200px]">
+                      <select
+                        value={selectedSupplierIdForCodes}
+                        onChange={(e) => setSelectedSupplierIdForCodes(e.target.value)}
+                        className="flex h-9 w-full rounded-md border border-orange-300 dark:border-orange-800 bg-background px-3 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        {suppliers.map(s => (
+                          <option key={s.id} value={s.id}>
+                            Proveedor: {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="w-[180px] relative">
+                      <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Buscar implemento..."
+                        className="pl-8 h-9 text-xs"
+                        value={skuSearchQuery}
+                        onChange={(e) => setSkuSearchQuery(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pb-24">
+                {catalog.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground text-xs">
+                    No hay implementos en el catálogo. Ve a la pestaña "Requerimientos de Cargos" para agregar implementos.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {catalog
+                      .filter(cat => !skuSearchQuery || cat.name.toLowerCase().includes(skuSearchQuery.toLowerCase()))
+                      .map(catItem => {
+                        const usesSizes = catItem.uses_sizes;
+                        const sizeOptions = usesSizes ? getItemSizeOptions(catItem) : ['Única'];
+                        
+                        return (
+                          <div 
+                            key={catItem.id}
+                            className="border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 bg-white dark:bg-slate-900 shadow-xs"
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 gap-2">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className={
+                                  catItem.product_type === 'UNIFORM' 
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30'
+                                    : 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/30'
+                                }>
+                                  {catItem.product_type === 'UNIFORM' ? 'Uniforme' : 'EPP'}
+                                </Badge>
+                                <h4 className="font-bold text-sm text-slate-800 dark:text-slate-100">{catItem.name}</h4>
+                                <span className="text-xs text-muted-foreground">
+                                  ({usesSizes ? `${sizeOptions.length} tallas configurables` : 'Talla Única'})
+                                </span>
+                              </div>
+
+                              {usesSizes && (
+                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                  <span className="text-[11px] italic">Tip: puedes auto-llenar todas las tallas desde un código base</span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="pt-3">
+                              {usesSizes ? (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+                                  {sizeOptions.map(size => {
+                                    const key = `${catItem.id}__${size}`;
+                                    const entry = supplierCodesMap[key] || { code: '' };
+                                    const origEntry = originalSupplierCodesMap[key] || { code: '' };
+                                    const isChanged = entry.code !== origEntry.code;
+
+                                    return (
+                                      <div 
+                                        key={size}
+                                        className={`p-2 rounded-lg border transition-all ${
+                                          isChanged 
+                                            ? 'border-orange-400 bg-orange-50/50 dark:bg-orange-950/20 ring-1 ring-orange-300' 
+                                            : entry.code 
+                                              ? 'border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30'
+                                              : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between mb-1">
+                                          <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Talla {size}</span>
+                                          {entry.code && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleCopyCodeToAllSizes(catItem, entry.code)}
+                                              title="Copiar este código a todas las tallas"
+                                              className="text-[10px] text-orange-600 hover:text-orange-800 flex items-center gap-0.5 font-semibold"
+                                            >
+                                              <Copy className="h-3 w-3" />
+                                              Todas
+                                            </button>
+                                          )}
+                                        </div>
+                                        <Input
+                                          placeholder="Cód. SKU..."
+                                          value={entry.code}
+                                          onChange={(e) => handleSupplierCodeChange(catItem.id, size, e.target.value)}
+                                          className="h-7 text-xs font-mono font-semibold px-2"
+                                        />
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div className="max-w-md flex items-center gap-3">
+                                  <div className="flex-1">
+                                    <Label className="text-xs text-muted-foreground mb-1 block">Código de Producto / SKU del Proveedor</Label>
+                                    {(() => {
+                                      const key = `${catItem.id}__Única`;
+                                      const entry = supplierCodesMap[key] || { code: '' };
+                                      const origEntry = originalSupplierCodesMap[key] || { code: '' };
+                                      const isChanged = entry.code !== origEntry.code;
+                                      return (
+                                        <Input
+                                          placeholder="Ej: 210422 o MTX-EPP-01..."
+                                          value={entry.code}
+                                          onChange={(e) => handleSupplierCodeChange(catItem.id, 'Única', e.target.value)}
+                                          className={`h-8 text-xs font-mono font-semibold ${
+                                            isChanged ? 'border-orange-400 bg-orange-50 dark:bg-orange-950/20 ring-1 ring-orange-300' : ''
+                                          }`}
+                                        />
+                                      );
+                                    })()}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </CardContent>
+
+              {/* Sticky Save Button for Supplier Codes */}
+              {suppliers.length > 0 && catalog.length > 0 && (
+                <div className="sticky bottom-0 left-0 right-0 z-20 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm border-t border-slate-200 dark:border-slate-800 px-6 py-3 flex items-center justify-between rounded-b-xl">
+                  <div className="text-xs text-muted-foreground">
+                    {supplierCodesHaveChanges ? (
+                      <span className="flex items-center gap-1.5 text-orange-600 font-semibold">
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                        Hay códigos modificados sin guardar para {suppliers.find(s => s.id === selectedSupplierIdForCodes)?.name}
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-green-600">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Todos los códigos SKU guardados
+                      </span>
+                    )}
+                  </div>
+                  <Button
+                    onClick={handleSaveSupplierCodes}
+                    disabled={!supplierCodesHaveChanges || savingSupplierCodes}
+                    className="bg-orange-600 hover:bg-orange-700 text-white flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Save className="h-4 w-4" />
+                    {savingSupplierCodes ? 'Guardando...' : 'Guardar Códigos SKU'}
+                  </Button>
+                </div>
+              )}
+            </Card>
+          )}
+        </TabsContent>
+
         {/* --- TAB 4: REPORTS & HISTORY --- */}
         <TabsContent value="reports" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1996,29 +2603,48 @@ export default function EPPPage() {
               <CardHeader>
                 <CardTitle className="text-lg">Previsión Mensual de Entregas y Compras</CardTitle>
                 <CardDescription>
-                  Calcula qué elementos vencen o deben entregarse por primera vez en un mes para estimar compras requeridas.
+                  Calcula qué elementos vencen o deben entregarse por primera vez en un mes para estimar compras requeridas y generar cotizaciones por proveedor o genéricas.
                 </CardDescription>
                 <div className="flex flex-wrap items-center gap-3 mt-4">
-                  <div className="w-[180px]">
+                  <div className="w-[170px]">
+                    <Label className="text-xs text-muted-foreground mb-1 block">Mes de Previsión</Label>
                     <Input 
                       type="month" 
                       value={forecastMonth}
                       onChange={(e) => setForecastMonth(e.target.value)}
+                      className="h-10"
                     />
                   </div>
-                  <Button 
-                    onClick={handleGenerateForecast}
-                    disabled={generatingForecast}
-                    className="bg-orange-600 hover:bg-orange-700 text-white"
-                  >
-                    {generatingForecast ? 'Calculando...' : 'Calcular'}
-                  </Button>
+                  <div className="w-[230px]">
+                    <Label className="text-xs text-muted-foreground mb-1 block">Cotizar con Proveedor</Label>
+                    <select
+                      value={forecastSupplierId}
+                      onChange={(e) => setForecastSupplierId(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-semibold ring-offset-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="generic">Cotización Genérica (Sin Proveedor)</option>
+                      {suppliers.map(s => (
+                        <option key={s.id} value={s.id}>
+                          Proveedor: {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="self-end">
+                    <Button 
+                      onClick={handleGenerateForecast}
+                      disabled={generatingForecast}
+                      className="bg-orange-600 hover:bg-orange-700 text-white h-10"
+                    >
+                      {generatingForecast ? 'Calculando...' : 'Calcular Compras'}
+                    </Button>
+                  </div>
                   {forecastData.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 self-end ml-auto">
                       <Button 
                         variant="outline" 
                         onClick={downloadForecastPDF}
-                        className="border-slate-300 dark:border-slate-800 text-xs font-semibold gap-1.5"
+                        className="border-slate-300 dark:border-slate-800 text-xs font-semibold gap-1.5 h-10"
                         title="Descargar informe completo con stock y desglose por talla"
                       >
                         <FileDown className="h-4 w-4 text-blue-600" />
@@ -2027,11 +2653,20 @@ export default function EPPPage() {
                       <Button 
                         variant="outline" 
                         onClick={downloadQuotationPDF}
-                        className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 text-xs font-semibold gap-1.5 shadow-sm"
-                        title="Descargar versión simplificada (Implemento, Talla, Cantidad) para cotizar con proveedores"
+                        className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 text-xs font-semibold gap-1.5 shadow-sm h-10"
+                        title="Descargar versión simplificada con códigos de proveedor en PDF"
                       >
                         <FileDown className="h-4 w-4 text-orange-600" />
-                        PDF Cotización Proveedores
+                        PDF Cotización {forecastSupplierId !== 'generic' && suppliers.find(s => s.id === forecastSupplierId) ? `(${suppliers.find(s => s.id === forecastSupplierId)?.name})` : ''}
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        onClick={downloadQuotationExcel}
+                        className="border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800 text-xs font-semibold gap-1.5 shadow-sm h-10"
+                        title="Descargar solicitud de cotización en formato Excel (.xlsx)"
+                      >
+                        <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                        Excel Cotización (.xlsx)
                       </Button>
                     </div>
                   )}
@@ -2103,11 +2738,14 @@ export default function EPPPage() {
                     <div>
                       <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2.5 flex items-center gap-2">
                         <span className="h-2 w-2 rounded-full bg-blue-500"></span>
-                        2. Detalle Desglosado por Talla
+                        2. Detalle Desglosado por Talla {forecastSupplierId !== 'generic' && suppliers.find(s => s.id === forecastSupplierId) ? `(con Códigos SKU de ${suppliers.find(s => s.id === forecastSupplierId)?.name})` : ''}
                       </h4>
                       <Table className="border rounded-lg">
                         <TableHeader className="bg-slate-50 dark:bg-slate-900">
                           <TableRow>
+                            {forecastSupplierId !== 'generic' && (
+                              <TableHead className="text-xs font-bold">Cód. Proveedor</TableHead>
+                            )}
                             <TableHead className="text-xs">Implemento</TableHead>
                             <TableHead className="text-xs">Talla</TableHead>
                             <TableHead className="text-center text-xs">Requerido</TableHead>
@@ -2118,6 +2756,17 @@ export default function EPPPage() {
                         <TableBody>
                           {forecastData.map((item, index) => (
                             <TableRow key={index} className="hover:bg-slate-50/50">
+                              {forecastSupplierId !== 'generic' && (
+                                <TableCell className="text-xs py-1.5 font-mono font-bold text-orange-700 dark:text-orange-400">
+                                  {item.supplierCode ? (
+                                    <Badge variant="outline" className="font-mono bg-orange-50 border-orange-200 text-orange-800 text-[11px]">
+                                      {item.supplierCode}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-slate-400 font-normal italic text-[11px]">Sin código</span>
+                                  )}
+                                </TableCell>
+                              )}
                               <TableCell className="font-semibold text-xs py-1.5">{item.productName}</TableCell>
                               <TableCell className="text-xs py-1.5">
                                 {item.size === 'No ingresada' ? (
@@ -2144,7 +2793,7 @@ export default function EPPPage() {
                   </div>
                 ) : (
                   <div className="text-center py-12 text-muted-foreground border border-dashed rounded-lg bg-slate-50/50">
-                    Selecciona un mes y haz clic en "Calcular" para ver las compras sugeridas de EPP/Uniformes.
+                    Selecciona un mes y haz clic en "Calcular Compras" para ver los requerimientos y cotizaciones de EPP/Uniformes.
                   </div>
                 )}
               </CardContent>
@@ -3072,6 +3721,83 @@ export default function EPPPage() {
               </Table>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- DIALOG 8: CREATE / EDIT SUPPLIER --- */}
+      <Dialog open={isSupplierDialogOpen} onOpenChange={setIsSupplierDialogOpen}>
+        <DialogContent className="sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-orange-600" />
+              {editingSupplier ? 'Editar Proveedor' : 'Nuevo Proveedor de EPP/Uniformes'}
+            </DialogTitle>
+            <DialogDescription>
+              Registra la empresa proveedora para poder asignarle códigos de implemento y generar solicitudes de cotización.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSupplierFormSubmit} className="space-y-3.5 pt-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="supp_name">Nombre de la Empresa Proveedora *</Label>
+              <Input
+                id="supp_name"
+                placeholder="Ej: Maritex, Treck, 3M, Steelpro..."
+                value={supplierForm.name}
+                onChange={(e) => setSupplierForm(prev => ({ ...prev, name: e.target.value }))}
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="supp_rut">RUT de la Empresa (opcional)</Label>
+              <Input
+                id="supp_rut"
+                placeholder="Ej: 76.123.456-7"
+                value={supplierForm.rut}
+                onChange={(e) => setSupplierForm(prev => ({ ...prev, rut: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="supp_contact">Nombre de Contacto / Ejecutivo (opcional)</Label>
+              <Input
+                id="supp_contact"
+                placeholder="Ej: Juan Pérez"
+                value={supplierForm.contactName}
+                onChange={(e) => setSupplierForm(prev => ({ ...prev, contactName: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="supp_email">Email de Cotización</Label>
+                <Input
+                  id="supp_email"
+                  type="email"
+                  placeholder="ventas@proveedor.cl"
+                  value={supplierForm.contactEmail}
+                  onChange={(e) => setSupplierForm(prev => ({ ...prev, contactEmail: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="supp_phone">Teléfono de Contacto</Label>
+                <Input
+                  id="supp_phone"
+                  placeholder="+56 9 1234 5678"
+                  value={supplierForm.contactPhone}
+                  onChange={(e) => setSupplierForm(prev => ({ ...prev, contactPhone: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="pt-3">
+              <Button type="button" variant="ghost" onClick={() => setIsSupplierDialogOpen(false)}>Cancelar</Button>
+              <Button type="submit" disabled={isPending} className="bg-orange-600 hover:bg-orange-700 text-white">
+                {isPending ? 'Guardando...' : (editingSupplier ? 'Guardar Cambios' : 'Crear Proveedor')}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>
