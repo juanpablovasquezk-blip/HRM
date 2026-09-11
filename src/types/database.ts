@@ -112,6 +112,11 @@ export interface Personnel {
   // Contract fields
   nationality?: string | null;
   marital_status?: string | null;
+  contract_type?: 'PLAZO_FIJO' | 'INDEFINIDO' | null;
+  contract_start_date?: string | null;
+  contract_duration_days?: number | null;
+  contract_end_date?: string | null;
+  indefinite_contract_date?: string | null;
 }
 
 
@@ -373,6 +378,18 @@ export interface SpecialBonus {
   reason: string;
   amount: number;
   paid_month: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface PersonnelContractHistory {
+  id: string;
+  personnel_id: string;
+  contract_type: 'PLAZO_FIJO' | 'INDEFINIDO';
+  start_date: string;
+  duration_days: number | null;
+  end_date: string | null;
+  notes: string | null;
   created_by: string | null;
   created_at: string;
 }

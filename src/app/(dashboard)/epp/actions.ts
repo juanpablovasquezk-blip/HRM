@@ -37,6 +37,7 @@ export interface ProductCatalogItem {
   uses_sizes: boolean;
   size_field: string | null;
   size_type?: 'LETTER' | 'NUMBER' | 'SHOE' | null;
+  contract_eligibility?: 'PLAZO_FIJO' | 'INDEFINIDO' | 'AMBOS';
   renewal_days: number;
   is_active: boolean;
   created_at: string;
@@ -263,14 +264,34 @@ export async function getEPPPersonnelData(): Promise<{
 
   if (itemsErr) console.warn('Warning fetching epp_delivery_items:', itemsErr.message);
 
+  // Fetch product catalog to know contract eligibility
+  const { data: catalogItems } = await supabase
+    .from('epp_product_catalog')
+    .select('*');
+  const catalogMap = new Map((catalogItems || []).map((c: any) => [c.name.toLowerCase().trim(), c]));
+
   const safeRequirements = reqsErr ? [] : (requirements || []);
   const safeInventory = invErr ? [] : (inventory || []);
   const safeDeliveryItems = itemsErr ? [] : (deliveryItems || []);
 
   // Assemble EPP delivery history per person
   const assembledPersonnel = personnel.map((p: any) => {
-    // Requirements for this person's main_position
-    const persReqs = safeRequirements.filter(r => r.position_id === p.main_position);
+    const workerContractType = p.contract_type || 'PLAZO_FIJO';
+
+    // Requirements for this person's main_position filtered by contract type
+    const persReqs = safeRequirements
+      .filter(r => r.position_id === p.main_position)
+      .filter(r => {
+        const cat = catalogMap.get(r.product_name.toLowerCase().trim());
+        const eligibility = cat?.contract_eligibility || 'AMBOS';
+        if (workerContractType === 'INDEFINIDO') {
+          // Indefinite workers only get INDEFINIDO and AMBOS (never PLAZO_FIJO)
+          return eligibility === 'INDEFINIDO' || eligibility === 'AMBOS';
+        } else {
+          // Plazo Fijo workers get PLAZO_FIJO and AMBOS
+          return eligibility === 'PLAZO_FIJO' || eligibility === 'AMBOS';
+        }
+      });
 
     // Deliveries received by this person
     const persDeliveries = safeDeliveryItems
@@ -295,6 +316,10 @@ export async function getEPPPersonnelData(): Promise<{
 
     // Calculate dynamic delivery status for each requirement
     const reqStatuses = persReqs.map(req => {
+      const cat = catalogMap.get(req.product_name.toLowerCase().trim());
+      const eligibility: 'PLAZO_FIJO' | 'INDEFINIDO' | 'AMBOS' = cat?.contract_eligibility || 'AMBOS';
+      const isPlazoFijoOnly = eligibility === 'PLAZO_FIJO';
+
       // Find deliveries of this specific product that are NOT fully returned
       const activeDeliveries = persDeliveries.filter(
         d => d.productName === req.product_name && d.quantity > d.returnedQty
@@ -325,10 +350,11 @@ export async function getEPPPersonnelData(): Promise<{
         return {
           productName: req.product_name,
           productType: req.product_type,
+          contractEligibility: eligibility,
           quantity: req.quantity,
           deliveredQty: 0,
           pendingQty: req.quantity,
-          renewalDays: req.renewal_days,
+          renewalDays: isPlazoFijoOnly ? 0 : req.renewal_days,
           size: sizeValue,
           lastDeliveryDate: null,
           nextDeliveryDate: null,
@@ -343,15 +369,34 @@ export async function getEPPPersonnelData(): Promise<{
         return {
           productName: req.product_name,
           productType: req.product_type,
+          contractEligibility: eligibility,
           quantity: req.quantity,
           deliveredQty: totalActiveDelivered,
           pendingQty,
-          renewalDays: req.renewal_days,
+          renewalDays: isPlazoFijoOnly ? 0 : req.renewal_days,
           size: sizeValue,
           lastDeliveryDate: latestDelivery.deliveryDate,
-          nextDeliveryDate: latestDelivery.nextDeliveryDate,
+          nextDeliveryDate: isPlazoFijoOnly ? null : latestDelivery.nextDeliveryDate,
           status: 'PARTIAL' as const,
           daysRemaining: 0,
+        };
+      }
+
+      // Fully delivered — if it's plazo fijo only, it NEVER renews (single delivery done)
+      if (isPlazoFijoOnly) {
+        return {
+          productName: req.product_name,
+          productType: req.product_type,
+          contractEligibility: eligibility,
+          quantity: req.quantity,
+          deliveredQty: totalActiveDelivered,
+          pendingQty: 0,
+          renewalDays: 0,
+          size: sizeValue,
+          lastDeliveryDate: latestDelivery.deliveryDate,
+          nextDeliveryDate: null,
+          status: 'OK' as const,
+          daysRemaining: 99999,
         };
       }
 
@@ -372,6 +417,7 @@ export async function getEPPPersonnelData(): Promise<{
       return {
         productName: req.product_name,
         productType: req.product_type,
+        contractEligibility: eligibility,
         quantity: req.quantity,
         deliveredQty: totalActiveDelivered,
         pendingQty: 0,
@@ -696,6 +742,7 @@ export interface ForecastReportItem {
   productName: string;
   productType: 'UNIFORM' | 'EPP';
   size: string;
+  contractEligibility?: 'PLAZO_FIJO' | 'INDEFINIDO' | 'AMBOS';
   qtyNeeded: number;
   qtyInStock: number;
   qtyToPurchase: number;
@@ -808,6 +855,7 @@ export async function getMonthlyEPPForecastReport(
       productName: req.name,
       productType: req.type,
       size: req.size,
+      contractEligibility: catItem?.contract_eligibility || 'AMBOS',
       qtyNeeded: req.qty,
       qtyInStock: matchingStock,
       qtyToPurchase: deficit,
@@ -844,10 +892,13 @@ export async function saveProductCatalogItem(payload: {
   usesSizes: boolean;
   sizeField: string | null;
   sizeType?: 'LETTER' | 'NUMBER' | 'SHOE' | null;
+  contractEligibility?: 'PLAZO_FIJO' | 'INDEFINIDO' | 'AMBOS';
   renewalDays: number;
 }): Promise<{ success: boolean; error: string | null }> {
   const supabase = await createClient();
   let error;
+
+  const contractEligibility = payload.contractEligibility || 'AMBOS';
 
   if (payload.id) {
     const { error: err } = await supabase
@@ -858,7 +909,8 @@ export async function saveProductCatalogItem(payload: {
         uses_sizes: payload.usesSizes,
         size_field: payload.usesSizes ? payload.sizeField : null,
         size_type: payload.usesSizes ? (payload.sizeType || 'LETTER') : null,
-        renewal_days: payload.renewalDays,
+        contract_eligibility: contractEligibility,
+        renewal_days: contractEligibility === 'PLAZO_FIJO' ? 0 : payload.renewalDays,
       })
       .eq('id', payload.id);
     error = err;
@@ -871,7 +923,8 @@ export async function saveProductCatalogItem(payload: {
         uses_sizes: payload.usesSizes,
         size_field: payload.usesSizes ? payload.sizeField : null,
         size_type: payload.usesSizes ? (payload.sizeType || 'LETTER') : null,
-        renewal_days: payload.renewalDays,
+        contract_eligibility: contractEligibility,
+        renewal_days: contractEligibility === 'PLAZO_FIJO' ? 0 : payload.renewalDays,
       }]);
     error = err;
   }

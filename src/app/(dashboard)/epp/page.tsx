@@ -175,6 +175,7 @@ export default function EPPPage() {
   const [customSizeFieldName, setCustomSizeFieldName] = useState('');
   const [catRenewalDays, setCatRenewalDays] = useState(180);
   const [catSizeType, setCatSizeType] = useState<'LETTER' | 'NUMBER' | 'SHOE'>('LETTER');
+  const [catContractEligibility, setCatContractEligibility] = useState<'PLAZO_FIJO' | 'INDEFINIDO' | 'AMBOS'>('AMBOS');
 
   const handleCopyWorkerSelfServiceLink = async (workerId?: string, workerName?: string) => {
     if (!workerId) {
@@ -791,7 +792,8 @@ export default function EPPPage() {
         usesSizes: catUsesSizes,
         sizeField: finalSizeField,
         sizeType: catUsesSizes ? catSizeType : null,
-        renewalDays: catRenewalDays,
+        contractEligibility: catContractEligibility,
+        renewalDays: catContractEligibility === 'PLAZO_FIJO' ? 0 : catRenewalDays,
       });
 
       if (res.success) {
@@ -813,6 +815,7 @@ export default function EPPPage() {
     setCatSizeField('');
     setCustomSizeFieldName('');
     setCatSizeType('LETTER');
+    setCatContractEligibility('AMBOS');
     setCatRenewalDays(180);
   };
 
@@ -824,7 +827,8 @@ export default function EPPPage() {
     setCatSizeField(item.size_field || '');
     setCustomSizeFieldName('');
     setCatSizeType(item.size_type || 'LETTER');
-    setCatRenewalDays(item.renewal_days);
+    setCatContractEligibility(item.contract_eligibility || 'AMBOS');
+    setCatRenewalDays(item.renewal_days || 180);
     setIsCatalogDialogOpen(true);
   };
 
@@ -1540,12 +1544,13 @@ export default function EPPPage() {
         ['SOLICITUD DE COTIZACIÓN - EPP Y UNIFORMES (CONSOLIDADO GENERAL)'],
         [`Período Requerido: ${forecastMonth}`, `Fecha de Emisión: ${format(new Date(), 'dd/MM/yyyy')}`],
         [],
-        ['Implemento / Producto', 'Tipo', 'Talla', 'Cantidad Requerida', 'En Stock Bodega', 'Cantidad a Comprar']
+        ['Implemento / Producto', 'Tipo', 'Contrato', 'Talla', 'Cantidad Requerida', 'En Stock Bodega', 'Cantidad a Comprar']
       ];
       itemsToQuote.forEach(i => {
         sheetData.push([
           i.productName,
           i.productType === 'UNIFORM' ? 'Uniforme' : 'EPP',
+          i.contractEligibility === 'PLAZO_FIJO' ? 'Solo Plazo Fijo' : i.contractEligibility === 'INDEFINIDO' ? 'Solo Indefinido' : 'Ambos',
           i.size,
           i.qtyNeeded,
           i.qtyInStock,
@@ -1558,7 +1563,7 @@ export default function EPPPage() {
     const ws = XLSX.utils.aoa_to_sheet(sheetData);
     ws['!cols'] = isSupplierSelected
       ? [{ wch: 22 }, { wch: 35 }, { wch: 14 }, { wch: 10 }, { wch: 18 }]
-      : [{ wch: 35 }, { wch: 14 }, { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 18 }];
+      : [{ wch: 35 }, { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 18 }];
 
     XLSX.utils.book_append_sheet(wb, ws, 'Cotización');
     const fileName = isSupplierSelected 
@@ -1707,9 +1712,14 @@ export default function EPPPage() {
                             worker.overallStatus === 'ORANGE' ? 'bg-amber-500' : 'bg-emerald-500'
                           }`} />
                           <div>
-                            <p className="font-semibold text-slate-800 dark:text-white">
-                              {worker.first_name} {worker.last_name_father} {worker.last_name_mother || ''}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-slate-800 dark:text-white">
+                                {worker.first_name} {worker.last_name_father} {worker.last_name_mother || ''}
+                              </p>
+                              <Badge variant="outline" className={worker.contract_type === 'INDEFINIDO' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] font-bold uppercase' : 'bg-amber-50 text-amber-700 border-amber-200 text-[10px] font-bold uppercase'}>
+                                {worker.contract_type === 'INDEFINIDO' ? 'Indefinido' : 'Plazo Fijo'}
+                              </Badge>
+                            </div>
                             <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-muted-foreground font-medium">
                               <span className="font-mono">{worker.rut}</span>
                               <span>•</span>
@@ -1838,12 +1848,13 @@ export default function EPPPage() {
                                 </TableHeader>
                                 <TableBody>
                                   {worker.requirements.map((req: any, ri: number) => {
+                                    const isPlazoFijo = req.contractEligibility === 'PLAZO_FIJO';
                                     const reqBadgeColor = {
                                       PENDING_FIRST: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-400',
                                       PENDING_RENEWAL: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-400',
                                       PARTIAL: 'bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-400',
                                       WARNING: 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400',
-                                      OK: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400',
+                                      OK: isPlazoFijo ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-400' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400',
                                     }[req.status as 'PENDING_FIRST' | 'PENDING_RENEWAL' | 'PARTIAL' | 'WARNING' | 'OK'];
 
                                     const reqStatusText = {
@@ -1851,24 +1862,35 @@ export default function EPPPage() {
                                       PENDING_RENEWAL: 'Vencido',
                                       PARTIAL: `Parcial (${req.deliveredQty ?? 0}/${req.quantity} entregados)`,
                                       WARNING: `Por vencer (${req.daysRemaining} d)`,
-                                      OK: 'Vigente',
+                                      OK: isPlazoFijo ? 'Entrega Única Cumplida' : 'Vigente',
                                     }[req.status as 'PENDING_FIRST' | 'PENDING_RENEWAL' | 'PARTIAL' | 'WARNING' | 'OK'];
 
                                     return (
                                       <TableRow key={ri}>
-                                        <TableCell className="font-semibold text-xs py-2">{req.productName}</TableCell>
+                                        <TableCell className="font-semibold text-xs py-2">
+                                          <div className="flex items-center gap-1.5">
+                                            <span>{req.productName}</span>
+                                            {isPlazoFijo && (
+                                              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[9px] px-1 py-0 font-bold">
+                                                Plazo Fijo
+                                              </Badge>
+                                            )}
+                                          </div>
+                                        </TableCell>
                                         <TableCell className="text-xs py-2">{req.size}</TableCell>
                                         <TableCell className="text-xs text-center py-2">
                                           {req.status === 'PARTIAL' ? (
                                             <span className="font-bold text-orange-700 dark:text-orange-400">{req.deliveredQty ?? 0}/{req.quantity}</span>
                                           ) : req.quantity}
                                         </TableCell>
-                                        <TableCell className="text-xs text-center py-2">{req.renewalDays} días</TableCell>
+                                        <TableCell className="text-xs text-center py-2">
+                                          {isPlazoFijo ? 'Entrega única' : `${req.renewalDays} días`}
+                                        </TableCell>
                                         <TableCell className="text-xs py-2">
                                           {req.lastDeliveryDate ? format(parseISO(req.lastDeliveryDate), 'dd/MM/yyyy') : 'Nunca'}
                                         </TableCell>
-                                        <TableCell className="text-xs py-2 font-semibold">
-                                          {req.nextDeliveryDate ? format(parseISO(req.nextDeliveryDate), 'dd/MM/yyyy') : '—'}
+                                        <TableCell className="text-xs py-2 font-semibold text-slate-600 dark:text-slate-300">
+                                          {isPlazoFijo ? '—' : (req.nextDeliveryDate ? format(parseISO(req.nextDeliveryDate), 'dd/MM/yyyy') : '—')}
                                         </TableCell>
                                         <TableCell className="py-2">
                                           <Badge className={reqBadgeColor}>
@@ -2113,6 +2135,7 @@ export default function EPPPage() {
                   <TableRow>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Nombre del Implemento</TableHead>
+                    <TableHead className="text-center">Elegibilidad Contrato</TableHead>
                     <TableHead className="text-center">Usa Tallas</TableHead>
                     <TableHead>Campo Talla</TableHead>
                     <TableHead className="text-center">Renovación</TableHead>
@@ -2124,9 +2147,13 @@ export default function EPPPage() {
                     const sizeLabel = item.uses_sizes
                       ? formatSizeFieldLabel(item.size_field)
                       : '—';
-                    const renewalLabel = item.renewal_days >= 30
-                      ? `${Math.round(item.renewal_days / 30)} mes${Math.round(item.renewal_days / 30) !== 1 ? 'es' : ''}`
-                      : `${item.renewal_days} días`;
+                    const isPlazoFijo = item.contract_eligibility === 'PLAZO_FIJO';
+                    const renewalLabel = isPlazoFijo
+                      ? 'Entrega única (Sin renovación)'
+                      : item.renewal_days >= 30
+                        ? `${Math.round(item.renewal_days / 30)} mes${Math.round(item.renewal_days / 30) !== 1 ? 'es' : ''}`
+                        : `${item.renewal_days} días`;
+
                     return (
                       <TableRow key={item.id}>
                         <TableCell>
@@ -2140,6 +2167,21 @@ export default function EPPPage() {
                         </TableCell>
                         <TableCell className="font-semibold">{item.name}</TableCell>
                         <TableCell className="text-center">
+                          <Badge variant="outline" className={
+                            item.contract_eligibility === 'PLAZO_FIJO'
+                              ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 font-bold text-[10px]'
+                              : item.contract_eligibility === 'INDEFINIDO'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 font-bold text-[10px]'
+                                : 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-300 font-bold text-[10px]'
+                          }>
+                            {item.contract_eligibility === 'PLAZO_FIJO' 
+                              ? 'Solo Plazo Fijo' 
+                              : item.contract_eligibility === 'INDEFINIDO' 
+                                ? 'Solo Indefinido' 
+                                : 'Ambos'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
                           {item.uses_sizes 
                             ? <Badge className="bg-green-100 text-green-800 border-green-200 dark:bg-green-950/30 dark:text-green-400">Sí</Badge>
                             : <Badge variant="outline" className="text-slate-400 border-slate-200">Única</Badge>
@@ -2147,7 +2189,11 @@ export default function EPPPage() {
                         </TableCell>
                         <TableCell className="text-xs text-slate-500">{sizeLabel}</TableCell>
                         <TableCell className="text-center">
-                          <Badge variant="outline" className="border-orange-200 text-orange-700 dark:text-orange-400">
+                          <Badge variant="outline" className={
+                            isPlazoFijo
+                              ? 'border-amber-200 text-amber-700 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/20'
+                              : 'border-orange-200 text-orange-700 dark:text-orange-400'
+                          }>
                             {renewalLabel}
                           </Badge>
                         </TableCell>
@@ -3273,35 +3319,89 @@ export default function EPPPage() {
                 </div>
               )}
 
-              <div className="space-y-2 col-span-2">
-                <Label htmlFor="cat_renewal">Duración Planificada (Renovación) *</Label>
-                <select 
-                  id="cat_renewal"
-                  value={catRenewalDays}
-                  onChange={(e) => setCatRenewalDays(Number(e.target.value))}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <option value={30}>1 mes (30 días)</option>
-                  <option value={60}>2 meses (60 días)</option>
-                  <option value={90}>3 meses (90 días)</option>
-                  <option value={180}>6 meses (180 días)</option>
-                  <option value={365}>12 meses (365 días)</option>
-                  <option value={730}>24 meses (730 días)</option>
-                </select>
-                {![30, 60, 90, 180, 365, 730].includes(catRenewalDays) && (
-                  <div className="flex items-center gap-2 mt-1">
-                    <Label htmlFor="cat_renewal_custom" className="text-xs text-muted-foreground whitespace-nowrap">Personalizado (días):</Label>
-                    <Input 
-                      id="cat_renewal_custom"
-                      type="number" 
-                      min="1"
-                      value={catRenewalDays}
-                      onChange={(e) => setCatRenewalDays(Number(e.target.value))}
-                      className="h-8 w-24"
-                    />
-                  </div>
-                )}
+              {/* Elegibilidad de Contrato */}
+              <div className="space-y-2 col-span-2 bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
+                <Label className="text-xs font-bold uppercase text-slate-700 dark:text-slate-300">Elegibilidad según Contrato de Trabajo *</Label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                  <label className={`flex flex-col p-2.5 rounded-lg border cursor-pointer transition-all ${catContractEligibility === 'AMBOS' ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/20' : 'border-slate-200 dark:border-slate-800'}`}>
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800 dark:text-slate-200">
+                      <input 
+                        type="radio" 
+                        name="cat_eligibility" 
+                        checked={catContractEligibility === 'AMBOS'}
+                        onChange={() => setCatContractEligibility('AMBOS')}
+                        className="h-3.5 w-3.5 accent-blue-600"
+                      />
+                      Ambos Contratos
+                    </div>
+                    <span className="text-[10px] text-muted-foreground mt-1">Aplica a Plazo Fijo e Indefinido (renovación periódica).</span>
+                  </label>
+
+                  <label className={`flex flex-col p-2.5 rounded-lg border cursor-pointer transition-all ${catContractEligibility === 'INDEFINIDO' ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-slate-800'}`}>
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-emerald-800 dark:text-emerald-300">
+                      <input 
+                        type="radio" 
+                        name="cat_eligibility" 
+                        checked={catContractEligibility === 'INDEFINIDO'}
+                        onChange={() => setCatContractEligibility('INDEFINIDO')}
+                        className="h-3.5 w-3.5 accent-emerald-600"
+                      />
+                      Solo Indefinido
+                    </div>
+                    <span className="text-[10px] text-muted-foreground mt-1">Solo para contrato indefinido (ej: gabardina, con renovación).</span>
+                  </label>
+
+                  <label className={`flex flex-col p-2.5 rounded-lg border cursor-pointer transition-all ${catContractEligibility === 'PLAZO_FIJO' ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'}`}>
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-amber-800 dark:text-amber-300">
+                      <input 
+                        type="radio" 
+                        name="cat_eligibility" 
+                        checked={catContractEligibility === 'PLAZO_FIJO'}
+                        onChange={() => setCatContractEligibility('PLAZO_FIJO')}
+                        className="h-3.5 w-3.5 accent-amber-600"
+                      />
+                      Solo Plazo Fijo
+                    </div>
+                    <span className="text-[10px] text-muted-foreground mt-1">Solo para contrato fijo (ej: poplin, entrega única sin renovación).</span>
+                  </label>
+                </div>
               </div>
+
+              {catContractEligibility === 'PLAZO_FIJO' ? (
+                <div className="col-span-2 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-lg text-xs text-amber-800 dark:text-amber-300">
+                  ℹ️ <strong>Entrega Única:</strong> Este implemento es exclusivo para contratos a plazo fijo y se entregará una sola vez al ingresar. No tiene ciclo de renovación periódica.
+                </div>
+              ) : (
+                <div className="space-y-2 col-span-2">
+                  <Label htmlFor="cat_renewal">Duración Planificada (Renovación) *</Label>
+                  <select 
+                    id="cat_renewal"
+                    value={catRenewalDays}
+                    onChange={(e) => setCatRenewalDays(Number(e.target.value))}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value={30}>1 mes (30 días)</option>
+                    <option value={60}>2 meses (60 días)</option>
+                    <option value={90}>3 meses (90 días)</option>
+                    <option value={180}>6 meses (180 días)</option>
+                    <option value={365}>12 meses (365 días)</option>
+                    <option value={730}>24 meses (730 días)</option>
+                  </select>
+                  {![30, 60, 90, 180, 365, 730].includes(catRenewalDays) && (
+                    <div className="flex items-center gap-2 mt-1">
+                      <Label htmlFor="cat_renewal_custom" className="text-xs text-muted-foreground whitespace-nowrap">Personalizado (días):</Label>
+                      <Input 
+                        id="cat_renewal_custom"
+                        type="number" 
+                        min="1"
+                        value={catRenewalDays}
+                        onChange={(e) => setCatRenewalDays(Number(e.target.value))}
+                        className="h-8 w-24"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             
             <DialogFooter className="mt-4">

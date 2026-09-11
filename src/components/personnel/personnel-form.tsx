@@ -12,10 +12,11 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, CheckCircle2, XCircle, Phone, Mail } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Phone, Mail, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
-import { createPersonnel, updatePersonnel, deletePersonnel } from '@/app/(dashboard)/personnel/actions';
+import { createPersonnel, updatePersonnel, deletePersonnel, changeToIndefiniteContract, renewFixedContract, getContractHistory } from '@/app/(dashboard)/personnel/actions';
 import { generateDismissalActa } from '@/app/(dashboard)/personnel/generate-dismissal-acta';
+import { addDays, parseISO, format } from 'date-fns';
 import { Checkbox } from '@/components/ui/checkbox';
 import { 
   Dialog, 
@@ -285,6 +286,95 @@ export function PersonnelForm({
 
   const [requiresShifts, setRequiresShifts] = useState<boolean>((personnel as any)?.requires_shifts ?? true);
 
+  // ── Contract Type & Duration States ─────────────────────────────────────────
+  const [contractType, setContractType] = useState<'PLAZO_FIJO' | 'INDEFINIDO'>(
+    (personnel?.contract_type as 'PLAZO_FIJO' | 'INDEFINIDO') || 'PLAZO_FIJO'
+  );
+  const [contractStartDate, setContractStartDate] = useState(
+    personnel?.contract_start_date || personnel?.hire_date || new Date().toISOString().split('T')[0]
+  );
+  const [contractDurationDays, setContractDurationDays] = useState<number>(
+    personnel?.contract_duration_days ?? 90
+  );
+  const [indefiniteContractDate, setIndefiniteContractDate] = useState(
+    personnel?.indefinite_contract_date || ''
+  );
+
+  // Calculated contract end date
+  const computedEndDate = (() => {
+    if (contractType !== 'PLAZO_FIJO' || !contractStartDate || !contractDurationDays) return '';
+    try {
+      return format(addDays(parseISO(contractStartDate), Number(contractDurationDays)), 'yyyy-MM-dd');
+    } catch {
+      return '';
+    }
+  })();
+
+  // Transition to Indefinite Contract Dialog
+  const [isIndefiniteDialogOpen, setIsIndefiniteDialogOpen] = useState(false);
+  const [indefiniteChangeDate, setIndefiniteChangeDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [indefiniteNotes, setIndefiniteNotes] = useState('');
+
+  // Fixed Contract Renewal Dialog
+  const [isRenewDialogOpen, setIsRenewDialogOpen] = useState(false);
+  const [renewStartDate, setRenewStartDate] = useState(() => computedEndDate || new Date().toISOString().split('T')[0]);
+  const [renewDurationDays, setRenewDurationDays] = useState(90);
+  const [renewNotes, setRenewNotes] = useState('');
+
+  // Contract History State
+  const [contractHistories, setContractHistories] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (personnel?.id) {
+      getContractHistory(personnel.id).then(res => {
+        if (res.data) setContractHistories(res.data);
+      });
+    }
+  }, [personnel?.id]);
+
+  const handleConfirmIndefinite = () => {
+    if (!personnel?.id) return;
+    if (!indefiniteChangeDate) {
+      toast.error('Selecciona la fecha del cambio a indefinido');
+      return;
+    }
+    startTransition(async () => {
+      const res = await changeToIndefiniteContract(personnel.id, indefiniteChangeDate, indefiniteNotes);
+      if (res.success) {
+        toast.success('Trabajador actualizado a Contrato Indefinido');
+        setContractType('INDEFINIDO');
+        setIndefiniteContractDate(indefiniteChangeDate);
+        setContractStartDate(indefiniteChangeDate);
+        setIsIndefiniteDialogOpen(false);
+        const updatedHist = await getContractHistory(personnel.id);
+        if (updatedHist.data) setContractHistories(updatedHist.data);
+      } else {
+        toast.error(res.error || 'Error al cambiar a contrato indefinido');
+      }
+    });
+  };
+
+  const handleConfirmRenewal = () => {
+    if (!personnel?.id) return;
+    if (!renewStartDate || !renewDurationDays) {
+      toast.error('Ingresa la fecha de inicio y duración en días');
+      return;
+    }
+    startTransition(async () => {
+      const res = await renewFixedContract(personnel.id, renewStartDate, renewDurationDays, renewNotes);
+      if (res.success) {
+        toast.success(`Contrato a Plazo Fijo renovado por ${renewDurationDays} días`);
+        setContractStartDate(renewStartDate);
+        setContractDurationDays(renewDurationDays);
+        setIsRenewDialogOpen(false);
+        const updatedHist = await getContractHistory(personnel.id);
+        if (updatedHist.data) setContractHistories(updatedHist.data);
+      } else {
+        toast.error(res.error || 'Error al renovar contrato');
+      }
+    });
+  };
+
   // Stabilize initial values for uncontrolled inputs to satisfy Base UI
   const [initialValues] = useState(() => {
     const addr = (personnel?.address as { street?: string; city?: string; region?: string; comuna?: string }) || {};
@@ -386,6 +476,14 @@ export function PersonnelForm({
     formData.set('bank_account_type', bankAccountType);
     formData.set('bank_name', bankName);
     formData.set('bank_account_number', bankAccountNumber);
+
+    // Contract fields
+    formData.set('contract_type', contractType);
+    formData.set('contract_start_date', contractStartDate);
+    formData.set('contract_duration_days', String(contractDurationDays));
+    formData.set('contract_end_date', computedEndDate);
+    formData.set('indefinite_contract_date', indefiniteContractDate);
+    formData.set('hire_date', contractStartDate);
 
 
     // Block submission if validations fail
@@ -1036,7 +1134,13 @@ export function PersonnelForm({
 
             <div className="space-y-2">
               <Label htmlFor="hire_date">Fecha de Ingreso (Contratación)</Label>
-              <DatePickerField id="hire_date" name="hire_date" value={initialValues.hire_date} />
+              <input
+                id="hire_date"
+                type="date"
+                value={contractStartDate}
+                onChange={(e) => setContractStartDate(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
               <p className="text-[10px] text-muted-foreground italic">No se podrán asignar turnos antes de esta fecha.</p>
             </div>
 
@@ -1044,6 +1148,137 @@ export function PersonnelForm({
               <Label htmlFor="termination_date">Fecha de Baja (Si renuncia)</Label>
               <DatePickerField id="termination_date" name="termination_date" value={initialValues.termination_date} />
               <p className="text-[10px] text-muted-foreground italic">Pasada esta fecha, el trabajador quedará bloqueado en el roster.</p>
+            </div>
+
+            {/* Contract Type Details */}
+            <div className="md:col-span-2 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-black uppercase text-slate-800 dark:text-slate-200">Tipo de Contrato</Label>
+                  <Badge className={contractType === 'INDEFINIDO' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-black uppercase text-[10px]' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-black uppercase text-[10px]'}>
+                    {contractType === 'INDEFINIDO' ? 'Indefinido' : 'Plazo Fijo'}
+                  </Badge>
+                </div>
+                {isEditing && (
+                  <div className="flex items-center gap-2">
+                    {contractType === 'PLAZO_FIJO' && (
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setIsRenewDialogOpen(true)}
+                          className="h-8 text-xs font-bold border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300 rounded-lg"
+                        >
+                          Renovar Plazo Fijo
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => setIsIndefiniteDialogOpen(true)}
+                          className="h-8 text-xs font-black uppercase bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg"
+                        >
+                          Pasar a Indefinido
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="contract_type" className="text-xs font-bold">Tipo de Contrato Actual</Label>
+                  <select
+                    id="contract_type"
+                    value={contractType}
+                    onChange={(e) => setContractType(e.target.value as any)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="PLAZO_FIJO">Plazo Fijo</option>
+                    <option value="INDEFINIDO">Indefinido</option>
+                  </select>
+                </div>
+
+                {contractType === 'PLAZO_FIJO' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="contract_duration_days" className="text-xs font-bold">Duración (Días) *</Label>
+                      <Input
+                        id="contract_duration_days"
+                        type="number"
+                        min="1"
+                        max="730"
+                        value={contractDurationDays}
+                        onChange={(e) => setContractDurationDays(parseInt(e.target.value, 10) || 0)}
+                        placeholder="Ej: 30, 60, 90"
+                        className="bg-white dark:bg-slate-900"
+                        required={contractType === 'PLAZO_FIJO'}
+                      />
+                      <p className="text-[10px] text-muted-foreground">Ej: 30, 60, 90 o 180 días.</p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold">Fecha de Término (Calculada)</Label>
+                      <Input
+                        type="text"
+                        readOnly
+                        value={computedEndDate ? format(parseISO(computedEndDate), 'dd/MM/yyyy') : '—'}
+                        className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold cursor-not-allowed"
+                      />
+                      <p className="text-[10px] text-muted-foreground italic">Calculada automáticamente: Inicio + Días</p>
+                    </div>
+                  </>
+                )}
+
+                {contractType === 'INDEFINIDO' && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="indefinite_contract_date" className="text-xs font-bold">Fecha Paso a Indefinido</Label>
+                    <input
+                      id="indefinite_contract_date"
+                      type="date"
+                      value={indefiniteContractDate || contractStartDate}
+                      onChange={(e) => setIndefiniteContractDate(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Mini Contract History in Form */}
+              {contractHistories.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  <p className="text-xs font-bold uppercase text-slate-500 mb-2">Historial de Contratos Registrados</p>
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden text-xs">
+                    <table className="w-full text-left">
+                      <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                        <tr>
+                          <th className="p-2">Tipo</th>
+                          <th className="p-2">Inicio</th>
+                          <th className="p-2">Duración</th>
+                          <th className="p-2">Término</th>
+                          <th className="p-2">Notas</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {contractHistories.map((h, i) => (
+                          <tr key={h.id || i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
+                            <td className="p-2 font-bold">
+                              <span className={h.contract_type === 'INDEFINIDO' ? 'text-emerald-600' : 'text-amber-600'}>
+                                {h.contract_type === 'INDEFINIDO' ? 'Indefinido' : 'Plazo Fijo'}
+                              </span>
+                            </td>
+                            <td className="p-2">{h.start_date ? format(parseISO(h.start_date), 'dd/MM/yyyy') : '—'}</td>
+                            <td className="p-2">{h.duration_days ? `${h.duration_days} días` : '—'}</td>
+                            <td className="p-2">{h.end_date ? format(parseISO(h.end_date), 'dd/MM/yyyy') : '—'}</td>
+                            <td className="p-2 text-muted-foreground">{h.notes || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between p-3 rounded-lg border border-orange-100 bg-orange-50/30 md:col-span-2">
@@ -1264,6 +1499,129 @@ export function PersonnelForm({
               className="bg-rose-600 hover:bg-rose-700 text-white rounded-xl px-6 font-black uppercase text-xs"
             >
               {isPending ? 'Procesando...' : 'Confirmar Baja'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG: PASAR A CONTRATO INDEFINIDO */}
+      <Dialog open={isIndefiniteDialogOpen} onOpenChange={setIsIndefiniteDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white dark:bg-slate-900 border-none shadow-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase tracking-tight flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              Pasar a Contrato Indefinido
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Registra el cambio de contrato a indefinido para {personnel?.first_name} {personnel?.last_name_father}. Esto se guardará en su hoja de vida/historial y habilitará los uniformes de contrato indefinido.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="indefinite-date" className="text-sm font-semibold">Fecha de Cambio a Indefinido *</Label>
+              <input
+                id="indefinite-date"
+                type="date"
+                value={indefiniteChangeDate}
+                onChange={e => setIndefiniteChangeDate(e.target.value)}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="indefinite-notes" className="text-sm font-semibold">Notas / Observaciones (Opcional)</Label>
+              <textarea
+                id="indefinite-notes"
+                placeholder="Ej: Cumplimiento satisfactorio de período de prueba..."
+                value={indefiniteNotes}
+                onChange={e => setIndefiniteNotes(e.target.value)}
+                className="flex min-h-[80px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-400"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="mt-2 gap-2 flex-col sm:flex-row">
+            <Button variant="ghost" onClick={() => setIsIndefiniteDialogOpen(false)} className="rounded-xl font-bold uppercase text-xs">
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleConfirmIndefinite}
+              disabled={isPending || !indefiniteChangeDate}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl px-6 font-black uppercase text-xs"
+            >
+              {isPending ? 'Guardando...' : 'Confirmar Cambio a Indefinido'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG: RENOVAR CONTRATO PLAZO FIJO */}
+      <Dialog open={isRenewDialogOpen} onOpenChange={setIsRenewDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white dark:bg-slate-900 border-none shadow-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase tracking-tight flex items-center gap-2">
+              <Repeat className="h-5 w-5 text-amber-500" />
+              Renovar Contrato Plazo Fijo
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Registra una renovación de plazo fijo para {personnel?.first_name} {personnel?.last_name_father}. Se creará un nuevo período en su historial.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="renew-start-date" className="text-sm font-semibold">Fecha Inicio Nuevo Período *</Label>
+              <input
+                id="renew-start-date"
+                type="date"
+                value={renewStartDate}
+                onChange={e => setRenewStartDate(e.target.value)}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="renew-days" className="text-sm font-semibold">Duración en Días *</Label>
+              <Input
+                id="renew-days"
+                type="number"
+                min="1"
+                max="730"
+                value={renewDurationDays}
+                onChange={e => setRenewDurationDays(parseInt(e.target.value, 10) || 0)}
+                className="focus:ring-2 focus:ring-amber-500"
+                required
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Fecha de término estimada: <strong>{renewStartDate && renewDurationDays ? format(addDays(parseISO(renewStartDate), renewDurationDays), 'dd/MM/yyyy') : '—'}</strong>
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="renew-notes" className="text-sm font-semibold">Notas / Observaciones (Opcional)</Label>
+              <textarea
+                id="renew-notes"
+                placeholder="Ej: Anexo de renovación 1..."
+                value={renewNotes}
+                onChange={e => setRenewNotes(e.target.value)}
+                className="flex min-h-[80px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 placeholder:text-slate-400"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="mt-2 gap-2 flex-col sm:flex-row">
+            <Button variant="ghost" onClick={() => setIsRenewDialogOpen(false)} className="rounded-xl font-bold uppercase text-xs">
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleConfirmRenewal}
+              disabled={isPending || !renewStartDate || !renewDurationDays}
+              className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl px-6 font-black uppercase text-xs"
+            >
+              {isPending ? 'Guardando...' : 'Confirmar Renovación'}
             </Button>
           </DialogFooter>
         </DialogContent>

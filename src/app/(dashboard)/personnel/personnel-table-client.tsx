@@ -51,6 +51,7 @@ import { createOnboardingToken, approveOnboarding, rejectOnboarding, deletePerso
 import { createWorkerSizeToken } from '../epp/actions';
 import { createPersonnelUpdateToken, sendFichaUpdateWhatsApp } from './update-actions';
 import { generateDismissalActa } from './generate-dismissal-acta';
+import { addDays, parseISO, format } from 'date-fns';
 
 
 interface Personnel {
@@ -92,6 +93,11 @@ interface Personnel {
   emergency_contact_phone?: string | null;
   gender?: string | null;
   marital_status?: string | null;
+  contract_type?: 'PLAZO_FIJO' | 'INDEFINIDO' | null;
+  contract_start_date?: string | null;
+  contract_duration_days?: number | null;
+  contract_end_date?: string | null;
+  indefinite_contract_date?: string | null;
   missingFields?: string[];
   missingDocs?: string[];
   hasTica?: boolean;
@@ -172,6 +178,9 @@ export default function PersonnelTableClient({
   const [approveRotationPattern, setApproveRotationPattern] = useState('5x2');
   const [approveFixedShiftId, setApproveFixedShiftId] = useState('');
   const [approveEnableAccess, setApproveEnableAccess] = useState(true);
+  const [approveContractType, setApproveContractType] = useState<'PLAZO_FIJO' | 'INDEFINIDO'>('PLAZO_FIJO');
+  const [approveContractDurationDays, setApproveContractDurationDays] = useState<number>(90);
+  const [approveContractStartDate, setApproveContractStartDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   // Rejection states
   const [isRejectOpen, setIsRejectOpen] = useState(false);
@@ -216,6 +225,10 @@ export default function PersonnelTableClient({
       toast.error('Selecciona un cargo principal para el trabajador');
       return;
     }
+    if (approveContractType === 'PLAZO_FIJO' && !approveContractDurationDays) {
+      toast.error('Ingresa la cantidad de días del contrato a plazo fijo');
+      return;
+    }
 
     startTransition(async () => {
       const res = await approveOnboarding(
@@ -223,7 +236,10 @@ export default function PersonnelTableClient({
         approvePositionId,
         approveRotationPattern,
         approveFixedShiftId || null,
-        approveEnableAccess
+        approveEnableAccess,
+        approveContractType,
+        approveContractType === 'PLAZO_FIJO' ? approveContractDurationDays : null,
+        approveContractStartDate
       );
 
       if (res.success) {
@@ -355,6 +371,7 @@ export default function PersonnelTableClient({
     { id: 'rut', label: 'RUT', defaultVisible: true },
     { id: 'main_position', label: 'Cargo', defaultVisible: true },
     { id: 'company', label: 'Empresa', defaultVisible: true },
+    { id: 'contract_type', label: 'Tipo Contrato', defaultVisible: true },
     { id: 'epp_sizes', label: 'Tallas EPP', defaultVisible: true },
     { id: 'rotation_pattern', label: 'Planificación', defaultVisible: true },
     { id: 'preferences', label: 'Preferencias', defaultVisible: true },
@@ -468,7 +485,10 @@ export default function PersonnelTableClient({
           row['Cargo'] = positionMap[p.main_position] || p.main_position || '';
         }
         if (visibleColumns.company) {
-          row['Empresa'] = p.company?.name || '';
+          row['Empresa'] = (p.company as { name: string } | null)?.name || '';
+        }
+        if (visibleColumns.contract_type) {
+          row['Tipo de Contrato'] = p.contract_type === 'INDEFINIDO' ? 'Indefinido' : 'Plazo Fijo';
         }
         if (visibleColumns.rotation_pattern) {
           row['Planificación / Rotación'] = p.rotation_pattern || 'Estándar';
@@ -630,6 +650,7 @@ export default function PersonnelTableClient({
                 {visibleColumns.rut && <TableHead>RUT</TableHead>}
                 {visibleColumns.main_position && <TableHead>Cargo</TableHead>}
                 {visibleColumns.company && <TableHead>Empresa</TableHead>}
+                {visibleColumns.contract_type && <TableHead>Contrato</TableHead>}
                 {visibleColumns.epp_sizes && <TableHead>Tallas EPP</TableHead>}
                 {visibleColumns.rotation_pattern && <TableHead>Planificación</TableHead>}
                 {visibleColumns.preferences && <TableHead>Preferencias</TableHead>}
@@ -800,6 +821,22 @@ export default function PersonnelTableClient({
                       </TableCell>
                     )}
 
+                    {/* Contrato Cell */}
+                    {visibleColumns.contract_type && (
+                      <TableCell>
+                        <Badge 
+                          variant="outline" 
+                          className={
+                            (person as any).contract_type === 'INDEFINIDO'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800 text-[10px] font-black uppercase'
+                              : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-800 text-[10px] font-black uppercase'
+                          }
+                        >
+                          {(person as any).contract_type === 'INDEFINIDO' ? 'Indefinido' : 'Plazo Fijo'}
+                        </Badge>
+                      </TableCell>
+                    )}
+
                     {/* Tallas EPP Cell */}
                     {visibleColumns.epp_sizes && (
                       <TableCell>
@@ -960,6 +997,9 @@ export default function PersonnelTableClient({
                                   setApproveRotationPattern(person.rotation_pattern || '5x2');
                                   setApproveFixedShiftId(person.fixed_shift_id || '');
                                   setApproveEnableAccess(true);
+                                  setApproveContractType(((person as any).contract_type as any) || 'PLAZO_FIJO');
+                                  setApproveContractDurationDays((person as any).contract_duration_days || 90);
+                                  setApproveContractStartDate((person as any).contract_start_date || (person as any).hire_date || new Date().toISOString().split('T')[0]);
                                   setIsApproveOpen(true);
                                 }}
                                 className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
@@ -1194,6 +1234,56 @@ export default function PersonnelTableClient({
                   <option key={s.id} value={s.id}>{s.name} ({s.start_time.substring(0,5)} - {s.end_time.substring(0,5)})</option>
                 ))}
               </select>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="approve-contract-type" className="text-xs font-bold uppercase text-slate-600 dark:text-slate-300">Tipo de Contrato *</Label>
+                <select 
+                  id="approve-contract-type" 
+                  value={approveContractType}
+                  onChange={e => setApproveContractType(e.target.value as any)}
+                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 font-semibold"
+                >
+                  <option value="PLAZO_FIJO">Plazo Fijo (Default)</option>
+                  <option value="INDEFINIDO">Indefinido</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="approve-contract-start" className="text-xs font-bold text-slate-600 dark:text-slate-300">Fecha Inicio *</Label>
+                  <input
+                    id="approve-contract-start"
+                    type="date"
+                    value={approveContractStartDate}
+                    onChange={e => setApproveContractStartDate(e.target.value)}
+                    className="flex h-9 w-full rounded-lg border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+
+                {approveContractType === 'PLAZO_FIJO' ? (
+                  <div className="space-y-1">
+                    <Label htmlFor="approve-contract-days" className="text-xs font-bold text-slate-600 dark:text-slate-300">Duración (Días) *</Label>
+                    <input
+                      id="approve-contract-days"
+                      type="number"
+                      min="1"
+                      max="730"
+                      value={approveContractDurationDays}
+                      onChange={e => setApproveContractDurationDays(parseInt(e.target.value, 10) || 0)}
+                      placeholder="Ej: 90"
+                      className="flex h-9 w-full rounded-lg border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                ) : null}
+              </div>
+
+              {approveContractType === 'PLAZO_FIJO' && approveContractStartDate && approveContractDurationDays ? (
+                <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                  Fecha de término estimada: <strong>{format(addDays(parseISO(approveContractStartDate), approveContractDurationDays), 'dd/MM/yyyy')}</strong>
+                </p>
+              ) : null}
             </div>
 
             <div className="flex items-center justify-between p-3 rounded-lg border border-blue-100 bg-blue-50/20">

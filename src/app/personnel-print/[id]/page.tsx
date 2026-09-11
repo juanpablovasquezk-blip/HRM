@@ -281,6 +281,20 @@ export default async function PersonnelPrintPage({
               </p>
             </div>
             <div>
+              <p className="text-slate-400 font-bold uppercase text-[9px] print:text-[8px]">Tipo de Contrato</p>
+              <p className="font-bold text-slate-855 dark:text-slate-200 print:text-black text-[11px] uppercase">
+                {person.contract_type === 'INDEFINIDO' ? 'INDEFINIDO' : `PLAZO FIJO${person.contract_duration_days ? ` (${person.contract_duration_days} DÍAS)` : ''}`}
+              </p>
+            </div>
+            <div>
+              <p className="text-slate-400 font-bold uppercase text-[9px] print:text-[8px]">Vigencia / Término</p>
+              <p className="font-semibold text-slate-855 dark:text-slate-200 print:text-black">
+                {person.contract_type === 'INDEFINIDO'
+                  ? (person.indefinite_contract_date ? `Indefinido desde ${format(new Date(person.indefinite_contract_date), 'dd/MM/yyyy')}` : 'Indefinido')
+                  : (person.contract_end_date ? format(new Date(person.contract_end_date), 'dd/MM/yyyy') : '—')}
+              </p>
+            </div>
+            <div>
               <p className="text-slate-400 font-bold uppercase text-[9px] print:text-[8px]">Planificación (Rotación)</p>
               <p className="font-semibold text-slate-855 dark:text-slate-200 print:text-black text-[11px]">
                 {person.rotation_pattern === '5x2' ? '5X2 ROTATIVO (SEMANAL)' : 
@@ -299,7 +313,7 @@ export default async function PersonnelPrintPage({
             <div>
               <p className="text-slate-400 font-bold uppercase text-[9px] print:text-[8px]">Fecha Contratación</p>
               <p className="font-semibold text-slate-855 dark:text-slate-200 print:text-black">
-                {person.hire_date ? format(new Date(person.hire_date), 'dd/MM/yyyy') : '—'}
+                {person.contract_start_date || person.hire_date ? format(new Date(person.contract_start_date || person.hire_date), 'dd/MM/yyyy') : '—'}
               </p>
             </div>
             <div>

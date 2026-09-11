@@ -7,6 +7,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createSupabaseAdminClient } from '@supabase/supabase-js';
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
+import { addDays, parseISO, format } from 'date-fns';
 
 function safeRevalidatePath(path: string) {
   try {
@@ -162,9 +163,24 @@ export async function createPersonnel(
     // Contract fields
     nationality: toUpper(formData.get('nationality')) || 'CHILENA',
     marital_status: toUpper(formData.get('marital_status')) || null,
+    contract_type: ((formData.get('contract_type') as 'PLAZO_FIJO' | 'INDEFINIDO') || 'PLAZO_FIJO'),
+    contract_start_date: (formData.get('contract_start_date') as string) || (formData.get('hire_date') as string) || null,
+    contract_duration_days: formData.get('contract_duration_days') ? parseInt(formData.get('contract_duration_days') as string, 10) : null,
+    contract_end_date: (formData.get('contract_end_date') as string) || null,
+    indefinite_contract_date: (formData.get('indefinite_contract_date') as string) || null,
   };
 
-
+  // Calculate contract_end_date if prazo fijo and start date + duration provided
+  if (personnelData.contract_type === 'PLAZO_FIJO' && personnelData.contract_start_date && personnelData.contract_duration_days) {
+    try {
+      personnelData.contract_end_date = format(addDays(parseISO(personnelData.contract_start_date), personnelData.contract_duration_days), 'yyyy-MM-dd');
+    } catch {
+      // Keep existing contract_end_date if calculation fails
+    }
+  } else if (personnelData.contract_type === 'INDEFINIDO') {
+    personnelData.contract_duration_days = null;
+    personnelData.contract_end_date = null;
+  }
 
   const todayStr = new Date().toLocaleDateString('sv');
   if (personnelData.termination_date && personnelData.termination_date <= todayStr) {
@@ -179,6 +195,20 @@ export async function createPersonnel(
     insertError = retry.error;
   }
   if (insertError) return { success: false, error: insertError.message };
+
+  // Create initial contract history record
+  if (person?.id && personnelData.contract_start_date) {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from('personnel_contract_history').insert({
+      personnel_id: person.id,
+      contract_type: personnelData.contract_type || 'PLAZO_FIJO',
+      start_date: personnelData.contract_start_date,
+      duration_days: personnelData.contract_type === 'PLAZO_FIJO' ? personnelData.contract_duration_days : null,
+      end_date: personnelData.contract_type === 'PLAZO_FIJO' ? personnelData.contract_end_date : null,
+      notes: 'Contrato inicial',
+      created_by: user?.id || null,
+    });
+  }
 
   // Handle system access if requested
   if (formData.get('enable_access') === 'true' && personnelData.email) {
@@ -273,9 +303,24 @@ export async function updatePersonnel(
     // Contract fields
     nationality: toUpper(formData.get('nationality')) || 'CHILENA',
     marital_status: toUpper(formData.get('marital_status')) || null,
+    contract_type: ((formData.get('contract_type') as 'PLAZO_FIJO' | 'INDEFINIDO') || 'PLAZO_FIJO'),
+    contract_start_date: (formData.get('contract_start_date') as string) || (formData.get('hire_date') as string) || null,
+    contract_duration_days: formData.get('contract_duration_days') ? parseInt(formData.get('contract_duration_days') as string, 10) : null,
+    contract_end_date: (formData.get('contract_end_date') as string) || null,
+    indefinite_contract_date: (formData.get('indefinite_contract_date') as string) || null,
   };
 
-
+  // Calculate contract_end_date if prazo fijo and start date + duration provided
+  if (updateData.contract_type === 'PLAZO_FIJO' && updateData.contract_start_date && updateData.contract_duration_days) {
+    try {
+      updateData.contract_end_date = format(addDays(parseISO(updateData.contract_start_date), updateData.contract_duration_days), 'yyyy-MM-dd');
+    } catch {
+      // Keep existing contract_end_date if calculation fails
+    }
+  } else if (updateData.contract_type === 'INDEFINIDO') {
+    updateData.contract_duration_days = null;
+    updateData.contract_end_date = null;
+  }
 
   const todayStr = new Date().toLocaleDateString('sv');
   if (updateData.termination_date && updateData.termination_date <= todayStr) {
@@ -894,7 +939,10 @@ export async function approveOnboarding(
   mainPositionId: string,
   rotationPattern: string,
   fixedShiftId?: string | null,
-  enableAccess?: boolean
+  enableAccess?: boolean,
+  contractType: 'PLAZO_FIJO' | 'INDEFINIDO' = 'PLAZO_FIJO',
+  contractDurationDays?: number | null,
+  contractStartDate?: string | null
 ): Promise<{ success: boolean; error: string | null }> {
   try {
     const supabase = await createClient();
@@ -909,7 +957,20 @@ export async function approveOnboarding(
 
     if (fetchErr || !personnel) throw new Error('No se encontró la ficha de postulación');
 
-    // 2. Update status and configure roster fields
+    const startDate = contractStartDate || new Date().toISOString().split('T')[0];
+    let endDate: string | null = null;
+    let duration: number | null = null;
+
+    if (contractType === 'PLAZO_FIJO') {
+      duration = contractDurationDays || 90; // Default to 90 days if not provided
+      try {
+        endDate = format(addDays(parseISO(startDate), duration), 'yyyy-MM-dd');
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2. Update status and configure roster & contract fields
     const { error: updateErr } = await admin
       .from('personnel')
       .update({
@@ -918,13 +979,30 @@ export async function approveOnboarding(
         main_position: mainPositionId,
         rotation_pattern: rotationPattern,
         fixed_shift_id: fixedShiftId || null,
-        hire_date: new Date().toISOString().split('T')[0], // Set hire date to today
+        hire_date: startDate,
+        contract_type: contractType,
+        contract_start_date: startDate,
+        contract_duration_days: duration,
+        contract_end_date: endDate,
+        indefinite_contract_date: contractType === 'INDEFINIDO' ? startDate : null,
         rejection_reason: null,
         inactive_reason: null
       })
       .eq('id', personnelId);
 
     if (updateErr) throw updateErr;
+
+    // Insert first contract history record
+    const { data: { user } } = await supabase.auth.getUser();
+    await admin.from('personnel_contract_history').insert({
+      personnel_id: personnelId,
+      contract_type: contractType,
+      start_date: startDate,
+      duration_days: duration,
+      end_date: endDate,
+      notes: 'Contrato inicial al aprobar postulación',
+      created_by: user?.id || null,
+    });
 
     // 3. Create system access if email is present and requested
     if (enableAccess && personnel.email) {
@@ -1035,3 +1113,149 @@ export async function rejectOnboarding(
     return { success: false, error: error.message };
   }
 }
+
+// ── Contract Management Actions ───────────────────────────────────────────────
+
+export async function changeToIndefiniteContract(
+  personnelId: string,
+  changeDate: string,
+  notes?: string
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    const admin = createAdminClient();
+
+    // 1. Close current fixed-term contract history if open
+    const { data: latestHistory } = await supabase
+      .from('personnel_contract_history')
+      .select('id')
+      .eq('personnel_id', personnelId)
+      .is('end_date', null)
+      .order('start_date', { ascending: false })
+      .limit(1);
+
+    if (latestHistory && latestHistory.length > 0) {
+      await admin
+        .from('personnel_contract_history')
+        .update({ end_date: changeDate })
+        .eq('id', latestHistory[0].id);
+    }
+
+    // 2. Update personnel record
+    const { error: updateErr } = await admin
+      .from('personnel')
+      .update({
+        contract_type: 'INDEFINIDO',
+        indefinite_contract_date: changeDate,
+        contract_start_date: changeDate,
+        contract_duration_days: null,
+        contract_end_date: null,
+      })
+      .eq('id', personnelId);
+
+    if (updateErr) throw updateErr;
+
+    // 3. Insert new indefinite contract history entry
+    const { data: { user } } = await supabase.auth.getUser();
+    await admin.from('personnel_contract_history').insert({
+      personnel_id: personnelId,
+      contract_type: 'INDEFINIDO',
+      start_date: changeDate,
+      duration_days: null,
+      end_date: null,
+      notes: notes?.trim() || 'Paso a Contrato Indefinido',
+      created_by: user?.id || null,
+    });
+
+    safeRevalidatePath('/personnel');
+    safeRevalidatePath(`/personnel/${personnelId}`);
+    safeRevalidatePath('/epp');
+    return { success: true, error: null };
+  } catch (error: any) {
+    console.error('Error changing to indefinite contract:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function renewFixedContract(
+  personnelId: string,
+  startDate: string,
+  durationDays: number,
+  notes?: string
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    const admin = createAdminClient();
+
+    const endDate = format(addDays(parseISO(startDate), durationDays), 'yyyy-MM-dd');
+
+    // 1. Close previous open history entry if needed
+    const { data: openHistories } = await supabase
+      .from('personnel_contract_history')
+      .select('id')
+      .eq('personnel_id', personnelId)
+      .is('end_date', null)
+      .order('start_date', { ascending: false })
+      .limit(1);
+
+    if (openHistories && openHistories.length > 0) {
+      await admin
+        .from('personnel_contract_history')
+        .update({ end_date: startDate })
+        .eq('id', openHistories[0].id);
+    }
+
+    // 2. Update personnel record
+    const { error: updateErr } = await admin
+      .from('personnel')
+      .update({
+        contract_type: 'PLAZO_FIJO',
+        contract_start_date: startDate,
+        contract_duration_days: durationDays,
+        contract_end_date: endDate,
+      })
+      .eq('id', personnelId);
+
+    if (updateErr) throw updateErr;
+
+    // 3. Insert new fixed contract history entry
+    const { data: { user } } = await supabase.auth.getUser();
+    await admin.from('personnel_contract_history').insert({
+      personnel_id: personnelId,
+      contract_type: 'PLAZO_FIJO',
+      start_date: startDate,
+      duration_days: durationDays,
+      end_date: endDate,
+      notes: notes?.trim() || `Renovación Plazo Fijo (${durationDays} días)`,
+      created_by: user?.id || null,
+    });
+
+    safeRevalidatePath('/personnel');
+    safeRevalidatePath(`/personnel/${personnelId}`);
+    safeRevalidatePath('/epp');
+    return { success: true, error: null };
+  } catch (error: any) {
+    console.error('Error renewing fixed contract:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function getContractHistory(
+  personnelId: string
+): Promise<{ data: any[]; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('personnel_contract_history')
+      .select('*')
+      .eq('personnel_id', personnelId)
+      .order('start_date', { ascending: false });
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (error: any) {
+    console.error('Error fetching contract history:', error);
+    return { data: [], error: error.message };
+  }
+}
+

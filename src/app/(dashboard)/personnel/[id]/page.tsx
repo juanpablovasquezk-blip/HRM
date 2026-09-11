@@ -51,6 +51,7 @@ export default async function PersonnelDetailPage({
     { data: riohsRecord },
     { data: companyDocsData },
     { data: bonusesData },
+    { data: contractHistoryData },
     role
   ] = await Promise.all([
     supabase.from('personnel').select('*, company:companies(id, name, rut, legal_name), documents(*)').eq('id', id).single(),
@@ -60,6 +61,7 @@ export default async function PersonnelDetailPage({
     adminSupabase.from('riohs_records').select('*').eq('personnel_id', id).maybeSingle(),
     supabase.from('company_documents').select('*'),
     adminSupabase.from('special_bonuses').select('*').eq('personnel_id', id).order('date', { ascending: false }),
+    adminSupabase.from('personnel_contract_history').select('*').eq('personnel_id', id).order('start_date', { ascending: false }),
     getUserRole()
   ]);
 
@@ -364,6 +366,74 @@ export default async function PersonnelDetailPage({
                     )}
                   </div>
                 </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Tarjeta de Información Contractual */}
+          <Card className="border-slate-200/60 dark:border-slate-800 shadow-sm">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-blue-600" />
+                  Contrato de Trabajo
+                </CardTitle>
+                <Badge className={person.contract_type === 'INDEFINIDO' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold uppercase text-[10px]' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold uppercase text-[10px]'}>
+                  {person.contract_type === 'INDEFINIDO' ? 'Indefinido' : 'Plazo Fijo'}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-muted-foreground">Fecha Inicio / Ingreso:</span>
+                <span className="font-semibold">{person.contract_start_date || person.hire_date ? format(new Date(person.contract_start_date || person.hire_date), 'dd/MM/yyyy') : '—'}</span>
+              </div>
+
+              {person.contract_type === 'PLAZO_FIJO' && (
+                <>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-muted-foreground">Duración del Contrato:</span>
+                    <span className="font-semibold">{person.contract_duration_days ? `${person.contract_duration_days} días` : '—'}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-muted-foreground">Fecha de Término:</span>
+                    <span className="font-bold text-amber-700 dark:text-amber-400">
+                      {person.contract_end_date ? format(new Date(person.contract_end_date), 'dd/MM/yyyy') : '—'}
+                    </span>
+                  </div>
+                </>
+              )}
+
+              {person.contract_type === 'INDEFINIDO' && person.indefinite_contract_date && (
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-muted-foreground">Paso a Indefinido:</span>
+                  <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                    {format(new Date(person.indefinite_contract_date), 'dd/MM/yyyy')}
+                  </span>
+                </div>
+              )}
+
+              {/* Mini History List */}
+              {contractHistoryData && contractHistoryData.length > 0 && (
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                  <p className="text-[10px] font-bold uppercase text-muted-foreground">Historial de Períodos</p>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                    {contractHistoryData.map((h: any, i: number) => (
+                      <div key={h.id || i} className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-[11px] space-y-0.5">
+                        <div className="flex items-center justify-between font-bold">
+                          <span className={h.contract_type === 'INDEFINIDO' ? 'text-emerald-600' : 'text-amber-600'}>
+                            {h.contract_type === 'INDEFINIDO' ? 'Indefinido' : `Plazo Fijo (${h.duration_days || '—'}d)`}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {h.start_date ? format(new Date(h.start_date), 'dd/MM/yy') : ''}
+                            {h.end_date ? ` → ${format(new Date(h.end_date), 'dd/MM/yy')}` : ''}
+                          </span>
+                        </div>
+                        {h.notes && <p className="text-[10px] text-muted-foreground italic">{h.notes}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>
