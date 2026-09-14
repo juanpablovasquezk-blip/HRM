@@ -102,7 +102,13 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
   const [isSaving, setIsSaving] = useState(false);
   const [isNotifying, setIsNotifying] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
-  const [isTimePending, setIsTimePending] = useState(false);
+  const [isTimePending, setIsTimePending] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`hrm_fedex_confirmed_${req.date}`);
+      if (saved === 'false') return true;
+    }
+    return false;
+  });
   const [selectedShiftId, setSelectedShiftId] = useState(req.assignment?.shift_id || '');
   const [isUpdatingShift, setIsUpdatingShift] = useState(false);
   const [isAssigningDriver, setIsAssigningDriver] = useState(false);
@@ -127,7 +133,15 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
     if (extractedProvider) {
       setProviderName(extractedProvider);
     }
-  }, [req.reservation_number, req.pickup_time, req.observations, req.cost, req.assignment?.shift_id, extractedProvider]);
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`hrm_fedex_confirmed_${req.date}`);
+      if (saved === 'false') {
+        setIsTimePending(true);
+      } else if (saved === 'true') {
+        setIsTimePending(false);
+      }
+    }
+  }, [req.reservation_number, req.pickup_time, req.observations, req.cost, req.assignment?.shift_id, extractedProvider, req.date]);
 
   // List of potential drivers: strictly those who have transport_type === 'PROPIO' on the same date and type
   const potentialDrivers = React.useMemo(() => {

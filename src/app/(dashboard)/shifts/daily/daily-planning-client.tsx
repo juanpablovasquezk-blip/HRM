@@ -72,6 +72,27 @@ export default function DailyPlanningClient({
   const [loadingAvailable, setLoadingAvailable] = useState<string | null>(null);
   const [availablePersonnel, setAvailablePersonnel] = useState<Record<string, any[]>>({});
   const [isConfirmed, setIsConfirmed] = useState(initialAssignments.some(a => a.is_confirmed));
+  const [isFedexConfirmed, setIsFedexConfirmed] = useState(true);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`hrm_fedex_confirmed_${selectedDate}`);
+      if (saved !== null) {
+        setIsFedexConfirmed(saved === 'true');
+      } else {
+        setIsFedexConfirmed(true);
+      }
+    }
+  }, [selectedDate]);
+
+  const handleToggleFedexConfirmed = (confirmed: boolean) => {
+    setIsFedexConfirmed(confirmed);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`hrm_fedex_confirmed_${selectedDate}`, String(confirmed));
+    }
+    toast.success(confirmed ? 'Horario de FedEx marcado como CONFIRMADO' : 'Horario de FedEx marcado como PENDIENTE');
+  };
+
   const [isConfirming, setIsConfirming] = useState(false);
   
   // State for quick edit modal
@@ -1058,9 +1079,31 @@ export default function DailyPlanningClient({
             )}
             {/* FEDEX Grouping */}
             {fedex.length > 0 && (
-              <div className="space-y-1">
-                 <div className="flex items-center gap-2">
+              <div className="space-y-1.5">
+                 <div className="flex items-center gap-2.5 flex-wrap">
                    <span className="bg-slate-900 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase" style={{ backgroundColor: '#0f172a', color: '#ffffff' }}>FEDEX</span>
+                   
+                   {!readOnly && (
+                     <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded cursor-pointer no-print hover:bg-slate-200 transition-colors">
+                       <input 
+                         type="checkbox"
+                         checked={isFedexConfirmed}
+                         onChange={(e) => handleToggleFedexConfirmed(e.target.checked)}
+                         className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
+                       />
+                       <span>{isFedexConfirmed ? '✓ Horario Confirmado' : '⚠️ Horario por Confirmar'}</span>
+                     </label>
+                   )}
+
+                   {isFedexConfirmed ? (
+                     <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded print:inline-block">
+                       ✓ Horario Confirmado
+                     </span>
+                   ) : (
+                     <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded print:inline-block">
+                       ⚠️ Horario por Confirmar
+                     </span>
+                   )}
                  </div>
                  <div className="flex flex-wrap gap-x-5 gap-y-2 pl-1">
                     {fedex.map(a => (
