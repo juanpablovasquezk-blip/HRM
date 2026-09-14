@@ -296,6 +296,9 @@ export function PersonnelForm({
   const [requiresShifts, setRequiresShifts] = useState<boolean>((personnel as any)?.requires_shifts ?? true);
 
   // ── Contract Type & Duration States ─────────────────────────────────────────
+  const [hireDate, setHireDate] = useState(
+    personnel?.hire_date || personnel?.contract_start_date || new Date().toISOString().split('T')[0]
+  );
   const [contractType, setContractType] = useState<'PLAZO_FIJO' | 'INDEFINIDO'>(
     (personnel?.contract_type as 'PLAZO_FIJO' | 'INDEFINIDO') || 'PLAZO_FIJO'
   );
@@ -336,10 +339,18 @@ export function PersonnelForm({
   useEffect(() => {
     if (personnel?.id) {
       getContractHistory(personnel.id).then(res => {
-        if (res.data) setContractHistories(res.data);
+        if (res.data) {
+          setContractHistories(res.data);
+          if (!personnel.hire_date && res.data.length > 0) {
+            const sorted = [...res.data].sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
+            if (sorted[0]?.start_date) {
+              setHireDate(sorted[0].start_date);
+            }
+          }
+        }
       });
     }
-  }, [personnel?.id]);
+  }, [personnel?.id, personnel?.hire_date]);
 
   const handleConfirmIndefinite = () => {
     if (!personnel?.id) return;
@@ -588,7 +599,7 @@ export function PersonnelForm({
     formData.set('contract_duration_days', String(contractDurationDays));
     formData.set('contract_end_date', computedEndDate);
     formData.set('indefinite_contract_date', indefiniteContractDate);
-    formData.set('hire_date', contractStartDate);
+    formData.set('hire_date', hireDate);
 
 
     // Block submission if validations fail
@@ -1242,11 +1253,11 @@ export function PersonnelForm({
               <input
                 id="hire_date"
                 type="date"
-                value={contractStartDate}
-                onChange={(e) => setContractStartDate(e.target.value)}
+                value={hireDate}
+                onChange={(e) => setHireDate(e.target.value)}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
-              <p className="text-[10px] text-muted-foreground italic">No se podrán asignar turnos antes de esta fecha.</p>
+              <p className="text-[10px] text-muted-foreground italic">Fecha del primer contrato / ingreso a la empresa.</p>
             </div>
 
             <div className="space-y-2">
