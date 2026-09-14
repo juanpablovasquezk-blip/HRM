@@ -1259,3 +1259,122 @@ export async function getContractHistory(
   }
 }
 
+export async function updateContractHistory(
+  historyId: string,
+  personnelId: string,
+  data: {
+    contract_type: 'PLAZO_FIJO' | 'INDEFINIDO';
+    start_date: string;
+    duration_days?: number | null;
+    end_date?: string | null;
+    notes?: string;
+  }
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    const admin = createAdminClient();
+
+    let computedEndDate = data.end_date;
+    if (data.contract_type === 'PLAZO_FIJO' && data.start_date && data.duration_days) {
+      computedEndDate = format(addDays(parseISO(data.start_date), Number(data.duration_days)), 'yyyy-MM-dd');
+    } else if (data.contract_type === 'INDEFINIDO') {
+      computedEndDate = null;
+      data.duration_days = null;
+    }
+
+    // 1. Update history record
+    const { error: histErr } = await admin
+      .from('personnel_contract_history')
+      .update({
+        contract_type: data.contract_type,
+        start_date: data.start_date,
+        duration_days: data.duration_days || null,
+        end_date: computedEndDate || null,
+        notes: data.notes?.trim() || null,
+      })
+      .eq('id', historyId);
+
+    if (histErr) throw histErr;
+
+    // 2. Check if this is the latest history record to sync main personnel fields
+    const { data: latestHistory } = await supabase
+      .from('personnel_contract_history')
+      .select('*')
+      .eq('personnel_id', personnelId)
+      .order('start_date', { ascending: false })
+      .limit(1);
+
+    if (latestHistory && latestHistory.length > 0 && latestHistory[0].id === historyId) {
+      await admin
+        .from('personnel')
+        .update({
+          contract_type: data.contract_type,
+          contract_start_date: data.start_date,
+          contract_duration_days: data.duration_days || null,
+          contract_end_date: computedEndDate || null,
+          indefinite_contract_date: data.contract_type === 'INDEFINIDO' ? data.start_date : null,
+        })
+        .eq('id', personnelId);
+    }
+
+    safeRevalidatePath('/personnel');
+    safeRevalidatePath(`/personnel/${personnelId}`);
+    safeRevalidatePath(`/personnel/${personnelId}/edit`);
+    safeRevalidatePath('/epp');
+    return { success: true, error: null };
+  } catch (error: any) {
+    console.error('Error updating contract history:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function deleteContractHistory(
+  historyId: string,
+  personnelId: string
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const supabase = await createClient();
+    const admin = createAdminClient();
+
+    // 1. Delete history record
+    const { error: delErr } = await admin
+      .from('personnel_contract_history')
+      .delete()
+      .eq('id', historyId);
+
+    if (delErr) throw delErr;
+
+    // 2. Sync personnel record with remaining latest history record (if any)
+    const { data: remainingHistories } = await supabase
+      .from('personnel_contract_history')
+      .select('*')
+      .eq('personnel_id', personnelId)
+      .order('start_date', { ascending: false })
+      .limit(1);
+
+    if (remainingHistories && remainingHistories.length > 0) {
+      const latest = remainingHistories[0];
+      await admin
+        .from('personnel')
+        .update({
+          contract_type: latest.contract_type,
+          contract_start_date: latest.start_date,
+          contract_duration_days: latest.duration_days,
+          contract_end_date: latest.end_date,
+          indefinite_contract_date: latest.contract_type === 'INDEFINIDO' ? latest.start_date : null,
+        })
+        .eq('id', personnelId);
+    }
+
+    safeRevalidatePath('/personnel');
+    safeRevalidatePath(`/personnel/${personnelId}`);
+    safeRevalidatePath(`/personnel/${personnelId}/edit`);
+    safeRevalidatePath('/epp');
+    return { success: true, error: null };
+  } catch (error: any) {
+    console.error('Error deleting contract history:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+

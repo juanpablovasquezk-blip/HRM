@@ -12,9 +12,18 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, CheckCircle2, XCircle, Phone, Mail, Repeat } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Phone, Mail, Repeat, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { createPersonnel, updatePersonnel, deletePersonnel, changeToIndefiniteContract, renewFixedContract, getContractHistory } from '@/app/(dashboard)/personnel/actions';
+import { 
+  createPersonnel, 
+  updatePersonnel, 
+  deletePersonnel, 
+  changeToIndefiniteContract, 
+  renewFixedContract, 
+  getContractHistory,
+  updateContractHistory,
+  deleteContractHistory
+} from '@/app/(dashboard)/personnel/actions';
 import { generateDismissalActa } from '@/app/(dashboard)/personnel/generate-dismissal-acta';
 import { addDays, parseISO, format } from 'date-fns';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -371,6 +380,102 @@ export function PersonnelForm({
         if (updatedHist.data) setContractHistories(updatedHist.data);
       } else {
         toast.error(res.error || 'Error al renovar contrato');
+      }
+    });
+  };
+
+  // Edit Contract History State
+  const [isEditHistoryOpen, setIsEditHistoryOpen] = useState(false);
+  const [editingHistoryItem, setEditingHistoryItem] = useState<any | null>(null);
+  const [editHistType, setEditHistType] = useState<'PLAZO_FIJO' | 'INDEFINIDO'>('PLAZO_FIJO');
+  const [editHistStartDate, setEditHistStartDate] = useState('');
+  const [editHistDurationDays, setEditHistDurationDays] = useState<number>(90);
+  const [editHistNotes, setEditHistNotes] = useState('');
+
+  // Computed end date for editing history item
+  const editHistComputedEndDate = (() => {
+    if (editHistType !== 'PLAZO_FIJO' || !editHistStartDate || !editHistDurationDays) return '';
+    try {
+      return format(addDays(parseISO(editHistStartDate), Number(editHistDurationDays)), 'yyyy-MM-dd');
+    } catch {
+      return '';
+    }
+  })();
+
+  const handleOpenEditHistory = (h: any) => {
+    setEditingHistoryItem(h);
+    setEditHistType(h.contract_type || 'PLAZO_FIJO');
+    setEditHistStartDate(h.start_date || '');
+    setEditHistDurationDays(h.duration_days || 90);
+    setEditHistNotes(h.notes || '');
+    setIsEditHistoryOpen(true);
+  };
+
+  const handleSaveEditHistory = () => {
+    if (!editingHistoryItem?.id || !personnel?.id) return;
+    if (!editHistStartDate) {
+      toast.error('Ingresa la fecha de inicio');
+      return;
+    }
+    if (editHistType === 'PLAZO_FIJO' && (!editHistDurationDays || editHistDurationDays <= 0)) {
+      toast.error('Ingresa una duración válida en días');
+      return;
+    }
+
+    startTransition(async () => {
+      const res = await updateContractHistory(editingHistoryItem.id, personnel.id, {
+        contract_type: editHistType,
+        start_date: editHistStartDate,
+        duration_days: editHistType === 'PLAZO_FIJO' ? editHistDurationDays : null,
+        end_date: editHistType === 'PLAZO_FIJO' ? editHistComputedEndDate : null,
+        notes: editHistNotes,
+      });
+
+      if (res.success) {
+        toast.success('Registro de contrato actualizado');
+        setIsEditHistoryOpen(false);
+        const updatedHist = await getContractHistory(personnel.id);
+        if (updatedHist.data) {
+          setContractHistories(updatedHist.data);
+          // Sync current form values if it updated the latest
+          if (updatedHist.data.length > 0 && updatedHist.data[0].id === editingHistoryItem.id) {
+            setContractType(editHistType);
+            setContractStartDate(editHistStartDate);
+            setContractDurationDays(editHistDurationDays);
+            if (editHistType === 'INDEFINIDO') {
+              setIndefiniteContractDate(editHistStartDate);
+            }
+          }
+        }
+      } else {
+        toast.error(res.error || 'Error al actualizar contrato');
+      }
+    });
+  };
+
+  const handleDeleteHistory = (historyId: string) => {
+    if (!personnel?.id) return;
+    if (!confirm('¿Estás seguro de eliminar este registro del historial de contratos?')) return;
+
+    startTransition(async () => {
+      const res = await deleteContractHistory(historyId, personnel.id);
+      if (res.success) {
+        toast.success('Registro eliminado del historial');
+        const updatedHist = await getContractHistory(personnel.id);
+        if (updatedHist.data) {
+          setContractHistories(updatedHist.data);
+          if (updatedHist.data.length > 0) {
+            const latest = updatedHist.data[0];
+            setContractType(latest.contract_type);
+            setContractStartDate(latest.start_date || '');
+            setContractDurationDays(latest.duration_days || 90);
+            if (latest.contract_type === 'INDEFINIDO') {
+              setIndefiniteContractDate(latest.start_date || '');
+            }
+          }
+        }
+      } else {
+        toast.error(res.error || 'Error al eliminar registro');
       }
     });
   };
@@ -1186,7 +1291,7 @@ export function PersonnelForm({
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="space-y-1.5">
                   <Label htmlFor="contract_type" className="text-xs font-bold">Tipo de Contrato Actual</Label>
                   <select
@@ -1202,6 +1307,19 @@ export function PersonnelForm({
 
                 {contractType === 'PLAZO_FIJO' && (
                   <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="contract_start_date_input" className="text-xs font-bold">Fecha de Inicio *</Label>
+                      <input
+                        id="contract_start_date_input"
+                        type="date"
+                        value={contractStartDate}
+                        onChange={(e) => setContractStartDate(e.target.value)}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        required={contractType === 'PLAZO_FIJO'}
+                      />
+                      <p className="text-[10px] text-muted-foreground">Inicio de este contrato.</p>
+                    </div>
+
                     <div className="space-y-1.5">
                       <Label htmlFor="contract_duration_days" className="text-xs font-bold">Duración (Días) *</Label>
                       <Input
@@ -1238,7 +1356,10 @@ export function PersonnelForm({
                       id="indefinite_contract_date"
                       type="date"
                       value={indefiniteContractDate || contractStartDate}
-                      onChange={(e) => setIndefiniteContractDate(e.target.value)}
+                      onChange={(e) => {
+                        setIndefiniteContractDate(e.target.value);
+                        setContractStartDate(e.target.value);
+                      }}
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                   </div>
@@ -1248,7 +1369,10 @@ export function PersonnelForm({
               {/* Mini Contract History in Form */}
               {contractHistories.length > 0 && (
                 <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
-                  <p className="text-xs font-bold uppercase text-slate-500 mb-2">Historial de Contratos Registrados</p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-bold uppercase text-slate-500">Historial de Contratos Registrados</p>
+                    <p className="text-[10px] text-muted-foreground">Puedes editar o corregir cualquier período</p>
+                  </div>
                   <div className="rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden text-xs">
                     <table className="w-full text-left">
                       <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
@@ -1258,6 +1382,7 @@ export function PersonnelForm({
                           <th className="p-2">Duración</th>
                           <th className="p-2">Término</th>
                           <th className="p-2">Notas</th>
+                          {isEditing && <th className="p-2 text-right">Acciones</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1272,6 +1397,30 @@ export function PersonnelForm({
                             <td className="p-2">{h.duration_days ? `${h.duration_days} días` : '—'}</td>
                             <td className="p-2">{h.end_date ? format(parseISO(h.end_date), 'dd/MM/yyyy') : '—'}</td>
                             <td className="p-2 text-muted-foreground">{h.notes || '—'}</td>
+                            {isEditing && (
+                              <td className="p-2 text-right space-x-1 whitespace-nowrap">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-slate-500 hover:text-orange-600"
+                                  onClick={() => handleOpenEditHistory(h)}
+                                  title="Editar registro del contrato"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-slate-500 hover:text-red-600"
+                                  onClick={() => handleDeleteHistory(h.id)}
+                                  title="Eliminar registro del contrato"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -1622,6 +1771,91 @@ export function PersonnelForm({
               className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl px-6 font-black uppercase text-xs"
             >
               {isPending ? 'Guardando...' : 'Confirmar Renovación'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG: EDITAR REGISTRO HISTORIAL CONTRATO */}
+      <Dialog open={isEditHistoryOpen} onOpenChange={setIsEditHistoryOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white dark:bg-slate-900 border-none shadow-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase tracking-tight flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-orange-500" />
+              Editar Registro de Contrato
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Modifica las fechas o datos del contrato registrado en el historial.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-hist-type" className="text-sm font-semibold">Tipo de Contrato</Label>
+              <select
+                id="edit-hist-type"
+                value={editHistType}
+                onChange={(e) => setEditHistType(e.target.value as any)}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                <option value="PLAZO_FIJO">Plazo Fijo</option>
+                <option value="INDEFINIDO">Indefinido</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-hist-start-date" className="text-sm font-semibold">Fecha de Inicio *</Label>
+              <input
+                id="edit-hist-start-date"
+                type="date"
+                value={editHistStartDate}
+                onChange={(e) => setEditHistStartDate(e.target.value)}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                required
+              />
+            </div>
+
+            {editHistType === 'PLAZO_FIJO' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-hist-days" className="text-sm font-semibold">Duración en Días *</Label>
+                <Input
+                  id="edit-hist-days"
+                  type="number"
+                  min="1"
+                  max="730"
+                  value={editHistDurationDays}
+                  onChange={(e) => setEditHistDurationDays(parseInt(e.target.value, 10) || 0)}
+                  className="focus:ring-2 focus:ring-orange-500"
+                  required
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Fecha de término: <strong>{editHistComputedEndDate ? format(parseISO(editHistComputedEndDate), 'dd/MM/yyyy') : '—'}</strong>
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-hist-notes" className="text-sm font-semibold">Notas / Observaciones</Label>
+              <textarea
+                id="edit-hist-notes"
+                placeholder="Ej: Corrección de fechas, renovación, anexo..."
+                value={editHistNotes}
+                onChange={(e) => setEditHistNotes(e.target.value)}
+                className="flex min-h-[80px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder:text-slate-400"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="mt-2 gap-2 flex-col sm:flex-row">
+            <Button variant="ghost" onClick={() => setIsEditHistoryOpen(false)} className="rounded-xl font-bold uppercase text-xs">
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleSaveEditHistory}
+              disabled={isPending || !editHistStartDate}
+              className="bg-orange-600 hover:bg-orange-700 text-white rounded-xl px-6 font-black uppercase text-xs"
+            >
+              {isPending ? 'Guardando...' : 'Guardar Cambios'}
             </Button>
           </DialogFooter>
         </DialogContent>
