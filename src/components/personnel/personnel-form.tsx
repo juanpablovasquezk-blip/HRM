@@ -336,15 +336,22 @@ export function PersonnelForm({
   // Contract History State
   const [contractHistories, setContractHistories] = useState<any[]>([]);
 
+  const earliestContractDate = contractHistories
+    .map(h => h.start_date)
+    .filter(Boolean)
+    .sort()[0] || '';
+
   useEffect(() => {
     if (personnel?.id) {
       getContractHistory(personnel.id).then(res => {
         if (res.data) {
           setContractHistories(res.data);
-          if (!personnel.hire_date && res.data.length > 0) {
-            const sorted = [...res.data].sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
-            if (sorted[0]?.start_date) {
-              setHireDate(sorted[0].start_date);
+          const validStarts = res.data.map((h: any) => h.start_date).filter(Boolean).sort();
+          if (validStarts.length > 0) {
+            const earliest = validStarts[0];
+            // If hire_date is not set or is later than the earliest contract (e.g. was previously overwritten), auto-sync to earliest contract date
+            if (!personnel.hire_date || personnel.hire_date > earliest) {
+              setHireDate(earliest);
             }
           }
         }
@@ -1249,7 +1256,18 @@ export function PersonnelForm({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="hire_date">Fecha de Ingreso (Contratación)</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="hire_date">Fecha de Ingreso (Contratación)</Label>
+                {earliestContractDate && hireDate !== earliestContractDate && (
+                  <button
+                    type="button"
+                    onClick={() => setHireDate(earliestContractDate)}
+                    className="text-[11px] text-orange-600 dark:text-orange-400 font-bold hover:underline"
+                  >
+                    Usar 1er contrato ({format(parseISO(earliestContractDate), 'dd/MM/yyyy')})
+                  </button>
+                )}
+              </div>
               <input
                 id="hire_date"
                 type="date"
@@ -1257,7 +1275,11 @@ export function PersonnelForm({
                 onChange={(e) => setHireDate(e.target.value)}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
-              <p className="text-[10px] text-muted-foreground italic">Fecha del primer contrato / ingreso a la empresa.</p>
+              <p className="text-[10px] text-muted-foreground italic">
+                {earliestContractDate 
+                  ? `Fecha del primer contrato registrado (${format(parseISO(earliestContractDate), 'dd/MM/yyyy')}).`
+                  : 'Fecha de ingreso / contratación a la empresa.'}
+              </p>
             </div>
 
             <div className="space-y-2">

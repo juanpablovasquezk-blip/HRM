@@ -384,16 +384,30 @@ export default async function PersonnelDetailPage({
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-muted-foreground">Fecha de Ingreso:</span>
-                <span className="font-semibold">{person.hire_date ? format(new Date(person.hire_date), 'dd/MM/yyyy') : (person.contract_start_date ? format(new Date(person.contract_start_date), 'dd/MM/yyyy') : '—')}</span>
-              </div>
-              {person.contract_start_date && person.contract_start_date !== person.hire_date && (
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-muted-foreground">Inicio Contrato Actual:</span>
-                  <span className="font-semibold">{format(new Date(person.contract_start_date), 'dd/MM/yyyy')}</span>
-                </div>
-              )}
+              {(() => {
+                const earliestContractDate = (contractHistoryData || [])
+                  .map((h: any) => h.start_date)
+                  .filter(Boolean)
+                  .sort()[0];
+                const displayHireDate = person.hire_date && (!earliestContractDate || person.hire_date <= earliestContractDate)
+                  ? person.hire_date
+                  : (earliestContractDate || person.hire_date || person.contract_start_date);
+
+                return (
+                  <>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-muted-foreground">Fecha de Ingreso:</span>
+                      <span className="font-semibold">{displayHireDate ? format(new Date(displayHireDate), 'dd/MM/yyyy') : '—'}</span>
+                    </div>
+                    {person.contract_start_date && person.contract_start_date !== displayHireDate && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-muted-foreground">Inicio Contrato Actual:</span>
+                        <span className="font-semibold">{format(new Date(person.contract_start_date), 'dd/MM/yyyy')}</span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               {person.contract_type === 'PLAZO_FIJO' && (
                 <>
