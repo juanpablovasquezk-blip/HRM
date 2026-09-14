@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Search, ChevronDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -27,6 +27,7 @@ interface PersonnelFiltersProps {
   positions: Position[];
 }
 
+const STORAGE_KEY = 'hrm_personnel_filters';
 
 export function PersonnelFilters({ 
   companies, 
@@ -35,8 +36,59 @@ export function PersonnelFilters({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const hasRestoredRef = useRef(false);
 
-  // Helper to update URL
+  const currentSearch = searchParams.get('search') || '';
+  const currentCompanyId = searchParams.get('company_id') || '';
+  const currentPositionId = searchParams.get('position_id') || '';
+  const currentStatus = searchParams.get('status') || 'active';
+
+  // Restore filters from localStorage on initial load if URL has no search params
+  useEffect(() => {
+    if (hasRestoredRef.current) return;
+
+    const currentQs = searchParams.toString();
+    if (!currentQs) {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          const params = new URLSearchParams();
+          if (parsed.search) params.set('search', parsed.search);
+          if (parsed.company_id) params.set('company_id', parsed.company_id);
+          if (parsed.position_id) params.set('position_id', parsed.position_id);
+          if (parsed.status && parsed.status !== 'active') params.set('status', parsed.status);
+
+          const queryString = params.toString();
+          if (queryString) {
+            hasRestoredRef.current = true;
+            router.replace(`${pathname}?${queryString}`);
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('Error restoring personnel filters:', e);
+      }
+    } else {
+      // URL has explicit params, update localStorage to reflect them
+      try {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            search: currentSearch,
+            company_id: currentCompanyId,
+            position_id: currentPositionId,
+            status: currentStatus,
+          })
+        );
+      } catch (e) {
+        console.error('Error saving personnel filters:', e);
+      }
+    }
+    hasRestoredRef.current = true;
+  }, [pathname, router, searchParams, currentSearch, currentCompanyId, currentPositionId, currentStatus]);
+
+  // Helper to update URL and persist to localStorage
   const updateFilter = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (value) {
@@ -44,13 +96,32 @@ export function PersonnelFilters({
     } else {
       params.delete(key);
     }
+
+    const nextSearch = key === 'search' ? value : (params.get('search') || '');
+    const nextCompanyId = key === 'company_id' ? value : (params.get('company_id') || '');
+    const nextPositionId = key === 'position_id' ? value : (params.get('position_id') || '');
+    const nextStatus = key === 'status' ? value : (params.get('status') || 'active');
+
+    try {
+      if (!nextSearch && !nextCompanyId && !nextPositionId && nextStatus === 'active') {
+        localStorage.removeItem(STORAGE_KEY);
+      } else {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            search: nextSearch,
+            company_id: nextCompanyId,
+            position_id: nextPositionId,
+            status: nextStatus,
+          })
+        );
+      }
+    } catch (e) {
+      console.error('Error saving personnel filters:', e);
+    }
+
     router.push(`${pathname}?${params.toString()}`);
   };
-
-  const currentSearch = searchParams.get('search') || '';
-  const currentCompanyId = searchParams.get('company_id') || '';
-  const currentPositionId = searchParams.get('position_id') || '';
-  const currentStatus = searchParams.get('status') || 'active';
 
   // Deduplicate positions by name for the filter dropdown
   const uniquePositions = Array.from(
@@ -81,10 +152,20 @@ export function PersonnelFilters({
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm]);
 
-  // Sync local state if currentSearch changes from outside (e.g. Clear button)
+  // Sync local state if currentSearch changes from outside (e.g. Clear button or restored URL)
   useEffect(() => {
     setSearchTerm(currentSearch);
   }, [currentSearch]);
+
+  const handleClearFilters = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+      console.error('Error clearing saved filters:', e);
+    }
+    setSearchTerm('');
+    router.push(pathname);
+  };
 
   return (
     <div className="flex gap-2">
@@ -186,12 +267,11 @@ export function PersonnelFilters({
           <option value="pending">Solicitudes Pendientes</option>
           <option value="all">Todos</option>
         </select>
-
       </div>
       {(currentSearch || currentCompanyId || currentPositionId || currentStatus !== 'active') && (
         <Button 
           variant="ghost" 
-          onClick={() => router.push(pathname)}
+          onClick={handleClearFilters}
           className="text-muted-foreground hover:text-orange-600"
         >
           Limpiar

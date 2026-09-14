@@ -75,6 +75,10 @@ export default async function PersonnelPage({
   }
 
 
+  if (params.company_id) {
+    query = query.eq('company_id', params.company_id);
+  }
+
   if (positionIds.length > 0) {
     query = query.in('main_position', positionIds);
   }

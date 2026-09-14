@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useTransition, useMemo } from 'react';
+import React, { useState, useEffect, useTransition, useMemo, useRef } from 'react';
 import { jsPDF } from 'jspdf';
 import * as XLSX from 'xlsx';
 import { 
@@ -147,6 +147,45 @@ export default function EPPPage() {
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCompanyId, setSelectedCompanyId] = useState('all');
+  const hasRestoredEppFiltersRef = useRef(false);
+
+  // Restore filters on mount
+  useEffect(() => {
+    if (hasRestoredEppFiltersRef.current) return;
+    hasRestoredEppFiltersRef.current = true;
+
+    try {
+      const saved = localStorage.getItem('hrm_epp_filters');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.searchQuery) setSearchQuery(parsed.searchQuery);
+        if (parsed.selectedCompanyId) setSelectedCompanyId(parsed.selectedCompanyId);
+      }
+    } catch (e) {
+      console.error('Error loading epp filters:', e);
+    }
+  }, []);
+
+  // Save filters on change
+  useEffect(() => {
+    if (!hasRestoredEppFiltersRef.current) return;
+
+    try {
+      if (!searchQuery && (selectedCompanyId === 'all' || !selectedCompanyId)) {
+        localStorage.removeItem('hrm_epp_filters');
+      } else {
+        localStorage.setItem(
+          'hrm_epp_filters',
+          JSON.stringify({
+            searchQuery,
+            selectedCompanyId,
+          })
+        );
+      }
+    } catch (e) {
+      console.error('Error saving epp filters:', e);
+    }
+  }, [searchQuery, selectedCompanyId]);
   
   // Expanded workers list
   const [expandedWorkers, setExpandedWorkers] = useState<Record<string, boolean>>({});

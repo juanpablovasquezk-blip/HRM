@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -30,6 +30,8 @@ interface PrevencionRiesgosClientProps {
   canExecute: boolean;
 }
 
+const PDR_STORAGE_KEY = 'hrm_pdr_filters';
+
 export function PrevencionRiesgosClient({
   initialWorkers,
   companies,
@@ -41,6 +43,51 @@ export function PrevencionRiesgosClient({
   const [selectedPositionNames, setSelectedPositionNames] = useState<string[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
   const [selectedSteps, setSelectedSteps] = useState<string[]>([]);
+  const hasRestoredPdrRef = useRef(false);
+
+  // Load saved filters on mount
+  useEffect(() => {
+    if (hasRestoredPdrRef.current) return;
+    hasRestoredPdrRef.current = true;
+
+    try {
+      const saved = localStorage.getItem(PDR_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.search) setSearch(parsed.search);
+        if (Array.isArray(parsed.selectedCompanyIds)) setSelectedCompanyIds(parsed.selectedCompanyIds);
+        if (Array.isArray(parsed.selectedPositionNames)) setSelectedPositionNames(parsed.selectedPositionNames);
+        if (Array.isArray(parsed.selectedStatuses)) setSelectedStatuses(parsed.selectedStatuses);
+        if (Array.isArray(parsed.selectedSteps)) setSelectedSteps(parsed.selectedSteps);
+      }
+    } catch (e) {
+      console.error('Error loading pdr filters:', e);
+    }
+  }, []);
+
+  // Save filters to localStorage on change
+  useEffect(() => {
+    if (!hasRestoredPdrRef.current) return;
+
+    try {
+      if (!search && selectedCompanyIds.length === 0 && selectedPositionNames.length === 0 && selectedStatuses.length === 0 && selectedSteps.length === 0) {
+        localStorage.removeItem(PDR_STORAGE_KEY);
+      } else {
+        localStorage.setItem(
+          PDR_STORAGE_KEY,
+          JSON.stringify({
+            search,
+            selectedCompanyIds,
+            selectedPositionNames,
+            selectedStatuses,
+            selectedSteps,
+          })
+        );
+      }
+    } catch (e) {
+      console.error('Error saving pdr filters:', e);
+    }
+  }, [search, selectedCompanyIds, selectedPositionNames, selectedStatuses, selectedSteps]);
 
   // Selected workers state
   const [selectedWorkerIds, setSelectedWorkerIds] = useState<Set<string>>(new Set());
@@ -181,6 +228,11 @@ export function PrevencionRiesgosClient({
   };
 
   const clearFilters = () => {
+    try {
+      localStorage.removeItem(PDR_STORAGE_KEY);
+    } catch (e) {
+      console.error('Error clearing pdr filters:', e);
+    }
     setSearch('');
     setSelectedCompanyIds([]);
     setSelectedPositionNames([]);
