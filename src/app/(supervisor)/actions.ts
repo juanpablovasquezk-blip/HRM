@@ -419,8 +419,18 @@ export async function updateTransportMobilization(personnelId: string, date: str
 
           const message = `SR. ${pData.first_name} ${pData.last_name_father}\nTURNO ${format(parseISO(date), 'dd-MM-yyyy')}: ${shiftTime}\n${mobilization === 'PROPIO' ? 'LLEGA POR SUS PROPIOS MEDIOS' : 'RECORRIDO EMPRESA'}\n\n*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
 
-          // 3. FINAL ROUTING DECISION (Position > Others)
-          const groupId = finalPositionGroupId || dbSettings.ultramsg_group_others;
+          // 3. FINAL ROUTING DECISION (Position > Area/Name Search > Others)
+          let groupId = finalPositionGroupId || null;
+          if (!groupId) {
+            const combinedSearch = `${detectedAreaName} ${positionName} ${pData?.main_position_name || ''}`.toUpperCase().replace(/\s+/g, '');
+            if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
+            else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
+            else if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
+            else if (combinedSearch.includes('AEROPUERTO')) groupId = dbSettings.ultramsg_group_others;
+          }
+          if (!groupId) {
+            groupId = dbSettings.ultramsg_group_others;
+          }
           
           debugInfo += ` | AreaDet: ${detectedAreaName.substring(0,10)} | PosID: ${finalPositionGroupId ? 'SI' : 'NO'} | AreaID: ${finalAreaGroupId ? 'SI' : 'NO'} | Final: ${groupId.substring(0,8)}...`;
 

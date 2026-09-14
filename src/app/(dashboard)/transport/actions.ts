@@ -443,10 +443,7 @@ export async function sendTransportNotification(requestId: string, isTimePending
     // 7. Send to both in parallel using cached settings
     const sendPromises = [];
     
-    // Send to group only if it's pending, or if it is confirmed but NOT Fedex own transport ('PROPIO')
-    const isFedexOwnTransportConfirmed = !isTimePending && isFedex && tr.transport_type === 'PROPIO';
-    
-    if (groupId && !isFedexOwnTransportConfirmed) {
+    if (groupId) {
       sendPromises.push(sendWhatsAppMessage(groupId, message, dbSettings));
     }
     

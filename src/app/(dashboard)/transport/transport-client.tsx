@@ -102,7 +102,7 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
   const [isSaving, setIsSaving] = useState(false);
   const [isNotifying, setIsNotifying] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
-  const [isTimePending, setIsTimePending] = useState(true);
+  const [isTimePending, setIsTimePending] = useState(false);
   const [selectedShiftId, setSelectedShiftId] = useState(req.assignment?.shift_id || '');
   const [isUpdatingShift, setIsUpdatingShift] = useState(false);
   const [isAssigningDriver, setIsAssigningDriver] = useState(false);
@@ -168,7 +168,8 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
     localData.reservation_number !== (req.reservation_number || '') ||
     localData.pickup_time !== (req.pickup_time ? req.pickup_time.substring(0, 5) : '') ||
     localData.observations !== (req.observations || '') ||
-    localData.cost !== (req.cost != null ? String(req.cost) : '');
+    localData.cost !== (req.cost != null ? String(req.cost) : '') ||
+    (Boolean(providerName.trim()) && !req.observations?.includes(providerName.trim()));
 
   const saveChanges = async () => {
     setIsSaving(true);
@@ -183,6 +184,25 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
       cost: localData.cost ? Number(localData.cost) : null
     });
     setIsSaving(false);
+  };
+
+  const handleTransportTypeChange = async (newType: TransportType) => {
+    if (newType === 'PROPIO') {
+      setIsSaving(true);
+      await onUpdate(req.id, { transport_type: newType });
+      // Send WhatsApp immediately and move to GESTIONADO
+      const res = await sendTransportNotification(req.id, isTimePending);
+      if (res.success) {
+        toast.success('Movilización Propia asignada y alerta WhatsApp enviada');
+        onRefresh();
+      } else {
+        toast.warning('Movilización Propia asignada, pero hubo aviso en WhatsApp: ' + res.error);
+        onRefresh();
+      }
+      setIsSaving(false);
+    } else {
+      await onUpdate(req.id, { transport_type: newType });
+    }
   };
 
   const handleDriverSelect = async (driverId: string) => {
@@ -212,15 +232,25 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
 
   const handleNotify = async () => {
     setIsNotifying(true);
-    if (hasChanges) {
-      await saveChanges();
+    let updatedObs = localData.observations;
+    if (req.transport_type === 'OTRO_PROVEEDOR' && providerName.trim()) {
+      updatedObs = `Proveedor: ${providerName.trim()}${localData.observations && !localData.observations.startsWith('Proveedor:') ? ` | ${localData.observations}` : ''}`;
     }
+
+    if (hasChanges || (req.transport_type === 'OTRO_PROVEEDOR' && providerName.trim())) {
+      await onUpdate(req.id, {
+        ...localData,
+        observations: updatedObs,
+        cost: localData.cost ? Number(localData.cost) : null
+      });
+    }
+
     const res = await sendTransportNotification(req.id, isTimePending);
     if (res.success) {
       toast.success(isManaged ? 'WhatsApp re-enviado correctamente' : 'WhatsApp enviado y movido a Gestionados');
       onRefresh();
     } else {
-      toast.error('Error al enviar: ' + res.error);
+      toast.error('Error al enviar WhatsApp: ' + res.error);
     }
     setIsNotifying(false);
   };
@@ -239,11 +269,14 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
     setIsUpdatingShift(false);
   };
 
+  const hasReservationInfo = Boolean(localData.reservation_number?.trim() && localData.pickup_time?.trim());
+  const hasProviderInfo = Boolean(providerName.trim() || localData.observations?.trim());
+
   const isDataComplete = 
     (req.transport_type === 'PROPIO') ||
     (req.transport_type === 'COLEGA' && Boolean(assignedDriverName)) ||
-    (req.transport_type === 'OTRO_PROVEEDOR' && Boolean(providerName || req.observations)) ||
-    (req.reservation_number && req.pickup_time && req.pickup_address && req.destination_address);
+    (req.transport_type === 'OTRO_PROVEEDOR' && hasProviderInfo) ||
+    (hasReservationInfo && req.pickup_address && req.destination_address);
 
   const showNotifyButton = 
     req.transport_type === 'REQUERIDO' || 
@@ -332,7 +365,7 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
         <div className="flex items-center gap-2">
           <select 
             value={req.transport_type}
-            onChange={(e) => onUpdate(req.id, { transport_type: e.target.value as TransportType })}
+            onChange={(e) => handleTransportTypeChange(e.target.value as TransportType)}
             className="text-xs font-bold border-slate-200 rounded-md focus:ring-indigo-500 focus:border-indigo-500 bg-white"
           >
             <option value="REQUERIDO">REQUIERE TRANSPORTE (Transvip)</option>
@@ -541,9 +574,13 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
                 />
               </div>
               {hasChanges && (
-                <Button size="sm" onClick={saveChanges} disabled={isSaving} className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white">
-                  {isSaving ? 'Guardando...' : 'Guardar Datos Proveedor'}
-                </Button>
+                <button 
+                  onClick={saveChanges} 
+                  disabled={isSaving} 
+                  className="text-[10px] text-amber-700 hover:text-amber-900 underline font-semibold disabled:opacity-50"
+                >
+                  {isSaving ? 'Guardando...' : 'Solo guardar datos (sin WhatsApp)'}
+                </button>
               )}
             </div>
           </div>
@@ -591,13 +628,15 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
             )}
             
             {hasChanges && req.transport_type !== 'PROPIO' && (
-              <button 
-                onClick={saveChanges}
-                disabled={isSaving}
-                className="w-full py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 active:scale-95 disabled:opacity-50"
-              >
-                {isSaving ? 'Guardando...' : 'Guardar Cambios de Reserva'}
-              </button>
+              <div className="flex justify-end">
+                <button 
+                  onClick={saveChanges}
+                  disabled={isSaving}
+                  className="text-[10px] text-indigo-600 hover:text-indigo-800 underline font-semibold disabled:opacity-50"
+                >
+                  {isSaving ? 'Guardando...' : 'Solo guardar cambios (sin enviar WhatsApp)'}
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -620,8 +659,8 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
             <div className="flex items-center gap-2">
               <button 
                 onClick={handleNotify}
-                disabled={!isDataComplete || isNotifying}
-                className={`flex-1 py-2 flex items-center justify-center gap-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 disabled:opacity-30 disabled:grayscale ${
+                disabled={!isDataComplete || isNotifying || isSaving}
+                className={`flex-1 py-2.5 flex items-center justify-center gap-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 disabled:opacity-40 disabled:grayscale ${
                   isManaged 
                     ? 'bg-emerald-600 text-white shadow-emerald-200 hover:bg-emerald-700'
                     : isDataComplete 
@@ -633,20 +672,22 @@ const RequestCard = React.memo(({ req, allRequests, onUpdate, onCopyToClipboard,
                       : 'bg-slate-200 text-slate-500 shadow-none cursor-not-allowed'
                 }`}
               >
-                {isNotifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                {isNotifying || isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                 {isManaged 
-                  ? 'Re-enviar WhatsApp' 
+                  ? (hasChanges ? 'Guardar y Re-enviar WhatsApp' : 'Re-enviar WhatsApp')
                   : isDataComplete 
                     ? req.transport_type === 'COLEGA'
                       ? 'Notificar a Pasajero y Colega Conductor'
                       : req.transport_type === 'OTRO_PROVEEDOR'
-                        ? 'Notificar Transporte Alternativo'
+                        ? 'Guardar y Notificar Transporte Alternativo'
                         : req.transport_type === 'PROPIO'
                           ? 'Notificar Movilización Propia'
-                          : 'Enviar Notificación WhatsApp' 
+                          : 'Guardar y Enviar WhatsApp' 
                     : req.transport_type === 'COLEGA'
                       ? 'Falta Seleccionar Conductor'
-                      : 'Datos Incompletos para Notificar'}
+                      : !localData.reservation_number || !localData.pickup_time
+                        ? 'Ingresa N° Reserva y Hora para Enviar'
+                        : 'Datos Incompletos para Notificar'}
               </button>
 
               {isManaged && (
@@ -862,12 +903,6 @@ export default function TransportClient({
       // Los registros de bono de recogida del conductor no son solicitudes pendientes de coordinar
       if (r.observations?.startsWith('Recogida a')) return false;
 
-      // Si es movilización propia, solo mostrar si es de Fedex (para coordinar horario)
-      if (r.transport_type === 'PROPIO') {
-        const areaName = (r.assignment?.area?.name || '').toUpperCase();
-        const posName = (r.assignment?.position?.name || '').toUpperCase();
-        return posName.includes('FEDEX') || areaName.includes('FEDEX');
-      }
       return true;
     })
     .sort(sortTransportRequests);
@@ -880,11 +915,6 @@ export default function TransportClient({
       
       if (r.observations?.startsWith('Recogida a')) return false;
 
-      if (r.transport_type === 'PROPIO') {
-        const areaName = (r.assignment?.area?.name || '').toUpperCase();
-        const posName = (r.assignment?.position?.name || '').toUpperCase();
-        return posName.includes('FEDEX') || areaName.includes('FEDEX');
-      }
       return true;
     })
     .sort(sortTransportRequests);
