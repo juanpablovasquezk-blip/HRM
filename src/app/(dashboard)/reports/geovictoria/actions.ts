@@ -67,7 +67,6 @@ export async function getGeoVictoriaData(filters: {
       `)
       .gte('date', filters.startDate)
       .lte('date', filters.endDate)
-      .eq('is_published', true)
       .eq('is_extra', false) // RULE: No extra shifts
       .neq('status', 'cancelled');
 
