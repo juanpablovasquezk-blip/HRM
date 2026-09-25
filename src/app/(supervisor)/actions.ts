@@ -469,7 +469,16 @@ export async function updateTransportMobilization(personnelId: string, date: str
             workerError = "Trabajador no tiene teléfono registrado";
           }
 
+          if (groupSent || workerSent) {
+            await supabase
+              .from('transport_requests')
+              .update({ status: 'GESTIONADO' })
+              .eq('assignment_id', assignmentId)
+              .eq('type', 'ENTRADA');
+          }
+
           revalidatePath('/supervisor/transport');
+          revalidatePath('/transport');
           return { 
             success: true, 
             whatsapp: { 
