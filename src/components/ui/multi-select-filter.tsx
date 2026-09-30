@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 export interface FilterOption {
   value: string;
@@ -79,13 +80,14 @@ export function MultiSelectFilter({
       <PopoverTrigger
         disabled={disabled}
         aria-expanded={open}
-        className={`flex h-10 w-full items-center justify-between rounded-xl border border-input bg-background px-3 py-2 text-xs font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer ${
-          disabled ? 'opacity-50 pointer-events-none' : ''
-        } ${
+        className={cn(
+          "flex h-10 w-full items-center justify-between rounded-xl border border-input bg-background px-3 py-2 text-xs font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer",
+          disabled && "opacity-50 pointer-events-none",
           selectedCount > 0
-            ? 'border-orange-500/50 bg-orange-50/40 text-orange-950 dark:text-orange-200 font-semibold'
-            : 'text-slate-600 dark:text-slate-300'
-        } ${className}`}
+            ? "border-orange-500/50 bg-orange-50/40 text-orange-950 dark:text-orange-200 font-semibold"
+            : "text-slate-600 dark:text-slate-300",
+          className
+        )}
       >
         <span className="truncate pr-1">{buttonText}</span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />

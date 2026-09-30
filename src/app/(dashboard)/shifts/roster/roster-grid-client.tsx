@@ -63,6 +63,7 @@ import { BlueConfigurator } from './blue-configurator';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { MultiSelectFilter } from '@/components/ui/multi-select-filter';
 import { Progress } from "@/components/ui/progress";
 import { 
   Dialog, 
@@ -163,7 +164,7 @@ export function RosterGridClient({
 }: RosterGridProps) {
   const router = useRouter();
   const [search, setSearch] = useState('');
-  const [positionFilter, setPositionFilter] = useState('');
+  const [positionFilter, setPositionFilter] = useState<string[]>([]);
   const [areaFilter, setAreaFilter] = useState('');
   const [personnelFilter, setPersonnelFilter] = useState<string[]>([]);
 
@@ -174,7 +175,13 @@ export function RosterGridClient({
       try {
         const parsed = JSON.parse(savedFilters);
         if (parsed.search) setSearch(parsed.search);
-        if (parsed.positionFilter) setPositionFilter(parsed.positionFilter);
+        if (parsed.positionFilter) {
+          if (Array.isArray(parsed.positionFilter)) {
+            setPositionFilter(parsed.positionFilter);
+          } else if (typeof parsed.positionFilter === 'string' && parsed.positionFilter.trim() !== '') {
+            setPositionFilter([parsed.positionFilter]);
+          }
+        }
         if (parsed.areaFilter) setAreaFilter(parsed.areaFilter);
         if (parsed.personnelFilter) setPersonnelFilter(parsed.personnelFilter);
       } catch (e) {
@@ -391,7 +398,7 @@ export function RosterGridClient({
       
       const pos = positions.find(pos => pos.id === p.main_position);
       const personPositionName = pos?.name || '';
-      const posMatch = !positionFilter || personPositionName === positionFilter;
+      const posMatch = positionFilter.length === 0 || positionFilter.includes(personPositionName);
 
       const areaMatch = !areaFilter || pos?.area_id === areaFilter;
       const personMatch = personnelFilter.length === 0 || personnelFilter.includes(p.id);
@@ -431,10 +438,10 @@ export function RosterGridClient({
 
   const filteredPersonnelForSelect = useMemo(() => {
     return personnel.filter(p => {
-      if (!positionFilter && !areaFilter) return true;
+      if (positionFilter.length === 0 && !areaFilter) return true;
       const pos = positions.find(pos => pos.id === p.main_position);
       const posName = pos?.name || "";
-      const posMatch = !positionFilter || posName === positionFilter;
+      const posMatch = positionFilter.length === 0 || positionFilter.includes(posName);
       const areaMatch = !areaFilter || pos?.area_id === areaFilter;
       return posMatch && areaMatch;
     }).sort((a, b) => a.first_name.localeCompare(b.first_name));
@@ -548,7 +555,7 @@ export function RosterGridClient({
            end, 
            areaFilter || undefined, 
            personnelFilter, 
-           positionFilter || undefined,
+           positionFilter.length > 0 ? positionFilter : undefined,
            clearOptions
          );
          if (res.error) toast.error(res.error);
@@ -595,7 +602,7 @@ export function RosterGridClient({
 
       try {
         setAiStep('scheduling');
-        const res = await runScheduler(start, end, areaFilter || undefined, personnelFilter, positionFilter || undefined) as any;
+        const res = await runScheduler(start, end, areaFilter || undefined, personnelFilter, positionFilter.length > 0 ? positionFilter : undefined) as any;
         
         if (res.error) {
           setAiError(res.error);
@@ -758,7 +765,7 @@ export function RosterGridClient({
       
       const currentPersonnelIds = filteredPersonnel.map(p => p.id);
       
-      const res = await getMonthlyAudit(start, areaFilter !== 'all' ? areaFilter : undefined, currentPersonnelIds, positionFilter || undefined) as any;
+      const res = await getMonthlyAudit(start, areaFilter !== 'all' ? areaFilter : undefined, currentPersonnelIds, positionFilter.length > 0 ? positionFilter : undefined) as any;
       
       if (res.success && res.auditSummary) {
         setAuditSummary(res.auditSummary);
@@ -1384,14 +1391,16 @@ export function RosterGridClient({
         </div>
 
         <div className="w-[200px]">
-          <select 
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            value={positionFilter}
-            onChange={(e) => setPositionFilter(e.target.value)}
-          >
-            <option value="">Todos los cargos</option>
-            {uniquePositionNames.map(name => <option key={name} value={name}>{name}</option>)}
-          </select>
+          <MultiSelectFilter
+            placeholder="Todos los cargos"
+            singularName="cargo"
+            pluralName="cargos"
+            options={uniquePositionNames.map(name => ({ value: name, label: name }))}
+            selectedValues={positionFilter}
+            onChange={setPositionFilter}
+            searchPlaceholder="Buscar cargo..."
+            className="h-9 text-sm rounded-md"
+          />
         </div>
 
         <DropdownMenu>
@@ -1634,7 +1643,7 @@ export function RosterGridClient({
                   days,
                   monthLabel: monthLabelStr.charAt(0).toUpperCase() + monthLabelStr.slice(1),
                   areaFilter: areaFilter !== 'all' ? areaFilter : undefined,
-                  positionFilter: positionFilter || undefined,
+                  positionFilter: positionFilter.length > 0 ? positionFilter : undefined,
                 });
               }}
               title="Descargar roster mensual en PDF"
@@ -1742,7 +1751,7 @@ export function RosterGridClient({
                   days,
                   monthLabel: monthLabelStr.charAt(0).toUpperCase() + monthLabelStr.slice(1),
                   areaFilter: areaFilter !== 'all' ? areaFilter : undefined,
-                  positionFilter: positionFilter || undefined,
+                  positionFilter: positionFilter.length > 0 ? positionFilter : undefined,
                 });
               }}
               title="Descargar roster mensual en PDF"
@@ -1758,7 +1767,7 @@ export function RosterGridClient({
       </div>
 
       {/* Visual Management Legend for Operador Aeropuerto */}
-      {(positionFilter?.toUpperCase().includes('AEROPUERTO') || filteredPersonnel.some(p => (positionsMap[p.main_position]?.name || '').toUpperCase().includes('AEROPUERTO'))) && (
+      {(positionFilter.some(pf => pf.toUpperCase().includes('AEROPUERTO')) || filteredPersonnel.some(p => (positionsMap[p.main_position]?.name || '').toUpperCase().includes('AEROPUERTO'))) && (
         <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-xl text-xs flex-wrap shadow-sm">
           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mr-1">Gestión Visual Aeropuerto (Borrador):</span>
           <span className="flex items-center gap-1.5 font-bold text-amber-950 bg-amber-100/90 border border-amber-400 px-2 py-0.5 rounded-lg text-[10px] shadow-xs">
@@ -1863,9 +1872,9 @@ export function RosterGridClient({
                       if (r.area_id !== areaFilter) return false;
                     }
                     
-                    if (positionFilter && positionFilter !== "none") {
+                    if (positionFilter.length > 0) {
                       const reqName = r.position?.name?.toUpperCase() || "";
-                      if (positionFilter.toUpperCase() !== reqName) return false;
+                      if (!positionFilter.some(pf => pf.toUpperCase() === reqName)) return false;
                     }
                     return true;
                   });
@@ -1875,9 +1884,9 @@ export function RosterGridClient({
                   // Filter assignments based on shown positions
                   const dateAssignments = assignmentsByDate[dateStr] || [];
                   const dailyAssignments = dateAssignments.filter(a => {
-                    if (positionFilter && positionFilter !== "none") {
+                    if (positionFilter.length > 0) {
                       const assignPosName = positionsMap[a.position_id]?.name?.toUpperCase() || "";
-                      return positionFilter.toUpperCase() === assignPosName;
+                      return positionFilter.some(pf => pf.toUpperCase() === assignPosName);
                     }
                     return true;
                   }).length;
@@ -1889,9 +1898,9 @@ export function RosterGridClient({
                     const shift = shiftsMap[r.shift_id];
                     const count = dateAssignments.filter(a => {
                       if (a.shift_id !== r.shift_id) return false;
-                      if (!positionFilter) return true;
+                      if (positionFilter.length === 0) return true;
                       const pName = positionsMap[a.position_id]?.name?.toUpperCase() || "";
-                      return pName === positionFilter.toUpperCase();
+                      return positionFilter.some(pf => pf.toUpperCase() === pName);
                     }).length;
                     return `${shift?.name || 'Turno'}: ${count}/${r.required_count}`;
                   }).join(' | ');
@@ -2826,9 +2835,9 @@ export function RosterGridClient({
           if (areaFilter && areaFilter !== 'none') {
             if (r.area_id !== areaFilter) return false;
           }
-          if (positionFilter && positionFilter !== 'none') {
+          if (positionFilter.length > 0) {
             const reqName = r.position?.name?.toUpperCase() || '';
-            if (positionFilter.toUpperCase() !== reqName) return false;
+            if (!positionFilter.some(pf => pf.toUpperCase() === reqName)) return false;
           }
           return true;
         });
@@ -2848,11 +2857,11 @@ export function RosterGridClient({
                 <DialogTitle className="text-lg font-black tracking-tight capitalize text-white">
                   {format(day, "EEEE d 'de' MMMM", { locale: es })}
                 </DialogTitle>
-                {(positionFilter || areaFilter) && (
+                {(positionFilter.length > 0 || areaFilter) && (
                   <div className="flex gap-2 mt-2 flex-wrap">
-                    {positionFilter && (
+                    {positionFilter.length > 0 && (
                       <span className="flex items-center gap-1 text-[10px] font-black bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded-full uppercase tracking-wide">
-                        <Briefcase className="h-2.5 w-2.5" />{positionFilter}
+                        <Briefcase className="h-2.5 w-2.5" />{positionFilter.join(', ')}
                       </span>
                     )}
                     {areaFilter && (

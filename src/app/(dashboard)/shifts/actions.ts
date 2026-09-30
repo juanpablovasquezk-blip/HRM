@@ -1385,7 +1385,7 @@ export async function bulkDeleteAssignmentsByIds(ids: string[]) {
 }
 // ─── Scheduling Engine Actions ────────────────────────────────────────────────
 
-export async function runScheduler(startDate: string, endDate: string, areaId?: string, personnelIds?: string[], positionFilter?: string, shouldValidate: boolean = false) {
+export async function runScheduler(startDate: string, endDate: string, areaId?: string, personnelIds?: string[], positionFilter?: string | string[], shouldValidate: boolean = false) {
   try {
     // Extend end date to the end of the current week (Sunday) to ensure full week analysis
     const end = parseISO(endDate);
@@ -1406,7 +1406,16 @@ export async function runScheduler(startDate: string, endDate: string, areaId?: 
     if (targetIds.length === 0) {
       let pQuery = supabase.from('personnel').select('id');
       if (areaId && areaId !== 'all') pQuery = pQuery.eq('area_id', areaId);
-      if (positionFilter && positionFilter !== 'none') pQuery = pQuery.ilike('main_position_name', `%${positionFilter}%`);
+      if (positionFilter) {
+        if (Array.isArray(positionFilter)) {
+          if (positionFilter.length > 0) {
+            const filters = positionFilter.map(pf => `main_position_name.ilike.%${pf}%`).join(',');
+            pQuery = pQuery.or(filters);
+          }
+        } else if (positionFilter !== 'none') {
+          pQuery = pQuery.ilike('main_position_name', `%${positionFilter}%`);
+        }
+      }
       const { data: pData } = await pQuery;
       targetIds = (pData || []).map(p => p.id);
     }
@@ -1532,7 +1541,7 @@ export async function clearAutoAssignments(
   endDate: string, 
   areaId?: string, 
   personnelIds?: string[], 
-  positionFilter?: string,
+  positionFilter?: string | string[],
   options?: {
     includeManual?: boolean;
     includeValidated?: boolean;
@@ -1564,8 +1573,17 @@ export async function clearAutoAssignments(
     query = query.in('personnel_id', personnelIds);
   }
   if (positionFilter) {
-     const { data: pos } = await supabase.from('positions').select('id').eq('name', positionFilter).maybeSingle();
-     if (pos) query = query.eq('position_id', pos.id);
+    if (Array.isArray(positionFilter)) {
+      if (positionFilter.length > 0) {
+        const { data: posList } = await supabase.from('positions').select('id').in('name', positionFilter);
+        if (posList && posList.length > 0) {
+          query = query.in('position_id', posList.map(p => p.id));
+        }
+      }
+    } else if (positionFilter !== 'none') {
+      const { data: pos } = await supabase.from('positions').select('id').eq('name', positionFilter).maybeSingle();
+      if (pos) query = query.eq('position_id', pos.id);
+    }
   }
 
   const { error } = await query;
@@ -1683,7 +1701,7 @@ export async function bulkUpdateBlueRotations(
   return { error: null };
 }
 
-export async function getMonthlyAudit(startDate: string, areaId?: string, personnelIds?: string[], positionFilter?: string) {
+export async function getMonthlyAudit(startDate: string, areaId?: string, personnelIds?: string[], positionFilter?: string | string[]) {
   try {
     const sDate = parseISO(startDate);
     const monthStart = startOfMonth(sDate);
@@ -1697,7 +1715,16 @@ export async function getMonthlyAudit(startDate: string, areaId?: string, person
     if (targetIds.length === 0) {
       let pQuery = supabase.from('personnel').select('id');
       if (areaId && areaId !== 'all') pQuery = pQuery.eq('area_id', areaId);
-      if (positionFilter && positionFilter !== 'none') pQuery = pQuery.ilike('main_position_name', `%${positionFilter}%`);
+      if (positionFilter) {
+        if (Array.isArray(positionFilter)) {
+          if (positionFilter.length > 0) {
+            const filters = positionFilter.map(pf => `main_position_name.ilike.%${pf}%`).join(',');
+            pQuery = pQuery.or(filters);
+          }
+        } else if (positionFilter !== 'none') {
+          pQuery = pQuery.ilike('main_position_name', `%${positionFilter}%`);
+        }
+      }
       const { data: pData } = await pQuery;
       targetIds = (pData || []).map(p => p.id);
     }

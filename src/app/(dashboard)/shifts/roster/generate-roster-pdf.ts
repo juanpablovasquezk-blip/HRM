@@ -47,7 +47,7 @@ export interface RosterPDFParams {
   days: Date[];
   monthLabel: string;
   areaFilter?: string;
-  positionFilter?: string;
+  positionFilter?: string | string[];
 }
 
 // ── Colors ───────────────────────────────────────────────────────────────────
@@ -229,10 +229,13 @@ export function generateRosterPDF(params: RosterPDFParams) {
     const filterParts: string[] = [];
     if (areaFilter && areaFilter !== 'all') {
       const areaName = Object.values(areasMap).find(a => a.id === areaFilter)?.name;
-      if (areaName) filterParts.push(`\u00c1rea: ${areaName}`);
+      if (areaName) filterParts.push(`Área: ${areaName}`);
     }
-    if (positionFilter) filterParts.push(`Cargo: ${positionFilter}`);
-    if (filterParts.length === 0) filterParts.push('Todas las \u00e1reas');
+    if (positionFilter) {
+      const posText = Array.isArray(positionFilter) ? positionFilter.join(', ') : positionFilter;
+      if (posText) filterParts.push(`Cargo: ${posText}`);
+    }
+    if (filterParts.length === 0) filterParts.push('Todas las áreas');
 
     const now = format(new Date(), "dd/MM/yyyy HH:mm");
     const subtitle = `${filterParts.join(' | ')}  \u2022  Generado: ${now}  \u2022  ${personnel.length} trabajadores`;

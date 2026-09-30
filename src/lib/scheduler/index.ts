@@ -20,7 +20,7 @@ export async function generateSchedule(
   endDateStr: string,
   areaId?: string,
   personnelIds?: string[],
-  positionFilter?: string,
+  positionFilter?: string | string[],
   shouldValidate: boolean = false
 ): Promise<ScheduleResult> {
   const dbLogs: string[] = [];
@@ -36,19 +36,24 @@ export async function generateSchedule(
   const extendedEnd = format(addDays(endDate, 7), 'yyyy-MM-dd');
 
   // 1. CARGA DE DATOS (ESTILO ESTABLE)
-  let targetPositionId: string | undefined;
+  let targetPositionIds: string[] = [];
   
-  if (positionFilter && positionFilter !== 'none') {
-    const cleanFilter = positionFilter.trim();
-    // Búsqueda ultra-flexible para evitar fallos de tildes o espacios
-    const { data: posData } = await supabase.from('positions')
+  const rawFilters = Array.isArray(positionFilter) 
+    ? positionFilter 
+    : (positionFilter && positionFilter !== 'none' ? [positionFilter] : []);
+
+  if (rawFilters.length > 0) {
+    const orConditions = rawFilters.flatMap(pf => {
+      const cleanFilter = pf.trim();
+      return [`name.ilike.%${cleanFilter}%`, `name.ilike.%${cleanFilter.split(' ').join('%')}%`];
+    }).join(',');
+
+    const { data: posDataList } = await supabase.from('positions')
       .select('id')
-      .or(`name.ilike.%${cleanFilter}%,name.ilike.%${cleanFilter.split(' ').join('%')}%`)
-      .limit(1)
-      .maybeSingle();
+      .or(orConditions);
     
-    if (posData) {
-      targetPositionId = posData.id;
+    if (posDataList && posDataList.length > 0) {
+      targetPositionIds = posDataList.map(p => p.id);
     }
   }
 
@@ -58,9 +63,9 @@ export async function generateSchedule(
     .gte('date', format(startDate, 'yyyy-MM-dd'))
     .lte('date', format(endDate, 'yyyy-MM-dd'));
 
-  if (targetPositionId) {
-    dbLogs.push(`[DEBUG] Cargo encontrado: ${targetPositionId}`);
-    reqQuery = reqQuery.eq('position_id', targetPositionId);
+  if (targetPositionIds.length > 0) {
+    dbLogs.push(`[DEBUG] Cargos encontrados: ${targetPositionIds.join(', ')}`);
+    reqQuery = reqQuery.in('position_id', targetPositionIds);
   }
   
   if (areaId && areaId !== 'all') {
@@ -81,32 +86,26 @@ export async function generateSchedule(
     return true;
   });
 
-  // 1. Intentar por ID exacto
+  // Filter personnel matching target positions
   let filteredPersonnel = activeShiftPersonnel.filter(p => {
-    if (!targetPositionId) return true;
-    return String(p.main_position) === String(targetPositionId);
+    if (targetPositionIds.length === 0) return true;
+    if (targetPositionIds.includes(String(p.main_position))) return true;
+    const targetPosNames = (positions || [])
+      .filter(pos => targetPositionIds.includes(pos.id))
+      .map(pos => pos.name.toLowerCase());
+    const pPos = (positions || []).find(pos => pos.id === p.main_position);
+    return pPos && targetPosNames.includes(pPos.name.toLowerCase());
   });
-
-  // 2. Si falló, intentar por NOMBRE del cargo (Salvavidas)
-  if (filteredPersonnel.length === 0 && targetPositionId) {
-    const targetPos = (positions || []).find(pos => pos.id === targetPositionId);
-    if (targetPos) {
-       filteredPersonnel = (personnelRaw || []).filter(p => {
-         const pPos = (positions || []).find(pos => pos.id === p.main_position);
-         return pPos && pPos.name === targetPos.name;
-       });
-    }
-  }
 
   const personnelCount = filteredPersonnel.length;
   dbLogs.push(`[DEBUG] Personal final para procesar: ${personnelCount}`);
   
-  if (personnelCount === 0 && targetPositionId) {
+  if (personnelCount === 0 && targetPositionIds.length > 0) {
     return {
       assignments: [],
       coverage: 0,
       count: 0,
-      diagnosticLogs: [...dbLogs, "ERROR: No hay personal disponible para este cargo."],
+      diagnosticLogs: [...dbLogs, "ERROR: No hay personal disponible para los cargos seleccionados."],
       stats: { total_slots: 0, filled_slots: 0, coverage_percent: 0, recalculated_count: 0, execution_time_ms: 0 }
     };
   }
