@@ -315,11 +315,15 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     pendingTransports = pendingTransCount || 0;
     pendingDates = Array.from(new Set(pendingDatesData?.map(d => d.date) || [])) as string[];
 
-    // ── 12. Cambios manuales de turno (mes seleccionado) ────────────────────
-    const { count: manualCount } = await supabase
-      .from('shift_assignments').select('id', { count: 'exact', head: true })
-      .eq('is_manual', true).gte('date', monthStart).lte('date', monthEnd);
-    manualChanges = manualCount || 0;
+    // ── 12. Cambios de turno post-publicación (mes seleccionado) ────────────
+    // Solo contabiliza reasignaciones y modificaciones hechas sobre turnos ya publicados
+    const { count: auditCount } = await supabase
+      .from('roster_audit_logs')
+      .select('id', { count: 'exact', head: true })
+      .gte('date', monthStart)
+      .lte('date', monthEnd)
+      .eq('was_published', true);
+    manualChanges = auditCount || 0;
 
     // ── 13. Solicitudes pendientes ──────────────────────────────────────────
     const { count: pendingCount } = await supabase
@@ -592,7 +596,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           <StatCard
             title="Cambios de Turno"
             value={manualChanges}
-            subtitle={`Reasignaciones en ${selectedMonthLabelCap.split(' ')[0]}`}
+            subtitle={manualChanges === 0 ? "0 reasignaciones post-publicación" : `${manualChanges} cambio${manualChanges !== 1 ? 's' : ''} post-publicación`}
             icon={GitCompare}
             iconClassName="bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400"
           />
