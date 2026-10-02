@@ -141,31 +141,7 @@ export default function TransportClient({ initialData }: { initialData: any }) {
       try {
         const res = await updateTransportMobilization(item.personnelId, item.date, item.dbType, String(item.id));
         if (res.success) {
-          let msg = `${item.workerName}: ${item.type}`;
-          if (item.dbType === 'PROPIO' && res.whatsapp) {
-            const { group, worker, groupError, workerError } = res.whatsapp;
-            if (group && worker) {
-              msg += ' | WhatsApp enviado a Grupo y Trabajador ✅';
-            } else if (group) {
-              msg += ` | Enviado a Grupo, falló Trabajador ⚠️ (${workerError || 'Error desconocido'})`;
-            } else if (worker) {
-              msg += ` | Enviado a Trabajador, falló Grupo ⚠️ (${groupError || 'Error desconocido'})`;
-            } else {
-              const errors = [];
-              if (groupError) errors.push(`Grupo: ${groupError}`);
-              if (workerError) errors.push(`Trabajador: ${workerError}`);
-              
-              const errorMsg = errors.join(' | ');
-              if (errorMsg) {
-                msg += ` | Fallaron ambos WhatsApp ❌ (${errorMsg})`;
-              } else if (res.whatsapp.debug) {
-                msg += ` | Error de servicio ❌ (${res.whatsapp.debug})`;
-              } else {
-                msg += ' | Fallaron ambos WhatsApp ❌ (Error de servicio)';
-              }
-            }
-          }
-          toast.success(msg, { id: `toast-${item.id}` });
+          toast.success(`${item.workerName}: Asignado a ${item.type} ✅`, { id: `toast-${item.id}` });
         } else {
           delete localOverrides.current[item.id];
           toast.error(`Error en ${item.workerName}: ${res.error || "No se pudo asignar"}`);

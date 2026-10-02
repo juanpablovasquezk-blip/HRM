@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { after } from 'next/server';
 import { format, addDays, parseISO } from 'date-fns';
 import { sendWhatsAppMessage, getSystemSettings } from '@/lib/ultramsg';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
@@ -343,177 +344,102 @@ export async function updateTransportMobilization(personnelId: string, date: str
     return { success: false, error: dbError.message };
   }
 
-  // 4. WhatsApp Notification for PROPIO
+  // 4. WhatsApp Notification for PROPIO executed in background via after()
   if (!dbError && mobilization === 'PROPIO' && personnel) {
     const todayStr = format(
       new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" })),
       'yyyy-MM-dd'
     );
-    if (date < todayStr) {
-      revalidatePath('/supervisor/transport');
-      return { success: true, whatsapp: { group: false, worker: false, debug: 'Omitido: Fecha pasada' } };
-    }
 
-    let debugInfo = 'Iniciando';
-    try {
-      const pData = personnel;
-      debugInfo = `Persona: ${pData?.first_name || 'No encontrada'} | ASG_ID: ${assignmentId}`;
+    if (date >= todayStr) {
+      after(async () => {
+        try {
+          const pData = personnel;
+          const sData = shiftData as any;
+          let posObj = posData as any;
+          let aData = areaData as any;
 
-      const sData = shiftData as any;
-      let posObj = posData as any;
-      let aData = areaData as any;
+          const adminSupabase = await createAdminClient();
 
-      // FALLBACK: If join failed, fetch area and position manually
-      if (!aData && (asg as any)?.area_id) {
-        const { data } = await supabase.from('areas').select('name, whatsapp_group_id').eq('id', (asg as any).area_id).single();
-        if (data) aData = data;
-      }
-      if (!posObj && (asg as any)?.position_id) {
-        const { data } = await supabase.from('positions').select('name, whatsapp_group_id').eq('id', (asg as any).position_id).single();
-        if (data) posObj = data;
-      }
-
-      const positionName = (Array.isArray(posObj) ? posObj[0]?.name : posObj?.name) || '';
-      const positionNameUpper = positionName.toUpperCase();
-
-      if (pData) {
-        const isSupervisor = pData.role === 'Supervisor' || positionNameUpper.includes('SUPERVISOR');
-        
-        if (!isSupervisor) {
-          const shiftTime = sData?.start_time?.substring(0, 5) || '00:00';
-          const phone = pData.phone;
-          
-          debugInfo += ` | Prep Msg | Tel: ${phone || 'Sin tel'}`;
-
-          // Determine Group
-          const dbSettings = await getSystemSettings();
-          
-          if (dbSettings._error || dbSettings._warn) {
-            debugInfo += ` | DB_SETTINGS_ISSUE: ${dbSettings._error || dbSettings._warn}`;
-          } else {
-            debugInfo += ` | DB_KEYS: ${Object.keys(dbSettings).join(',')}`;
+          // FALLBACK: If join failed, fetch area and position manually
+          if (!aData && (asg as any)?.area_id) {
+            const { data } = await adminSupabase.from('areas').select('name, whatsapp_group_id').eq('id', (asg as any).area_id).single();
+            if (data) aData = data;
+          }
+          if (!posObj && (asg as any)?.position_id) {
+            const { data } = await adminSupabase.from('positions').select('name, whatsapp_group_id').eq('id', (asg as any).position_id).single();
+            if (data) posObj = data;
           }
 
-          // FORCED MANUAL LOOKUP (Bypassing schema cache issues)
-          let finalPositionGroupId = '';
-          let finalAreaGroupId = '';
-          let detectedAreaName = '';
+          const positionName = (Array.isArray(posObj) ? posObj[0]?.name : posObj?.name) || '';
+          const positionNameUpper = positionName.toUpperCase();
 
-          // 1. Fetch Area details manually (Only for name diagnostic)
-          if ((asg as any)?.area_id) {
-             const { data: areaObj } = await supabase.from('areas').select('name').eq('id', (asg as any).area_id).single();
-             if (areaObj) {
-               detectedAreaName = areaObj.name;
-             }
-          }
+          if (pData) {
+            const isSupervisor = pData.role === 'Supervisor' || positionNameUpper.includes('SUPERVISOR');
+            
+            if (!isSupervisor) {
+              const shiftTime = sData?.start_time?.substring(0, 5) || '00:00';
+              const phone = pData.phone;
+              const dbSettings = await getSystemSettings();
 
-          // 2. Fetch Position details manually
-          if ((asg as any)?.position_id) {
-             const { data: posObjManual } = await supabase.from('positions').select('whatsapp_group_id').eq('id', (asg as any).position_id).single();
-             if (posObjManual) {
-               finalPositionGroupId = posObjManual.whatsapp_group_id;
-             }
-          }
+              let finalPositionGroupId = '';
+              let detectedAreaName = '';
 
-          console.log(`[WHATSAPP-DEBUG] Worker: ${pData?.first_name}, Area: "${detectedAreaName}", PosGroup: "${finalPositionGroupId}"`);
-
-          const message = `SR. ${pData.first_name} ${pData.last_name_father}\nTURNO ${format(parseISO(date), 'dd-MM-yyyy')}: ${shiftTime}\n${mobilization === 'PROPIO' ? 'LLEGA POR SUS PROPIOS MEDIOS' : 'RECORRIDO EMPRESA'}\n\n*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
-
-          // 3. FINAL ROUTING DECISION (Position > Area/Name Search > Others)
-          let groupId = finalPositionGroupId || null;
-          if (!groupId) {
-            const combinedSearch = `${detectedAreaName} ${positionName} ${pData?.main_position_name || ''}`.toUpperCase().replace(/\s+/g, '');
-            if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
-            else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
-            else if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
-            else if (combinedSearch.includes('AEROPUERTO')) groupId = dbSettings.ultramsg_group_others;
-          }
-          if (!groupId) {
-            groupId = dbSettings.ultramsg_group_others;
-          }
-          
-          debugInfo += ` | AreaDet: ${detectedAreaName.substring(0,10)} | PosID: ${finalPositionGroupId ? 'SI' : 'NO'} | AreaID: ${finalAreaGroupId ? 'SI' : 'NO'} | Final: ${groupId.substring(0,8)}...`;
-
-          // Send to Group
-          let groupSent = false;
-          let groupError = null;
-          if (groupId) {
-            const res = await sendWhatsAppMessage(groupId, message);
-            groupSent = res.success;
-            groupError = res.error;
-            if (!res.success) {
-              console.error(`WhatsApp Group Error (${groupId}):`, res.error);
-              debugInfo += ` | Error Grupo: ${res.error}`;
-            }
-          } else {
-            groupError = "No se encontró ID de grupo configurado";
-          }
-          
-          // Send to Worker
-          let workerSent = false;
-          let workerError = null;
-          if (phone) {
-            const cleanPhone = phone.toString().replace(/\D/g, '');
-            if (cleanPhone.length >= 8) {
-              const res = await sendWhatsAppMessage(cleanPhone, message);
-              workerSent = res.success;
-              workerError = res.error;
-              if (!res.success) {
-                console.error(`WhatsApp Worker Error (${cleanPhone}):`, res.error);
-                debugInfo += ` | Error Trabajador: ${res.error}`;
+              if ((asg as any)?.area_id) {
+                const { data: areaObj } = await adminSupabase.from('areas').select('name').eq('id', (asg as any).area_id).single();
+                if (areaObj) detectedAreaName = areaObj.name;
               }
-            } else {
-              workerError = `Teléfono inválido: ${phone}`;
+
+              if ((asg as any)?.position_id) {
+                const { data: posObjManual } = await adminSupabase.from('positions').select('whatsapp_group_id').eq('id', (asg as any).position_id).single();
+                if (posObjManual) finalPositionGroupId = posObjManual.whatsapp_group_id;
+              }
+
+              const message = `SR. ${pData.first_name} ${pData.last_name_father}\nTURNO ${format(parseISO(date), 'dd-MM-yyyy')}: ${shiftTime}\n${mobilization === 'PROPIO' ? 'LLEGA POR SUS PROPIOS MEDIOS' : 'RECORRIDO EMPRESA'}\n\n*ESTE ES UN MENSAJE QUE SE GENERA AUTOMATICO. NO LO RESPONDA*`;
+
+              let groupId = finalPositionGroupId || null;
+              if (!groupId) {
+                const combinedSearch = `${detectedAreaName} ${positionName} ${pData?.main_position_name || ''}`.toUpperCase().replace(/\s+/g, '');
+                if (combinedSearch.includes('DHL')) groupId = dbSettings.ultramsg_group_dhl;
+                else if (combinedSearch.includes('FEDEX')) groupId = dbSettings.ultramsg_group_fedex;
+                else if (combinedSearch.includes('BLUE')) groupId = dbSettings.ultramsg_group_blue;
+                else if (combinedSearch.includes('AEROPUERTO')) groupId = dbSettings.ultramsg_group_others;
+              }
+              if (!groupId) {
+                groupId = dbSettings.ultramsg_group_others;
+              }
+
+              let groupSent = false;
+              if (groupId) {
+                const res = await sendWhatsAppMessage(groupId, message);
+                groupSent = res.success;
+              }
+
+              let workerSent = false;
+              if (phone) {
+                const cleanPhone = phone.toString().replace(/\D/g, '');
+                if (cleanPhone.length >= 8) {
+                  const res = await sendWhatsAppMessage(cleanPhone, message);
+                  workerSent = res.success;
+                }
+              }
+
+              if (groupSent || workerSent) {
+                await adminSupabase
+                  .from('transport_requests')
+                  .update({ status: 'GESTIONADO' })
+                  .eq('assignment_id', assignmentId)
+                  .eq('type', 'ENTRADA');
+              }
             }
-          } else {
-            workerError = "Trabajador no tiene teléfono registrado";
           }
-
-          if (groupSent || workerSent) {
-            await supabase
-              .from('transport_requests')
-              .update({ status: 'GESTIONADO' })
-              .eq('assignment_id', assignmentId)
-              .eq('type', 'ENTRADA');
-          }
-
-          revalidatePath('/supervisor/transport');
-          revalidatePath('/transport');
-          return { 
-            success: true, 
-            whatsapp: { 
-              group: groupSent, 
-              worker: workerSent, 
-              groupError: groupError || (groupSent ? null : 'Error desconocido'),
-              workerError: workerError || (workerSent ? null : 'Error desconocido'),
-              debug: debugInfo 
-            } 
-          };
-        } else {
-          return { success: true, whatsapp: { group: false, worker: false, debug: 'Omitido: Es Supervisor' } };
+        } catch (e: any) {
+          console.error('BACKGROUND WHATSAPP ERROR:', e);
         }
-      } else {
-        return { success: true, whatsapp: { group: false, worker: false, debug: 'Error: No hay datos de personal' } };
-      }
-    } catch (e: any) {
-      console.error('NOTIFY CATCH ERROR:', e);
-      return { 
-        success: true, 
-        whatsapp: { 
-          group: false, 
-          worker: false, 
-          groupError: `Error interno: ${e.message}`,
-          workerError: `Error interno: ${e.message}`,
-          debug: `CATCH: ${e.message} | State: ${debugInfo}` 
-        } 
-      };
+      });
     }
   }
-  
-  revalidatePath('/supervisor/transport');
-  if (mobilization === 'PROPIO') {
-    return { success: true, whatsapp: { debug: 'DEBUG: Salió del bloque sin retornar nada' } };
-  }
+
   return { success: true };
 }
 
