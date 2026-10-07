@@ -105,27 +105,58 @@ export async function getEPPInventory(): Promise<{ data: InventoryItem[]; error:
   return { data: (data || []) as InventoryItem[], error: null };
 }
 
-export async function addInventoryBatch(payload: {
-  companyId: string;
+export interface InventoryBatchItemInput {
   type: 'UNIFORM' | 'EPP';
   name: string;
-  size: string;
-  price: number;
-  invoiceNumber: string;
+  size?: string;
+  price?: number;
   stockQty: number;
+}
+
+export async function addInventoryBatch(payload: {
+  companyId: string;
+  invoiceNumber?: string;
+  type?: 'UNIFORM' | 'EPP';
+  name?: string;
+  size?: string;
+  price?: number;
+  stockQty?: number;
+  items?: InventoryBatchItemInput[];
 }): Promise<{ success: boolean; error: string | null }> {
   const supabase = await createClient();
+  
+  let rows: any[] = [];
+  if (payload.items && payload.items.length > 0) {
+    rows = payload.items
+      .filter(item => item.name && item.name.trim() !== '' && Number(item.stockQty) > 0)
+      .map(item => ({
+        company_id: payload.companyId,
+        type: item.type || 'EPP',
+        name: item.name.trim(),
+        size: item.size?.trim() || 'Única',
+        price: Number(item.price) || 0,
+        invoice_number: payload.invoiceNumber?.trim() || '',
+        stock_qty: Number(item.stockQty) || 0
+      }));
+  } else if (payload.name) {
+    rows = [{
+      company_id: payload.companyId,
+      type: payload.type || 'EPP',
+      name: payload.name.trim(),
+      size: payload.size?.trim() || 'Única',
+      price: Number(payload.price) || 0,
+      invoice_number: payload.invoiceNumber?.trim() || '',
+      stock_qty: Number(payload.stockQty) || 0
+    }];
+  }
+
+  if (rows.length === 0) {
+    return { success: false, error: 'Debe ingresar al menos una prenda válida con nombre y cantidad' };
+  }
+
   const { error } = await supabase
     .from('epp_inventory')
-    .insert([{
-      company_id: payload.companyId,
-      type: payload.type,
-      name: payload.name,
-      size: payload.size || 'Única',
-      price: payload.price || 0,
-      invoice_number: payload.invoiceNumber || '',
-      stock_qty: payload.stockQty || 0
-    }]);
+    .insert(rows);
 
   if (error) return { success: false, error: error.message };
   safeRevalidatePath('/epp');

@@ -196,14 +196,29 @@ export default function EPPPage() {
   const [isDeliverOpen, setIsDeliverOpen] = useState(false);
   const [isReturnOpen, setIsReturnOpen] = useState(false);
 
-  // Form States - Add Stock
-  const [stockType, setStockType] = useState<'UNIFORM' | 'EPP'>('EPP');
-  const [stockName, setStockName] = useState('');
-  const [stockSize, setStockSize] = useState('');
-  const [stockPrice, setStockPrice] = useState(0);
-  const [stockInvoice, setStockInvoice] = useState('');
-  const [stockQty, setStockQty] = useState(0);
+  // Form States - Add Stock (Multi-item Invoice)
+  interface StockRowItem {
+    id: string;
+    type: 'UNIFORM' | 'EPP';
+    name: string;
+    size: string;
+    stockQty: number | string;
+    price: number | string;
+  }
+
+  const createDefaultStockRow = (): StockRowItem => ({
+    id: Math.random().toString(36).substring(2, 9),
+    type: 'EPP',
+    name: '',
+    size: '',
+    stockQty: 1,
+    price: 0,
+  });
+
   const [stockCompany, setStockCompany] = useState('');
+  const [stockInvoice, setStockInvoice] = useState('');
+  const [stockRows, setStockRows] = useState<StockRowItem[]>([createDefaultStockRow()]);
+
 
   // Form States - Catalog Item
   const [editingCatalogItem, setEditingCatalogItem] = useState<ProductCatalogItem | null>(null);
@@ -765,33 +780,97 @@ export default function EPPPage() {
 
   // --- Handlers ---
 
+  // Add Stock Multi-item Handlers
+  const addStockRow = () => {
+    setStockRows(prev => [...prev, createDefaultStockRow()]);
+  };
+
+  const duplicateStockRow = (index: number) => {
+    setStockRows(prev => {
+      const item = prev[index];
+      const newRow: StockRowItem = {
+        ...item,
+        id: Math.random().toString(36).substring(2, 9),
+      };
+      const updated = [...prev];
+      updated.splice(index + 1, 0, newRow);
+      return updated;
+    });
+  };
+
+  const removeStockRow = (id: string) => {
+    setStockRows(prev => {
+      if (prev.length <= 1) {
+        return [createDefaultStockRow()];
+      }
+      return prev.filter(r => r.id !== id);
+    });
+  };
+
+  const updateStockRow = (id: string, field: keyof StockRowItem, value: any) => {
+    setStockRows(prev => prev.map(row => {
+      if (row.id !== id) return row;
+      return { ...row, [field]: value };
+    }));
+  };
+
+  const handleStockRowNameChange = (id: string, name: string) => {
+    setStockRows(prev => prev.map(row => {
+      if (row.id !== id) return row;
+      const catMatch = catalog.find(c => c.name.toLowerCase() === name.trim().toLowerCase());
+      return {
+        ...row,
+        name,
+        type: catMatch ? catMatch.product_type : row.type,
+        size: catMatch && !catMatch.uses_sizes && !row.size ? 'Única' : row.size
+      };
+    }));
+  };
+
+  const resetStockForm = () => {
+    setStockInvoice('');
+    setStockRows([createDefaultStockRow()]);
+  };
+
+  const stockTotalUnits = useMemo(() => {
+    return stockRows.reduce((acc, row) => acc + (Number(row.stockQty) || 0), 0);
+  }, [stockRows]);
+
+  const stockTotalPrice = useMemo(() => {
+    return stockRows.reduce((acc, row) => acc + ((Number(row.stockQty) || 0) * (Number(row.price) || 0)), 0);
+  }, [stockRows]);
+
   // Add Stock handler
   const handleAddStockSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!stockName || !stockQty) {
-      toast.error('Faltan campos obligatorios');
+    if (!stockCompany) {
+      toast.error('Selecciona la empresa propietaria');
+      return;
+    }
+
+    const validRows = stockRows.filter(r => r.name && r.name.trim() !== '' && Number(r.stockQty) > 0);
+    if (validRows.length === 0) {
+      toast.error('Debes ingresar al menos una prenda con nombre y cantidad mayor a 0');
       return;
     }
 
     startTransition(async () => {
       const res = await addInventoryBatch({
         companyId: stockCompany,
-        type: stockType,
-        name: stockName,
-        size: stockSize || 'Única',
-        price: stockPrice,
         invoiceNumber: stockInvoice,
-        stockQty: stockQty
+        items: validRows.map(r => ({
+          type: r.type,
+          name: r.name.trim(),
+          size: r.size.trim() || 'Única',
+          price: Number(r.price) || 0,
+          stockQty: Number(r.stockQty) || 1
+        }))
       });
 
       if (res.success) {
-        toast.success('Lote de stock ingresado correctamente');
+        toast.success(`Se ingresaron ${validRows.length} prenda(s) a bodega correctamente`);
         setIsAddStockOpen(false);
-        setStockName('');
-        setStockSize('');
-        setStockPrice(0);
-        setStockInvoice('');
-        setStockQty(0);
+        resetStockForm();
         fetchData();
       } else {
         toast.error('Error: ' + res.error);
@@ -3110,122 +3189,247 @@ export default function EPPPage() {
         </TabsContent>
       </Tabs>
 
-      {/* --- DIALOG 1: ADD STOCK --- */}
-      <Dialog open={isAddStockOpen} onOpenChange={setIsAddStockOpen}>
-        <DialogContent className="sm:max-w-[460px]">
-          <DialogHeader>
-            <DialogTitle>Ingreso de Mercadería a Bodega</DialogTitle>
-            <DialogDescription>
-              Añade un lote de uniformes o equipos de protección personal (EPP) indicando factura, talla y precio.
-            </DialogDescription>
+      {/* --- DIALOG 1: ADD STOCK (MULTI-ITEM INVOICE) --- */}
+      <Dialog open={isAddStockOpen} onOpenChange={(open) => { if (!open) resetStockForm(); setIsAddStockOpen(open); }}>
+        <DialogContent className="sm:max-w-[920px] w-[95vw] max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden">
+          <DialogHeader className="p-5 pb-4 border-b bg-slate-50/70 dark:bg-slate-900/50">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-lg bg-orange-100 dark:bg-orange-950/50 text-orange-600">
+                <Boxes className="h-5 w-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-lg font-bold">Ingreso de Mercadería a Bodega</DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                  Registra el ingreso de una o varias prendas asociadas a una factura o guía de despacho.
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
-          <form onSubmit={handleAddStockSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2 col-span-2">
-                <Label htmlFor="stock_company">Empresa Propietaria *</Label>
-                <select 
-                  id="stock_company"
-                  required
-                  value={stockCompany}
-                  onChange={(e) => setStockCompany(e.target.value)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+
+          <form onSubmit={handleAddStockSubmit} className="flex flex-col flex-1 overflow-hidden">
+            {/* Header info: Empresa & Factura */}
+            <div className="p-5 pb-4 border-b bg-background">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="stock_company" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Empresa Propietaria *
+                  </Label>
+                  <select 
+                    id="stock_company"
+                    required
+                    value={stockCompany}
+                    onChange={(e) => setStockCompany(e.target.value)}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="stock_invoice" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Nro Factura / Guía de Despacho
+                  </Label>
+                  <Input 
+                    id="stock_invoice" 
+                    placeholder="Ej: FACT-1234, GD-5678..." 
+                    value={stockInvoice}
+                    onChange={(e) => setStockInvoice(e.target.value)}
+                    className="h-9 text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Rows Table Area */}
+            <div className="flex-1 overflow-y-auto p-5 pt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                    Prendas / Implementos
+                  </span>
+                  <Badge variant="secondary" className="text-[11px] px-2 py-0 h-5 font-semibold">
+                    {stockRows.length} {stockRows.length === 1 ? 'fila' : 'filas'}
+                  </Badge>
+                </div>
+
+                <Button 
+                  type="button" 
+                  size="sm" 
+                  onClick={addStockRow}
+                  variant="outline"
+                  className="h-8 text-xs gap-1.5 border-orange-300 text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/30"
                 >
-                  {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                  <Plus className="h-3.5 w-3.5" /> Agregar Prenda
+                </Button>
               </div>
 
-              <div className="space-y-2 col-span-2">
-                <Label>Tipo de Producto *</Label>
-                <div className="flex gap-3">
-                  <label className="flex items-center gap-1.5 text-sm font-medium cursor-pointer">
-                    <input 
-                      type="radio" 
-                      name="stock_type" 
-                      checked={stockType === 'EPP'}
-                      onChange={() => setStockType('EPP')}
-                      className="h-4 w-4 accent-orange-600"
-                    />
-                    Equipo de Protección (EPP)
-                  </label>
-                  <label className="flex items-center gap-1.5 text-sm font-medium cursor-pointer">
-                    <input 
-                      type="radio" 
-                      name="stock_type" 
-                      checked={stockType === 'UNIFORM'}
-                      onChange={() => setStockType('UNIFORM')}
-                      className="h-4 w-4 accent-orange-600"
-                    />
-                    Vestuario / Uniforme
-                  </label>
+              <div className="border rounded-lg overflow-x-auto shadow-sm">
+                <table className="w-full text-xs min-w-[720px]">
+                  <thead className="bg-slate-100/80 dark:bg-slate-900 border-b text-slate-600 dark:text-slate-400">
+                    <tr>
+                      <th className="text-center px-2 py-2.5 font-semibold w-[36px]">#</th>
+                      <th className="text-left px-2 py-2.5 font-semibold w-[130px]">Tipo</th>
+                      <th className="text-left px-2 py-2.5 font-semibold min-w-[220px]">Implemento / Prenda *</th>
+                      <th className="text-left px-2 py-2.5 font-semibold w-[110px]">Talla</th>
+                      <th className="text-center px-2 py-2.5 font-semibold w-[80px]">Cant. *</th>
+                      <th className="text-right px-2 py-2.5 font-semibold w-[105px]">P. Unit ($)</th>
+                      <th className="text-right px-2 py-2.5 font-semibold w-[100px]">Subtotal</th>
+                      <th className="text-center px-2 py-2.5 font-semibold w-[75px]">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-background">
+                    {stockRows.map((row, idx) => {
+                      const rowSubtotal = (Number(row.stockQty) || 0) * (Number(row.price) || 0);
+                      return (
+                        <tr key={row.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-900/30 transition-colors">
+                          <td className="text-center font-semibold text-slate-400 px-2 py-1.5">
+                            {idx + 1}
+                          </td>
+                          <td className="px-1.5 py-1.5">
+                            <select
+                              value={row.type}
+                              onChange={e => updateStockRow(row.id, 'type', e.target.value as 'UNIFORM' | 'EPP')}
+                              className="h-8 w-full rounded-md border border-input bg-background px-2 text-[11px] font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            >
+                              <option value="EPP">🛡️ EPP</option>
+                              <option value="UNIFORM">👕 Uniforme</option>
+                            </select>
+                          </td>
+                          <td className="px-1.5 py-1.5">
+                            <Input
+                              placeholder="Ej: Zapato de Seguridad, Polar..."
+                              required
+                              value={row.name}
+                              onChange={e => handleStockRowNameChange(row.id, e.target.value)}
+                              list="stock-suggested-products"
+                              className="h-8 text-xs font-medium"
+                            />
+                          </td>
+                          <td className="px-1.5 py-1.5">
+                            <Input
+                              placeholder="Ej: M, 42, Única..."
+                              value={row.size}
+                              onChange={e => updateStockRow(row.id, 'size', e.target.value)}
+                              list="stock-common-sizes"
+                              className="h-8 text-xs"
+                            />
+                          </td>
+                          <td className="px-1.5 py-1.5">
+                            <Input
+                              type="number"
+                              min="1"
+                              required
+                              value={row.stockQty}
+                              onChange={e => updateStockRow(row.id, 'stockQty', e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value) || 1))}
+                              className="h-8 text-xs text-center font-bold"
+                            />
+                          </td>
+                          <td className="px-1.5 py-1.5">
+                            <Input
+                              type="number"
+                              min="0"
+                              value={row.price}
+                              onChange={e => updateStockRow(row.id, 'price', e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value) || 0))}
+                              className="h-8 text-xs text-right"
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-semibold text-slate-700 dark:text-slate-300">
+                            ${rowSubtotal.toLocaleString('es-CL')}
+                          </td>
+                          <td className="px-1.5 py-1.5 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                type="button"
+                                title="Duplicar prenda (útil para ingresar otra talla)"
+                                onClick={() => duplicateStockRow(idx)}
+                                className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Eliminar fila"
+                                disabled={stockRows.length <= 1 && !row.name}
+                                onClick={() => removeStockRow(row.id)}
+                                className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/50 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pt-1">
+                <Button 
+                  type="button" 
+                  size="sm" 
+                  variant="ghost" 
+                  onClick={addStockRow}
+                  className="h-7 text-xs text-orange-600 hover:text-orange-700 hover:bg-orange-50 -ml-2 gap-1 font-medium"
+                >
+                  <Plus className="h-3.5 w-3.5" /> + Añadir otra fila
+                </Button>
+                <span className="text-[11px] text-muted-foreground italic">
+                  💡 Tip: Puedes usar el botón de copiar (📋) para duplicar una prenda y asignarle otra talla rápidamente.
+                </span>
+              </div>
+
+              {/* Datalists for autocompletion */}
+              <datalist id="stock-suggested-products">
+                {uniqueProducts.map(name => <option key={name} value={name} />)}
+              </datalist>
+              <datalist id="stock-common-sizes">
+                {['Única', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'].map(s => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+            </div>
+
+            {/* Footer Summary & Actions */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-900 border-t flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-4 text-xs">
+                <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
+                  <span>Prendas a ingresar:</span>
+                  <span className="font-bold text-slate-900 dark:text-slate-100">
+                    {stockRows.filter(r => r.name.trim() !== '' && Number(r.stockQty) > 0).length}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
+                  <span>Total Unidades:</span>
+                  <span className="font-bold text-slate-900 dark:text-slate-100">
+                    {stockTotalUnits}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
+                  <span>Monto Total Factura:</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                    ${stockTotalPrice.toLocaleString('es-CL')}
+                  </span>
                 </div>
               </div>
 
-              <div className="space-y-2 col-span-2">
-                <Label htmlFor="stock_name">Nombre del Implemento *</Label>
-                <Input 
-                  id="stock_name" 
-                  placeholder="Ej: Calzado de Seguridad (Con puntera)" 
-                  required
-                  value={stockName}
-                  onChange={(e) => setStockName(e.target.value)}
-                  list="suggested-products"
-                />
-                <datalist id="suggested-products">
-                  {uniqueProducts.map(name => <option key={name} value={name} />)}
-                </datalist>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="stock_size">Talla / Medida</Label>
-                <Input 
-                  id="stock_size" 
-                  placeholder="Ej: M, L, 42..." 
-                  value={stockSize}
-                  onChange={(e) => setStockSize(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="stock_qty">Cantidad *</Label>
-                <Input 
-                  id="stock_qty" 
-                  type="number" 
-                  min="1"
-                  required
-                  value={stockQty}
-                  onChange={(e) => setStockQty(Number(e.target.value))}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="stock_price">Precio Unitario ($)*</Label>
-                <Input 
-                  id="stock_price" 
-                  type="number" 
-                  min="0"
-                  required
-                  value={stockPrice}
-                  onChange={(e) => setStockPrice(Number(e.target.value))}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="stock_invoice">Nro Factura</Label>
-                <Input 
-                  id="stock_invoice" 
-                  placeholder="Ej: FACT-1234" 
-                  value={stockInvoice}
-                  onChange={(e) => setStockInvoice(e.target.value)}
-                />
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <Button 
+                  type="button" 
+                  variant="ghost" 
+                  onClick={() => { resetStockForm(); setIsAddStockOpen(false); }}
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  type="submit" 
+                  disabled={isPending || stockRows.filter(r => r.name.trim() !== '' && Number(r.stockQty) > 0).length === 0} 
+                  className="bg-orange-600 hover:bg-orange-700 text-white font-medium shadow-sm"
+                >
+                  {isPending ? 'Guardando...' : `Ingresar a Bodega (${stockTotalUnits} un.)`}
+                </Button>
               </div>
             </div>
-            
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="ghost" onClick={() => setIsAddStockOpen(false)}>Cancelar</Button>
-              <Button type="submit" disabled={isPending} className="bg-orange-600 hover:bg-orange-700 text-white">
-                {isPending ? 'Guardando...' : 'Ingresar a Bodega'}
-              </Button>
-            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
