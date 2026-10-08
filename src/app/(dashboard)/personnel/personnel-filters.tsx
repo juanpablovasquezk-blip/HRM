@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useTransition } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { Search, ChevronDown } from 'lucide-react';
+import { Search, ChevronDown, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -43,6 +43,10 @@ export function PersonnelFilters({
   const currentPositionId = searchParams.get('position_id') || '';
   const currentStatus = searchParams.get('status') || 'active';
 
+  const [isPending, startTransition] = useTransition();
+  const lastPushedSearchRef = useRef(currentSearch);
+  const [searchTerm, setSearchTerm] = useState(currentSearch);
+
   // Restore filters from localStorage on initial load if URL has no search params
   useEffect(() => {
     if (hasRestoredRef.current) return;
@@ -62,7 +66,9 @@ export function PersonnelFilters({
           const queryString = params.toString();
           if (queryString) {
             hasRestoredRef.current = true;
-            router.replace(`${pathname}?${queryString}`);
+            lastPushedSearchRef.current = parsed.search || '';
+            setSearchTerm(parsed.search || '');
+            router.replace(`${pathname}?${queryString}`, { scroll: false });
             return;
           }
         }
@@ -102,6 +108,10 @@ export function PersonnelFilters({
     const nextPositionId = key === 'position_id' ? value : (params.get('position_id') || '');
     const nextStatus = key === 'status' ? value : (params.get('status') || 'active');
 
+    if (key === 'search') {
+      lastPushedSearchRef.current = value;
+    }
+
     try {
       if (!nextSearch && !nextCompanyId && !nextPositionId && nextStatus === 'active') {
         localStorage.removeItem(STORAGE_KEY);
@@ -120,7 +130,10 @@ export function PersonnelFilters({
       console.error('Error saving personnel filters:', e);
     }
 
-    router.push(`${pathname}?${params.toString()}`);
+    const qs = params.toString();
+    startTransition(() => {
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    });
   };
 
   // Deduplicate positions by name for the filter dropdown
@@ -139,23 +152,30 @@ export function PersonnelFilters({
     positionButtonLabel = `${selectedPositionIds.length} cargos`;
   }
 
-  const [searchTerm, setSearchTerm] = useState(currentSearch);
-
   // Debounce effect for search
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      if (searchTerm !== currentSearch) {
+      if (searchTerm !== lastPushedSearchRef.current) {
         updateFilter('search', searchTerm);
       }
-    }, 400);
+    }, 250);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm]);
 
-  // Sync local state if currentSearch changes from outside (e.g. Clear button or restored URL)
+  // Sync local state ONLY when search was changed externally (e.g. popstate or Clear button)
   useEffect(() => {
-    setSearchTerm(currentSearch);
+    if (currentSearch !== lastPushedSearchRef.current) {
+      lastPushedSearchRef.current = currentSearch;
+      setSearchTerm(currentSearch);
+    }
   }, [currentSearch]);
+
+  const handleClearSearch = () => {
+    setSearchTerm('');
+    lastPushedSearchRef.current = '';
+    updateFilter('search', '');
+  };
 
   const handleClearFilters = () => {
     try {
@@ -164,21 +184,35 @@ export function PersonnelFilters({
       console.error('Error clearing saved filters:', e);
     }
     setSearchTerm('');
-    router.push(pathname);
+    lastPushedSearchRef.current = '';
+    startTransition(() => {
+      router.replace(pathname, { scroll: false });
+    });
   };
 
   return (
     <div className="flex gap-2">
       <div className="relative flex-1 max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
         <Input
           name="search"
           placeholder="Buscar por nombre o RUT..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10"
+          className="pl-10 pr-8"
           id="personnel-search"
+          autoComplete="off"
         />
+        {searchTerm && (
+          <button
+            type="button"
+            onClick={handleClearSearch}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded-full hover:bg-muted transition-colors cursor-pointer"
+            title="Borrar búsqueda"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
       <div className="flex-1 max-w-[200px]">
         <select

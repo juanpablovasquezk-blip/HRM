@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useTransition } from 'react';
+import { useState, useRef, useEffect, useTransition, useMemo } from 'react';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import { 
@@ -22,7 +22,10 @@ import {
   UserMinus,
   Printer,
   Send,
-  ClipboardCopy
+  ClipboardCopy,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -365,6 +368,8 @@ export default function PersonnelTableClient({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showColumnPanel]);
 
+  const COLUMNS_STORAGE_KEY = 'hrm_personnel_visible_columns';
+
   // Define available columns
   const columns: ColumnConfig[] = [
     { id: 'fullName', label: 'Nombre Completo', defaultVisible: true },
@@ -385,27 +390,225 @@ export default function PersonnelTableClient({
     { id: 'is_active', label: 'Estado', defaultVisible: false },
   ];
 
-  // State to track visible columns
+  // State to track visible columns with localStorage persistence
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(() => {
-    return Object.fromEntries(columns.map(c => [c.id, c.defaultVisible]));
+    const defaults = Object.fromEntries(columns.map(c => [c.id, c.defaultVisible]));
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(COLUMNS_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return { ...defaults, ...parsed };
+        }
+      } catch (e) {
+        console.error('Error loading saved columns:', e);
+      }
+    }
+    return defaults;
   });
+
+  // Sync saved columns on mount (safeguard for hydration)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(COLUMNS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setVisibleColumns(prev => ({ ...prev, ...parsed }));
+      }
+    } catch (e) {
+      console.error('Error restoring columns from localStorage:', e);
+    }
+  }, []);
+
+  const saveColumnsToStorage = (newVisible: Record<string, boolean>) => {
+    try {
+      localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(newVisible));
+    } catch (e) {
+      console.error('Error saving columns to localStorage:', e);
+    }
+  };
 
   const toggleColumn = (columnId: string) => {
     setVisibleColumns(prev => {
       // Don't allow hiding all columns
       const next = { ...prev, [columnId]: !prev[columnId] };
       const hasVisible = Object.values(next).some(Boolean);
-      return hasVisible ? next : prev;
+      const result = hasVisible ? next : prev;
+      saveColumnsToStorage(result);
+      return result;
     });
   };
 
   // Select all / Deselect all
   const selectAll = () => {
-    setVisibleColumns(Object.fromEntries(columns.map(c => [c.id, true])));
+    const all = Object.fromEntries(columns.map(c => [c.id, true]));
+    setVisibleColumns(all);
+    saveColumnsToStorage(all);
   };
 
   const resetDefault = () => {
-    setVisibleColumns(Object.fromEntries(columns.map(c => [c.id, c.defaultVisible])));
+    const defaults = Object.fromEntries(columns.map(c => [c.id, c.defaultVisible]));
+    setVisibleColumns(defaults);
+    try {
+      localStorage.removeItem(COLUMNS_STORAGE_KEY);
+    } catch (e) {
+      console.error('Error clearing saved columns:', e);
+    }
+  };
+
+  // Sorting state & handler
+  type SortField =
+    | 'fullName'
+    | 'rut'
+    | 'main_position'
+    | 'company'
+    | 'contract_type'
+    | 'epp_sizes'
+    | 'rotation_pattern'
+    | 'preferences'
+    | 'email'
+    | 'phone'
+    | 'driver_licenses'
+    | 'birth_date'
+    | 'hire_date'
+    | 'termination_date'
+    | 'requires_transport'
+    | 'is_active';
+
+  type SortDirection = 'asc' | 'desc';
+
+  interface SortConfig {
+    field: SortField;
+    direction: SortDirection;
+  }
+
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+
+  const handleSort = (field: SortField) => {
+    setSortConfig(prev => {
+      if (!prev || prev.field !== field) {
+        return { field, direction: 'asc' };
+      }
+      return {
+        field,
+        direction: prev.direction === 'asc' ? 'desc' : 'asc'
+      };
+    });
+  };
+
+  const sortedPersonnel = useMemo(() => {
+    if (!sortConfig) return personnel;
+
+    return [...personnel].sort((a, b) => {
+      let aVal: any = '';
+      let bVal: any = '';
+
+      switch (sortConfig.field) {
+        case 'fullName':
+          aVal = `${a.first_name || ''} ${a.last_name_father || ''} ${a.last_name_mother || ''}`.trim().toLowerCase();
+          bVal = `${b.first_name || ''} ${b.last_name_father || ''} ${b.last_name_mother || ''}`.trim().toLowerCase();
+          break;
+        case 'rut': {
+          const cleanA = (a.rut || '').replace(/[^0-9kK]/g, '');
+          const cleanB = (b.rut || '').replace(/[^0-9kK]/g, '');
+          const numA = parseInt(cleanA.slice(0, -1), 10) || 0;
+          const numB = parseInt(cleanB.slice(0, -1), 10) || 0;
+          aVal = numA;
+          bVal = numB;
+          break;
+        }
+        case 'main_position':
+          aVal = (positionMap[a.main_position] || a.main_position || '').toLowerCase();
+          bVal = (positionMap[b.main_position] || b.main_position || '').toLowerCase();
+          break;
+        case 'company':
+          aVal = (a.company?.name || '').toLowerCase();
+          bVal = (b.company?.name || '').toLowerCase();
+          break;
+        case 'contract_type':
+          aVal = ((a as any).contract_type || '').toLowerCase();
+          bVal = ((b as any).contract_type || '').toLowerCase();
+          break;
+        case 'epp_sizes':
+          aVal = `${a.clothing_tshirt_size || ''} ${a.clothing_pants_size_letter || ''} ${a.clothing_shoe_size || ''}`.trim().toLowerCase();
+          bVal = `${b.clothing_tshirt_size || ''} ${b.clothing_pants_size_letter || ''} ${b.clothing_shoe_size || ''}`.trim().toLowerCase();
+          break;
+        case 'rotation_pattern':
+          aVal = (a.rotation_pattern || '').toLowerCase();
+          bVal = (b.rotation_pattern || '').toLowerCase();
+          break;
+        case 'preferences':
+          aVal = a.prefers_night ? 1 : a.avoids_night ? 2 : 3;
+          bVal = b.prefers_night ? 1 : b.avoids_night ? 2 : 3;
+          break;
+        case 'email':
+          aVal = (a.email || '').toLowerCase();
+          bVal = (b.email || '').toLowerCase();
+          break;
+        case 'phone':
+          aVal = (a.phone || '').toLowerCase();
+          bVal = (b.phone || '').toLowerCase();
+          break;
+        case 'driver_licenses':
+          aVal = (a.driver_licenses || []).join(', ').toLowerCase();
+          bVal = (b.driver_licenses || []).join(', ').toLowerCase();
+          break;
+        case 'birth_date':
+          aVal = a.birth_date || '';
+          bVal = b.birth_date || '';
+          break;
+        case 'hire_date':
+          aVal = a.hire_date || '';
+          bVal = b.hire_date || '';
+          break;
+        case 'termination_date':
+          aVal = a.termination_date || '';
+          bVal = b.termination_date || '';
+          break;
+        case 'requires_transport':
+          aVal = a.requires_transport ? 1 : 0;
+          bVal = b.requires_transport ? 1 : 0;
+          break;
+        case 'is_active':
+          aVal = a.is_active ? 1 : 0;
+          bVal = b.is_active ? 1 : 0;
+          break;
+        default:
+          aVal = '';
+          bVal = '';
+      }
+
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [personnel, sortConfig, positionMap]);
+
+  const renderSortableHeader = (field: SortField, label: string, className?: string) => {
+    const isCurrent = sortConfig?.field === field;
+    const isAsc = isCurrent && sortConfig.direction === 'asc';
+    const isDesc = isCurrent && sortConfig.direction === 'desc';
+
+    return (
+      <TableHead
+        onClick={() => handleSort(field)}
+        className={`cursor-pointer select-none hover:text-orange-600 dark:hover:text-orange-400 transition-colors group ${className || ''}`}
+        title={`Ordenar por ${label}`}
+      >
+        <div className="flex items-center gap-1.5 py-1">
+          <span className={isCurrent ? 'font-bold text-orange-600 dark:text-orange-400' : ''}>{label}</span>
+          <span className={`inline-flex transition-all ${isCurrent ? 'opacity-100 text-orange-600 dark:text-orange-400' : 'opacity-0 group-hover:opacity-40 text-muted-foreground'}`}>
+            {isAsc ? (
+              <ArrowUp className="h-3.5 w-3.5 shrink-0" />
+            ) : isDesc ? (
+              <ArrowDown className="h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <ArrowUpDown className="h-3.5 w-3.5 shrink-0" />
+            )}
+          </span>
+        </div>
+      </TableHead>
+    );
   };
 
   const handleCopyWorkerSizeTokenLink = async (person: Personnel) => {
@@ -470,7 +673,7 @@ export default function PersonnelTableClient({
 
     try {
       // Map data according to selected/visible columns
-      const dataToExport = personnel.map(p => {
+      const dataToExport = sortedPersonnel.map(p => {
         const row: Record<string, any> = {};
 
         if (visibleColumns.fullName) {
@@ -488,7 +691,7 @@ export default function PersonnelTableClient({
           row['Empresa'] = (p.company as { name: string } | null)?.name || '';
         }
         if (visibleColumns.contract_type) {
-          row['Tipo de Contrato'] = p.contract_type === 'INDEFINIDO' ? 'Indefinido' : 'Plazo Fijo';
+          row['Tipo de Contrato'] = (p as any).contract_type === 'INDEFINIDO' ? 'Indefinido' : 'Plazo Fijo';
         }
         if (visibleColumns.rotation_pattern) {
           row['Planificación / Rotación'] = p.rotation_pattern || 'Estándar';
@@ -646,27 +849,27 @@ export default function PersonnelTableClient({
           <Table>
             <TableHeader>
               <TableRow>
-                {visibleColumns.fullName && <TableHead>Nombre</TableHead>}
-                {visibleColumns.rut && <TableHead>RUT</TableHead>}
-                {visibleColumns.main_position && <TableHead>Cargo</TableHead>}
-                {visibleColumns.company && <TableHead>Empresa</TableHead>}
-                {visibleColumns.contract_type && <TableHead>Contrato</TableHead>}
-                {visibleColumns.epp_sizes && <TableHead>Tallas EPP</TableHead>}
-                {visibleColumns.rotation_pattern && <TableHead>Planificación</TableHead>}
-                {visibleColumns.preferences && <TableHead>Preferencias</TableHead>}
-                {visibleColumns.email && <TableHead>Correo</TableHead>}
-                {visibleColumns.phone && <TableHead>Teléfono</TableHead>}
-                {visibleColumns.driver_licenses && <TableHead>Licencias</TableHead>}
-                {visibleColumns.birth_date && <TableHead>Fecha Nacimiento</TableHead>}
-                {visibleColumns.hire_date && <TableHead>Fecha Contratación</TableHead>}
-                {visibleColumns.termination_date && <TableHead>Fecha Término</TableHead>}
-                {visibleColumns.requires_transport && <TableHead>Transporte</TableHead>}
-                {visibleColumns.is_active && <TableHead>Estado</TableHead>}
+                {visibleColumns.fullName && renderSortableHeader('fullName', 'Nombre')}
+                {visibleColumns.rut && renderSortableHeader('rut', 'RUT')}
+                {visibleColumns.main_position && renderSortableHeader('main_position', 'Cargo')}
+                {visibleColumns.company && renderSortableHeader('company', 'Empresa')}
+                {visibleColumns.contract_type && renderSortableHeader('contract_type', 'Contrato')}
+                {visibleColumns.epp_sizes && renderSortableHeader('epp_sizes', 'Tallas EPP')}
+                {visibleColumns.rotation_pattern && renderSortableHeader('rotation_pattern', 'Planificación')}
+                {visibleColumns.preferences && renderSortableHeader('preferences', 'Preferencias')}
+                {visibleColumns.email && renderSortableHeader('email', 'Correo')}
+                {visibleColumns.phone && renderSortableHeader('phone', 'Teléfono')}
+                {visibleColumns.driver_licenses && renderSortableHeader('driver_licenses', 'Licencias')}
+                {visibleColumns.birth_date && renderSortableHeader('birth_date', 'Fecha Nacimiento')}
+                {visibleColumns.hire_date && renderSortableHeader('hire_date', 'Fecha Contratación')}
+                {visibleColumns.termination_date && renderSortableHeader('termination_date', 'Fecha Término')}
+                {visibleColumns.requires_transport && renderSortableHeader('requires_transport', 'Transporte')}
+                {visibleColumns.is_active && renderSortableHeader('is_active', 'Estado')}
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {personnel.map((person) => {
+              {sortedPersonnel.map((person) => {
                 const hasStandardSizes = person.clothing_tshirt_size || person.clothing_shoe_size || person.clothing_pants_size_letter;
 
                 return (
