@@ -21,6 +21,7 @@ import {
   Shirt,
   ShieldCheck,
   Smartphone,
+  Tv,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -169,6 +170,20 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         >
           <Smartphone className="h-4 w-4 shrink-0" />
           {!collapsed && <span>App Móvil (Terreno)</span>}
+        </Link>
+
+        <Link
+          href="/proyeccion"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(
+            'flex items-center gap-3 rounded-xl px-3 py-2 text-xs font-bold text-indigo-600 bg-indigo-50/80 hover:bg-indigo-100 hover:text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400 dark:hover:bg-indigo-900/40 transition-all duration-200 border border-indigo-200/60 dark:border-indigo-900/40',
+            collapsed && 'justify-center px-2'
+          )}
+          title="Modo Proyección (Pantalla TV / Kiosko)"
+        >
+          <Tv className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+          {!collapsed && <span>Modo Proyección (TV)</span>}
         </Link>
 
         {(role === 'ADMIN' || role === 'HR') && (
