@@ -36,12 +36,17 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
+  // Always allow /proyeccion without redirects (both for logged in and anonymous users)
+  if (pathname.startsWith('/proyeccion')) {
+    return supabaseResponse;
+  }
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   const isAuthPage = pathname.startsWith('/login') || pathname.endsWith('/login');
-  const isPublicPage = pathname === '/' || pathname.startsWith('/api/') || pathname.startsWith('/onboarding') || pathname.startsWith('/actualizar-ficha') || pathname.startsWith('/proyeccion');
+  const isPublicPage = pathname === '/' || pathname.startsWith('/api/') || pathname.startsWith('/onboarding') || pathname.startsWith('/actualizar-ficha');
 
   if (!user && !isAuthPage && !isPublicPage) {
     const url = request.nextUrl.clone();
