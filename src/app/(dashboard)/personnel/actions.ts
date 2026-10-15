@@ -7,6 +7,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createSupabaseAdminClient } from '@supabase/supabase-js';
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
+import { triggerWommSync } from '@/lib/womm-sync';
 import { addDays, parseISO, format } from 'date-fns';
 
 function safeRevalidatePath(path: string) {
@@ -227,6 +228,7 @@ export async function createPersonnel(
 
   safeRevalidatePath('/personnel');
   safeRevalidatePath('/shifts/daily');
+  triggerWommSync();
   return { success: true, error: null };
 }
 
@@ -449,6 +451,7 @@ export async function updatePersonnel(
   safeRevalidatePath('/shifts/roster');
   safeRevalidatePath('/shifts/daily');
   safeRevalidatePath('/dashboard');
+  triggerWommSync();
   return { success: true, error: null };
 }
 
@@ -558,6 +561,7 @@ export async function deletePersonnel(
   safeRevalidatePath('/shifts/roster');
   safeRevalidatePath('/shifts/daily');
   safeRevalidatePath('/dashboard');
+  triggerWommSync();
   return { success: true, error: null };
 }
 
