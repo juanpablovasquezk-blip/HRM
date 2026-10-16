@@ -44,10 +44,13 @@ export async function GET(request: Request) {
     if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
       targetDateStr = dateParam;
     } else {
-      const now = new Date();
-      const chileNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Santiago' }));
-      chileNow.setDate(chileNow.getDate() - 1);
-      targetDateStr = chileNow.toISOString().split('T')[0];
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      targetDateStr = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Santiago',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(yesterday);
     }
 
     // 4. Fetch absent assignments (excluding extra shifts)
@@ -203,34 +206,87 @@ export async function GET(request: Request) {
       `;
     }
 
-    // 8. Send the email via SMTP (Nodemailer)
-    const transporter = nodemailer.createTransport({
-      host: 'mail.minerquim.cl',
-      port: 465,
-      secure: true,
-      auth: {
-        user: 'no-reply@minerquim.cl',
-        pass: 'Empresa_1000',
+    // 8. Send the email via SMTP with fallback across ports and hostnames
+    const configs = [
+      {
+        name: 'rack23.miwebdns.net:587 (STARTTLS)',
+        host: 'rack23.miwebdns.net',
+        port: 587,
+        secure: false,
+        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+        tls: { rejectUnauthorized: false },
+        authMethod: 'LOGIN',
+        connectionTimeout: 10000,
       },
-    });
+      {
+        name: 'mail.minerquim.cl:587 (STARTTLS)',
+        host: 'mail.minerquim.cl',
+        port: 587,
+        secure: false,
+        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+        tls: { rejectUnauthorized: false },
+        authMethod: 'LOGIN',
+        connectionTimeout: 10000,
+      },
+      {
+        name: 'rack23.miwebdns.net:465 (SSL)',
+        host: 'rack23.miwebdns.net',
+        port: 465,
+        secure: true,
+        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+        tls: { rejectUnauthorized: false },
+        authMethod: 'LOGIN',
+        connectionTimeout: 10000,
+      },
+      {
+        name: 'mail.minerquim.cl:465 (SSL)',
+        host: 'mail.minerquim.cl',
+        port: 465,
+        secure: true,
+        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+        tls: { rejectUnauthorized: false },
+        connectionTimeout: 10000,
+      },
+    ];
 
-    const info = await transporter.sendMail({
+    const mailOptions = {
       from: '"HRM Roster Manager" <no-reply@minerquim.cl>',
       to: emailRecipients,
       subject: absenceCount > 0
         ? `[Ausencias] Reporte de Inasistencias - ${targetDateStr}`
         : `[Ausencias] ✅ Sin inasistencias - ${targetDateStr}`,
       html: emailHtml,
-    });
+    };
 
-    console.log('Absences alert email sent successfully:', info.messageId);
+    let sentInfo: any = null;
+    let successfulTransport = '';
+    const failureLog: string[] = [];
+
+    for (const config of configs) {
+      try {
+        console.log(`[Absences Cron] Trying transport: ${config.name}...`);
+        const transporter = nodemailer.createTransport(config as any);
+        sentInfo = await transporter.sendMail(mailOptions);
+        successfulTransport = config.name;
+        console.log(`[Absences Cron] Email sent successfully via ${config.name}:`, sentInfo.messageId);
+        break;
+      } catch (err: any) {
+        console.warn(`[Absences Cron] Failed via ${config.name}:`, err.message);
+        failureLog.push(`${config.name} (${err.message})`);
+      }
+    }
+
+    if (!sentInfo) {
+      throw new Error(`All SMTP transports failed: ${failureLog.join(' | ')}`);
+    }
 
     return NextResponse.json({
       success: true,
       message: 'Email sent successfully',
+      transport: successfulTransport,
       recipients: emailRecipients.length,
       absences: absenceCount,
-      messageId: info.messageId
+      messageId: sentInfo.messageId
     });
 
   } catch (error: any) {

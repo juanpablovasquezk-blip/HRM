@@ -138,18 +138,50 @@ export async function POST(req: NextRequest) {
       </html>
     `;
 
-    // SMTP config — identical to the working cron/absences route
-    const transporter = nodemailer.createTransport({
-      host: 'mail.minerquim.cl',
-      port: 465,
-      secure: true,
-      auth: {
-        user: 'no-reply@minerquim.cl',
-        pass: 'Empresa_1000',
+    // SMTP config with fallback across ports and hostnames
+    const configs = [
+      {
+        name: 'rack23.miwebdns.net:587 (STARTTLS)',
+        host: 'rack23.miwebdns.net',
+        port: 587,
+        secure: false,
+        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+        tls: { rejectUnauthorized: false },
+        authMethod: 'LOGIN',
+        connectionTimeout: 10000,
       },
-    });
+      {
+        name: 'mail.minerquim.cl:587 (STARTTLS)',
+        host: 'mail.minerquim.cl',
+        port: 587,
+        secure: false,
+        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+        tls: { rejectUnauthorized: false },
+        authMethod: 'LOGIN',
+        connectionTimeout: 10000,
+      },
+      {
+        name: 'rack23.miwebdns.net:465 (SSL)',
+        host: 'rack23.miwebdns.net',
+        port: 465,
+        secure: true,
+        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+        tls: { rejectUnauthorized: false },
+        authMethod: 'LOGIN',
+        connectionTimeout: 10000,
+      },
+      {
+        name: 'mail.minerquim.cl:465 (SSL)',
+        host: 'mail.minerquim.cl',
+        port: 465,
+        secure: true,
+        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+        tls: { rejectUnauthorized: false },
+        connectionTimeout: 10000,
+      },
+    ];
 
-    const info = await transporter.sendMail({
+    const mailOptions = {
       from: `"Prevención de Riesgos - ${companyName}" <no-reply@minerquim.cl>`,
       to: worker.email,
       bcc: 'juanpablo.vasquez@minerquim.cl',
@@ -162,9 +194,27 @@ export async function POST(req: NextRequest) {
           contentType: 'application/pdf',
         },
       ],
-    });
+    };
 
-    console.log('[RIOHS-EMAIL] Email sent successfully:', info.messageId);
+    let info: any = null;
+    const failureLog: string[] = [];
+
+    for (const config of configs) {
+      try {
+        console.log(`[RIOHS-EMAIL] Trying transport: ${config.name}...`);
+        const transporter = nodemailer.createTransport(config as any);
+        info = await transporter.sendMail(mailOptions);
+        console.log(`[RIOHS-EMAIL] Email sent successfully via ${config.name}:`, info.messageId);
+        break;
+      } catch (err: any) {
+        console.warn(`[RIOHS-EMAIL] Failed via ${config.name}:`, err.message);
+        failureLog.push(`${config.name} (${err.message})`);
+      }
+    }
+
+    if (!info) {
+      throw new Error(`All SMTP transports failed: ${failureLog.join(' | ')}`);
+    }
 
     // Record RIOHS status update in Database
     let effectiveCompanyId = worker.company_id;
