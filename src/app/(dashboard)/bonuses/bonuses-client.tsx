@@ -11,7 +11,8 @@ import {
   bulkUpdateBonusPaidMonth 
 } from './actions';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -32,6 +33,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import {
   Table,
   TableBody,
@@ -57,7 +71,8 @@ import {
   Check,
   X,
   ExternalLink,
-  Info
+  Info,
+  ChevronsUpDown
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
@@ -118,7 +133,9 @@ export function BonusesClient({
 
   // Form Individual
   const [formPersonnelId, setFormPersonnelId] = useState('');
+  const [comboboxOpenPerson, setComboboxOpenPerson] = useState(false);
   const [formTypeId, setFormTypeId] = useState('');
+  const [comboboxOpenType, setComboboxOpenType] = useState(false);
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
   const [formAmount, setFormAmount] = useState<number>(0);
   const [formOt, setFormOt] = useState('');
@@ -979,36 +996,116 @@ export function BonusesClient({
             </DialogHeader>
 
             <div className="space-y-4 py-4">
+              {/* Selector Searchable de Colaborador */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Colaborador</Label>
-                <Select value={formPersonnelId} onValueChange={(val) => setFormPersonnelId(val || '')}>
-                  <SelectTrigger className="text-xs">
-                    <SelectValue placeholder="Seleccionar colaborador..." />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-56">
-                    {personnelList.map((p) => (
-                      <SelectItem key={p.id} value={p.id} className="text-xs">
-                        {p.first_name} {p.last_name_father} ({p.rut})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="text-xs font-semibold">Colaborador *</Label>
+                <Popover open={comboboxOpenPerson} onOpenChange={setComboboxOpenPerson}>
+                  <PopoverTrigger
+                    role="combobox"
+                    aria-expanded={comboboxOpenPerson}
+                    className={cn(
+                      buttonVariants({ variant: 'outline' }),
+                      "w-full justify-between h-9 text-xs font-normal"
+                    )}
+                  >
+                    {(() => {
+                      const p = personnelList.find((item) => item.id === formPersonnelId);
+                      return p 
+                        ? `${p.first_name} ${p.last_name_father} (${p.rut})`
+                        : "Seleccionar colaborador o escribir para buscar...";
+                    })()}
+                    <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[380px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Escribe nombre, apellido o RUT..." className="text-xs" />
+                      <CommandList className="max-h-56">
+                        <CommandEmpty>No se encontró ningún colaborador.</CommandEmpty>
+                        <CommandGroup>
+                          {personnelList.map((p) => {
+                            const isSelected = formPersonnelId === p.id;
+                            return (
+                              <CommandItem
+                                key={p.id}
+                                value={`${p.first_name} ${p.last_name_father} ${p.last_name_mother || ''} ${p.rut}`}
+                                onSelect={() => {
+                                  setFormPersonnelId(p.id);
+                                  setComboboxOpenPerson(false);
+                                }}
+                                className="text-xs cursor-pointer flex items-center justify-between"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Check className={`h-3.5 w-3.5 text-emerald-600 ${isSelected ? 'opacity-100' : 'opacity-0'}`} />
+                                  <div>
+                                    <p className="font-semibold">{p.first_name} {p.last_name_father} {p.last_name_mother || ''}</p>
+                                    <p className="text-[11px] text-muted-foreground font-mono">{p.rut}</p>
+                                  </div>
+                                </div>
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
 
+              {/* Selector Searchable de Tipo de Bono */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Tipo de Bono</Label>
-                <Select value={formTypeId} onValueChange={(val) => handleSingleTypeChange(val || '')}>
-                  <SelectTrigger className="text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {bonusTypes.map((t) => (
-                      <SelectItem key={t.id} value={t.id} className="text-xs">
-                        {t.name} {t.default_amount > 0 ? `($${t.default_amount.toLocaleString('es-CL')})` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="text-xs font-semibold">Tipo de Bono *</Label>
+                <Popover open={comboboxOpenType} onOpenChange={setComboboxOpenType}>
+                  <PopoverTrigger
+                    role="combobox"
+                    aria-expanded={comboboxOpenType}
+                    className={cn(
+                      buttonVariants({ variant: 'outline' }),
+                      "w-full justify-between h-9 text-xs font-normal"
+                    )}
+                  >
+                    {(() => {
+                      const t = bonusTypes.find((item) => item.id === formTypeId);
+                      return t 
+                        ? `${t.name} ${t.default_amount > 0 ? `($${t.default_amount.toLocaleString('es-CL')})` : '(Monto variable)'}`
+                        : "Seleccionar tipo de bono...";
+                    })()}
+                    <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[380px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Buscar tipo de bono..." className="text-xs" />
+                      <CommandList className="max-h-52">
+                        <CommandEmpty>No se encontró tipo de bono.</CommandEmpty>
+                        <CommandGroup>
+                          {bonusTypes.map((t) => {
+                            const isSelected = formTypeId === t.id;
+                            return (
+                              <CommandItem
+                                key={t.id}
+                                value={`${t.name} ${t.code}`}
+                                onSelect={() => {
+                                  handleSingleTypeChange(t.id);
+                                  setComboboxOpenType(false);
+                                }}
+                                className="text-xs cursor-pointer flex items-center justify-between"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Check className={`h-3.5 w-3.5 text-emerald-600 ${isSelected ? 'opacity-100' : 'opacity-0'}`} />
+                                  <div>
+                                    <p className="font-semibold">{t.name}</p>
+                                    <p className="text-[11px] text-muted-foreground">
+                                      {t.default_amount > 0 ? `$${t.default_amount.toLocaleString('es-CL')}` : 'Monto manual'} • {t.requires_ot ? 'Exige OT' : 'Sin OT obligatoria'}
+                                    </p>
+                                  </div>
+                                </div>
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
