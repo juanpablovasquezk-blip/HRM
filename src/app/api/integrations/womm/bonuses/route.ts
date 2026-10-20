@@ -79,19 +79,22 @@ export async function POST(request: Request) {
     const results: Array<{ rut: string; status: 'CREATED' | 'ALREADY_EXISTS' | 'NOT_FOUND'; error?: string }> = [];
     const bonusAmount = bonusType.default_amount;
 
+    // Cargar todo el personal para mapeo infalible por RUT normalizado
+    const { data: allPersonnel } = await admin
+      .from('personnel')
+      .select('id, first_name, last_name_father, rut');
+
+    const personnelList = allPersonnel || [];
+    const normalizeRut = (r?: string | null) => (r || '').replace(/[^0-9kK]/g, '').toUpperCase();
+
     for (const rawWorker of workers) {
       const rawRut = typeof rawWorker === 'string' ? rawWorker : rawWorker?.rut;
       if (!rawRut) continue;
 
-      // Limpiar RUT para búsqueda flexible (quitar puntos)
-      const cleanRut = String(rawRut).trim().replace(/\./g, '');
+      const cleanWorkerRut = normalizeRut(rawRut);
 
       // Buscar colaborador en personnel
-      const { data: person } = await admin
-        .from('personnel')
-        .select('id, first_name, last_name_father, rut')
-        .or(`rut.eq.${cleanRut},rut.ilike.%${cleanRut.replace('-', '')}%`)
-        .maybeSingle();
+      const person = personnelList.find(p => normalizeRut(p.rut) === cleanWorkerRut);
 
       if (!person) {
         results.push({ rut: rawRut, status: 'NOT_FOUND', error: 'RUT no encontrado en personal de HRM' });
