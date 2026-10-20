@@ -1,7 +1,7 @@
 'use client';
 
 import { Card, CardContent } from '@/components/ui/card';
-import { Settings as SettingsIcon, Building, Users, Shield, Bell, FileText, History, MapPin } from 'lucide-react';
+import { Settings as SettingsIcon, Building, Users, Shield, Bell, FileText, History, MapPin, Coins } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
@@ -13,6 +13,7 @@ export default function SettingsPage() {
   };
 
   const settingsItems = [
+    { icon: Coins, title: 'Tipos de Bonos', desc: 'Configurar catálogo de bonos definibles, tarifas por defecto y requerimientos de OT', href: '/settings/bonus-types' },
     { icon: Building, title: 'Ajustes de Compañía', desc: 'Gestionar información, razones sociales y configuración general', href: '/settings/companies' },
     { icon: MapPin, title: 'Áreas y Cargos', desc: 'Gestionar áreas de la empresa y cargos (operativos y administrativos exentos de turnos)', href: '/settings/areas' },
     { icon: FileText, title: 'Documentos Requeridos', desc: 'Configurar qué documentos debe subir cada empleado y cuáles son obligatorios', href: '/settings/documents' },

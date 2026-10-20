@@ -117,6 +117,9 @@ export interface Personnel {
   contract_duration_days?: number | null;
   contract_end_date?: string | null;
   indefinite_contract_date?: string | null;
+
+  // Joined relations
+  company?: Company | null;
 }
 
 
@@ -382,6 +385,46 @@ export interface SpecialBonus {
   created_at: string;
 }
 
+export interface BonusType {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  default_amount: number;
+  amount_is_editable: boolean;
+  requires_ot: boolean;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type BonusRecordStatus = 'active' | 'voided';
+export type BonusRecordSource = 'manual' | 'womm' | 'import';
+
+export interface BonusRecord {
+  id: string;
+  personnel_id: string;
+  bonus_type_id: string;
+  date: string;
+  amount: number;
+  ot_number: string | null;
+  observations: string | null;
+  paid_month: string | null;
+  status: BonusRecordStatus;
+  voided_at: string | null;
+  voided_by: string | null;
+  void_reason: string | null;
+  source: BonusRecordSource;
+  external_ref: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+
+  // Joins comunes
+  bonus_type?: BonusType;
+  personnel?: Personnel;
+}
+
 export interface PersonnelContractHistory {
   id: string;
   personnel_id: string;
@@ -393,4 +436,5 @@ export interface PersonnelContractHistory {
   created_by: string | null;
   created_at: string;
 }
+
 

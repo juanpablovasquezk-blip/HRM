@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Smartphone,
   Tv,
+  Coins,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -53,6 +54,7 @@ const navItems: NavItem[] = [
   { label: 'Licencias', href: '/leaves', icon: Briefcase },
   { label: 'Transporte', href: '/transport', icon: Bus, requiredPermission: 'manageTransport' },
   { label: 'EPP y Uniformes', href: '/epp', icon: Shirt, requiredPermission: 'viewPersonnel' },
+  { label: 'Bonos', href: '/bonuses', icon: Coins, requiredPermission: 'managePersonnel' },
   { label: 'Reportes', href: '/reports', icon: BarChart3, requiredPermission: 'viewReports' },
 ];
 

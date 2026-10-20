@@ -29,7 +29,6 @@ import { ContractDownloadButton } from './contract-download-button';
 import { TicaLetterDownloadButton } from './tica-letter-download-button';
 import { DismissalPanelClient } from './dismissal-panel-client';
 import { RiohsGadget } from './riohs/riohs-gadget';
-import { PersonnelBonusesCard } from './personnel-bonuses-card';
 
 export default async function PersonnelDetailPage({
   params,
@@ -657,13 +656,6 @@ export default async function PersonnelDetailPage({
         </CardContent>
       </Card>
 
-      {/* Bonos Especiales */}
-      <PersonnelBonusesCard
-        personnelId={id}
-        workerName={`${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`}
-        initialBonuses={bonusesData || []}
-        canEdit={canEdit}
-      />
 
       {/* Gadget Prevención de riesgos (RIOHS) */}
       {(() => {

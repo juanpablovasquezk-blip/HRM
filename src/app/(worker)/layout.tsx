@@ -10,7 +10,8 @@ import {
   LogOut,
   User,
   FileText,
-  Users
+  Users,
+  Coins
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { logoutWorker } from './actions';
@@ -58,6 +59,7 @@ export default function WorkerLayout({
   const navItems = [
     { label: 'Mañana', href: '/worker', icon: Clock },
     { label: 'Mi Mes', href: '/worker/roster', icon: CalendarDays },
+    { label: 'Mis Bonos', href: '/worker/bonuses', icon: Coins },
     { label: 'Mis Docs', href: '/worker/documents', icon: FileText },
     { label: 'Mi Ficha', href: '/worker/profile', icon: User },
     { label: 'Movilidad', href: '/worker/transport', icon: Bus },

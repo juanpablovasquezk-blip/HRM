@@ -11,7 +11,8 @@ import {
   CheckCircle2, 
   AlertCircle,
   ChevronRight,
-  TrendingUp
+  TrendingUp,
+  Coins
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -102,13 +103,13 @@ export default function SupervisorDashboard() {
           <ChevronRight className="h-5 w-5 text-slate-300" />
         </Link>
 
-        <Link href="/supervisor/transport" className="flex items-center gap-4 bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group">
-          <div className="h-12 w-12 bg-indigo-100 rounded-2xl flex items-center justify-center shrink-0">
-            <Bus className="h-6 w-6 text-indigo-600" />
+        <Link href="/supervisor/bonuses" className="flex items-center gap-4 bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group">
+          <div className="h-12 w-12 bg-emerald-100 rounded-2xl flex items-center justify-center shrink-0">
+            <Coins className="h-6 w-6 text-emerald-600" />
           </div>
           <div className="flex-1">
-            <p className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">Gestión Transporte</p>
-            <p className="text-xs text-slate-400 font-medium italic">Cambios y observaciones de ruta</p>
+            <p className="font-bold text-slate-900 group-hover:text-emerald-600 transition-colors">Bonos del Equipo</p>
+            <p className="text-xs text-slate-400 font-medium italic">Consultar bonos por OT y actividades</p>
           </div>
           <ChevronRight className="h-5 w-5 text-slate-300" />
         </Link>

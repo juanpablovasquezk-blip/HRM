@@ -74,28 +74,64 @@ export async function getBonosReportData(filters: BonosReportFilters) {
     return { error: transportsError.message };
   }
 
-  // 3. Fetch special bonuses
-  let querySpecialBonuses = supabase
-    .from('special_bonuses')
-    .select(`
-      id, date, reason, amount, paid_month, personnel_id, created_by, created_at,
-      personnel:personnel_id (
-        id, first_name, last_name_father, last_name_mother, rut, company_id,
-        company:companies!personnel_company_id_fkey(name)
-      )
-    `)
-    .gte('date', from)
-    .lte('date', to);
+  // 3. Fetch bonuses from bonus_records (active) with fallback to special_bonuses
+  let specialBonuses: any[] = [];
+  try {
+    let queryBonusRecords = supabase
+      .from('bonus_records')
+      .select(`
+        id, date, amount, ot_number, observations, paid_month, personnel_id, created_by, created_at, status,
+        bonus_type:bonus_types (name, code),
+        personnel:personnel_id (
+          id, first_name, last_name_father, last_name_mother, rut, company_id,
+          company:companies!personnel_company_id_fkey(name)
+        )
+      `)
+      .eq('status', 'active')
+      .gte('date', from)
+      .lte('date', to);
 
-  if (companyId) {
-    querySpecialBonuses = querySpecialBonuses.eq('personnel.company_id', companyId);
-  }
+    if (companyId) {
+      queryBonusRecords = queryBonusRecords.eq('personnel.company_id', companyId);
+    }
 
-  const { data: specialBonuses, error: specialBonusesError } = await querySpecialBonuses.order('date', { ascending: true });
+    const { data: bRecords, error: bError } = await queryBonusRecords.order('date', { ascending: true });
 
-  if (specialBonusesError) {
-    console.error('Error fetching special bonuses for bonos report:', specialBonusesError);
-    return { error: specialBonusesError.message };
+    if (!bError && bRecords) {
+      specialBonuses = bRecords.map((r: any) => ({
+        id: r.id,
+        date: r.date,
+        amount: r.amount,
+        reason: `${r.bonus_type?.name || 'Bono'}${r.ot_number ? ` [OT: ${r.ot_number}]` : ''}${r.observations ? ` - ${r.observations}` : ''}`,
+        paid_month: r.paid_month,
+        personnel_id: r.personnel_id,
+        personnel: r.personnel,
+        created_by: r.created_by,
+        created_at: r.created_at,
+      }));
+    } else {
+      // Fallback a special_bonuses
+      let querySpecialBonuses = supabase
+        .from('special_bonuses')
+        .select(`
+          id, date, reason, amount, paid_month, personnel_id, created_by, created_at,
+          personnel:personnel_id (
+            id, first_name, last_name_father, last_name_mother, rut, company_id,
+            company:companies!personnel_company_id_fkey(name)
+          )
+        `)
+        .gte('date', from)
+        .lte('date', to);
+
+      if (companyId) {
+        querySpecialBonuses = querySpecialBonuses.eq('personnel.company_id', companyId);
+      }
+
+      const { data: legacySpecials } = await querySpecialBonuses.order('date', { ascending: true });
+      specialBonuses = legacySpecials || [];
+    }
+  } catch (err) {
+    console.error('Error fetching bonuses for report:', err);
   }
 
   return {
@@ -176,11 +212,20 @@ export async function bulkUpdatePaidMonth(
     }
 
     if (specialBonusIds.length > 0) {
+      // Actualizar en bonus_records
+      await adminSupabase
+        .from('bonus_records')
+        .update({ paid_month: value, updated_at: new Date().toISOString() })
+        .in('id', specialBonusIds)
+        .neq('status', 'voided');
+
+      // Actualizar también en special_bonuses para consistencia histórica
       const { error } = await adminSupabase
         .from('special_bonuses')
         .update({ paid_month: value })
         .in('id', specialBonusIds);
-      if (error) {
+
+      if (error && error.code !== 'PGRST205') {
         bonusSuccess = false;
         errorMsg += `Special bonuses error: ${error.message}.`;
       }
