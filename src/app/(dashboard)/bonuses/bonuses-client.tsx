@@ -8,7 +8,8 @@ import {
   createBatchBonusRecord, 
   voidBonusRecord, 
   updateBonusRecord, 
-  bulkUpdateBonusPaidMonth 
+  bulkUpdateBonusPaidMonth,
+  deleteBonusRecord
 } from './actions';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -72,7 +73,8 @@ import {
   X,
   ExternalLink,
   Info,
-  ChevronsUpDown
+  ChevronsUpDown,
+  Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
@@ -440,6 +442,30 @@ export function BonusesClient({
       toast.error('Error al procesar anulación');
     } finally {
       setSavingAction(false);
+    }
+  };
+
+  // Eliminación de prueba (temporal)
+  const handleDeleteRecord = async (record: BonusRecord) => {
+    if (record.paid_month) {
+      toast.error('No se puede eliminar un bono liquidado');
+      return;
+    }
+    const confirmDelete = window.confirm(
+      `¿Estás seguro de ELIMINAR definitivamente este bono de ${record.personnel?.first_name} ${record.personnel?.last_name_father} ($${record.amount.toLocaleString('es-CL')})?`
+    );
+    if (!confirmDelete) return;
+
+    try {
+      const res = await deleteBonusRecord(record.id);
+      if (res.success) {
+        toast.success('Bono eliminado');
+        setRecords((prev) => prev.filter((r) => r.id !== record.id));
+      } else {
+        toast.error(res.error || 'Error al eliminar');
+      }
+    } catch {
+      toast.error('Error al eliminar bono');
     }
   };
 
@@ -964,11 +990,20 @@ export function BonusesClient({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                            className="h-7 w-7 text-amber-600 hover:text-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/20"
                             onClick={() => handleOpenVoid(item)}
                             title="Anular bono"
                           >
                             <Ban className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                            onClick={() => handleDeleteRecord(item)}
+                            title="Eliminar bono (Pruebas)"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
                       )}

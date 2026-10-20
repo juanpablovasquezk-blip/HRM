@@ -449,3 +449,42 @@ export async function bulkUpdateBonusPaidMonth(ids: string[], paidMonth: string 
     return { success: false, error: err.message };
   }
 }
+
+/**
+ * Eliminar físicamente un bono (habilitado temporalmente para pruebas)
+ */
+export async function deleteBonusRecord(id: string) {
+  try {
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return { success: false, error: 'Usuario no autenticado' };
+    }
+
+    const admin = createAdminClient();
+
+    const { data: existing } = await admin
+      .from('bonus_records')
+      .select('paid_month')
+      .eq('id', id)
+      .single();
+
+    if (existing?.paid_month) {
+      return { success: false, error: 'No se puede eliminar un bono ya liquidado.' };
+    }
+
+    const { error } = await admin.from('bonus_records').delete().eq('id', id);
+    if (error) {
+      console.error('[deleteBonusRecord] Error:', error);
+      return { success: false, error: error.message };
+    }
+
+    revalidatePath('/bonuses');
+    revalidatePath('/reports/bonos');
+    return { success: true };
+  } catch (err: any) {
+    console.error('[deleteBonusRecord] Unexpected:', err);
+    return { success: false, error: err.message };
+  }
+}
+
