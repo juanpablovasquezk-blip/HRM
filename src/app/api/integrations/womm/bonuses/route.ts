@@ -39,6 +39,16 @@ export async function POST(request: Request) {
     }
 
     const cleanOt = String(ot_number).trim();
+
+    // Descartar números de OT temporales/ficticios (ej: WO-1792511498654) generados antes del número definitivo
+    if (/^WO-\d{8,}$/i.test(cleanOt) || /^(TEMP|DRAFT|BORRADOR)/i.test(cleanOt)) {
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        reason: `N° de OT temporal/ficticio (${cleanOt}) omitido hasta recibir N° definitivo`,
+      });
+    }
+
     const targetService = String(service_type).trim().toUpperCase();
 
     const admin = createAdminClient();
@@ -86,6 +96,7 @@ export async function POST(request: Request) {
 
     const personnelList = allPersonnel || [];
     const normalizeRut = (r?: string | null) => (r || '').replace(/[^0-9kK]/g, '').toUpperCase();
+    const externalRef = body.work_order_id ? `WOMM-WO-${body.work_order_id}` : cleanOt;
 
     for (const rawWorker of workers) {
       const rawRut = typeof rawWorker === 'string' ? rawWorker : rawWorker?.rut;
@@ -101,17 +112,35 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // Verificar si ya tiene registrado este bono activo para esta OT
-      const { data: existingBonus } = await admin
+      // Verificar si ya tiene registrado este bono activo para esta OT o este ID de WO
+      let existingQuery = admin
         .from('bonus_records')
-        .select('id')
+        .select('id, ot_number')
         .eq('personnel_id', person.id)
         .eq('bonus_type_id', bonusType.id)
-        .eq('ot_number', cleanOt)
-        .eq('status', 'active')
-        .maybeSingle();
+        .eq('status', 'active');
+
+      if (body.work_order_id) {
+        existingQuery = existingQuery.or(`ot_number.eq.${cleanOt},external_ref.eq.${externalRef}`);
+      } else {
+        existingQuery = existingQuery.eq('ot_number', cleanOt);
+      }
+
+      const { data: existingBonus } = await existingQuery.maybeSingle();
 
       if (existingBonus) {
+        // Si ya existía pero con OT provisoria o diferente, actualizar al número definitivo
+        if (existingBonus.ot_number !== cleanOt) {
+          await admin
+            .from('bonus_records')
+            .update({
+              ot_number: cleanOt,
+              observations: observations.trim() || null,
+              external_ref: externalRef,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existingBonus.id);
+        }
         results.push({ rut: rawRut, status: 'ALREADY_EXISTS' });
         continue;
       }
@@ -129,7 +158,7 @@ export async function POST(request: Request) {
           paid_month: null,
           status: 'active',
           source: 'womm',
-          external_ref: cleanOt,
+          external_ref: externalRef,
         });
 
       if (insertError) {
