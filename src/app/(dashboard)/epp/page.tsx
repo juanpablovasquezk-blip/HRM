@@ -271,6 +271,11 @@ export default function EPPPage() {
     size: string;
   }>>({});
 
+  // Warning Dialog States - Stock Warning Before Delivery
+  const [isStockWarningOpen, setIsStockWarningOpen] = useState(false);
+  const [stockWarningItems, setStockWarningItems] = useState<any[]>([]);
+  const [pendingDeliveryItems, setPendingDeliveryItems] = useState<any[]>([]);
+
   // Form States - Return Item
   const [activeReturnItem, setActiveReturnItem] = useState<any | null>(null);
   const [returnQty, setReturnQty] = useState(1);
@@ -1069,16 +1074,44 @@ export default function EPPPage() {
       return;
     }
 
+    // Check if any selected items have insufficient stock in bodega
+    const outOfStockItems = selectedItemsInput
+      .map(item => {
+        const availableStock = checkStock(item.productName, item.size);
+        return {
+          ...item,
+          availableStock,
+        };
+      })
+      .filter(item => item.availableStock < item.quantity);
+
+    if (outOfStockItems.length > 0) {
+      setStockWarningItems(outOfStockItems);
+      setPendingDeliveryItems(selectedItemsInput);
+      setIsStockWarningOpen(true);
+      return;
+    }
+
+    await executeDelivery(selectedItemsInput);
+  };
+
+  // Execute delivery registration and PDF generation
+  const executeDelivery = async (itemsToDeliver: any[]) => {
+    if (!activeWorker) return;
+
     startTransition(async () => {
       const res = await registerDeliveryEvent(
         activeWorker.id,
         deliverDate,
-        selectedItemsInput
+        itemsToDeliver
       );
 
       if (res.success && res.eventId) {
         toast.success('Entrega registrada exitosamente');
         setIsDeliverOpen(false);
+        setIsStockWarningOpen(false);
+        setPendingDeliveryItems([]);
+        setStockWarningItems([]);
 
         // Generate PDF Receipt Client-Side automatically
         toast.loading('Generando Acta de Entrega en PDF...');
@@ -1107,7 +1140,7 @@ export default function EPPPage() {
             areaName: activeWorker.position?.area?.name || 'Operaciones',
           },
           deliveryDate: deliverDate,
-          items: selectedItemsInput.map(i => ({
+          items: itemsToDeliver.map(i => ({
             productName: i.productName,
             productType: i.productType,
             size: i.size,
@@ -3793,6 +3826,76 @@ export default function EPPPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- DIALOG: CONFIRMACION STOCK INSUFICIENTE --- */}
+      <Dialog open={isStockWarningOpen} onOpenChange={setIsStockWarningOpen}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-5 w-5" />
+              <DialogTitle className="text-base font-bold">Prendas sin stock suficiente en bodega</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-slate-600 dark:text-slate-300 pt-1">
+              Las siguientes prendas seleccionadas no cuentan con stock suficiente en el inventario actual de bodega:
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="my-2 border rounded-md overflow-hidden bg-amber-50/20 dark:bg-amber-950/20">
+            <Table>
+              <TableHeader className="bg-amber-100/50 dark:bg-amber-900/30">
+                <TableRow className="text-xs">
+                  <TableHead className="py-2 text-xs font-bold text-slate-700 dark:text-slate-200">Implemento</TableHead>
+                  <TableHead className="py-2 text-xs font-bold text-center text-slate-700 dark:text-slate-200">Talla</TableHead>
+                  <TableHead className="py-2 text-xs font-bold text-center text-slate-700 dark:text-slate-200">A Entregar</TableHead>
+                  <TableHead className="py-2 text-xs font-bold text-center text-red-600 dark:text-red-400">En Bodega</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {stockWarningItems.map((item, idx) => (
+                  <TableRow key={idx} className="text-xs">
+                    <TableCell className="py-1.5 font-medium">{item.productName}</TableCell>
+                    <TableCell className="py-1.5 text-center font-bold">{item.size || 'Única'}</TableCell>
+                    <TableCell className="py-1.5 text-center font-semibold">{item.quantity}</TableCell>
+                    <TableCell className="py-1.5 text-center font-bold text-red-600 dark:text-red-400">
+                      {item.availableStock} {item.availableStock === 0 ? '(Agotado)' : ''}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="rounded-md bg-slate-50 dark:bg-slate-800/60 p-3 text-xs text-slate-600 dark:text-slate-300 space-y-1">
+            <p className="font-semibold text-slate-700 dark:text-slate-200">
+              ¿Deseas continuar emitiendo el acta de todas maneras?
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              Al hacer clic en <strong>Continuar de todas maneras</strong>, el formulario se emitirá y los implementos quedarán registrados como <strong>entregados</strong> en el historial del trabajador. El stock disponible no quedará en negativo.
+            </p>
+          </div>
+
+          <DialogFooter className="mt-2 flex items-center justify-between gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsStockWarningOpen(false)}
+            >
+              Corregir o volver
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={isPending}
+              className="bg-amber-600 hover:bg-amber-700 text-white font-medium flex items-center gap-1.5"
+              onClick={() => executeDelivery(pendingDeliveryItems)}
+            >
+              <Check className="h-4 w-4" />
+              {isPending ? 'Procesando...' : 'Continuar de todas maneras'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

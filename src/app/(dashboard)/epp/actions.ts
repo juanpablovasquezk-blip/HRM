@@ -193,6 +193,7 @@ export async function saveEPPRequirement(payload: {
 }): Promise<{ success: boolean; error: string | null }> {
   const supabase = await createClient();
   let error;
+  const renewalDaysVal = (payload.renewalDays && payload.renewalDays > 0) ? payload.renewalDays : 36500;
 
   if (payload.id) {
     const { error: err } = await supabase
@@ -201,7 +202,7 @@ export async function saveEPPRequirement(payload: {
         product_type: payload.productType,
         product_name: payload.productName,
         quantity: payload.quantity,
-        renewal_days: payload.renewalDays,
+        renewal_days: renewalDaysVal,
         size_field: payload.sizeField
       })
       .eq('id', payload.id);
@@ -214,7 +215,7 @@ export async function saveEPPRequirement(payload: {
         product_type: payload.productType,
         product_name: payload.productName,
         quantity: payload.quantity,
-        renewal_days: payload.renewalDays,
+        renewal_days: renewalDaysVal,
         size_field: payload.sizeField
       }]);
     error = err;
@@ -534,6 +535,8 @@ export async function registerDeliveryEvent(
   }
 
   // 3. For each item, deduct from stock (FIFO) and insert detail record
+  const itemErrors: string[] = [];
+
   for (const item of items) {
     let quantityToDeduct = item.quantity;
     let inventoryId = null;
@@ -572,8 +575,11 @@ export async function registerDeliveryEvent(
     }
 
     // Calculate next delivery date
+    // If renewalDays is 0 (e.g. plazo fijo / entrega única), default to 36500 (~100 years)
+    // so it satisfies the database check constraint (renewal_days > 0) without triggering periodic renewal.
+    const renewalDaysVal = (item.renewalDays && item.renewalDays > 0) ? item.renewalDays : 36500;
     const parsedDate = parseISO(deliveryDate);
-    const nextDate = addDays(parsedDate, item.renewalDays);
+    const nextDate = addDays(parsedDate, renewalDaysVal);
     const nextDeliveryDateStr = format(nextDate, 'yyyy-MM-dd');
 
     // Insert delivery item
@@ -587,17 +593,27 @@ export async function registerDeliveryEvent(
         size: item.size,
         quantity: item.quantity,
         reason: item.reason,
-        renewal_days: item.renewalDays,
+        renewal_days: renewalDaysVal,
         next_delivery_date: nextDeliveryDateStr
       }]);
 
     if (itemErr) {
-      console.error(`Error inserting delivery item:`, itemErr.message);
+      console.error(`Error inserting delivery item ${item.productName}:`, itemErr.message);
+      itemErrors.push(`${item.productName}: ${itemErr.message}`);
     }
   }
 
+  if (itemErrors.length > 0) {
+    console.error('Errors inserting some delivery items:', itemErrors);
+  }
+
   safeRevalidatePath('/epp');
-  return { success: true, eventId: event.id, formNumber: nextFormNumber, error: null };
+  return { 
+    success: true, 
+    eventId: event.id, 
+    formNumber: nextFormNumber, 
+    error: itemErrors.length > 0 ? `Atención: algunas prendas no pudieron guardarse (${itemErrors.join(', ')})` : null 
+  };
 }
 
 export async function deleteDeliveryEvent(eventId: string): Promise<{ success: boolean; error: string | null }> {
@@ -1418,8 +1434,9 @@ export async function registerBulkHistoricalDelivery(
 
     // Insert all items for this date (PAST_DELIVERY → no stock deduction)
     for (const item of dateItems) {
+      const renewalDaysVal = (item.renewalDays && item.renewalDays > 0) ? item.renewalDays : 36500;
       const parsedDate = parseISO(dateStr);
-      const nextDate = addDays(parsedDate, item.renewalDays);
+      const nextDate = addDays(parsedDate, renewalDaysVal);
       const nextDeliveryDateStr = format(nextDate, 'yyyy-MM-dd');
 
       const { error: itemErr } = await supabase
@@ -1432,7 +1449,7 @@ export async function registerBulkHistoricalDelivery(
           size: item.size || 'Única',
           quantity: item.quantity,
           reason: 'PAST_DELIVERY',
-          renewal_days: item.renewalDays,
+          renewal_days: renewalDaysVal,
           next_delivery_date: nextDeliveryDateStr,
         }]);
 
