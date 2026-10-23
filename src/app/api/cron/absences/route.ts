@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 export const runtime = 'nodejs';
 
@@ -206,78 +207,109 @@ export async function GET(request: Request) {
       `;
     }
 
-    // 8. Send the email via SMTP with fallback across ports and hostnames
-    const configs = [
-      {
-        name: 'rack23.miwebdns.net:587 (STARTTLS)',
-        host: 'rack23.miwebdns.net',
-        port: 587,
-        secure: false,
-        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
-        tls: { rejectUnauthorized: false },
-        authMethod: 'LOGIN',
-        connectionTimeout: 10000,
-      },
-      {
-        name: 'mail.minerquim.cl:587 (STARTTLS)',
-        host: 'mail.minerquim.cl',
-        port: 587,
-        secure: false,
-        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
-        tls: { rejectUnauthorized: false },
-        authMethod: 'LOGIN',
-        connectionTimeout: 10000,
-      },
-      {
-        name: 'rack23.miwebdns.net:465 (SSL)',
-        host: 'rack23.miwebdns.net',
-        port: 465,
-        secure: true,
-        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
-        tls: { rejectUnauthorized: false },
-        authMethod: 'LOGIN',
-        connectionTimeout: 10000,
-      },
-      {
-        name: 'mail.minerquim.cl:465 (SSL)',
-        host: 'mail.minerquim.cl',
-        port: 465,
-        secure: true,
-        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
-        tls: { rejectUnauthorized: false },
-        connectionTimeout: 10000,
-      },
-    ];
-
-    const mailOptions = {
-      from: '"HRM Roster Manager" <no-reply@minerquim.cl>',
-      to: emailRecipients,
-      subject: absenceCount > 0
-        ? `[Ausencias] Reporte de Inasistencias - ${targetDateStr}`
-        : `[Ausencias] ✅ Sin inasistencias - ${targetDateStr}`,
-      html: emailHtml,
-    };
+    const emailSubject = absenceCount > 0
+      ? `[Ausencias] Reporte de Inasistencias - ${targetDateStr}`
+      : `[Ausencias] ✅ Sin inasistencias - ${targetDateStr}`;
 
     let sentInfo: any = null;
     let successfulTransport = '';
-    const failureLog: string[] = [];
 
-    for (const config of configs) {
+    // 8. Primary method: Resend API (via verified domain notificaciones.minerquim.cl)
+    const resendApiKey = process.env.RESEND_API_KEY;
+    if (resendApiKey) {
       try {
-        console.log(`[Absences Cron] Trying transport: ${config.name}...`);
-        const transporter = nodemailer.createTransport(config as any);
-        sentInfo = await transporter.sendMail(mailOptions);
-        successfulTransport = config.name;
-        console.log(`[Absences Cron] Email sent successfully via ${config.name}:`, sentInfo.messageId);
-        break;
-      } catch (err: any) {
-        console.warn(`[Absences Cron] Failed via ${config.name}:`, err.message);
-        failureLog.push(`${config.name} (${err.message})`);
+        console.log('[Absences Cron] Attempting email send via Resend API...');
+        const resend = new Resend(resendApiKey);
+        const { data: resendData, error: resendError } = await resend.emails.send({
+          from: 'HRM Roster Manager <no-reply@notificaciones.minerquim.cl>',
+          replyTo: 'no-reply@minerquim.cl',
+          to: emailRecipients,
+          subject: emailSubject,
+          html: emailHtml,
+        });
+
+        if (!resendError && resendData?.id) {
+          sentInfo = { messageId: resendData.id };
+          successfulTransport = 'Resend API (notificaciones.minerquim.cl)';
+          console.log('[Absences Cron] Email sent successfully via Resend:', resendData.id);
+        } else {
+          console.warn('[Absences Cron] Resend returned error, will fallback to SMTP:', resendError);
+        }
+      } catch (rErr: any) {
+        console.warn('[Absences Cron] Resend exception, will fallback to SMTP:', rErr.message);
       }
     }
 
+    // 9. Fallback method: SMTP across ports and hostnames
     if (!sentInfo) {
-      throw new Error(`All SMTP transports failed: ${failureLog.join(' | ')}`);
+      const configs = [
+        {
+          name: 'rack23.miwebdns.net:587 (STARTTLS)',
+          host: 'rack23.miwebdns.net',
+          port: 587,
+          secure: false,
+          auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+          tls: { rejectUnauthorized: false },
+          authMethod: 'LOGIN',
+          connectionTimeout: 10000,
+        },
+        {
+          name: 'mail.minerquim.cl:587 (STARTTLS)',
+          host: 'mail.minerquim.cl',
+          port: 587,
+          secure: false,
+          auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+          tls: { rejectUnauthorized: false },
+          authMethod: 'LOGIN',
+          connectionTimeout: 10000,
+        },
+        {
+          name: 'rack23.miwebdns.net:465 (SSL)',
+          host: 'rack23.miwebdns.net',
+          port: 465,
+          secure: true,
+          auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+          tls: { rejectUnauthorized: false },
+          authMethod: 'LOGIN',
+          connectionTimeout: 10000,
+        },
+        {
+          name: 'mail.minerquim.cl:465 (SSL)',
+          host: 'mail.minerquim.cl',
+          port: 465,
+          secure: true,
+          auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 10000,
+        },
+      ];
+
+      const mailOptions = {
+        from: '"HRM Roster Manager" <no-reply@minerquim.cl>',
+        to: emailRecipients,
+        subject: emailSubject,
+        html: emailHtml,
+      };
+
+      const failureLog: string[] = [];
+
+      for (const config of configs) {
+        try {
+          console.log(`[Absences Cron] Trying transport: ${config.name}...`);
+          const transporter = nodemailer.createTransport(config as any);
+          sentInfo = await transporter.sendMail(mailOptions);
+          successfulTransport = config.name;
+          console.log(`[Absences Cron] Email sent successfully via ${config.name}:`, sentInfo.messageId);
+          break;
+        } catch (err: any) {
+          console.warn(`[Absences Cron] Failed via ${config.name}:`, err.message);
+          failureLog.push(`${config.name} (${err.message})`);
+        }
+      }
+
+      if (!sentInfo) {
+        throw new Error(`All transports failed (Resend + SMTP): ${failureLog.join(' | ')}`);
+      }
     }
 
     return NextResponse.json({

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -138,82 +139,118 @@ export async function POST(req: NextRequest) {
       </html>
     `;
 
-    // SMTP config with fallback across ports and hostnames
-    const configs = [
-      {
-        name: 'rack23.miwebdns.net:587 (STARTTLS)',
-        host: 'rack23.miwebdns.net',
-        port: 587,
-        secure: false,
-        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
-        tls: { rejectUnauthorized: false },
-        authMethod: 'LOGIN',
-        connectionTimeout: 10000,
-      },
-      {
-        name: 'mail.minerquim.cl:587 (STARTTLS)',
-        host: 'mail.minerquim.cl',
-        port: 587,
-        secure: false,
-        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
-        tls: { rejectUnauthorized: false },
-        authMethod: 'LOGIN',
-        connectionTimeout: 10000,
-      },
-      {
-        name: 'rack23.miwebdns.net:465 (SSL)',
-        host: 'rack23.miwebdns.net',
-        port: 465,
-        secure: true,
-        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
-        tls: { rejectUnauthorized: false },
-        authMethod: 'LOGIN',
-        connectionTimeout: 10000,
-      },
-      {
-        name: 'mail.minerquim.cl:465 (SSL)',
-        host: 'mail.minerquim.cl',
-        port: 465,
-        secure: true,
-        auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
-        tls: { rejectUnauthorized: false },
-        connectionTimeout: 10000,
-      },
-    ];
-
-    const mailOptions = {
-      from: `"Prevención de Riesgos - ${companyName}" <no-reply@minerquim.cl>`,
-      to: worker.email,
-      bcc: 'juanpablo.vasquez@minerquim.cl',
-      subject: `Entrega de Reglamento Interno de Orden, Higiene y Seguridad - ${companyName}`,
-      html: emailHtml,
-      attachments: [
-        {
-          filename: pdfFileName,
-          content: pdfBuffer,
-          contentType: 'application/pdf',
-        },
-      ],
-    };
-
+    const emailSubject = `Entrega de Reglamento Interno de Orden, Higiene y Seguridad - ${companyName}`;
     let info: any = null;
-    const failureLog: string[] = [];
 
-    for (const config of configs) {
+    // 1. Primary method: Resend API (via verified domain notificaciones.minerquim.cl)
+    const resendApiKey = process.env.RESEND_API_KEY;
+    if (resendApiKey) {
       try {
-        console.log(`[RIOHS-EMAIL] Trying transport: ${config.name}...`);
-        const transporter = nodemailer.createTransport(config as any);
-        info = await transporter.sendMail(mailOptions);
-        console.log(`[RIOHS-EMAIL] Email sent successfully via ${config.name}:`, info.messageId);
-        break;
-      } catch (err: any) {
-        console.warn(`[RIOHS-EMAIL] Failed via ${config.name}:`, err.message);
-        failureLog.push(`${config.name} (${err.message})`);
+        console.log('[RIOHS-EMAIL] Attempting email send via Resend API...');
+        const resend = new Resend(resendApiKey);
+        const { data: resendData, error: resendError } = await resend.emails.send({
+          from: `"Prevención de Riesgos - ${companyName}" <no-reply@notificaciones.minerquim.cl>`,
+          replyTo: 'no-reply@minerquim.cl',
+          to: worker.email,
+          bcc: ['juanpablo.vasquez@minerquim.cl'],
+          subject: emailSubject,
+          html: emailHtml,
+          attachments: [
+            {
+              filename: pdfFileName,
+              content: pdfBuffer,
+            },
+          ],
+        });
+
+        if (!resendError && resendData?.id) {
+          info = { messageId: resendData.id };
+          console.log('[RIOHS-EMAIL] Email sent successfully via Resend API:', resendData.id);
+        } else {
+          console.warn('[RIOHS-EMAIL] Resend returned error, will fallback to SMTP:', resendError);
+        }
+      } catch (rErr: any) {
+        console.warn('[RIOHS-EMAIL] Resend exception, will fallback to SMTP:', rErr.message);
       }
     }
 
+    // 2. Fallback method: SMTP across ports and hostnames
     if (!info) {
-      throw new Error(`All SMTP transports failed: ${failureLog.join(' | ')}`);
+      const configs = [
+        {
+          name: 'rack23.miwebdns.net:587 (STARTTLS)',
+          host: 'rack23.miwebdns.net',
+          port: 587,
+          secure: false,
+          auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+          tls: { rejectUnauthorized: false },
+          authMethod: 'LOGIN',
+          connectionTimeout: 10000,
+        },
+        {
+          name: 'mail.minerquim.cl:587 (STARTTLS)',
+          host: 'mail.minerquim.cl',
+          port: 587,
+          secure: false,
+          auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+          tls: { rejectUnauthorized: false },
+          authMethod: 'LOGIN',
+          connectionTimeout: 10000,
+        },
+        {
+          name: 'rack23.miwebdns.net:465 (SSL)',
+          host: 'rack23.miwebdns.net',
+          port: 465,
+          secure: true,
+          auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+          tls: { rejectUnauthorized: false },
+          authMethod: 'LOGIN',
+          connectionTimeout: 10000,
+        },
+        {
+          name: 'mail.minerquim.cl:465 (SSL)',
+          host: 'mail.minerquim.cl',
+          port: 465,
+          secure: true,
+          auth: { user: 'no-reply@minerquim.cl', pass: 'Empresa_1000' },
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 10000,
+        },
+      ];
+
+      const mailOptions = {
+        from: `"Prevención de Riesgos - ${companyName}" <no-reply@minerquim.cl>`,
+        to: worker.email,
+        bcc: 'juanpablo.vasquez@minerquim.cl',
+        subject: emailSubject,
+        html: emailHtml,
+        attachments: [
+          {
+            filename: pdfFileName,
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          },
+        ],
+      };
+
+      const failureLog: string[] = [];
+
+      for (const config of configs) {
+        try {
+          console.log(`[RIOHS-EMAIL] Trying transport: ${config.name}...`);
+          const transporter = nodemailer.createTransport(config as any);
+          info = await transporter.sendMail(mailOptions);
+          console.log(`[RIOHS-EMAIL] Email sent successfully via ${config.name}:`, info.messageId);
+          break;
+        } catch (err: any) {
+          console.warn(`[RIOHS-EMAIL] Failed via ${config.name}:`, err.message);
+          failureLog.push(`${config.name} (${err.message})`);
+        }
+      }
+
+      if (!info) {
+        throw new Error(`All transports failed (Resend + SMTP): ${failureLog.join(' | ')}`);
+      }
     }
 
     // Record RIOHS status update in Database
