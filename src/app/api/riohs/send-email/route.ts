@@ -143,7 +143,15 @@ export async function POST(req: NextRequest) {
     let info: any = null;
 
     // 1. Primary method: Resend API (via verified domain notificaciones.minerquim.cl)
-    const resendApiKey = process.env.RESEND_API_KEY;
+    let resendApiKey = process.env.RESEND_API_KEY;
+    if (!resendApiKey) {
+      const { data: sData } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'resend_api_key')
+        .maybeSingle();
+      resendApiKey = sData?.value;
+    }
     if (resendApiKey) {
       try {
         console.log('[RIOHS-EMAIL] Attempting email send via Resend API...');

@@ -18,11 +18,11 @@ export async function GET(request: Request) {
   const supabase = createAdminClient();
 
   try {
-    // 2. Fetch configured email recipients from settings
+    // 2. Fetch configured email recipients and resend_api_key from settings
     const { data: settingsData, error: settingsError } = await supabase
       .from('system_settings')
       .select('key, value')
-      .in('key', ['email_recipients']);
+      .in('key', ['email_recipients', 'resend_api_key']);
 
     if (settingsError) throw settingsError;
 
@@ -215,7 +215,7 @@ export async function GET(request: Request) {
     let successfulTransport = '';
 
     // 8. Primary method: Resend API (via verified domain notificaciones.minerquim.cl)
-    const resendApiKey = process.env.RESEND_API_KEY;
+    const resendApiKey = process.env.RESEND_API_KEY || settingsData?.find(s => s.key === 'resend_api_key')?.value;
     if (resendApiKey) {
       try {
         console.log('[Absences Cron] Attempting email send via Resend API...');
