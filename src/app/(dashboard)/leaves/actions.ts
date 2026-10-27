@@ -4,7 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { partialRecalculate } from '@/lib/scheduler';
-import { resolveLeaveOverlap } from '@/lib/leaves/leave-overlap';
+import { resolveLeaveOverlap, isFreeDayRequest } from '@/lib/leaves/leave-overlap';
+import { parseISO, format, addDays, subDays } from 'date-fns';
 
 export async function requestLeave(formData: FormData) {
   const supabaseAdmin = createAdminClient();
@@ -16,12 +17,16 @@ export async function requestLeave(formData: FormData) {
   const reason = (formData.get('reason') as string) || null;
   const status = (formData.get('status') as string) || 'pending';
 
-  // Automatically resolve overlaps: if continues an existing leave, shift start_date to prevent day superposition
+  // Automatically resolve overlaps: if continues an existing leave, shift start_date to prevent day superposition.
+  // Las Vacaciones y Licencias Médicas tienen mayor prioridad que los días solicitados (días libres).
   const overlapCheck = await resolveLeaveOverlap(
     supabaseAdmin,
     personnelId,
     rawStartDate,
-    rawEndDate
+    rawEndDate,
+    undefined,
+    type,
+    reason
   );
 
   if (overlapCheck.error) {
@@ -96,6 +101,46 @@ export async function approveLeave(leaveId: string) {
 
   if (fetchError || !leave) return { success: false, error: 'Leave not found' };
 
+  // Las vacaciones y licencias médicas tienen mayor prioridad que los días solicitados
+  if (leave.type === 'vacation' || leave.type === 'sick') {
+    const { data: conflictingLeaves } = await supabaseAdmin
+      .from('leaves')
+      .select('*')
+      .eq('personnel_id', leave.personnel_id)
+      .neq('id', leaveId)
+      .neq('status', 'rejected')
+      .lte('start_date', leave.end_date)
+      .gte('end_date', leave.start_date);
+
+    if (conflictingLeaves && conflictingLeaves.length > 0) {
+      for (const conf of conflictingLeaves) {
+        if (isFreeDayRequest(conf)) {
+          if (conf.start_date >= leave.start_date && conf.end_date <= leave.end_date) {
+            await supabaseAdmin.from('leaves').delete().eq('id', conf.id);
+          } else if (conf.start_date < leave.start_date && conf.end_date <= leave.end_date) {
+            const prevDay = format(subDays(parseISO(leave.start_date), 1), 'yyyy-MM-dd');
+            await supabaseAdmin.from('leaves').update({ end_date: prevDay }).eq('id', conf.id);
+          } else if (conf.start_date >= leave.start_date && conf.end_date > leave.end_date) {
+            const nextDay = format(addDays(parseISO(leave.end_date), 1), 'yyyy-MM-dd');
+            await supabaseAdmin.from('leaves').update({ start_date: nextDay }).eq('id', conf.id);
+          } else if (conf.start_date < leave.start_date && conf.end_date > leave.end_date) {
+            const prevDay = format(subDays(parseISO(leave.start_date), 1), 'yyyy-MM-dd');
+            const nextDay = format(addDays(parseISO(leave.end_date), 1), 'yyyy-MM-dd');
+            await supabaseAdmin.from('leaves').update({ end_date: prevDay }).eq('id', conf.id);
+            await supabaseAdmin.from('leaves').insert({
+              personnel_id: leave.personnel_id,
+              type: conf.type,
+              status: conf.status,
+              reason: conf.reason,
+              start_date: nextDay,
+              end_date: conf.end_date,
+            });
+          }
+        }
+      }
+    }
+  }
+
   const { error } = await supabaseAdmin
     .from('leaves')
     .update({
@@ -169,14 +214,19 @@ export async function updateLeave(id: string, formData: FormData) {
 
   const rawStartDate = formData.get('start_date') as string;
   const rawEndDate = formData.get('end_date') as string;
+  const type = formData.get('type') as string;
+  const reason = (formData.get('reason') as string) || null;
 
   // Resolve overlaps with other leaves (excluding current leave)
+  // Las Vacaciones y Licencias Médicas tienen mayor prioridad que los días solicitados
   const overlapCheck = await resolveLeaveOverlap(
     supabaseAdmin,
     oldLeave.personnel_id,
     rawStartDate,
     rawEndDate,
-    id
+    id,
+    type,
+    reason
   );
 
   if (overlapCheck.error) {

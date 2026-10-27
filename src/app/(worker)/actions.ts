@@ -571,6 +571,28 @@ export async function uploadDocumentRecord(record: any) {
 export async function requestFreeDays(personnelId: string, dates: string[]) {
   const supabase = createAdminClient();
   
+  if (!dates || dates.length === 0) return { success: true };
+
+  // Las vacaciones y licencias médicas tienen mayor prioridad sobre los días solicitados
+  const { data: existingLeaves } = await supabase
+    .from('leaves')
+    .select('start_date, end_date, type')
+    .eq('personnel_id', personnelId)
+    .neq('status', 'rejected')
+    .in('type', ['vacation', 'sick']);
+
+  if (existingLeaves && existingLeaves.length > 0) {
+    const clashingDate = dates.find(d => 
+      existingLeaves.some(l => l.start_date <= d && l.end_date >= d)
+    );
+    if (clashingDate) {
+      return { 
+        success: false, 
+        error: `La fecha ${clashingDate} coincide con un período de vacaciones o licencia médica. Las vacaciones y licencias tienen mayor prioridad.` 
+      };
+    }
+  }
+
   // Insert each date as a separate leave record
   const leaves = dates.map(date => ({
     personnel_id: personnelId,
