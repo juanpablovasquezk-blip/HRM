@@ -11,6 +11,8 @@ import {
   CalendarDays,
   Search,
   ChevronRight,
+  ChevronDown,
+  X,
   Filter,
   Users,
   CheckSquare,
@@ -28,6 +30,8 @@ export default function AttendanceClient({ initialData }: { initialData: any }) 
   const [isPending, startTransition] = useTransition();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [selectedDateInput, setSelectedDateInput] = useState(data.date);
 
   const isFutureDate = useMemo(() => {
     const today = new Date();
@@ -169,30 +173,21 @@ export default function AttendanceClient({ initialData }: { initialData: any }) 
               >
                 <ChevronRight className="h-4 w-4 rotate-180" />
               </button>
-              <div className="relative">
-                <div className="flex items-center gap-2 text-slate-900 text-[10px] font-black uppercase tracking-widest bg-orange-100 hover:bg-orange-200 active:scale-95 transition-all px-3 py-1.5 rounded-full cursor-pointer select-none">
-                  <CalendarDays className="h-3 w-3 text-orange-600 shrink-0" />
-                  <span>
-                    {format(new Date(data.date + 'T12:00:00'), "eee d MMMM", { locale: es }).replace(/\./g, '')}
-                  </span>
-                </div>
-                <input 
-                  type="date" 
-                  value={data.date} 
-                  onClick={(e) => {
-                    try {
-                      e.currentTarget.showPicker?.();
-                    } catch {}
-                  }}
-                  onChange={(e) => {
-                    if (e.target.value && e.target.value !== data.date) {
-                      handleDateChange(e.target.value);
-                    }
-                  }}
-                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
-                  aria-label="Seleccionar fecha"
-                />
-              </div>
+              <button 
+                type="button"
+                onClick={() => {
+                  setSelectedDateInput(data.date);
+                  setIsDatePickerOpen(true);
+                }}
+                className="flex items-center gap-1.5 text-slate-900 text-[10px] font-black uppercase tracking-widest bg-orange-100 hover:bg-orange-200 active:scale-95 transition-all px-3 py-1.5 rounded-full cursor-pointer shadow-xs select-none"
+                title="Toca para seleccionar fecha"
+              >
+                <CalendarDays className="h-3.5 w-3.5 text-orange-600 shrink-0" />
+                <span>
+                  {format(new Date(data.date + 'T12:00:00'), "eee d MMMM", { locale: es }).replace(/\./g, '')}
+                </span>
+                <ChevronDown className="h-3 w-3 text-orange-500 shrink-0 -ml-0.5" />
+              </button>
               <button 
                 onClick={() => handleDateChange(format(addDays(new Date(data.date + 'T12:00:00'), 1), 'yyyy-MM-dd'))}
                 className="h-8 w-8 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400"
@@ -201,6 +196,117 @@ export default function AttendanceClient({ initialData }: { initialData: any }) 
               </button>
             </div>
           </div>
+
+          {/* Date Picker Modal */}
+          {isDatePickerOpen && (
+            <div 
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+              onClick={() => setIsDatePickerOpen(false)}
+            >
+              <div 
+                className="bg-white rounded-2xl w-full max-w-sm shadow-2xl border border-slate-100 overflow-hidden flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                  <div className="flex items-center gap-2">
+                    <CalendarDays className="h-5 w-5 text-orange-600" />
+                    <h3 className="font-black text-slate-900 text-sm tracking-tight uppercase">
+                      Seleccionar Fecha
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsDatePickerOpen(false)}
+                    className="h-8 w-8 rounded-full bg-slate-100 hover:bg-slate-200 active:scale-90 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-4">
+                  {/* Quick Shortcuts */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      Accesos Rápidos
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const todayIso = format(new Date(), 'yyyy-MM-dd');
+                          handleDateChange(todayIso);
+                          setIsDatePickerOpen(false);
+                        }}
+                        className="py-2.5 px-1 text-xs font-bold rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-700 active:scale-95 transition-all border border-orange-200/60 flex flex-col items-center"
+                      >
+                        <span className="font-black">Hoy</span>
+                        <span className="text-[9px] font-medium text-orange-600/80">
+                          {format(new Date(), 'd MMM', { locale: es })}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const yesterdayIso = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+                          handleDateChange(yesterdayIso);
+                          setIsDatePickerOpen(false);
+                        }}
+                        className="py-2.5 px-1 text-xs font-bold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 active:scale-95 transition-all flex flex-col items-center"
+                      >
+                        <span className="font-black">Ayer</span>
+                        <span className="text-[9px] font-medium text-slate-500">
+                          {format(subDays(new Date(), 1), 'd MMM', { locale: es })}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const tomorrowIso = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+                          handleDateChange(tomorrowIso);
+                          setIsDatePickerOpen(false);
+                        }}
+                        className="py-2.5 px-1 text-xs font-bold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 active:scale-95 transition-all flex flex-col items-center"
+                      >
+                        <span className="font-black">Mañana</span>
+                        <span className="text-[9px] font-medium text-slate-500">
+                          {format(addDays(new Date(), 1), 'd MMM', { locale: es })}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Custom Date Input */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                      Elegir Fecha Específica
+                    </label>
+                    <input
+                      type="date"
+                      value={selectedDateInput}
+                      onChange={(e) => setSelectedDateInput(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-base font-bold text-slate-900 outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Action Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedDateInput) {
+                        handleDateChange(selectedDateInput);
+                        setIsDatePickerOpen(false);
+                      }
+                    }}
+                    className="w-full py-3 bg-orange-600 hover:bg-orange-700 active:scale-98 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2"
+                  >
+                    <CalendarDays className="h-4 w-4" />
+                    <span>Ver Asistencia</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Progress Bar (Always full now, showing exceptions) */}
           <div className="space-y-1.5">

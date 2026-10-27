@@ -10,6 +10,8 @@ import {
   Search,
   CalendarDays,
   ChevronRight,
+  ChevronDown,
+  X,
   Clock,
   Truck,
   CheckCircle2,
@@ -37,6 +39,8 @@ export default function TransportClient({ initialData }: { initialData: any }) {
   const router = useRouter();
   const [data, setData] = useState(initialData);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [selectedDateInput, setSelectedDateInput] = useState(data.date);
   
   // Anti-Reversion Shield: Stores local changes to override stale server data
   const localOverrides = useRef<Record<string, any>>({});
@@ -267,30 +271,21 @@ export default function TransportClient({ initialData }: { initialData: any }) {
             >
               <ChevronRight className="h-4 w-4 text-slate-400 rotate-180" />
             </button>
-            <div className="relative">
-              <div className="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 active:scale-95 transition-all px-3 py-2 rounded-2xl border border-indigo-100 shadow-inner cursor-pointer select-none">
-                <CalendarDays className="h-4 w-4 text-indigo-600 shrink-0" />
-                <span className="text-[10px] font-black text-indigo-900 uppercase">
-                  {format(new Date(data.date + 'T12:00:00'), "eee d MMMM", { locale: es }).replace(/\./g, '')}
-                </span>
-              </div>
-              <input 
-                type="date" 
-                value={data.date} 
-                onClick={(e) => {
-                  try {
-                    e.currentTarget.showPicker?.();
-                  } catch {}
-                }}
-                onChange={(e) => {
-                  if (e.target.value && e.target.value !== data.date) {
-                    router.push(`/supervisor/transport?date=${e.target.value}`);
-                  }
-                }}
-                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
-                aria-label="Seleccionar fecha"
-              />
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedDateInput(data.date);
+                setIsDatePickerOpen(true);
+              }}
+              className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 active:scale-95 transition-all px-3 py-2 rounded-2xl border border-indigo-100 shadow-inner cursor-pointer select-none"
+              title="Toca para seleccionar fecha"
+            >
+              <CalendarDays className="h-4 w-4 text-indigo-600 shrink-0" />
+              <span className="text-[10px] font-black text-indigo-900 uppercase">
+                {format(new Date(data.date + 'T12:00:00'), "eee d MMMM", { locale: es }).replace(/\./g, '')}
+              </span>
+              <ChevronDown className="h-3 w-3 text-indigo-500 shrink-0 -ml-0.5" />
+            </button>
             <button 
               onClick={() => {
                 const newDate = format(addDays(new Date(data.date + 'T12:00:00'), 1), 'yyyy-MM-dd');
@@ -302,6 +297,117 @@ export default function TransportClient({ initialData }: { initialData: any }) {
             </button>
           </div>
         </div>
+
+        {/* Date Picker Modal */}
+        {isDatePickerOpen && (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+            onClick={() => setIsDatePickerOpen(false)}
+          >
+            <div 
+              className="bg-white rounded-2xl w-full max-w-sm shadow-2xl border border-slate-100 overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="h-5 w-5 text-indigo-600" />
+                  <h3 className="font-black text-slate-900 text-sm tracking-tight uppercase">
+                    Seleccionar Fecha
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDatePickerOpen(false)}
+                  className="h-8 w-8 rounded-full bg-slate-100 hover:bg-slate-200 active:scale-90 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* Quick Shortcuts */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    Accesos Rápidos
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const todayIso = format(new Date(), 'yyyy-MM-dd');
+                        router.push(`/supervisor/transport?date=${todayIso}`);
+                        setIsDatePickerOpen(false);
+                      }}
+                      className="py-2.5 px-1 text-xs font-bold rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 active:scale-95 transition-all border border-indigo-200/60 flex flex-col items-center"
+                    >
+                      <span className="font-black">Hoy</span>
+                      <span className="text-[9px] font-medium text-indigo-600/80">
+                        {format(new Date(), 'd MMM', { locale: es })}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const yesterdayIso = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+                        router.push(`/supervisor/transport?date=${yesterdayIso}`);
+                        setIsDatePickerOpen(false);
+                      }}
+                      className="py-2.5 px-1 text-xs font-bold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 active:scale-95 transition-all flex flex-col items-center"
+                    >
+                      <span className="font-black">Ayer</span>
+                      <span className="text-[9px] font-medium text-slate-500">
+                        {format(subDays(new Date(), 1), 'd MMM', { locale: es })}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const tomorrowIso = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+                        router.push(`/supervisor/transport?date=${tomorrowIso}`);
+                        setIsDatePickerOpen(false);
+                      }}
+                      className="py-2.5 px-1 text-xs font-bold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 active:scale-95 transition-all flex flex-col items-center"
+                    >
+                      <span className="font-black">Mañana</span>
+                      <span className="text-[9px] font-medium text-slate-500">
+                        {format(addDays(new Date(), 1), 'd MMM', { locale: es })}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Custom Date Input */}
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                    Elegir Fecha Específica
+                  </label>
+                  <input
+                    type="date"
+                    value={selectedDateInput}
+                    onChange={(e) => setSelectedDateInput(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-base font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent cursor-pointer"
+                  />
+                </div>
+
+                {/* Action Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selectedDateInput) {
+                      router.push(`/supervisor/transport?date=${selectedDateInput}`);
+                      setIsDatePickerOpen(false);
+                    }
+                  }}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-md shadow-indigo-500/20 transition-all flex items-center justify-center gap-2"
+                >
+                  <CalendarDays className="h-4 w-4" />
+                  <span>Ver Transporte</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         
         <div className="grid grid-cols-3 gap-2 max-w-lg mx-auto">
           <div className="bg-indigo-600 p-2.5 rounded-2xl shadow-lg shadow-indigo-100 flex flex-col items-center">
