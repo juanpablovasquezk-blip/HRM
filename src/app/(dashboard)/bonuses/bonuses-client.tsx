@@ -74,7 +74,11 @@ import {
   ExternalLink,
   Info,
   ChevronsUpDown,
-  Trash2
+  Trash2,
+  Landmark,
+  DollarSign,
+  Layers,
+  CheckSquare
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
@@ -121,6 +125,8 @@ export function BonusesClient({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkPaidMonth, setBulkPaidMonth] = useState('');
   const [bulkLiquidating, setBulkLiquidating] = useState(false);
+  const [viewMode, setViewMode] = useState<'grouped' | 'table'>('grouped');
+  const [personMonths, setPersonMonths] = useState<Record<string, string>>({});
 
   // Modales
   const [isSingleModalOpen, setIsSingleModalOpen] = useState(false);
@@ -225,6 +231,64 @@ export function BonusesClient({
     return { totalAmount, pendingAmount, paidAmount, activeCount, voidedCount };
   }, [records]);
 
+  // Agrupación por Colaborador (como en Reporte de Liquidación)
+  const groupedByPerson = useMemo(() => {
+    const map = new Map<string, {
+      personnelId: string;
+      first_name: string;
+      last_name_father: string;
+      last_name_mother: string;
+      rut: string;
+      companyName: string;
+      records: BonusRecord[];
+      activeCount: number;
+      totalAmount: number;
+      pendingAmount: number;
+      paidAmount: number;
+      voidedCount: number;
+    }>();
+
+    for (const r of records) {
+      const p = r.personnel;
+      const pid = r.personnel_id || p?.id || 'unknown';
+      if (!map.has(pid)) {
+        map.set(pid, {
+          personnelId: pid,
+          first_name: p?.first_name || 'Sin Nombre',
+          last_name_father: p?.last_name_father || '',
+          last_name_mother: p?.last_name_mother || '',
+          rut: p?.rut || 'Sin RUT',
+          companyName: p?.company?.name || 'Sin Empresa',
+          records: [],
+          activeCount: 0,
+          totalAmount: 0,
+          pendingAmount: 0,
+          paidAmount: 0,
+          voidedCount: 0,
+        });
+      }
+
+      const entry = map.get(pid)!;
+      entry.records.push(r);
+      if (r.status === 'voided') {
+        entry.voidedCount++;
+      } else {
+        entry.activeCount++;
+        entry.totalAmount += r.amount;
+        if (r.paid_month) {
+          entry.paidAmount += r.amount;
+        } else {
+          entry.pendingAmount += r.amount;
+        }
+      }
+    }
+
+    // Ordenar alfabéticamente por apellido paterno y nombre
+    return Array.from(map.values()).sort((a, b) =>
+      `${a.last_name_father} ${a.first_name}`.localeCompare(`${b.last_name_father} ${b.first_name}`)
+    );
+  }, [records]);
+
   // Selección en tabla
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -243,7 +307,18 @@ export function BonusesClient({
     );
   };
 
-  // Liquidación masiva
+  const handleToggleSelectPerson = (personnelId: string, checked: boolean) => {
+    const person = groupedByPerson.find((p) => p.personnelId === personnelId);
+    if (!person) return;
+    const activeIds = person.records.filter((r) => r.status === 'active').map((r) => r.id);
+    if (checked) {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...activeIds])));
+    } else {
+      setSelectedIds((prev) => prev.filter((id) => !activeIds.includes(id)));
+    }
+  };
+
+  // Liquidación masiva general
   const handleBulkLiquidate = async () => {
     if (selectedIds.length === 0) {
       toast.error('Selecciona al menos un bono para liquidar');
@@ -271,6 +346,38 @@ export function BonusesClient({
       }
     } catch (err: any) {
       toast.error('Error inesperado');
+    } finally {
+      setBulkLiquidating(false);
+    }
+  };
+
+  // Liquidación para un colaborador específico
+  const handleLiquidateForPerson = async (ids: string[], month: string) => {
+    if (ids.length === 0) {
+      toast.error('Selecciona al menos un registro de esta persona');
+      return;
+    }
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      toast.error('Ingresa un mes válido (ej: 2026-10)');
+      return;
+    }
+
+    setBulkLiquidating(true);
+    try {
+      const res = await bulkUpdateBonusPaidMonth(ids, month);
+      if (res.success) {
+        toast.success(`${ids.length} bonos liquidados para ${month}`);
+        setRecords((prev) =>
+          prev.map((r) =>
+            ids.includes(r.id) ? { ...r, paid_month: month } : r
+          )
+        );
+        setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
+      } else {
+        toast.error(res.error || 'Error al liquidar bonos');
+      }
+    } catch (err: any) {
+      toast.error('Error inesperado al liquidar');
     } finally {
       setBulkLiquidating(false);
     }
@@ -526,14 +633,99 @@ export function BonusesClient({
     }
   };
 
-  // Exportar Excel
+  // Exportar Excel individual para una persona
+  const handleExportPersonExcel = (person: (typeof groupedByPerson)[0]) => {
+    if (person.records.length === 0) {
+      toast.error('No hay datos para exportar');
+      return;
+    }
+
+    const rows = person.records.map((r) => ({
+      'RUT': person.rut,
+      'Colaborador': `${person.first_name} ${person.last_name_father} ${person.last_name_mother || ''}`.trim(),
+      'Empresa': person.companyName,
+      'Tipo de Bono': r.bonus_type?.name || '',
+      'Fecha': r.date,
+      'N° OT': r.ot_number || 'N/A',
+      'Monto ($)': r.amount,
+      'Estado': r.status === 'voided' ? 'ANULADO' : 'ACTIVO',
+      'Liquidación': r.paid_month ? 'LIQUIDADO' : 'PENDIENTE',
+      'Mes Liquidado': r.paid_month || 'Pendiente',
+      'Observaciones': r.observations || '',
+      'Motivo Anulación': r.void_reason || '',
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    worksheet['!cols'] = [
+      { wch: 15 },
+      { wch: 30 },
+      { wch: 22 },
+      { wch: 20 },
+      { wch: 12 },
+      { wch: 15 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 14 },
+      { wch: 15 },
+      { wch: 30 },
+      { wch: 25 },
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Bonos');
+    const cleanRut = person.rut.replace(/[^0-9kK]/g, '');
+    XLSX.writeFile(workbook, `Bonos_${cleanRut}_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`);
+    toast.success(`Excel descargado para ${person.first_name} ${person.last_name_father}`);
+  };
+
+  // Exportar Excel General (Con Hoja de Resumen por Colaborador y Hoja de Detalle)
   const handleExportExcel = () => {
     if (records.length === 0) {
       toast.error('No hay datos para exportar');
       return;
     }
 
-    const exportRows = records.map((r) => {
+    const workbook = XLSX.utils.book_new();
+
+    // 1. Hoja Resumen por Colaborador (Agrupado)
+    const summaryRows: any[] = groupedByPerson.map((p) => ({
+      'Colaborador': `${p.first_name} ${p.last_name_father} ${p.last_name_mother || ''}`.trim().toUpperCase(),
+      'RUT': p.rut,
+      'Empresa': p.companyName,
+      'Cant. Bonos Activos': p.activeCount,
+      'Total Bonos ($)': p.totalAmount,
+      'Pendiente de Pago ($)': p.pendingAmount,
+      'Liquidado ($)': p.paidAmount,
+      'Bonos Anulados': p.voidedCount,
+    }));
+
+    // Fila Total General
+    summaryRows.push({
+      'Colaborador': 'TOTAL GENERAL',
+      'RUT': '',
+      'Empresa': '',
+      'Cant. Bonos Activos': metrics.activeCount,
+      'Total Bonos ($)': metrics.totalAmount,
+      'Pendiente de Pago ($)': metrics.pendingAmount,
+      'Liquidado ($)': metrics.paidAmount,
+      'Bonos Anulados': metrics.voidedCount,
+    });
+
+    const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+    wsSummary['!cols'] = [
+      { wch: 35 },
+      { wch: 15 },
+      { wch: 24 },
+      { wch: 20 },
+      { wch: 18 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 15 },
+    ];
+    XLSX.utils.book_append_sheet(workbook, wsSummary, 'Resumen por Colaborador');
+
+    // 2. Hoja Detalle de Bonos
+    const detailRows = records.map((r) => {
       const p = r.personnel;
       return {
         'RUT': p?.rut || '',
@@ -543,7 +735,8 @@ export function BonusesClient({
         'Fecha': r.date,
         'N° OT': r.ot_number || 'N/A',
         'Monto ($)': r.amount,
-        'Estado': r.status === 'voided' ? 'ANULADO' : r.paid_month ? 'LIQUIDADO' : 'PENDIENTE',
+        'Estado': r.status === 'voided' ? 'ANULADO' : 'ACTIVO',
+        'Liquidación': r.paid_month ? 'LIQUIDADO' : 'PENDIENTE',
         'Mes Liquidado': r.paid_month || 'Pendiente',
         'Observaciones': r.observations || '',
         'Motivo Anulación': r.void_reason || '',
@@ -551,11 +744,26 @@ export function BonusesClient({
       };
     });
 
-    const worksheet = XLSX.utils.json_to_sheet(exportRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Bonos');
+    const wsDetail = XLSX.utils.json_to_sheet(detailRows);
+    wsDetail['!cols'] = [
+      { wch: 15 },
+      { wch: 32 },
+      { wch: 24 },
+      { wch: 22 },
+      { wch: 12 },
+      { wch: 15 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 14 },
+      { wch: 15 },
+      { wch: 30 },
+      { wch: 25 },
+      { wch: 12 },
+    ];
+    XLSX.utils.book_append_sheet(workbook, wsDetail, 'Detalle de Bonos');
+
     XLSX.writeFile(workbook, `HRM_Bonos_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`);
-    toast.success('Reporte exportado a Excel');
+    toast.success('Reporte de bonos exportado a Excel (Resumen y Detalle)');
   };
 
   // Filtrado de personal para el modal Batch
@@ -860,161 +1068,511 @@ export function BonusesClient({
         </div>
       )}
 
-      {/* Tabla de Registros */}
-      <Card className="border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
-        <Table>
-          <TableHeader className="bg-slate-50/70 dark:bg-slate-900/50">
-            <TableRow>
-              <TableHead className="w-10">
-                <Checkbox
-                  checked={
-                    records.length > 0 &&
-                    selectedIds.length === records.filter((r) => r.status === 'active').length
-                  }
-                  onCheckedChange={handleSelectAll}
-                  aria-label="Seleccionar todos"
-                />
-              </TableHead>
-              <TableHead className="text-xs font-semibold">Colaborador</TableHead>
-              <TableHead className="text-xs font-semibold">Tipo Bono</TableHead>
-              <TableHead className="text-xs font-semibold">Fecha</TableHead>
-              <TableHead className="text-xs font-semibold">N° OT</TableHead>
-              <TableHead className="text-xs font-semibold text-right">Monto</TableHead>
-              <TableHead className="text-xs font-semibold">Estado / Mes</TableHead>
-              <TableHead className="text-xs font-semibold">Observaciones</TableHead>
-              <TableHead className="text-xs font-semibold text-right">Acciones</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {records.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={9} className="text-center py-12 text-muted-foreground text-sm">
-                  No se encontraron bonos registrados con los filtros aplicados.
-                </TableCell>
-              </TableRow>
-            ) : (
-              records.map((item) => {
-                const p = item.personnel;
-                const isVoided = item.status === 'voided';
-                const isPaid = Boolean(item.paid_month);
-
-                return (
-                  <TableRow
-                    key={item.id}
-                    className={`text-xs ${
-                      isVoided ? 'opacity-50 line-through bg-slate-50/50 dark:bg-slate-900/30' : ''
-                    }`}
-                  >
-                    <TableCell>
-                      {!isVoided && (
-                        <Checkbox
-                          checked={selectedIds.includes(item.id)}
-                          onCheckedChange={() => handleToggleSelectRow(item.id)}
-                          aria-label={`Seleccionar bono ${item.id}`}
-                        />
-                      )}
-                    </TableCell>
-
-                    <TableCell>
-                      <div className="font-medium text-slate-900 dark:text-slate-100">
-                        {p ? `${p.first_name} ${p.last_name_father} ${p.last_name_mother || ''}` : 'N/A'}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground font-mono">
-                        {p?.rut || ''} {p?.company?.name ? `• ${p.company.name}` : ''}
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
-                      <Badge variant="outline" className="font-normal text-[11px] gap-1">
-                        <Coins className="h-3 w-3 text-emerald-600" />
-                        {item.bonus_type?.name || 'Bono'}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell className="font-mono text-[11px]">
-                      {item.date ? format(parseISO(item.date), 'dd/MM/yyyy') : '-'}
-                    </TableCell>
-
-                    <TableCell>
-                      {item.ot_number ? (
-                        <span className="font-mono font-semibold px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-slate-700 dark:text-slate-300">
-                          {item.ot_number}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-[11px]">-</span>
-                      )}
-                    </TableCell>
-
-                    <TableCell className="text-right font-bold text-slate-900 dark:text-slate-100">
-                      ${item.amount.toLocaleString('es-CL')}
-                    </TableCell>
-
-                    <TableCell>
-                      {isVoided ? (
-                        <Badge variant="destructive" className="text-[10px] gap-1">
-                          <Ban className="h-3 w-3" /> Anulado
-                        </Badge>
-                      ) : isPaid ? (
-                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] gap-1">
-                          <CheckCircle2 className="h-3 w-3" /> {item.paid_month}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-amber-600 border-amber-300 text-[10px] gap-1">
-                          <Clock className="h-3 w-3" /> Pendiente
-                        </Badge>
-                      )}
-                    </TableCell>
-
-                    <TableCell className="max-w-[180px] truncate" title={item.observations || ''}>
-                      {isVoided ? (
-                        <span className="text-red-500 italic text-[11px]" title={item.void_reason || ''}>
-                          Motivo: {item.void_reason}
-                        </span>
-                      ) : (
-                        item.observations || '-'
-                      )}
-                    </TableCell>
-
-                    <TableCell className="text-right">
-                      {!isVoided && !isPaid && (
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-slate-500 hover:text-slate-900"
-                            onClick={() => handleOpenEdit(item)}
-                            title="Editar bono"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-amber-600 hover:text-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/20"
-                            onClick={() => handleOpenVoid(item)}
-                            title="Anular bono"
-                          >
-                            <Ban className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
-                            onClick={() => handleDeleteRecord(item)}
-                            title="Eliminar bono (Pruebas)"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })
+      {/* Selector de Modo de Vista y Resumen */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant={viewMode === 'grouped' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setViewMode('grouped')}
+            className={cn(
+              "gap-1.5 text-xs h-9 font-bold",
+              viewMode === 'grouped' 
+                ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs" 
+                : "text-slate-700 hover:bg-slate-100 dark:text-slate-300"
             )}
-          </TableBody>
-        </Table>
-      </Card>
+          >
+            <Users className="h-4 w-4" />
+            Agrupado por Persona ({groupedByPerson.length})
+          </Button>
+          <Button
+            type="button"
+            variant={viewMode === 'table' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setViewMode('table')}
+            className={cn(
+              "gap-1.5 text-xs h-9 font-bold",
+              viewMode === 'table' 
+                ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs" 
+                : "text-slate-700 hover:bg-slate-100 dark:text-slate-300"
+            )}
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            Tabla General ({records.length})
+          </Button>
+        </div>
+
+        <div className="text-xs text-muted-foreground font-medium">
+          Mostrando <strong>{records.length}</strong> {records.length === 1 ? 'bono' : 'bonos'} en <strong>{groupedByPerson.length}</strong> {groupedByPerson.length === 1 ? 'colaborador' : 'colaboradores'}
+        </div>
+      </div>
+
+      {/* Vista 1: Agrupada por Persona (Idéntica al Reporte de Liquidación de Bonos) */}
+      {viewMode === 'grouped' && (
+        <div className="space-y-6">
+          {groupedByPerson.length === 0 ? (
+            <Card className="border-slate-200/80 dark:border-slate-800 shadow-sm p-12 text-center text-muted-foreground text-sm">
+              No se encontraron bonos registrados con los filtros aplicados.
+            </Card>
+          ) : (
+            groupedByPerson.map((person) => {
+              const personActiveRecords = person.records.filter((r) => r.status === 'active');
+              const personActiveIds = personActiveRecords.map((r) => r.id);
+              const personSelectedIds = personActiveIds.filter((id) => selectedIds.includes(id));
+              const isAllPersonSelected = personActiveIds.length > 0 && personSelectedIds.length === personActiveIds.length;
+
+              return (
+                <div
+                  key={person.personnelId}
+                  className="bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-all duration-200 space-y-5"
+                >
+                  {/* 1. Encabezado del Colaborador */}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 gap-3">
+                    <div>
+                      <h2 className="text-xl font-black text-slate-900 dark:text-slate-100 uppercase tracking-tight leading-tight">
+                        {person.first_name} {person.last_name_father} {person.last_name_mother}
+                      </h2>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-slate-500 font-medium">
+                        <span>RUT: <strong className="text-slate-700 dark:text-slate-300 font-bold">{person.rut}</strong></span>
+                        <span className="hidden md:inline text-slate-300 dark:text-slate-700">|</span>
+                        <span>Empresa: <strong className="text-slate-700 dark:text-slate-300 font-bold">{person.companyName}</strong></span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 self-start md:self-auto">
+                      <div className="text-left md:text-right font-medium text-xs text-slate-500">
+                        <div>
+                          Período: <strong className="text-slate-700 dark:text-slate-300">
+                            {startDate ? format(parseISO(startDate), 'dd/MM/yyyy') : 'Inicio'}
+                          </strong> al <strong className="text-slate-700 dark:text-slate-300">
+                            {endDate ? format(parseISO(endDate), 'dd/MM/yyyy') : 'Actual'}
+                          </strong>
+                        </div>
+                        <div className="mt-0.5 text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                          Liquidación de Bonos
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleExportPersonExcel(person)}
+                        className="h-8 gap-1.5 text-xs border-slate-200 text-slate-700 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                        title="Descargar Excel de este colaborador"
+                      >
+                        <Download className="h-3.5 w-3.5 text-emerald-600" />
+                        <span className="hidden sm:inline">Excel</span>
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* 2. Resumen de Métricas (4 Cards como en el Reporte de Liquidación) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Card 1: Bonos a Pago */}
+                    <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 flex items-start gap-3">
+                      <div className="p-2 bg-orange-50 dark:bg-orange-950/30 rounded-lg text-orange-600 dark:text-orange-400 shrink-0">
+                        <Calendar className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Turnos / Bonos a Pago</div>
+                        <div className="text-lg font-black text-slate-800 dark:text-slate-100 mt-0.5">
+                          {person.activeCount} <span className="text-xs font-medium text-slate-400">c/u</span>
+                        </div>
+                        <div className="text-xs font-bold text-orange-600 dark:text-orange-400 mt-0.5">
+                          ${person.totalAmount.toLocaleString('es-CL')} <span className="text-[9px] text-slate-400 font-normal">({person.activeCount} reg.)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card 2: Pendiente de Pago */}
+                    <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 flex items-start gap-3">
+                      <div className="p-2 bg-amber-50 dark:bg-amber-950/30 rounded-lg text-amber-600 dark:text-amber-400 shrink-0">
+                        <Clock className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Pendiente Liquidar</div>
+                        <div className="text-lg font-black text-slate-800 dark:text-slate-100 mt-0.5">
+                          {person.records.filter((r) => r.status === 'active' && !r.paid_month).length} <span className="text-xs font-medium text-slate-400">c/u</span>
+                        </div>
+                        <div className="text-xs font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                          ${person.pendingAmount.toLocaleString('es-CL')} <span className="text-[9px] text-slate-400 font-normal">(sin mes)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card 3: Liquidados */}
+                    <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 flex items-start gap-3">
+                      <div className="p-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg text-blue-600 dark:text-blue-400 shrink-0">
+                        <CheckCircle2 className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Liquidados</div>
+                        <div className="text-lg font-black text-slate-800 dark:text-slate-100 mt-0.5">
+                          {person.records.filter((r) => r.status === 'active' && r.paid_month).length} <span className="text-xs font-medium text-slate-400">c/u</span>
+                        </div>
+                        <div className="text-xs font-bold text-blue-600 dark:text-blue-400 mt-0.5">
+                          ${person.paidAmount.toLocaleString('es-CL')} <span className="text-[9px] text-slate-400 font-normal">(con mes)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card 4: Total Líquido a Pago */}
+                    <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/40 dark:bg-emerald-950/20 flex items-start gap-3">
+                      <div className="p-2 bg-emerald-100 dark:bg-emerald-900/40 rounded-lg text-emerald-700 dark:text-emerald-300 shrink-0">
+                        <Coins className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Total Líquido a Pago</div>
+                        <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
+                          ${person.totalAmount.toLocaleString('es-CL')}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-medium mt-0.5">
+                          Bono total acumulado
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. Acción en Lote para este colaborador */}
+                  <div className="p-3 bg-slate-50/80 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                      <Landmark className="h-4 w-4 text-slate-500 shrink-0" />
+                      <span>
+                        <strong className="text-slate-800 dark:text-slate-200">ACCIÓN EN LOTE:</strong> Selecciona registros con las casillas de la tabla para aplicar acción en lote
+                      </span>
+                      {personSelectedIds.length > 0 && (
+                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 text-[10px] font-bold">
+                          {personSelectedIds.length} {personSelectedIds.length === 1 ? 'seleccionado' : 'seleccionados'}
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <Input
+                        type="month"
+                        value={personMonths[person.personnelId] || bulkPaidMonth || ''}
+                        onChange={(e) => setPersonMonths((prev) => ({ ...prev, [person.personnelId]: e.target.value }))}
+                        className="h-8.5 w-36 text-xs bg-white dark:bg-slate-950 border-slate-200"
+                        placeholder="YYYY-MM"
+                      />
+                      <Button
+                        size="sm"
+                        disabled={bulkLiquidating || personSelectedIds.length === 0 || !(personMonths[person.personnelId] || bulkPaidMonth)}
+                        onClick={() => handleLiquidateForPerson(personSelectedIds, personMonths[person.personnelId] || bulkPaidMonth)}
+                        className="h-8.5 text-xs bg-slate-700 hover:bg-slate-800 text-white gap-1.5"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        Aplicar a Seleccionados
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* 4. Tabla Detalle de Bonos */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <div className="w-1 h-3.5 bg-orange-500 rounded-full" />
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                        Detalle de Bonos ({person.records.length})
+                      </h3>
+                    </div>
+
+                    <div className="border border-slate-200/80 dark:border-slate-800 rounded-xl overflow-hidden">
+                      <Table>
+                        <TableHeader className="bg-slate-50/70 dark:bg-slate-900/60">
+                          <TableRow>
+                            <TableHead className="w-10">
+                              <Checkbox
+                                checked={isAllPersonSelected}
+                                onCheckedChange={(checked) => handleToggleSelectPerson(person.personnelId, Boolean(checked))}
+                                aria-label={`Seleccionar todos de ${person.first_name}`}
+                              />
+                            </TableHead>
+                            <TableHead className="text-xs font-semibold">Fecha</TableHead>
+                            <TableHead className="text-xs font-semibold">Tipo Bono</TableHead>
+                            <TableHead className="text-xs font-semibold">N° OT</TableHead>
+                            <TableHead className="text-xs font-semibold text-right">Monto</TableHead>
+                            <TableHead className="text-xs font-semibold">Mes de Pago</TableHead>
+                            <TableHead className="text-xs font-semibold">Observaciones</TableHead>
+                            <TableHead className="text-xs font-semibold text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {person.records.map((item) => {
+                            const isVoided = item.status === 'voided';
+                            const isPaid = Boolean(item.paid_month);
+
+                            return (
+                              <TableRow
+                                key={item.id}
+                                className={`text-xs ${
+                                  isVoided ? 'opacity-50 line-through bg-slate-50/50 dark:bg-slate-900/30' : ''
+                                }`}
+                              >
+                                <TableCell>
+                                  {!isVoided && (
+                                    <Checkbox
+                                      checked={selectedIds.includes(item.id)}
+                                      onCheckedChange={() => handleToggleSelectRow(item.id)}
+                                      aria-label={`Seleccionar bono ${item.id}`}
+                                    />
+                                  )}
+                                </TableCell>
+
+                                <TableCell className="font-mono text-[11px] font-medium">
+                                  {item.date ? format(parseISO(item.date), 'dd/MM/yyyy') : '-'}
+                                </TableCell>
+
+                                <TableCell>
+                                  <Badge variant="outline" className="font-normal text-[11px] gap-1 bg-white dark:bg-slate-950">
+                                    <Coins className="h-3 w-3 text-emerald-600" />
+                                    {item.bonus_type?.name || 'Bono'}
+                                  </Badge>
+                                </TableCell>
+
+                                <TableCell>
+                                  {item.ot_number ? (
+                                    <span className="font-mono font-semibold px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-slate-700 dark:text-slate-300">
+                                      {item.ot_number}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground text-[11px]">-</span>
+                                  )}
+                                </TableCell>
+
+                                <TableCell className="text-right font-bold text-slate-900 dark:text-slate-100">
+                                  ${item.amount.toLocaleString('es-CL')}
+                                </TableCell>
+
+                                <TableCell>
+                                  {isVoided ? (
+                                    <Badge variant="destructive" className="text-[10px] gap-1">
+                                      <Ban className="h-3 w-3" /> Anulado
+                                    </Badge>
+                                  ) : isPaid ? (
+                                    <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] gap-1 font-bold">
+                                      <CheckCircle2 className="h-3 w-3" /> {item.paid_month}
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-amber-600 border-amber-300 text-[10px] gap-1">
+                                      <Clock className="h-3 w-3" /> Pendiente
+                                    </Badge>
+                                  )}
+                                </TableCell>
+
+                                <TableCell className="max-w-[200px] truncate" title={item.observations || ''}>
+                                  {isVoided ? (
+                                    <span className="text-red-500 italic text-[11px]" title={item.void_reason || ''}>
+                                      Motivo: {item.void_reason}
+                                    </span>
+                                  ) : (
+                                    item.observations || '-'
+                                  )}
+                                </TableCell>
+
+                                <TableCell className="text-right">
+                                  {!isVoided && !isPaid && (
+                                    <div className="flex items-center justify-end gap-1">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-slate-500 hover:text-slate-900"
+                                        onClick={() => handleOpenEdit(item)}
+                                        title="Editar bono"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-amber-600 hover:text-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/20"
+                                        onClick={() => handleOpenVoid(item)}
+                                        title="Anular bono"
+                                      >
+                                        <Ban className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                                        onClick={() => handleDeleteRecord(item)}
+                                        title="Eliminar bono"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* Vista 2: Tabla General */}
+      {viewMode === 'table' && (
+        <Card className="border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
+          <Table>
+            <TableHeader className="bg-slate-50/70 dark:bg-slate-900/50">
+              <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={
+                      records.length > 0 &&
+                      selectedIds.length === records.filter((r) => r.status === 'active').length
+                    }
+                    onCheckedChange={handleSelectAll}
+                    aria-label="Seleccionar todos"
+                  />
+                </TableHead>
+                <TableHead className="text-xs font-semibold">Colaborador</TableHead>
+                <TableHead className="text-xs font-semibold">Tipo Bono</TableHead>
+                <TableHead className="text-xs font-semibold">Fecha</TableHead>
+                <TableHead className="text-xs font-semibold">N° OT</TableHead>
+                <TableHead className="text-xs font-semibold text-right">Monto</TableHead>
+                <TableHead className="text-xs font-semibold">Estado / Mes</TableHead>
+                <TableHead className="text-xs font-semibold">Observaciones</TableHead>
+                <TableHead className="text-xs font-semibold text-right">Acciones</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {records.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} className="text-center py-12 text-muted-foreground text-sm">
+                    No se encontraron bonos registrados con los filtros aplicados.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                records.map((item) => {
+                  const p = item.personnel;
+                  const isVoided = item.status === 'voided';
+                  const isPaid = Boolean(item.paid_month);
+
+                  return (
+                    <TableRow
+                      key={item.id}
+                      className={`text-xs ${
+                        isVoided ? 'opacity-50 line-through bg-slate-50/50 dark:bg-slate-900/30' : ''
+                      }`}
+                    >
+                      <TableCell>
+                        {!isVoided && (
+                          <Checkbox
+                            checked={selectedIds.includes(item.id)}
+                            onCheckedChange={() => handleToggleSelectRow(item.id)}
+                            aria-label={`Seleccionar bono ${item.id}`}
+                          />
+                        )}
+                      </TableCell>
+
+                      <TableCell>
+                        <div className="font-medium text-slate-900 dark:text-slate-100">
+                          {p ? `${p.first_name} ${p.last_name_father} ${p.last_name_mother || ''}` : 'N/A'}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground font-mono">
+                          {p?.rut || ''} {p?.company?.name ? `• ${p.company.name}` : ''}
+                        </div>
+                      </TableCell>
+
+                      <TableCell>
+                        <Badge variant="outline" className="font-normal text-[11px] gap-1">
+                          <Coins className="h-3 w-3 text-emerald-600" />
+                          {item.bonus_type?.name || 'Bono'}
+                        </Badge>
+                      </TableCell>
+
+                      <TableCell className="font-mono text-[11px]">
+                        {item.date ? format(parseISO(item.date), 'dd/MM/yyyy') : '-'}
+                      </TableCell>
+
+                      <TableCell>
+                        {item.ot_number ? (
+                          <span className="font-mono font-semibold px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-slate-700 dark:text-slate-300">
+                            {item.ot_number}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground text-[11px]">-</span>
+                        )}
+                      </TableCell>
+
+                      <TableCell className="text-right font-bold text-slate-900 dark:text-slate-100">
+                        ${item.amount.toLocaleString('es-CL')}
+                      </TableCell>
+
+                      <TableCell>
+                        {isVoided ? (
+                          <Badge variant="destructive" className="text-[10px] gap-1">
+                            <Ban className="h-3 w-3" /> Anulado
+                          </Badge>
+                        ) : isPaid ? (
+                          <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] gap-1">
+                            <CheckCircle2 className="h-3 w-3" /> {item.paid_month}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-amber-600 border-amber-300 text-[10px] gap-1">
+                            <Clock className="h-3 w-3" /> Pendiente
+                          </Badge>
+                        )}
+                      </TableCell>
+
+                      <TableCell className="max-w-[180px] truncate" title={item.observations || ''}>
+                        {isVoided ? (
+                          <span className="text-red-500 italic text-[11px]" title={item.void_reason || ''}>
+                            Motivo: {item.void_reason}
+                          </span>
+                        ) : (
+                          item.observations || '-'
+                        )}
+                      </TableCell>
+
+                      <TableCell className="text-right">
+                        {!isVoided && !isPaid && (
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-slate-500 hover:text-slate-900"
+                              onClick={() => handleOpenEdit(item)}
+                              title="Editar bono"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-amber-600 hover:text-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/20"
+                              onClick={() => handleOpenVoid(item)}
+                              title="Anular bono"
+                            >
+                              <Ban className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                              onClick={() => handleDeleteRecord(item)}
+                              title="Eliminar bono (Pruebas)"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
 
       {/* Modal Bono Individual */}
       <Dialog open={isSingleModalOpen} onOpenChange={setIsSingleModalOpen}>
