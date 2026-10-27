@@ -268,17 +268,27 @@ export default function TransportClient({ initialData }: { initialData: any }) {
               <ChevronRight className="h-4 w-4 text-slate-400 rotate-180" />
             </button>
             <div className="relative">
-              <div className="flex items-center gap-2 bg-indigo-50 px-3 py-2 rounded-2xl border border-indigo-100 shadow-inner">
-                <CalendarDays className="h-4 w-4 text-indigo-600" />
+              <div className="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 active:scale-95 transition-all px-3 py-2 rounded-2xl border border-indigo-100 shadow-inner cursor-pointer select-none">
+                <CalendarDays className="h-4 w-4 text-indigo-600 shrink-0" />
                 <span className="text-[10px] font-black text-indigo-900 uppercase">
-                  {format(new Date(data.date + 'T12:00:00'), "eee d 'MMM'", { locale: es })}
+                  {format(new Date(data.date + 'T12:00:00'), "eee d MMMM", { locale: es }).replace(/\./g, '')}
                 </span>
               </div>
               <input 
                 type="date" 
                 value={data.date} 
-                onChange={(e) => router.push(`/supervisor/transport?date=${e.target.value}`)}
-                className="absolute inset-0 opacity-0 cursor-pointer"
+                onClick={(e) => {
+                  try {
+                    e.currentTarget.showPicker?.();
+                  } catch {}
+                }}
+                onChange={(e) => {
+                  if (e.target.value && e.target.value !== data.date) {
+                    router.push(`/supervisor/transport?date=${e.target.value}`);
+                  }
+                }}
+                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+                aria-label="Seleccionar fecha"
               />
             </div>
             <button 

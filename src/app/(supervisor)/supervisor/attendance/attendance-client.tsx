@@ -169,9 +169,29 @@ export default function AttendanceClient({ initialData }: { initialData: any }) 
               >
                 <ChevronRight className="h-4 w-4 rotate-180" />
               </button>
-              <div className="flex items-center gap-2 text-slate-900 text-[10px] font-black uppercase tracking-widest bg-orange-100 px-3 py-1.5 rounded-full">
-                <CalendarDays className="h-3 w-3 text-orange-600" />
-                {format(new Date(data.date + 'T12:00:00'), "eee d 'Mayo'", { locale: es })}
+              <div className="relative">
+                <div className="flex items-center gap-2 text-slate-900 text-[10px] font-black uppercase tracking-widest bg-orange-100 hover:bg-orange-200 active:scale-95 transition-all px-3 py-1.5 rounded-full cursor-pointer select-none">
+                  <CalendarDays className="h-3 w-3 text-orange-600 shrink-0" />
+                  <span>
+                    {format(new Date(data.date + 'T12:00:00'), "eee d MMMM", { locale: es }).replace(/\./g, '')}
+                  </span>
+                </div>
+                <input 
+                  type="date" 
+                  value={data.date} 
+                  onClick={(e) => {
+                    try {
+                      e.currentTarget.showPicker?.();
+                    } catch {}
+                  }}
+                  onChange={(e) => {
+                    if (e.target.value && e.target.value !== data.date) {
+                      handleDateChange(e.target.value);
+                    }
+                  }}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+                  aria-label="Seleccionar fecha"
+                />
               </div>
               <button 
                 onClick={() => handleDateChange(format(addDays(new Date(data.date + 'T12:00:00'), 1), 'yyyy-MM-dd'))}
