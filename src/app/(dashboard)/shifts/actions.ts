@@ -1385,6 +1385,101 @@ export async function bulkDeleteAssignmentsByIds(ids: string[]) {
 }
 // ─── Scheduling Engine Actions ────────────────────────────────────────────────
 
+async function buildMonthlyAuditSummary(
+  supabase: any,
+  targetIds: string[],
+  monthStart: Date,
+  monthEnd: Date
+) {
+  const monthStartStr = format(monthStart, 'yyyy-MM-dd');
+  const monthEndStr = format(monthEnd, 'yyyy-MM-dd');
+
+  // 1. Obtener datos de este personal
+  const { data: personnelData } = await supabase
+    .from('personnel')
+    .select('id, first_name, last_name_father, rotation_pattern')
+    .in('id', targetIds);
+
+  // 2. Obtener asignaciones del mes
+  const { data: allAssignments } = await supabase
+    .from('shift_assignments')
+    .select('*')
+    .in('personnel_id', targetIds)
+    .gte('date', monthStartStr)
+    .lte('date', monthEndStr);
+
+  // 3. Obtener licencias y permisos aprobados
+  const { data: allLeaves } = await supabase
+    .from('leaves')
+    .select('*')
+    .in('personnel_id', targetIds)
+    .eq('status', 'approved')
+    .lte('start_date', monthEndStr)
+    .gte('end_date', monthStartStr);
+
+  // 4. Definir las semanas naturales del mes (Lunes a Domingo)
+  const weeksList: string[] = [];
+  let currW = startOfWeek(monthStart, { weekStartsOn: 1 });
+  for (let i = 0; i < 6; i++) {
+    const wLabel = format(currW, 'dd/MM');
+    weeksList.push(wLabel);
+    currW = new Date(currW.getTime() + 7 * 24 * 60 * 60 * 1000);
+    if (currW > monthEnd && i >= 3) break; 
+  }
+
+  const monthSundays = eachDayOfInterval({ start: monthStart, end: monthEnd }).filter(d => d.getDay() === 0);
+
+  return (personnelData || []).map((p: any) => {
+    const pLeaves = (allLeaves || []).filter((l: any) => l.personnel_id === p.id);
+    const leaveDates = new Set<string>();
+    pLeaves.forEach((l: any) => {
+      try {
+        const lStart = parseISO(l.start_date);
+        const lEnd = parseISO(l.end_date);
+        const clipStart = lStart < monthStart ? monthStart : lStart;
+        const clipEnd = lEnd > monthEnd ? monthEnd : lEnd;
+        if (clipStart <= clipEnd) {
+          eachDayOfInterval({ start: clipStart, end: clipEnd }).forEach(d => {
+            leaveDates.add(format(d, 'yyyy-MM-dd'));
+          });
+        }
+      } catch (e) {
+        console.error('[Audit] Error al procesar rango de licencia:', e);
+      }
+    });
+
+    // Solo turnos efectivamente trabajados: excluye cancelados/ausencias y días con permiso/licencia aprobada
+    const pAssignments = (allAssignments || []).filter((a: any) => 
+      a.personnel_id === p.id && 
+      a.status !== 'cancelled' && 
+      !leaveDates.has(a.date)
+    );
+
+    const weekCounts: Record<string, number> = {};
+    weeksList.forEach(w => (weekCounts[w] = 0));
+
+    pAssignments.forEach((a: any) => {
+      const d = parseISO(a.date);
+      const w = format(startOfWeek(d, { weekStartsOn: 1 }), 'dd/MM');
+      if (weekCounts.hasOwnProperty(w)) weekCounts[w]++;
+    });
+
+    let sundaysOff = 0;
+    monthSundays.forEach(sun => {
+      const dStr = format(sun, 'yyyy-MM-dd');
+      if (!pAssignments.some((a: any) => a.date === dStr)) sundaysOff++;
+    });
+
+    return {
+      personId: p.id,
+      personName: `${p.first_name} ${p.last_name_father}`,
+      pattern: p.rotation_pattern || '5x2',
+      weekCounts,
+      sundaysOff
+    };
+  });
+}
+
 export async function runScheduler(startDate: string, endDate: string, areaId?: string, personnelIds?: string[], positionFilter?: string | string[], shouldValidate: boolean = false) {
   try {
     // Extend end date to the end of the current week (Sunday) to ensure full week analysis
@@ -1396,8 +1491,6 @@ export async function runScheduler(startDate: string, endDate: string, areaId?: 
     const sDate = parseISO(startDate);
     const monthStart = startOfMonth(sDate);
     const monthEnd = endOfMonth(sDate);
-    const monthStartStr = format(monthStart, 'yyyy-MM-dd');
-    const monthEndStr = format(monthEnd, 'yyyy-MM-dd');
 
     const supabase = await createClient();
 
@@ -1420,63 +1513,8 @@ export async function runScheduler(startDate: string, endDate: string, areaId?: 
       targetIds = (pData || []).map(p => p.id);
     }
 
-    // 2. Obtener datos de este personal y sus turnos
-    const { data: personnelData } = await supabase
-      .from('personnel')
-      .select('id, first_name, last_name_father, rotation_pattern')
-      .in('id', targetIds);
-
-    const { data: allAssignments } = await supabase
-      .from('shift_assignments')
-      .select('*')
-      .in('personnel_id', targetIds)
-      .gte('date', monthStartStr)
-      .lte('date', monthEndStr);
-
-    // 3. Definir las semanas naturales del mes (Lunes a Domingo)
-    const weeksList: string[] = [];
-    let currW = startOfWeek(monthStart, { weekStartsOn: 1 });
-    
-    // Generar al menos 5 semanas para cubrir el mes
-    for (let i = 0; i < 6; i++) {
-      const wLabel = format(currW, 'dd/MM');
-      weeksList.push(wLabel);
-      currW = new Date(currW.getTime() + 7 * 24 * 60 * 60 * 1000);
-      if (currW > monthEnd && i >= 3) break; 
-    }
-    
-    console.log(`[Audit] Generadas semanas para ${format(monthStart, 'MMMM')}: ${weeksList.join(', ')}`);
-
-    // 4. Construir el resumen
-    const auditSummary = (personnelData || []).map(p => {
-      const pAssignments = (allAssignments || []).filter(a => a.personnel_id === p.id);
-      const weekCounts: Record<string, number> = {};
-      weeksList.forEach(w => weekCounts[w] = 0);
-
-      pAssignments.forEach((a: any) => {
-        const d = parseISO(a.date);
-        const w = format(startOfWeek(d, { weekStartsOn: 1 }), 'dd/MM');
-        if (weekCounts.hasOwnProperty(w)) weekCounts[w]++;
-      });
-
-      let sundaysOff = 0;
-      let currD = new Date(monthStart);
-      while (currD <= monthEnd) {
-        if (currD.getDay() === 0) {
-          const dStr = format(currD, 'yyyy-MM-dd');
-          if (!pAssignments.some(a => a.date === dStr)) sundaysOff++;
-        }
-        currD.setDate(currD.getDate() + 1);
-      }
-
-      return {
-        personId: p.id,
-        personName: `${p.first_name} ${p.last_name_father}`,
-        pattern: p.rotation_pattern || '5x2',
-        weekCounts,
-        sundaysOff
-      };
-    });
+    // 2. Construir el resumen de auditoría
+    const auditSummary = await buildMonthlyAuditSummary(supabase, targetIds, monthStart, monthEnd);
 
     revalidatePath('/shifts/assignments');
     revalidatePath('/shifts/roster');
@@ -1706,8 +1744,6 @@ export async function getMonthlyAudit(startDate: string, areaId?: string, person
     const sDate = parseISO(startDate);
     const monthStart = startOfMonth(sDate);
     const monthEnd = endOfMonth(sDate);
-    const monthStartStr = format(monthStart, 'yyyy-MM-dd');
-    const monthEndStr = format(monthEnd, 'yyyy-MM-dd');
 
     const supabase = await createClient();
 
@@ -1729,54 +1765,7 @@ export async function getMonthlyAudit(startDate: string, areaId?: string, person
       targetIds = (pData || []).map(p => p.id);
     }
 
-    const { data: personnelData } = await supabase
-      .from('personnel')
-      .select('id, first_name, last_name_father, rotation_pattern')
-      .in('id', targetIds);
-
-    const { data: allAssignments } = await supabase
-      .from('shift_assignments')
-      .select('*')
-      .in('personnel_id', targetIds)
-      .gte('date', monthStartStr)
-      .lte('date', monthEndStr);
-
-    const weeksList: string[] = [];
-    let currW = startOfWeek(monthStart, { weekStartsOn: 1 });
-    for (let i = 0; i < 6; i++) {
-      const wLabel = format(currW, 'dd/MM');
-      weeksList.push(wLabel);
-      currW = new Date(currW.getTime() + 7 * 24 * 60 * 60 * 1000);
-      if (currW > monthEnd && i >= 3) break; 
-    }
-
-    const auditSummary = (personnelData || []).map(p => {
-      const pAssignments = (allAssignments || []).filter(a => a.personnel_id === p.id);
-      const weekCounts: Record<string, number> = {};
-      weeksList.forEach(w => weekCounts[w] = 0);
-
-      pAssignments.forEach((a: any) => {
-        const d = parseISO(a.date);
-        const w = format(startOfWeek(d, { weekStartsOn: 1 }), 'dd/MM');
-        if (weekCounts.hasOwnProperty(w)) weekCounts[w]++;
-      });
-
-      let sundaysOff = 0;
-      const monthSundays = eachDayOfInterval({ start: monthStart, end: monthEnd }).filter(d => d.getDay() === 0);
-      
-      monthSundays.forEach(sun => {
-        const dStr = format(sun, 'yyyy-MM-dd');
-        if (!pAssignments.some(a => a.date === dStr)) sundaysOff++;
-      });
-
-      return {
-        personId: p.id,
-        personName: `${p.first_name} ${p.last_name_father}`,
-        pattern: p.rotation_pattern || '5x2',
-        weekCounts,
-        sundaysOff
-      };
-    });
+    const auditSummary = await buildMonthlyAuditSummary(supabase, targetIds, monthStart, monthEnd);
 
     return { success: true, auditSummary };
   } catch (err) {
