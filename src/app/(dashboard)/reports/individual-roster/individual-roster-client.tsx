@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useRef } from 'react';
+import { useState, useTransition, useRef, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -326,8 +326,17 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
 
   const weeks = getWeeks();
 
-  // Count manually changed assignments for the legend
-  const manualChangesCount = data?.assignments?.filter((a: any) => a.is_manual).length ?? 0;
+  // Set of dates that have an actual post-publication shift change
+  const postPublishChangeDates = useMemo(() => {
+    return new Set(
+      (data?.auditLogs || [])
+        .filter((log: any) => log.was_published && log.previous_shift_id !== log.new_shift_id)
+        .map((log: any) => log.date)
+    );
+  }, [data?.auditLogs]);
+
+  // Count post-publication changes for the legend
+  const postPublishChangesCount = postPublishChangeDates.size;
 
   // Helper: a leave is a "post-publish change" if the leave was created AFTER
   // the roster period started AND the day has a published assignment.
@@ -445,8 +454,8 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
             )}
           </div>
 
-          {/* Legend: manual changes or post-publish leaves */}
-          {data && (manualChangesCount > 0 || data.leaves?.some((l: any) =>
+          {/* Legend: post-publish shift changes or post-publish leaves */}
+          {data && (postPublishChangesCount > 0 || data.leaves?.some((l: any) =>
             data.assignments?.some((a: any) => a.is_published &&
               parseISO(a.date) >= parseISO(l.start_date) &&
               parseISO(a.date) <= parseISO(l.end_date))
@@ -454,7 +463,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
             <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5 w-fit no-print">
               <span className="inline-block w-3 h-3 rounded-sm bg-amber-400 border border-amber-500 shrink-0" />
               <span>
-                Días resaltados en ámbar: turno modificado manualmente o solicitud de ausencia sobre turno publicado
+                Días resaltados en ámbar: cambio de turno o solicitud de ausencia posterior a la publicación del rol
               </span>
             </div>
           )}
@@ -515,9 +524,10 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                       {week.map((day, dIdx) => {
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
-                        const isManual = asg?.is_manual && !leave;
+                        const dateStr = format(day, 'yyyy-MM-dd');
+                        const isPostPublishChange = postPublishChangeDates.has(dateStr) && !leave;
                         const isPostLeave = isPostPublishLeave(day, leave);
-                        const isChanged = isManual || isPostLeave;
+                        const isChanged = isPostPublishChange || isPostLeave;
 
                         // Label: VAC for vacation, LIC for other leaves, shift name, or LIBRE
                         let content: string;
@@ -537,7 +547,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                               isChanged && "bg-amber-100 text-amber-900 print:bg-amber-100"
                             )}
                             title={
-                              isManual ? "Turno modificado manualmente"
+                              isPostPublishChange ? "Cambio de turno realizado después de publicar el rol"
                               : isPostLeave ? "Solicitud de ausencia registrada después de publicar el rol"
                               : undefined
                             }
@@ -556,9 +566,10 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                       {week.map((day, dIdx) => {
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
-                        const isManual = asg?.is_manual && !leave;
+                        const dateStr = format(day, 'yyyy-MM-dd');
+                        const isPostPublishChange = postPublishChangeDates.has(dateStr) && !leave;
                         const isPostLeave = isPostPublishLeave(day, leave);
-                        const isChanged = isManual || isPostLeave;
+                        const isChanged = isPostPublishChange || isPostLeave;
 
                         let content = '';
                         if (leave) {
@@ -597,9 +608,10 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                       {week.map((day, dIdx) => {
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
-                        const isManual = asg?.is_manual && !leave;
+                        const dateStr = format(day, 'yyyy-MM-dd');
+                        const isPostPublishChange = postPublishChangeDates.has(dateStr) && !leave;
                         const isPostLeave = isPostPublishLeave(day, leave);
-                        const isChanged = isManual || isPostLeave;
+                        const isChanged = isPostPublishChange || isPostLeave;
                         return (
                           <td
                             key={dIdx}
@@ -619,9 +631,10 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                       {week.map((day, dIdx) => {
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
-                        const isManual = asg?.is_manual && !leave;
+                        const dateStr = format(day, 'yyyy-MM-dd');
+                        const isPostPublishChange = postPublishChangeDates.has(dateStr) && !leave;
                         const isPostLeave = isPostPublishLeave(day, leave);
-                        const isChanged = isManual || isPostLeave;
+                        const isChanged = isPostPublishChange || isPostLeave;
                         return (
                           <td
                             key={dIdx}

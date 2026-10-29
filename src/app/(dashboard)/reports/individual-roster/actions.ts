@@ -53,10 +53,20 @@ export async function getIndividualRoster(personnelId: string, startDate: string
     .gte('end_date', startDate);
 
 
+  // 4. Fetch Post-Publish Shift Changes (Audit logs with was_published = true)
+  const { data: auditLogs } = await supabase
+    .from('roster_audit_logs')
+    .select('date, previous_shift_id, new_shift_id, was_published')
+    .eq('personnel_id', personnelId)
+    .gte('date', startDate)
+    .lte('date', endDate)
+    .eq('was_published', true);
+
   return {
     personnel,
     assignments: assignments || [],
     leaves: leaves || [],
+    auditLogs: auditLogs || [],
     startDate,
     endDate
   };
