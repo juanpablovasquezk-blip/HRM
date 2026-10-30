@@ -518,8 +518,17 @@ export async function cancelAssignment(id: string) {
     .update({ status: 'cancelled' })
     .eq('id', id);
   if (error) return { success: false, error: error.message };
+
+  // Remove pending transport requests for this cancelled assignment
+  await supabase
+    .from('transport_requests')
+    .delete()
+    .eq('assignment_id', id)
+    .eq('status', 'ABIERTO');
+
   revalidatePath('/shifts/daily');
   revalidatePath('/shifts/roster');
+  revalidatePath('/transport');
   return { success: true };
 }
 

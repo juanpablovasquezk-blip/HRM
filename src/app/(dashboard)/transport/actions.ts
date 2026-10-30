@@ -542,6 +542,13 @@ export async function updateAssignmentShift(assignmentId: string, newShiftId: st
   }
 }
 
+function isWithinTransportWindow(timeStr: string | null | undefined): boolean {
+  if (!timeStr) return false;
+  const [h, m] = timeStr.split(':').map(Number);
+  const val = h * 100 + m;
+  return (val >= 2300 || val <= 630);
+}
+
 export async function getTransportRequests(date: string) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
@@ -560,13 +567,32 @@ export async function getTransportRequests(date: string) {
     
   if (error) return { data: null, error: error.message };
 
-  // Filter out transport requests for inactive or terminated personnel
+  // Filter out transport requests:
+  // 1. Inactive or terminated personnel
+  // 2. Cancelled shift assignments
+  // 3. Obsolete open requests where shift no longer requires transport or time outside window
   const filteredData = (data || []).filter(r => {
     const p = r.personnel;
     if (!p) return false;
     if (p.termination_date && date > p.termination_date) return false;
     const todayStr = new Date().toLocaleDateString('sv');
     if (!p.is_active && date >= todayStr) return false;
+
+    // Exclude if assignment was cancelled
+    if (r.assignment && r.assignment.status === 'cancelled') return false;
+
+    // Exclude if assignment was deleted and not a driver carpooling bonus
+    if (!r.assignment && !r.observations?.startsWith('Recogida a')) return false;
+
+    // For open/pending requests, verify the current shift still qualifies for transport
+    if (r.status === 'ABIERTO' && r.assignment?.shift) {
+      if (r.assignment.shift.requires_transport === false) return false;
+      const timeToCheck = r.type === 'SALIDA' 
+        ? r.assignment.shift.end_time 
+        : r.assignment.shift.start_time;
+      if (!isWithinTransportWindow(timeToCheck)) return false;
+    }
+
     return true;
   });
 
@@ -613,6 +639,34 @@ export async function generateTransportRequests(date: string) {
 
     const supabase = createAdminClient();
     
+    // Clean up obsolete pending requests for this date (e.g., cancelled assignments or shifts changed to daytime)
+    const { data: currentPending } = await supabase
+      .from('transport_requests')
+      .select('id, type, assignment:shift_assignments(status, shift:shifts(start_time, end_time, requires_transport))')
+      .eq('date', date)
+      .eq('status', 'ABIERTO');
+
+    const toDeleteIds: string[] = [];
+    for (const req of currentPending || []) {
+      const asg = (req as any).assignment;
+      if (!asg || asg.status === 'cancelled') {
+        toDeleteIds.push(req.id);
+      } else if (asg.shift) {
+        if (asg.shift.requires_transport === false) {
+          toDeleteIds.push(req.id);
+        } else {
+          const time = req.type === 'SALIDA' ? asg.shift.end_time : asg.shift.start_time;
+          if (!isWithinTransportWindow(time)) {
+            toDeleteIds.push(req.id);
+          }
+        }
+      }
+    }
+
+    if (toDeleteIds.length > 0) {
+      await supabase.from('transport_requests').delete().in('id', toDeleteIds);
+    }
+
     // 1. Get all confirmed assignments for that date
     const { data: assignments, error: assErr } = await supabase
       .from('shift_assignments')
@@ -649,13 +703,6 @@ export async function generateTransportRequests(date: string) {
       .eq('date', date);
     
     const existingIds = new Set(existingReqs?.map(r => r.assignment_id) || []);
-
-    const isWithinWindow = (timeStr: string) => {
-      if (!timeStr) return false;
-      const [h, m] = timeStr.split(':').map(Number);
-      const val = h * 100 + m;
-      return (val >= 2300 || val <= 630);
-    };
 
     const newRequests: any[] = [];
 
@@ -696,7 +743,7 @@ export async function generateTransportRequests(date: string) {
       const defaultTransportType = isSupervisor ? 'PROPIO' : 'PENDIENTE';
 
       // ENTRADA
-      if (isWithinWindow(shift.start_time)) {
+      if (isWithinTransportWindow(shift.start_time)) {
         newRequests.push({
           personnel_id: ass.personnel_id,
           assignment_id: ass.id,
@@ -710,7 +757,7 @@ export async function generateTransportRequests(date: string) {
       }
 
       // SALIDA
-      if (isWithinWindow(shift.end_time)) {
+      if (isWithinTransportWindow(shift.end_time)) {
         newRequests.push({
           personnel_id: ass.personnel_id,
           assignment_id: ass.id,

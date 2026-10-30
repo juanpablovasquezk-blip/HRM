@@ -602,6 +602,13 @@ export async function createManualAssignment(formData: FormData) {
 
       if (updateError) return { success: false, error: updateError.message };
 
+      // Clean up obsolete pending transport requests for this assignment
+      await supabase
+        .from('transport_requests')
+        .delete()
+        .eq('assignment_id', existing.id)
+        .eq('status', 'ABIERTO');
+
     } else {
       // If no existing assignment on this date, insert a new record
       const { data: newAsg, error: insertError } = await supabase
@@ -644,6 +651,7 @@ export async function createManualAssignment(formData: FormData) {
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
   revalidatePath('/shifts/daily');
+  revalidatePath('/transport');
   return { success: true, error: null };
 }
 
@@ -1292,6 +1300,13 @@ export async function deleteAssignment(id: string) {
   const { error } = await supabase.from('shift_assignments').delete().eq('id', id);
   if (error) return { success: false, error: error.message };
 
+  // Clean up pending transport requests for this deleted assignment
+  await supabase
+    .from('transport_requests')
+    .delete()
+    .eq('assignment_id', id)
+    .eq('status', 'ABIERTO');
+
   // 2. If it was published, notify the worker immediately of the change to Libre
   if (current && current.is_published && current.personnel?.phone) {
     (async () => {
@@ -1346,6 +1361,7 @@ export async function deleteAssignment(id: string) {
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
   revalidatePath('/shifts/daily');
+  revalidatePath('/transport');
   return { success: true, error: null };
 }
 
@@ -1362,9 +1378,17 @@ export async function bulkDeleteManualAssignments(personnelId: string, dates: st
 
   if (error) return { success: false, error: error.message };
 
+  await supabase
+    .from('transport_requests')
+    .delete()
+    .eq('personnel_id', personnelId)
+    .in('date', dates)
+    .eq('status', 'ABIERTO');
+
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
   revalidatePath('/shifts/daily');
+  revalidatePath('/transport');
   return { success: true, error: null };
 }
 
@@ -1377,10 +1401,17 @@ export async function bulkDeleteAssignmentsByIds(ids: string[]) {
     .in('id', ids);
   
   if (error) return { success: false, error: error.message };
+
+  await supabase
+    .from('transport_requests')
+    .delete()
+    .in('assignment_id', ids)
+    .eq('status', 'ABIERTO');
   
   revalidatePath('/shifts/assignments');
   revalidatePath('/shifts/roster');
   revalidatePath('/shifts/daily');
+  revalidatePath('/transport');
   return { success: true };
 }
 // ─── Scheduling Engine Actions ────────────────────────────────────────────────
