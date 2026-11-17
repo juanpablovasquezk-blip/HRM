@@ -16,6 +16,7 @@ import {
   type OperationalPriority,
   type PriorityOverridesMap,
 } from './dotacion/matrix-utils';
+import { calcEffectiveShiftDuration } from './shift-duration';
 import { getUserRole } from '@/app/role-actions';
 import { hasPermission } from '@/lib/auth/roles';
 import type { Role } from '@/types/database';
@@ -45,18 +46,6 @@ async function getCurrentUserId() {
 
 // ─── Shift CRUD ───────────────────────────────────────────────────────────────
 
-// Helper: calculate shift duration in hours (handles overnight shifts crossing midnight)
-// Subtracts 1 hour for mandatory lunch break (colación)
-function calcDurationHours(startTime: string, endTime: string): number {
-  const [sh, sm] = startTime.split(':').map(Number);
-  const [eh, em] = endTime.split(':').map(Number);
-  let startMins = sh * 60 + sm;
-  let endMins = eh * 60 + em;
-  if (endMins <= startMins) endMins += 24 * 60; // crosses midnight
-  const rawHours = (endMins - startMins) / 60;
-  return Math.round((rawHours - 1) * 10) / 10; // -1h colación
-}
-
 export async function createShift(formData: FormData) {
   const supabase = await createClient();
   const geovRaw = formData.get('geov');
@@ -67,7 +56,7 @@ export async function createShift(formData: FormData) {
     name: formData.get('name') as string,
     start_time: startTime,
     end_time: endTime,
-    duration_hours: calcDurationHours(startTime, endTime),
+    duration_hours: calcEffectiveShiftDuration(startTime, endTime) ?? 0,
     requires_transport: formData.get('requires_transport') === 'true',
     geov: geovRaw ? parseFloat(geovRaw as string) : null,
   };
@@ -98,7 +87,7 @@ export async function updateShift(formData: FormData) {
     name: formData.get('name') as string,
     start_time: startTime,
     end_time: endTime,
-    duration_hours: calcDurationHours(startTime, endTime),
+    duration_hours: calcEffectiveShiftDuration(startTime, endTime) ?? 0,
     requires_transport: formData.get('requires_transport') === 'true',
     geov: geovRaw ? parseFloat(geovRaw as string) : null,
   };

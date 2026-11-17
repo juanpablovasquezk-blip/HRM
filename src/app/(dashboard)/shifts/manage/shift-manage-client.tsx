@@ -18,6 +18,7 @@ import {
 import { Loader2, Plus, Trash2, Edit2, X, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { createShift, updateShift, deleteShift } from '@/app/(dashboard)/shifts/actions';
+import { calcEffectiveShiftDuration, resolveShiftDurationHours } from '@/app/(dashboard)/shifts/shift-duration';
 
 interface ShiftManageClientProps {
   initialShifts: Array<{
@@ -33,20 +34,6 @@ interface ShiftManageClientProps {
   companies: Array<{ id: string; name: string }>;
 }
 
-// Calculates duration in hours from "HH:MM" strings, handles overnight shifts
-// Subtracts 1 hour for mandatory lunch break (colación)
-function calcDuration(start: string, end: string): number | null {
-  if (!start || !end || !start.includes(':') || !end.includes(':')) return null;
-  const [sh, sm] = start.split(':').map(Number);
-  const [eh, em] = end.split(':').map(Number);
-  if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return null;
-  let startMins = sh * 60 + sm;
-  let endMins = eh * 60 + em;
-  if (endMins <= startMins) endMins += 24 * 60; // crosses midnight
-  const rawHours = (endMins - startMins) / 60;
-  return Math.round((rawHours - 1) * 10) / 10; // -1h colación
-}
-
 export function ShiftManageClient({ initialShifts, companies }: ShiftManageClientProps) {
   const [isPending, startTransition] = useTransition();
   const [requiresTransport, setRequiresTransport] = useState(false);
@@ -55,7 +42,7 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
   const [endTime, setEndTime] = useState('');
   const formRef = useRef<HTMLFormElement>(null);
 
-  const liveDuration = calcDuration(startTime, endTime);
+  const liveDuration = calcEffectiveShiftDuration(startTime, endTime);
 
   const handleSubmit = (formData: FormData) => {
     formData.set('requires_transport', String(requiresTransport));
@@ -230,9 +217,7 @@ export function ShiftManageClient({ initialShifts, companies }: ShiftManageClien
                   <TableCell className="font-mono text-sm">{shift.end_time?.slice(0, 5)}</TableCell>
                   <TableCell>
                     <Badge variant="secondary">
-                      {shift.duration_hours > 0
-                        ? `${shift.duration_hours}h`
-                        : (calcDuration(shift.start_time?.slice(0, 5), shift.end_time?.slice(0, 5)) ?? 0) + 'h'}
+                      {resolveShiftDurationHours(shift).hours}h
                     </Badge>
                   </TableCell>
                   <TableCell className="font-bold text-indigo-600">{shift.geov ?? '-'}</TableCell>

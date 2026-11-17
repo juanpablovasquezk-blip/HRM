@@ -11,7 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { CalendarDays, Clock, MapPin, Layers, Zap } from 'lucide-react';
+import { CalendarDays, Clock, MapPin, Layers, Zap, Calculator } from 'lucide-react';
 
 export default async function ShiftsPage() {
   const supabase = await createClient();
@@ -77,6 +77,20 @@ export default async function ShiftsPage() {
               <div>
                 <p className="font-semibold text-sm">Master Requirements</p>
                 <p className="text-xs text-muted-foreground">Reglas de dotación</p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/shifts/calculadora">
+          <Card className="border-cyan-200/70 dark:border-cyan-900 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer group bg-cyan-50/20 dark:bg-cyan-950/10">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400 group-hover:scale-110 transition-transform">
+                <Calculator className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">Calculadora de Dotación</p>
+                <p className="text-xs text-muted-foreground">Simulador y cobertura</p>
               </div>
             </CardContent>
           </Card>
