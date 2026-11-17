@@ -150,3 +150,48 @@ export function buildWeeklyMatrix(templates: TemplateLike[]): MatrixPositionGrou
     return areaCmp !== 0 ? areaCmp : a.positionName.localeCompare(b.positionName);
   });
 }
+
+export interface GroupedTemplateSpec {
+  required_count: number;
+  days_of_week: number[];
+}
+
+/**
+ * Validates that a value is a finite integer >= 0.
+ */
+export function isValidQuantity(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/**
+ * Converts a 7-element array ordered [Mon..Sun] into minimal consolidated
+ * requirement_templates specs grouped by required_count (> 0), using DB day
+ * numbers (0=Sun, 1=Mon..6=Sat).
+ */
+export function groupDailyCountsToTemplates(
+  countsMonToSun: number[]
+): GroupedTemplateSpec[] {
+  if (!Array.isArray(countsMonToSun) || countsMonToSun.length !== 7) {
+    throw new Error('Se requieren exactamente 7 cantidades (Lunes a Domingo).');
+  }
+
+  const byCount = new Map<number, number[]>();
+
+  for (let idx = 0; idx < 7; idx++) {
+    const qty = countsMonToSun[idx];
+    if (!isValidQuantity(qty)) {
+      throw new Error(`Cantidad inválida en el día ${MATRIX_DAYS_ORDER[idx].fullName}: debe ser un entero mayor o igual a 0.`);
+    }
+    if (qty === 0) continue;
+
+    const dbDay = MATRIX_DAYS_ORDER[idx].dbDay;
+    const list = byCount.get(qty) || [];
+    list.push(dbDay);
+    byCount.set(qty, list);
+  }
+
+  return Array.from(byCount.entries()).map(([required_count, days_of_week]) => ({
+    required_count,
+    days_of_week,
+  }));
+}

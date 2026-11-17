@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate } from '@/app/(dashboard)/shifts/actions';
+import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, type WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
 import { Layers, Plus, Trash2, Calendar, MapPin, Briefcase, Clock, Loader2, RefreshCw, Shield, ChevronDown, Edit2, X, TableProperties, LayoutGrid } from 'lucide-react';
 import { toast } from 'sonner';
 import { WeeklyMatrixView } from './weekly-matrix-view';
@@ -18,12 +18,13 @@ interface ReqClientProps {
   areas: any[];
   shifts: any[];
   companyId: string;
+  canEdit?: boolean;
 }
 
 const DAY_NAMES: Record<number, string> = { 0: 'Dom', 1: 'Lun', 2: 'Mar', 3: 'Mié', 4: 'Jue', 5: 'Vie', 6: 'Sáb' };
 const DAY_LABELS_SHORT: Record<number, string> = { 0: 'D', 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V', 6: 'S' };
 
-export function RequirementsClient({ initialReqs, templates, areas, shifts, companyId }: ReqClientProps) {
+export function RequirementsClient({ initialReqs, templates, areas, shifts, companyId, canEdit = false }: ReqClientProps) {
   const [isPending, startTransition] = useTransition();
   const [selectedAreaId, setSelectedAreaId] = useState('');
   const [showGenerate, setShowGenerate] = useState(false);
@@ -175,6 +176,19 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
       if (result.error) toast.error('Error', { description: result.error });
       else { toast.success('Requerimiento eliminado'); router.refresh(); }
     });
+  };
+
+  const handleSaveMatrixChanges = async (changes: WeeklyMatrixRowChange[]) => {
+    const res = await saveWeeklyMatrixChanges(changes);
+    if (res.error) {
+      toast.error('Error al guardar la matriz', { description: res.error });
+      return { success: false, error: res.error };
+    }
+    toast.success('Reglas semanales actualizadas', {
+      description: `Se guardaron ${res.updatedRows ?? changes.length} fila(s) en las reglas permanentes.`,
+    });
+    router.refresh();
+    return { success: true, error: null };
   };
 
   return (
@@ -344,9 +358,9 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
            </select>
         </div>
 
-        {/* Templates View: Weekly Matrix (read-only) or Cards */}
+        {/* Templates View: Weekly Matrix or Cards */}
         {viewMode === 'matrix' ? (
-          <WeeklyMatrixView templates={filteredTemplates} />
+          <WeeklyMatrixView templates={filteredTemplates} onSaveChanges={canEdit ? handleSaveMatrixChanges : undefined} />
         ) : filteredTemplates.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="py-8 text-center text-sm text-muted-foreground">

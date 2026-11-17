@@ -9,6 +9,10 @@ import { parseISO, format, endOfWeek, startOfWeek, isAfter, startOfMonth, endOfM
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
 import { es as esLocale } from 'date-fns/locale';
 import { buildConsolidatedRequirements, filterMissingRequirements } from './dotacion/materialize-utils';
+import { groupDailyCountsToTemplates } from './dotacion/matrix-utils';
+import { getUserRole } from '@/app/role-actions';
+import { hasPermission } from '@/lib/auth/roles';
+import type { Role } from '@/types/database';
 
 
 // ─── Auth Helpers ─────────────────────────────────────────────────────────────
@@ -360,6 +364,70 @@ export async function updateTemplate(id: string, formData: FormData) {
   if (error) return { success: false, error: error.message };
   revalidatePath('/shifts/dotacion');
   return { success: true, error: null };
+}
+
+export interface WeeklyMatrixRowChange {
+  area_id: string;
+  position_id: string;
+  shift_id: string;
+  /** 7 integer counts >= 0 ordered Monday..Sunday */
+  counts: number[];
+}
+
+export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) {
+  if (!Array.isArray(changes) || changes.length === 0) {
+    return { success: false, error: 'No hay cambios pendientes para guardar.' };
+  }
+
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) {
+    return { success: false, error: 'Usuario no autenticado.' };
+  }
+
+  const role = await getUserRole();
+  if (!role || !hasPermission(role as Role, 'manageShifts')) {
+    return { success: false, error: 'No autorizado para modificar reglas operacionales.' };
+  }
+
+  const prepared: Array<{
+    area_id: string;
+    position_id: string;
+    shift_id: string;
+    specs: Array<{ required_count: number; days_of_week: number[] }>;
+  }> = [];
+
+  try {
+    for (const item of changes) {
+      if (!item.area_id || !item.position_id || !item.shift_id) {
+        return { success: false, error: 'Faltan identificadores de área, cargo o turno.' };
+      }
+      const specs = groupDailyCountsToTemplates(item.counts);
+      prepared.push({
+        area_id: item.area_id,
+        position_id: item.position_id,
+        shift_id: item.shift_id,
+        specs,
+      });
+    }
+  } catch (validationErr: any) {
+    return { success: false, error: validationErr?.message || 'Cantidades inválidas en la matriz.' };
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc('save_weekly_matrix_changes', {
+    p_changes: prepared,
+  });
+
+  if (rpcError) {
+    return { success: false, error: `Error al guardar reglas operacionales: ${rpcError.message}` };
+  }
+
+  revalidatePath('/shifts/dotacion');
+  return {
+    success: true,
+    error: null,
+    updatedRows: (rpcData as { updated_rows?: number } | null)?.updated_rows ?? prepared.length,
+  };
 }
 
 export async function materializeTemplates(startDate: string, endDate: string) {

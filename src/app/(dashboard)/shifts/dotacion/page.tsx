@@ -2,6 +2,9 @@ import { listRequirements, listAreas, listShifts, listTemplates } from '@/app/(d
 import { RequirementsClient } from './requirements-client';
 import { createClient } from '@/lib/supabase/server';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { getUserRole } from '@/app/role-actions';
+import { hasPermission } from '@/lib/auth/roles';
+import type { Role } from '@/types/database';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +22,8 @@ export default async function RequirementsPage() {
     const { data: areas } = await listAreas();
     const { data: shifts } = await listShifts();
     const { data: templates } = await listTemplates();
+    const role = await getUserRole();
+    const canEdit = Boolean(role && hasPermission(role as Role, 'manageShifts'));
 
     return (
       <RequirementsClient
@@ -27,6 +32,7 @@ export default async function RequirementsPage() {
         areas={areas || []}
         shifts={shifts || []}
         companyId={authData.user?.id || ''}
+        canEdit={canEdit}
       />
     );
   } catch (e: any) {
