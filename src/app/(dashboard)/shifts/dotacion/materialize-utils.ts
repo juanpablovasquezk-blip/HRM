@@ -1,0 +1,121 @@
+import { eachDayOfInterval, format, getDay, parseISO } from 'date-fns';
+
+export interface RequirementTemplateRow {
+  area_id: string;
+  position_id: string;
+  shift_id: string;
+  required_count: number;
+  days_of_week: number[];
+  is_active?: boolean;
+}
+
+export interface MaterializedRequirementInsert {
+  area_id: string;
+  position_id: string;
+  shift_id: string;
+  required_count: number;
+  date: string;
+  is_extra: false;
+}
+
+export interface ExistingRequirementKeyRow {
+  area_id: string;
+  position_id: string;
+  shift_id: string;
+  date: string;
+  is_extra?: boolean | null;
+}
+
+export function buildRequirementSlotKey(row: {
+  area_id: string;
+  position_id: string;
+  shift_id: string;
+  date: string;
+}): string {
+  return `${row.area_id}|${row.position_id}|${row.shift_id}|${row.date}`;
+}
+
+/**
+ * Consolidates active templates into daily requirement rows for [startDate, endDate].
+ * Sums required_count when multiple templates match the same (area, position, shift, date).
+ */
+export function buildConsolidatedRequirements(
+  templates: RequirementTemplateRow[],
+  startDate: string,
+  endDate: string
+): MaterializedRequirementInsert[] {
+  const start = parseISO(startDate);
+  const end = parseISO(endDate);
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+    return [];
+  }
+
+  const days = eachDayOfInterval({ start, end });
+  const groupedInserts = new Map<string, MaterializedRequirementInsert>();
+
+  for (const day of days) {
+    const dayOfWeek = getDay(day); // 0=Dom, 1=Lun ... 6=Sab
+    const dateStr = format(day, 'yyyy-MM-dd');
+
+    for (const template of templates) {
+      if (template.is_active === false) continue;
+      if (!Array.isArray(template.days_of_week) || !template.days_of_week.includes(dayOfWeek)) {
+        continue;
+      }
+
+      const key = buildRequirementSlotKey({
+        area_id: template.area_id,
+        position_id: template.position_id,
+        shift_id: template.shift_id,
+        date: dateStr,
+      });
+
+      const existing = groupedInserts.get(key);
+      if (existing) {
+        existing.required_count += Number(template.required_count) || 0;
+      } else {
+        groupedInserts.set(key, {
+          area_id: template.area_id,
+          position_id: template.position_id,
+          shift_id: template.shift_id,
+          required_count: Number(template.required_count) || 0,
+          date: dateStr,
+          is_extra: false,
+        });
+      }
+    }
+  }
+
+  return Array.from(groupedInserts.values());
+}
+
+/**
+ * Filters out requirements that already exist in DB (ordinary, is_extra = false),
+ * returning only missing rows to insert and the count of skipped rows.
+ */
+export function filterMissingRequirements(
+  candidateInserts: MaterializedRequirementInsert[],
+  existingRows: ExistingRequirementKeyRow[]
+): {
+  missingInserts: MaterializedRequirementInsert[];
+  skippedCount: number;
+} {
+  const existingKeys = new Set<string>();
+  for (const row of existingRows) {
+    if (row.is_extra === true) continue;
+    existingKeys.add(buildRequirementSlotKey(row));
+  }
+
+  const missingInserts: MaterializedRequirementInsert[] = [];
+  let skippedCount = 0;
+
+  for (const item of candidateInserts) {
+    if (existingKeys.has(buildRequirementSlotKey(item))) {
+      skippedCount++;
+    } else {
+      missingInserts.push(item);
+    }
+  }
+
+  return { missingInserts, skippedCount };
+}

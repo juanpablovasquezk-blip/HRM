@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useMemo } from 'react';
+import { useState, useTransition, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,8 +8,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate } from '@/app/(dashboard)/shifts/actions';
-import { Layers, Plus, Trash2, Calendar, MapPin, Briefcase, Clock, Loader2, RefreshCw, Shield, ChevronDown, Edit2, X } from 'lucide-react';
+import { Layers, Plus, Trash2, Calendar, MapPin, Briefcase, Clock, Loader2, RefreshCw, Shield, ChevronDown, Edit2, X, TableProperties, LayoutGrid } from 'lucide-react';
 import { toast } from 'sonner';
+import { WeeklyMatrixView } from './weekly-matrix-view';
 
 interface ReqClientProps {
   initialReqs: any[];
@@ -30,6 +31,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
   const [filterAreaId, setFilterAreaId] = useState('all');
   const [filterPositionId, setFilterPositionId] = useState('all');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'matrix' | 'cards'>('matrix');
   
   // Form states
   const [areaId, setAreaId] = useState('');
@@ -130,16 +132,39 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
     });
   };
 
+  const isMaterializingRef = useRef(false);
+
   const handleMaterialize = (formData: FormData) => {
+    if (isMaterializingRef.current || isPending) return;
+    isMaterializingRef.current = true;
+
     const startDate = formData.get('gen_start') as string;
     const endDate = formData.get('gen_end') as string;
     startTransition(async () => {
-      const result = await materializeTemplates(startDate, endDate);
-      if (result.error) toast.error('Error', { description: result.error });
-      else {
-        toast.success(`${result.count} requerimientos generados exitosamente`);
-        setShowGenerate(false);
-        router.refresh();
+      try {
+        const result = await materializeTemplates(startDate, endDate) as any;
+        if (result.error) {
+          toast.error('Error', { description: result.error });
+        } else {
+          const created = result.createdCount ?? result.count ?? 0;
+          const skipped = result.skippedCount ?? 0;
+
+          if (created === 0 && skipped > 0) {
+            toast.info('El período ya estaba generado', {
+              description: `No se crearon nuevas necesidades (${skipped} existentes se mantuvieron intactas).`,
+            });
+          } else if (created > 0 && skipped > 0) {
+            toast.success(`${created} necesidades faltantes creadas`, {
+              description: `${skipped} necesidades ya existentes fueron omitidas sin cambios.`,
+            });
+          } else {
+            toast.success(`${created} requerimientos generados exitosamente`);
+          }
+          setShowGenerate(false);
+          router.refresh();
+        }
+      } finally {
+        isMaterializingRef.current = false;
       }
     });
   };
@@ -168,9 +193,34 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
 
       {/* ═══ SECTION 1: Templates ═══ */}
       <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Shield className="h-5 w-5 text-orange-500" />
-          <h2 className="text-lg font-semibold">Reglas de Dotación Permanentes</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-orange-500" />
+            <h2 className="text-lg font-semibold">Reglas de Dotación Permanentes</h2>
+          </div>
+
+          <div className="inline-flex items-center rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900 p-1">
+            <Button
+              type="button"
+              variant={viewMode === 'matrix' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('matrix')}
+              className={`h-8 text-xs gap-1.5 ${viewMode === 'matrix' ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300'}`}
+            >
+              <TableProperties className="h-3.5 w-3.5" />
+              Matriz Semanal
+            </Button>
+            <Button
+              type="button"
+              variant={viewMode === 'cards' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('cards')}
+              className={`h-8 text-xs gap-1.5 ${viewMode === 'cards' ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300'}`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Tarjetas
+            </Button>
+          </div>
         </div>
 
         {/* Create Template Form */}
@@ -294,8 +344,10 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
            </select>
         </div>
 
-        {/* Templates List */}
-        {filteredTemplates.length === 0 ? (
+        {/* Templates View: Weekly Matrix (read-only) or Cards */}
+        {viewMode === 'matrix' ? (
+          <WeeklyMatrixView templates={filteredTemplates} />
+        ) : filteredTemplates.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="py-8 text-center text-sm text-muted-foreground">
               <Shield className="h-8 w-8 mx-auto mb-3 opacity-40" />
@@ -433,16 +485,17 @@ function GroupedRequirements({ reqs, onDelete, isPending }: { reqs: any[]; onDel
     );
   }
 
-  const groups: Record<string, { key: string; area: string; position: string; shift: string; count: number; items: any[] }> = {};
+  const groups: Record<string, { key: string; area: string; position: string; shift: string; count: number; isExtra: boolean; items: any[] }> = {};
   for (const req of reqs) {
-    const groupKey = `${req.area?.name}||${req.position?.name}||${req.shift?.name}||${req.required_count}`;
+    const isExtra = Boolean(req.is_extra);
+    const groupKey = `${req.area?.name}||${req.position?.name}||${req.shift?.name}||${req.required_count}||${isExtra ? 'extra' : 'base'}`;
     if (!groups[groupKey]) {
-      groups[groupKey] = { key: groupKey, area: req.area?.name || '—', position: req.position?.name || '—', shift: req.shift?.name || '—', count: req.required_count, items: [] };
+      groups[groupKey] = { key: groupKey, area: req.area?.name || '—', position: req.position?.name || '—', shift: req.shift?.name || '—', count: req.required_count, isExtra, items: [] };
     }
     groups[groupKey].items.push(req);
   }
 
-  const groupList = Object.values(groups);
+  const groupList = Object.values(groups).sort((a, b) => Number(a.isExtra) - Number(b.isExtra));
   for (const g of groupList) g.items.sort((a: any, b: any) => a.date.localeCompare(b.date));
 
   return (
@@ -460,15 +513,22 @@ function GroupedRequirements({ reqs, onDelete, isPending }: { reqs: any[]; onDel
         const dayLabels = [1, 2, 3, 4, 5, 6, 0].filter(d => daysPresent.has(d)).map(d => DAY_NAMES[d]);
 
         return (
-          <Card key={group.key} className="border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow-md transition-all overflow-hidden">
+          <Card key={group.key} className={`shadow-sm hover:shadow-md transition-all overflow-hidden ${group.isExtra ? 'border-amber-300/80 dark:border-amber-800/80' : 'border-slate-200/60 dark:border-slate-800'}`}>
             <div className="p-4 cursor-pointer flex flex-col sm:flex-row sm:items-center gap-3 justify-between hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors"
               onClick={() => setExpandedGroup(isExpanded ? null : group.key)}>
               <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${group.isExtra ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'}`}>
                   <Layers className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
-                  <div className="font-semibold text-sm truncate">{group.area}</div>
+                  <div className="font-semibold text-sm truncate flex items-center gap-2">
+                    <span>{group.area}</span>
+                    {group.isExtra && (
+                      <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-amber-50 text-amber-700 border-amber-300">
+                        Extra
+                      </Badge>
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap mt-0.5">
                     <Badge variant="outline" className="font-normal text-xs py-0">{group.position}</Badge>
                     <span className="text-slate-300">•</span>

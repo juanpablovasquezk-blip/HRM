@@ -8,6 +8,7 @@ import type { RecalculationInput } from '@/lib/scheduler/types';
 import { parseISO, format, endOfWeek, startOfWeek, isAfter, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns';
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
 import { es as esLocale } from 'date-fns/locale';
+import { buildConsolidatedRequirements, filterMissingRequirements } from './dotacion/materialize-utils';
 
 
 // ─── Auth Helpers ─────────────────────────────────────────────────────────────
@@ -248,17 +249,24 @@ export async function createRequirement(formData: FormData) {
         area_id: areaId,
         position_id: positionId,
         required_count: requiredCount,
+        is_extra: false,
       });
     }
     currentDate.setDate(currentDate.getDate() + 1);
   }
 
   if (inserts.length > 0) {
-    const { error } = await supabase.from('shift_requirements').insert(inserts);
+    const { error } = await supabase
+      .from('shift_requirements')
+      .upsert(inserts, {
+        onConflict: 'area_id,position_id,shift_id,date,is_extra',
+        ignoreDuplicates: true,
+      });
     if (error) return { success: false, error: error.message };
   }
 
   revalidatePath('/shifts/requirements');
+  revalidatePath('/shifts/dotacion');
   return { success: true, error: null };
 }
 
@@ -272,24 +280,35 @@ export async function deleteRequirement(id: string) {
 
 export async function listRequirements(startDate?: string, endDate?: string) {
   const supabase = await createClient();
-  let query = supabase
-    .from('shift_requirements')
-    .select('*, shift:shifts(name, start_time, end_time), area:areas(name), position:positions(name)')
-    .order('date', { ascending: true });
+  const effectiveStart = startDate || format(startOfMonth(new Date()), 'yyyy-MM-dd');
+  const effectiveEnd = endDate || (!startDate ? format(endOfMonth(new Date()), 'yyyy-MM-dd') : undefined);
 
-  if (startDate && endDate) {
-    query = query.gte('date', startDate).lte('date', endDate);
-  } else if (startDate) {
-    query = query.eq('date', startDate);
-  } else {
-    // Default to current month to keep page light
-    const start = format(startOfMonth(new Date()), 'yyyy-MM-dd');
-    const end = format(endOfMonth(new Date()), 'yyyy-MM-dd');
-    query = query.gte('date', start).lte('date', end);
+  const allRows: any[] = [];
+  let from = 0;
+  const PAGE_SIZE = 1000;
+
+  while (true) {
+    let query = supabase
+      .from('shift_requirements')
+      .select('*, shift:shifts(name, start_time, end_time), area:areas(name), position:positions(name)')
+      .order('date', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (effectiveStart && effectiveEnd) {
+      query = query.gte('date', effectiveStart).lte('date', effectiveEnd);
+    } else if (startDate) {
+      query = query.eq('date', startDate);
+    }
+
+    const { data, error } = await query;
+    if (error) return { data: allRows, error: error.message };
+    if (!data || data.length === 0) break;
+    allRows.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
   }
 
-  const { data, error } = await query;
-  return { data: data || [], error: error?.message || null };
+  return { data: allRows, error: null };
 }
 
 // ─── Requirement Templates (Reglas Permanentes) ───────────────────────────────
@@ -344,62 +363,88 @@ export async function updateTemplate(id: string, formData: FormData) {
 }
 
 export async function materializeTemplates(startDate: string, endDate: string) {
+  if (!startDate || !endDate || startDate > endDate) {
+    return { success: false, error: 'Rango de fechas inválido.', count: 0, createdCount: 0, skippedCount: 0 };
+  }
+
   const supabase = await createClient();
-  
-  // 1. Obtener todas las reglas
+
+  // 1. Obtener todas las reglas activas
   const { data: templates, error: tError } = await supabase.from('requirement_templates').select('*');
-  if (tError) return { success: false, error: tError.message };
-  if (!templates || templates.length === 0) return { success: true, error: null, count: 0 };
+  if (tError) return { success: false, error: tError.message, count: 0, createdCount: 0, skippedCount: 0 };
+  if (!templates || templates.length === 0) {
+    return { success: true, error: null, count: 0, createdCount: 0, skippedCount: 0 };
+  }
 
-  const start = parseISO(startDate);
-  const end = parseISO(endDate);
-  const days = eachDayOfInterval({ start, end });
-  
-  // Usar un mapa para agrupar y sumar requerimientos que coincidan en la misma clave
-  const groupedInserts = new Map<string, any>();
+  // 2. Consolidar reglas día por día en memoria
+  const inserts = buildConsolidatedRequirements(templates, startDate, endDate);
+  if (inserts.length === 0) {
+    return { success: true, error: null, count: 0, createdCount: 0, skippedCount: 0 };
+  }
 
-  // 2. Generar requerimientos día por día basados en las reglas
-  for (const day of days) {
-    const dayOfWeek = getDay(day); 
-    const normalizedDay = dayOfWeek === 0 ? 0 : dayOfWeek; // 0=Dom, 1=Lun en requirements-client
+  // 3. Consultar necesidades ordinarias ya existentes en el rango (paginado)
+  const existingRows: any[] = [];
+  let from = 0;
+  const PAGE_SIZE = 1000;
+  while (true) {
+    const { data: chunk, error: eError } = await supabase
+      .from('shift_requirements')
+      .select('area_id, position_id, shift_id, date, is_extra')
+      .eq('is_extra', false)
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .range(from, from + PAGE_SIZE - 1);
 
-    const dateStr = format(day, 'yyyy-MM-dd');
-
-    for (const template of templates) {
-      if (template.days_of_week.includes(normalizedDay)) {
-        const key = `${template.area_id}-${template.position_id}-${template.shift_id}-${dateStr}`;
-        
-        if (groupedInserts.has(key)) {
-          // Si ya existe, sumamos la dotación
-          groupedInserts.get(key).required_count += template.required_count;
-        } else {
-          // Si es nuevo, lo añadimos
-          groupedInserts.set(key, {
-            area_id: template.area_id,
-            position_id: template.position_id,
-            shift_id: template.shift_id,
-            required_count: template.required_count,
-            date: dateStr,
-            is_extra: false
-          });
-        }
-      }
+    if (eError) {
+      return { success: false, error: eError.message, count: 0, createdCount: 0, skippedCount: 0 };
     }
+    if (!chunk || chunk.length === 0) break;
+    existingRows.push(...chunk);
+    if (chunk.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
   }
 
-  const inserts = Array.from(groupedInserts.values());
+  // 4. Filtrar solo los registros faltantes (sin sobrescribir ni sumar sobre existentes)
+  const { missingInserts } = filterMissingRequirements(inserts, existingRows);
 
-  if (inserts.length > 0) {
-    const { error: iError } = await supabase.from('shift_requirements').upsert(inserts, {
-       onConflict: 'area_id,position_id,shift_id,date,is_extra'
-    });
-    if (iError) return { success: false, error: iError.message };
+  // 5. Insertar únicamente faltantes con ON CONFLICT DO NOTHING (ignoreDuplicates: true)
+  let createdCount = 0;
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < missingInserts.length; i += CHUNK_SIZE) {
+    const chunk = missingInserts.slice(i, i + CHUNK_SIZE);
+    const { data: insertedRows, error: iError } = await supabase
+      .from('shift_requirements')
+      .upsert(chunk, {
+        onConflict: 'area_id,position_id,shift_id,date,is_extra',
+        ignoreDuplicates: true,
+      })
+      .select('id');
+
+    if (iError) {
+      return {
+        success: false,
+        error: iError.message,
+        count: createdCount,
+        createdCount,
+        skippedCount: inserts.length - createdCount,
+      };
+    }
+    createdCount += insertedRows?.length || 0;
   }
+
+  const skippedCount = inserts.length - createdCount;
 
   revalidatePath('/shifts/dotacion');
   revalidatePath('/shifts/requirements');
   revalidatePath('/shifts/daily');
-  return { success: true, error: null, count: inserts.length };
+  return {
+    success: true,
+    error: null,
+    count: createdCount,
+    createdCount,
+    skippedCount,
+    totalEvaluated: inserts.length,
+  };
 }
 
 // ─── Assignments ──────────────────────────────────────────────────────────────
