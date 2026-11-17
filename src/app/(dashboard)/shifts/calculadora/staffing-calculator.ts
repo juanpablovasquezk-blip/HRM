@@ -717,3 +717,160 @@ export function calculateManualServiceStaffing(
     },
   };
 }
+
+export interface SimulatedCurrentRow {
+  rowId: string;
+  areaId: string;
+  areaName: string;
+  positionId: string;
+  positionName: string;
+  shiftId: string;
+  counts: [number, number, number, number, number, number, number];
+}
+
+export interface GroupScenarioComparison {
+  groupKey: string;
+  areaName: string;
+  positionName: string;
+  actual: GroupStaffingResult | null;
+  simulated: GroupStaffingResult | null;
+  deltaWeeklyShifts: number;
+  deltaWeeklyHours: number | null;
+  deltaMinStaff: number | null;
+  deltaRecommendedStaff: number | null;
+}
+
+export interface StaffingScenarioComparison {
+  overall: {
+    deltaWeeklyShifts: number;
+    deltaWeeklyHours: number;
+    deltaMonthlyHours: number;
+    deltaTheoreticalMinStaff: number;
+    deltaRecommendedStaffing: number;
+  };
+  groups: GroupScenarioComparison[];
+}
+
+/**
+ * Extracts editable weekly matrix rows from current requirement_templates
+ * using buildWeeklyMatrix so the initial simulation matches Operación Actual 1:1.
+ */
+export function buildSimulatedCurrentRows(
+  templates: TemplateLike[]
+): SimulatedCurrentRow[] {
+  const groups = buildWeeklyMatrix(templates);
+  const rows: SimulatedCurrentRow[] = [];
+
+  for (const g of groups) {
+    for (const s of g.shifts) {
+      rows.push({
+        rowId: `${g.areaId}||${g.positionId}||${s.shiftId}`,
+        areaId: g.areaId,
+        areaName: g.areaName,
+        positionId: g.positionId,
+        positionName: g.positionName,
+        shiftId: s.shiftId,
+        counts: [...s.counts] as [number, number, number, number, number, number, number],
+      });
+    }
+  }
+
+  return rows;
+}
+
+/**
+ * Converts simulated weekly rows back into TemplateLike[] for calculateOperationalStaffing.
+ */
+export function buildSimulatedCurrentTemplates(
+  rows: SimulatedCurrentRow[]
+): TemplateLike[] {
+  const templates: TemplateLike[] = [];
+
+  for (const row of rows) {
+    if (!row.shiftId) continue;
+    const sanitized = row.counts.map((n) =>
+      typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : 0
+    );
+    const specs = groupDailyCountsToTemplates(sanitized);
+    for (const spec of specs) {
+      templates.push({
+        area_id: row.areaId,
+        position_id: row.positionId,
+        shift_id: row.shiftId,
+        required_count: spec.required_count,
+        days_of_week: spec.days_of_week,
+        area: { name: row.areaName },
+        position: { name: row.positionName },
+      });
+    }
+  }
+
+  return templates;
+}
+
+/**
+ * Compares ACTUAL vs SIMULATED StaffingCalculationReport outputs.
+ */
+export function compareStaffingScenarios(
+  actual: StaffingCalculationReport,
+  simulated: StaffingCalculationReport
+): StaffingScenarioComparison {
+  const actualByKey = new Map(actual.groups.map((g) => [g.groupKey, g]));
+  const simByKey = new Map(simulated.groups.map((g) => [g.groupKey, g]));
+  const allKeys = Array.from(new Set([...actualByKey.keys(), ...simByKey.keys()]));
+
+  const groups: GroupScenarioComparison[] = allKeys
+    .map((groupKey) => {
+      const a = actualByKey.get(groupKey) || null;
+      const s = simByKey.get(groupKey) || null;
+      const areaName = a?.areaName || s?.areaName || 'Desconocido';
+      const positionName = a?.positionName || s?.positionName || 'Desconocido';
+
+      const deltaWeeklyShifts = (s?.weeklyShifts ?? 0) - (a?.weeklyShifts ?? 0);
+      const deltaWeeklyHours =
+        (a && a.weeklyHoursRequired === null) || (s && s.weeklyHoursRequired === null)
+          ? null
+          : Number(((s?.weeklyHoursRequired ?? 0) - (a?.weeklyHoursRequired ?? 0)).toFixed(1));
+      const deltaMinStaff =
+        (a && a.theoreticalMinStaff === null) || (s && s.theoreticalMinStaff === null)
+          ? null
+          : (s?.theoreticalMinStaff ?? 0) - (a?.theoreticalMinStaff ?? 0);
+      const deltaRecommendedStaff =
+        (a && a.recommendedStaffing === null) || (s && s.recommendedStaffing === null)
+          ? null
+          : (s?.recommendedStaffing ?? 0) - (a?.recommendedStaffing ?? 0);
+
+      return {
+        groupKey,
+        areaName,
+        positionName,
+        actual: a,
+        simulated: s,
+        deltaWeeklyShifts,
+        deltaWeeklyHours,
+        deltaMinStaff,
+        deltaRecommendedStaff,
+      };
+    })
+    .sort((x, y) => {
+      const aCmp = x.areaName.localeCompare(y.areaName);
+      return aCmp !== 0 ? aCmp : x.positionName.localeCompare(y.positionName);
+    });
+
+  return {
+    overall: {
+      deltaWeeklyShifts: simulated.overall.totalWeeklyShifts - actual.overall.totalWeeklyShifts,
+      deltaWeeklyHours: Number(
+        (simulated.overall.knownWeeklyHoursRequired - actual.overall.knownWeeklyHoursRequired).toFixed(1)
+      ),
+      deltaMonthlyHours: Number(
+        (simulated.overall.knownMonthlyHoursEstimated - actual.overall.knownMonthlyHoursEstimated).toFixed(1)
+      ),
+      deltaTheoreticalMinStaff:
+        simulated.overall.totalTheoreticalMinStaff - actual.overall.totalTheoreticalMinStaff,
+      deltaRecommendedStaffing:
+        simulated.overall.totalRecommendedStaffing - actual.overall.totalRecommendedStaffing,
+    },
+    groups,
+  };
+}

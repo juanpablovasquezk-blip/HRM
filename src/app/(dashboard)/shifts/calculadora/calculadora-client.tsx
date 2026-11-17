@@ -28,17 +28,24 @@ import {
   HelpCircle,
   Info,
   Plus,
+  RotateCcw,
   ShieldAlert,
+  SlidersHorizontal,
   Trash2,
   Users,
+  X,
 } from 'lucide-react';
 import {
+  buildSimulatedCurrentRows,
+  buildSimulatedCurrentTemplates,
   calculateManualServiceStaffing,
   calculateOperationalStaffing,
+  compareStaffingScenarios,
   DEFAULT_STAFFING_CONFIG,
   type LowerBoundsResult,
   type ManualServicePositionInput,
   type ShiftCatalogItem,
+  type SimulatedCurrentRow,
   type WorkRegime,
 } from './staffing-calculator';
 import { MATRIX_DAYS_ORDER, type TemplateLike } from '../dotacion/matrix-utils';
@@ -98,9 +105,11 @@ export function CalculadoraClient({
   const [expandedGroupKey, setExpandedGroupKey] = useState<string | null>(null);
   const [showMethodology, setShowMethodology] = useState<boolean>(true);
 
-  // Mode 1: Current Operation filters
+  // Mode 1: Current Operation filters & temporary simulation state (in-memory only)
   const [filterAreaId, setFilterAreaId] = useState<string>('all');
   const [filterPositionName, setFilterPositionName] = useState<string>('all');
+  const [isSimulatingCurrent, setIsSimulatingCurrent] = useState<boolean>(false);
+  const [simRows, setSimRows] = useState<SimulatedCurrentRow[]>([]);
 
   // Deduplicate shifts catalog for dropdowns while preserving shift IDs for calculation
   const uniqueShifts = useMemo(() => {
@@ -188,6 +197,167 @@ export function CalculadoraClient({
     () => calculateOperationalStaffing(enrichedTemplates, shifts, sharedConfig),
     [enrichedTemplates, shifts, sharedConfig]
   );
+
+  const baseSimRows = useMemo(
+    () => buildSimulatedCurrentRows(enrichedTemplates),
+    [enrichedTemplates]
+  );
+
+  const simHasChanges = useMemo(() => {
+    if (!isSimulatingCurrent) return false;
+    if (simRows.length !== baseSimRows.length) return true;
+    for (let i = 0; i < simRows.length; i++) {
+      const a = simRows[i];
+      const b = baseSimRows[i];
+      if (
+        a.areaId !== b.areaId ||
+        a.positionId !== b.positionId ||
+        a.shiftId !== b.shiftId ||
+        a.counts.some((c, idx) => c !== b.counts[idx])
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [isSimulatingCurrent, simRows, baseSimRows]);
+
+  const simulatedCurrentTemplates = useMemo(
+    () => (isSimulatingCurrent ? buildSimulatedCurrentTemplates(simRows) : []),
+    [isSimulatingCurrent, simRows]
+  );
+
+  const simulatedCurrentReport = useMemo(
+    () =>
+      isSimulatingCurrent
+        ? calculateOperationalStaffing(simulatedCurrentTemplates, shifts, sharedConfig)
+        : null,
+    [isSimulatingCurrent, simulatedCurrentTemplates, shifts, sharedConfig]
+  );
+
+  const scenarioComparison = useMemo(
+    () =>
+      isSimulatingCurrent && simulatedCurrentReport
+        ? compareStaffingScenarios(currentReport, simulatedCurrentReport)
+        : null,
+    [isSimulatingCurrent, currentReport, simulatedCurrentReport]
+  );
+
+  const filterTemplatesFor = (areaId: string, posName: string) => {
+    const areaMap = new Map(areas.map((a) => [a.id, a]));
+    const posMap = new Map<string, { id: string; name: string }>();
+    for (const a of areas) {
+      for (const p of a.positions || []) {
+        posMap.set(p.id, p);
+      }
+    }
+    return templates
+      .map((tmpl) => ({
+        ...tmpl,
+        area: areaMap.get(tmpl.area_id) || tmpl.area || { name: 'Desconocido' },
+        position: posMap.get(tmpl.position_id) || tmpl.position || { name: 'Desconocido' },
+      }))
+      .filter((tmpl) => {
+        if (areaId !== 'all' && tmpl.area_id !== areaId) return false;
+        if (posName !== 'all' && tmpl.position?.name !== posName) return false;
+        return true;
+      });
+  };
+
+  const handleAreaFilterChange = (nextAreaId: string) => {
+    if (
+      isSimulatingCurrent &&
+      simHasChanges &&
+      !window.confirm(
+        'Tienes modificaciones simuladas sin restaurar. Al cambiar de Área se reinicializará la simulación para evitar mezclar datos. ¿Continuar?'
+      )
+    ) {
+      return;
+    }
+    setFilterAreaId(nextAreaId);
+    setFilterPositionName('all');
+    if (isSimulatingCurrent) {
+      setSimRows(buildSimulatedCurrentRows(filterTemplatesFor(nextAreaId, 'all')));
+    }
+  };
+
+  const handlePositionFilterChange = (nextPosName: string) => {
+    if (
+      isSimulatingCurrent &&
+      simHasChanges &&
+      !window.confirm(
+        'Tienes modificaciones simuladas sin restaurar. Al cambiar de Cargo se reinicializará la simulación para evitar mezclar datos. ¿Continuar?'
+      )
+    ) {
+      return;
+    }
+    setFilterPositionName(nextPosName);
+    if (isSimulatingCurrent) {
+      setSimRows(buildSimulatedCurrentRows(filterTemplatesFor(filterAreaId, nextPosName)));
+    }
+  };
+
+  const handleStartCurrentSimulation = () => {
+    setSimRows(baseSimRows);
+    setIsSimulatingCurrent(true);
+  };
+
+  const handleRestoreCurrentSimulation = () => {
+    setSimRows(baseSimRows);
+  };
+
+  const handleCloseCurrentSimulation = () => {
+    if (
+      simHasChanges &&
+      !window.confirm('¿Deseas cerrar la simulación temporal y descartar los cambios en memoria?')
+    ) {
+      return;
+    }
+    setIsSimulatingCurrent(false);
+    setSimRows([]);
+  };
+
+  const handleSimCellChange = (rowId: string, dayIdx: number, raw: string) => {
+    const parsed = raw.trim() === '' ? 0 : Math.max(0, Math.floor(Number(raw) || 0));
+    setSimRows((prev) =>
+      prev.map((r) => {
+        if (r.rowId !== rowId) return r;
+        const nextCounts: [number, number, number, number, number, number, number] = [
+          ...r.counts,
+        ] as [number, number, number, number, number, number, number];
+        nextCounts[dayIdx] = parsed;
+        return { ...r, counts: nextCounts };
+      })
+    );
+  };
+
+  const handleSimShiftChange = (rowId: string, shiftId: string) => {
+    setSimRows((prev) => prev.map((r) => (r.rowId === rowId ? { ...r, shiftId } : r)));
+  };
+
+  const handleSimDeleteRow = (rowId: string) => {
+    setSimRows((prev) => prev.filter((r) => r.rowId !== rowId));
+  };
+
+  const handleSimAddRow = (group: {
+    areaId: string;
+    areaName: string;
+    positionId: string;
+    positionName: string;
+  }) => {
+    if (!defaultShiftId) return;
+    setSimRows((prev) => [
+      ...prev,
+      {
+        rowId: makeUid('sim'),
+        areaId: group.areaId,
+        areaName: group.areaName,
+        positionId: group.positionId,
+        positionName: group.positionName,
+        shiftId: defaultShiftId,
+        counts: [1, 1, 1, 1, 1, 0, 0],
+      },
+    ]);
+  };
 
   const manualReport = useMemo(
     () => calculateManualServiceStaffing(projectName, manualPositions, shifts, sharedConfig),
@@ -373,10 +543,7 @@ export function CalculadoraClient({
                   <select
                     aria-label="Filtrar por área"
                     value={filterAreaId}
-                    onChange={(e) => {
-                      setFilterAreaId(e.target.value);
-                      setFilterPositionName('all');
-                    }}
+                    onChange={(e) => handleAreaFilterChange(e.target.value)}
                     className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-xs"
                   >
                     <option value="all">Toda la operación</option>
@@ -393,7 +560,7 @@ export function CalculadoraClient({
                   <select
                     aria-label="Filtrar por cargo"
                     value={filterPositionName}
-                    onChange={(e) => setFilterPositionName(e.target.value)}
+                    onChange={(e) => handlePositionFilterChange(e.target.value)}
                     className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-xs"
                   >
                     <option value="all">Todos los cargos</option>
@@ -495,12 +662,340 @@ export function CalculadoraClient({
                 Régimen excepcional {regime} (cuadrillas alternadas A/B).
               </span>
             )}
-            <span className="text-[11px] text-muted-foreground">
-              Factor de reemplazo: <strong>{replacementFactor.toFixed(3)}×</strong>
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-muted-foreground">
+                Factor de reemplazo: <strong>{replacementFactor.toFixed(3)}×</strong>
+              </span>
+              {mode === 'current' && (
+                !isSimulatingCurrent ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleStartCurrentSimulation}
+                    className="h-7 text-xs border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300"
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5 mr-1" />
+                    Simular cambios
+                  </Button>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!simHasChanges}
+                      onClick={handleRestoreCurrentSimulation}
+                      className="h-7 text-xs"
+                    >
+                      <RotateCcw className="h-3 w-3 mr-1" />
+                      Restaurar requerimientos
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleCloseCurrentSimulation}
+                      className="h-7 text-xs text-slate-500"
+                    >
+                      <X className="h-3.5 w-3.5 mr-1" />
+                      Cerrar simulación
+                    </Button>
+                  </div>
+                )
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Current Operation: Temporary In-Memory Simulation Matrix + Comparison */}
+      {mode === 'current' && isSimulatingCurrent && simulatedCurrentReport && scenarioComparison && (
+        <div className="space-y-3">
+          <Card className="border-2 border-dashed border-indigo-300 dark:border-indigo-800 shadow-sm overflow-hidden">
+            <CardHeader className="py-2.5 px-4 bg-indigo-50/70 dark:bg-indigo-950/30 border-b border-indigo-100 dark:border-indigo-900/60">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <CardTitle className="text-sm font-semibold text-indigo-950 dark:text-indigo-200 flex items-center gap-2">
+                    <SlidersHorizontal className="h-4 w-4 text-indigo-600" />
+                    Escenario Simulado (Solo en memoria)
+                    {simHasChanges && (
+                      <Badge className="bg-indigo-600 text-white text-[10px]">Modificado</Badge>
+                    )}
+                  </CardTitle>
+                  <p className="text-[11px] text-indigo-800/80 dark:text-indigo-300/80">
+                    Edita cantidades, agrega o elimina turnos temporalmente. No modifica requirement_templates ni la operación oficial; al recargar se descarta.
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!simHasChanges}
+                    onClick={handleRestoreCurrentSimulation}
+                    className="h-7 text-xs bg-white dark:bg-slate-950"
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" />
+                    Restaurar requerimientos
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-3 space-y-2.5">
+              {(() => {
+                const groupedSim = new Map<
+                  string,
+                  {
+                    groupKey: string;
+                    areaId: string;
+                    areaName: string;
+                    positionId: string;
+                    positionName: string;
+                    rows: SimulatedCurrentRow[];
+                  }
+                >();
+                for (const r of simRows) {
+                  const gk = `${r.areaId}||${r.positionId}`;
+                  let g = groupedSim.get(gk);
+                  if (!g) {
+                    g = {
+                      groupKey: gk,
+                      areaId: r.areaId,
+                      areaName: r.areaName,
+                      positionId: r.positionId,
+                      positionName: r.positionName,
+                      rows: [],
+                    };
+                    groupedSim.set(gk, g);
+                  }
+                  g.rows.push(r);
+                }
+                const simGroups = Array.from(groupedSim.values());
+                if (simGroups.length === 0) {
+                  return (
+                    <div className="py-4 text-center text-xs text-muted-foreground">
+                      No hay filas en el escenario simulado para el filtro actual. Usa &ldquo;Restaurar requerimientos&rdquo; para recuperar las reglas originales.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                    {simGroups.map((grp) => (
+                      <div
+                        key={grp.groupKey}
+                        className="rounded-lg border border-indigo-200/70 dark:border-indigo-900/60 overflow-hidden bg-white dark:bg-slate-950"
+                      >
+                        <div className="flex items-center justify-between gap-2 bg-indigo-50/40 dark:bg-indigo-950/20 px-3 py-1.5 border-b border-indigo-100 dark:border-indigo-900/50">
+                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
+                            {grp.areaName} — {grp.positionName}
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSimAddRow(grp)}
+                            className="h-6 px-2 text-[11px]"
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Agregar turno
+                          </Button>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] uppercase tracking-wider text-muted-foreground">
+                                <th className="py-1.5 px-2 text-left font-semibold min-w-[165px]">
+                                  Turno
+                                </th>
+                                {MATRIX_DAYS_ORDER.map((d) => (
+                                  <th
+                                    key={d.dbDay}
+                                    title={d.fullName}
+                                    className="py-1.5 px-0.5 text-center font-semibold w-9"
+                                  >
+                                    {d.label}
+                                  </th>
+                                ))}
+                                <th className="py-1.5 px-1.5 text-right font-semibold w-10">Tot</th>
+                                <th className="py-1.5 px-1 w-7"></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                              {grp.rows.map((row) => {
+                                const rTot = row.counts.reduce((a, b) => a + b, 0);
+                                return (
+                                  <tr key={row.rowId}>
+                                    <td className="py-1 px-2">
+                                      <select
+                                        aria-label={`Turno simulado ${grp.positionName}`}
+                                        value={row.shiftId}
+                                        onChange={(e) => handleSimShiftChange(row.rowId, e.target.value)}
+                                        className="h-6 w-full rounded border border-input bg-background px-1.5 text-[11px]"
+                                      >
+                                        {uniqueShifts.map((sh) => {
+                                          const eff = resolveShiftDurationHours(sh);
+                                          return (
+                                            <option key={sh.id} value={sh.id}>
+                                              {sh.name} ({sh.start_time?.slice(0, 5)}–{sh.end_time?.slice(0, 5)} · {eff.hours}h)
+                                            </option>
+                                          );
+                                        })}
+                                      </select>
+                                    </td>
+                                    {MATRIX_DAYS_ORDER.map((d, dayIdx) => (
+                                      <td key={d.dbDay} className="py-1 px-0.5 text-center tabular-nums">
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          step={1}
+                                          aria-label={`Simulado ${grp.areaName} ${grp.positionName} ${d.fullName}`}
+                                          value={row.counts[dayIdx]}
+                                          onChange={(e) =>
+                                            handleSimCellChange(row.rowId, dayIdx, e.target.value)
+                                          }
+                                          className={`w-8 h-6 text-center rounded text-xs font-bold tabular-nums border outline-none ${
+                                            row.counts[dayIdx] > 0
+                                              ? 'border-indigo-300 bg-indigo-50/70 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-200'
+                                              : 'border-slate-200 bg-white text-slate-400 dark:border-slate-800 dark:bg-slate-950'
+                                          }`}
+                                        />
+                                      </td>
+                                    ))}
+                                    <td className="py-1 px-1.5 text-right font-bold tabular-nums">
+                                      {rTot}
+                                    </td>
+                                    <td className="py-1 px-0.5 text-center">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handleSimDeleteRow(row.rowId)}
+                                        title="Quitar fila del escenario simulado"
+                                        className="h-6 w-6 text-slate-400 hover:text-red-600"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* Comparative Table: ACTUAL vs SIMULADO */}
+          <Card className="border-indigo-200 dark:border-indigo-900 shadow-sm overflow-hidden">
+            <CardHeader className="py-2.5 px-4 bg-indigo-50/40 dark:bg-indigo-950/20 border-b border-indigo-100 dark:border-indigo-900/50">
+              <CardTitle className="text-sm font-semibold flex flex-wrap items-center justify-between gap-2">
+                <span>Comparación de Escenarios: Actual vs Simulado</span>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <Badge variant="outline" className="bg-white dark:bg-slate-950">
+                    Actual: {currentReport.overall.totalRecommendedStaffing} trab. ({currentReport.overall.totalWeeklyShifts} turnos)
+                  </Badge>
+                  <Badge className="bg-indigo-600 text-white">
+                    Simulado: {simulatedCurrentReport.overall.totalRecommendedStaffing} trab. ({simulatedCurrentReport.overall.totalWeeklyShifts} turnos)
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className={
+                      scenarioComparison.overall.deltaRecommendedStaffing > 0
+                        ? 'border-amber-300 bg-amber-50 text-amber-800'
+                        : scenarioComparison.overall.deltaRecommendedStaffing < 0
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                        : 'border-slate-200 text-slate-600'
+                    }
+                  >
+                    Δ Dotación:{' '}
+                    {scenarioComparison.overall.deltaRecommendedStaffing > 0
+                      ? `+${scenarioComparison.overall.deltaRecommendedStaffing}`
+                      : scenarioComparison.overall.deltaRecommendedStaffing}
+                  </Badge>
+                </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="text-[11px] uppercase tracking-wider">
+                    <TableHead>Área / Cargo</TableHead>
+                    <TableHead className="text-center">Turnos (Act → Sim)</TableHead>
+                    <TableHead className="text-center">Horas sem / mes (Act → Sim)</TableHead>
+                    <TableHead className="text-center">Mín. factible (Act → Sim)</TableHead>
+                    <TableHead className="text-center">Recomendada (Act → Sim)</TableHead>
+                    <TableHead className="text-center">Variación dotación</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {scenarioComparison.groups.map((cg) => {
+                    const deltaRec = cg.deltaRecommendedStaff ?? 0;
+                    const rowChanged =
+                      cg.deltaWeeklyShifts !== 0 ||
+                      (cg.deltaMinStaff ?? 0) !== 0 ||
+                      deltaRec !== 0;
+                    return (
+                      <TableRow
+                        key={cg.groupKey}
+                        className={`text-xs ${
+                          rowChanged ? 'bg-indigo-50/30 dark:bg-indigo-950/10' : ''
+                        }`}
+                      >
+                        <TableCell className="font-medium">
+                          {cg.areaName} — {cg.positionName}
+                        </TableCell>
+                        <TableCell className="text-center tabular-nums">
+                          {cg.actual?.weeklyShifts ?? 0} →{' '}
+                          <strong>{cg.simulated?.weeklyShifts ?? 0}</strong>
+                        </TableCell>
+                        <TableCell className="text-center tabular-nums">
+                          <div>
+                            {cg.actual?.weeklyHoursRequired ?? 0}h →{' '}
+                            <strong>{cg.simulated?.weeklyHoursRequired ?? 0}h</strong>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            ~{cg.actual?.monthlyHoursEstimated ?? 0}h → ~
+                            {cg.simulated?.monthlyHoursEstimated ?? 0}h/mes
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center tabular-nums">
+                          {cg.actual?.theoreticalMinStaff ?? 0} →{' '}
+                          <strong>{cg.simulated?.theoreticalMinStaff ?? 0}</strong>
+                        </TableCell>
+                        <TableCell className="text-center tabular-nums">
+                          {cg.actual?.recommendedStaffing ?? 0} →{' '}
+                          <strong>{cg.simulated?.recommendedStaffing ?? 0}</strong>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge
+                            variant="outline"
+                            className={
+                              deltaRec > 0
+                                ? 'border-amber-300 bg-amber-50 text-amber-800 font-bold'
+                                : deltaRec < 0
+                                ? 'border-emerald-300 bg-emerald-50 text-emerald-800 font-bold'
+                                : 'border-slate-200 text-slate-500'
+                            }
+                          >
+                            {deltaRec > 0 ? `+${deltaRec} trab.` : deltaRec < 0 ? `${deltaRec} trab.` : 'Sin cambio'}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Manual Mode Demand Builder */}
       {mode === 'manual' && (
