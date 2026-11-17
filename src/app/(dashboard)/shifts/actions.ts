@@ -9,7 +9,7 @@ import { parseISO, format, endOfWeek, startOfWeek, isAfter, startOfMonth, endOfM
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
 import { es as esLocale } from 'date-fns/locale';
 import { buildConsolidatedRequirements, filterMissingRequirements } from './dotacion/materialize-utils';
-import { groupDailyCountsToTemplates } from './dotacion/matrix-utils';
+import { groupDailyCountsToTemplates, normalizePriority, type OperationalPriority } from './dotacion/matrix-utils';
 import { getUserRole } from '@/app/role-actions';
 import { hasPermission } from '@/lib/auth/roles';
 import type { Role } from '@/types/database';
@@ -370,8 +370,13 @@ export interface WeeklyMatrixRowChange {
   area_id: string;
   position_id: string;
   shift_id: string;
+  priority?: OperationalPriority;
   /** 7 integer counts >= 0 ordered Monday..Sunday */
   counts: number[];
+  /** Optimistic concurrency fields */
+  is_new?: boolean;
+  expected_counts?: number[];
+  expected_priority?: OperationalPriority;
 }
 
 export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) {
@@ -394,7 +399,11 @@ export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) 
     area_id: string;
     position_id: string;
     shift_id: string;
+    priority: OperationalPriority;
     specs: Array<{ required_count: number; days_of_week: number[] }>;
+    is_new?: boolean;
+    expected_counts?: number[];
+    expected_priority?: OperationalPriority;
   }> = [];
 
   try {
@@ -407,7 +416,15 @@ export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) 
         area_id: item.area_id,
         position_id: item.position_id,
         shift_id: item.shift_id,
+        priority: normalizePriority(item.priority),
         specs,
+        ...(item.is_new ? { is_new: true } : {}),
+        ...(Array.isArray(item.expected_counts) && item.expected_counts.length === 7
+          ? { expected_counts: item.expected_counts }
+          : {}),
+        ...(item.expected_priority
+          ? { expected_priority: normalizePriority(item.expected_priority) }
+          : {}),
       });
     }
   } catch (validationErr: any) {

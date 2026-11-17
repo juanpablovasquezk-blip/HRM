@@ -237,8 +237,9 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
           </div>
         </div>
 
-        {/* Create Template Form */}
-        <Card className="border-orange-200 dark:border-orange-900 shadow-sm border-t-4 border-t-orange-500">
+        {/* Create Template Form (only in Cards view; Matrix uses inline + Nueva regla) */}
+        {viewMode === 'cards' && (
+          <Card className="border-orange-200 dark:border-orange-900 shadow-sm border-t-4 border-t-orange-500">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -323,6 +324,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
             </form>
           </CardContent>
         </Card>
+        )}
 
         {/* Search and Filters for Templates */}
         <div className="flex flex-wrap items-center gap-2 bg-slate-50 dark:bg-slate-900/40 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
@@ -360,7 +362,13 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
 
         {/* Templates View: Weekly Matrix or Cards */}
         {viewMode === 'matrix' ? (
-          <WeeklyMatrixView templates={filteredTemplates} onSaveChanges={canEdit ? handleSaveMatrixChanges : undefined} />
+          <WeeklyMatrixView
+            templates={filteredTemplates}
+            allTemplates={templates}
+            areas={areas}
+            shifts={shifts}
+            onSaveChanges={canEdit ? handleSaveMatrixChanges : undefined}
+          />
         ) : filteredTemplates.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="py-8 text-center text-sm text-muted-foreground">

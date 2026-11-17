@@ -1,7 +1,52 @@
+export type OperationalPriority = 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW';
+
+export const PRIORITY_OPTIONS: Array<{
+  value: OperationalPriority;
+  label: string;
+  badgeClass: string;
+}> = [
+  {
+    value: 'CRITICAL',
+    label: 'Crítica',
+    badgeClass: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-900',
+  },
+  {
+    value: 'HIGH',
+    label: 'Alta',
+    badgeClass: 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-900',
+  },
+  {
+    value: 'NORMAL',
+    label: 'Normal',
+    badgeClass: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+  },
+  {
+    value: 'LOW',
+    label: 'Baja',
+    badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900',
+  },
+];
+
+const PRIORITY_RANK: Record<OperationalPriority, number> = {
+  CRITICAL: 4,
+  HIGH: 3,
+  NORMAL: 2,
+  LOW: 1,
+};
+
+export function normalizePriority(value?: string | null): OperationalPriority {
+  const upper = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  if (upper === 'CRITICAL' || upper === 'HIGH' || upper === 'NORMAL' || upper === 'LOW') {
+    return upper;
+  }
+  return 'NORMAL';
+}
+
 export interface MatrixShiftRow {
   shiftId: string;
   shiftName: string;
   startTime: string;
+  priority: OperationalPriority;
   /** Counts ordered Monday (index 0) to Sunday (index 6) */
   counts: [number, number, number, number, number, number, number];
   weeklyTotal: number;
@@ -48,6 +93,7 @@ export interface TemplateLike {
   shift_id: string;
   required_count: number;
   days_of_week: number[];
+  priority?: string | null;
   is_active?: boolean;
   area?: { name?: string };
   position?: { name?: string };
@@ -90,16 +136,20 @@ export function buildWeeklyMatrix(templates: TemplateLike[]): MatrixPositionGrou
     }
 
     let shiftRow = group.shiftMap.get(shiftId);
+    const tmplPriority = normalizePriority(tmpl.priority);
     if (!shiftRow) {
       shiftRow = {
         shiftId,
         shiftName: tmpl.shift?.name || 'Desconocido',
         startTime: tmpl.shift?.start_time || '99:99:99',
+        priority: tmplPriority,
         counts: [0, 0, 0, 0, 0, 0, 0],
         weeklyTotal: 0,
         templateCount: 0,
       };
       group.shiftMap.set(shiftId, shiftRow);
+    } else if (PRIORITY_RANK[tmplPriority] > PRIORITY_RANK[shiftRow.priority]) {
+      shiftRow.priority = tmplPriority;
     }
 
     shiftRow.templateCount += 1;
@@ -157,10 +207,15 @@ export interface GroupedTemplateSpec {
 }
 
 /**
- * Validates that a value is a finite integer >= 0.
+ * Validates that a value is a finite 32-bit PostgreSQL integer >= 0.
  */
 export function isValidQuantity(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 2147483647
+  );
 }
 
 /**
