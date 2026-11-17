@@ -5,6 +5,8 @@ import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { getFormMetadata, getHistoricalData } from './actions';
 import { getUserRole } from '@/app/role-actions';
 
+export const dynamic = 'force-dynamic';
+
 export default async function HistoricalRecordsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
