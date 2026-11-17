@@ -1,33 +1,39 @@
 export type OperationalPriority = 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW';
+export type PriorityOverridesMap = Partial<Record<string, OperationalPriority>>;
 
 export const PRIORITY_OPTIONS: Array<{
   value: OperationalPriority;
   label: string;
   badgeClass: string;
+  dotClass: string;
 }> = [
   {
     value: 'CRITICAL',
     label: 'Crítica',
     badgeClass: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-900',
+    dotClass: 'bg-red-500',
   },
   {
     value: 'HIGH',
     label: 'Alta',
     badgeClass: 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-900',
+    dotClass: 'bg-amber-500',
   },
   {
     value: 'NORMAL',
     label: 'Normal',
     badgeClass: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+    dotClass: 'bg-slate-400',
   },
   {
     value: 'LOW',
     label: 'Baja',
     badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900',
+    dotClass: 'bg-emerald-500',
   },
 ];
 
-const PRIORITY_RANK: Record<OperationalPriority, number> = {
+export const PRIORITY_RANK: Record<OperationalPriority, number> = {
   CRITICAL: 4,
   HIGH: 3,
   NORMAL: 2,
@@ -42,11 +48,56 @@ export function normalizePriority(value?: string | null): OperationalPriority {
   return 'NORMAL';
 }
 
+export function normalizePriorityOverrides(
+  rawOverrides: Record<string, unknown> | null | undefined,
+  generalPriority: OperationalPriority,
+  countsMonToSun?: number[]
+): PriorityOverridesMap {
+  if (!rawOverrides || typeof rawOverrides !== 'object' || Array.isArray(rawOverrides)) {
+    return {};
+  }
+  const clean: PriorityOverridesMap = {};
+  for (const [key, val] of Object.entries(rawOverrides)) {
+    if (!/^[0-6]$/.test(key) || typeof val !== 'string') continue;
+    const upper = val.trim().toUpperCase();
+    if (upper !== 'CRITICAL' && upper !== 'HIGH' && upper !== 'NORMAL' && upper !== 'LOW') {
+      continue;
+    }
+    if (upper === generalPriority) continue;
+    if (Array.isArray(countsMonToSun) && countsMonToSun.length === 7) {
+      const idx = DB_DAY_TO_INDEX[Number(key)];
+      if (idx === undefined || (countsMonToSun[idx] ?? 0) <= 0) continue;
+    }
+    clean[key] = upper;
+  }
+  return clean;
+}
+
+export function resolveDayPriority(
+  generalPriority: OperationalPriority,
+  priorityOverrides: PriorityOverridesMap | null | undefined,
+  dbDay: number
+): OperationalPriority {
+  const override = priorityOverrides?.[String(dbDay)];
+  return override ?? generalPriority;
+}
+
+export function arePriorityOverridesEqual(
+  a: PriorityOverridesMap | null | undefined,
+  b: PriorityOverridesMap | null | undefined
+): boolean {
+  const keysA = Object.keys(a || {}).filter((k) => Boolean((a || {})[k])).sort();
+  const keysB = Object.keys(b || {}).filter((k) => Boolean((b || {})[k])).sort();
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every((k, i) => k === keysB[i] && a?.[k] === b?.[k]);
+}
+
 export interface MatrixShiftRow {
   shiftId: string;
   shiftName: string;
   startTime: string;
   priority: OperationalPriority;
+  priorityOverrides: PriorityOverridesMap;
   /** Counts ordered Monday (index 0) to Sunday (index 6) */
   counts: [number, number, number, number, number, number, number];
   weeklyTotal: number;
@@ -94,6 +145,7 @@ export interface TemplateLike {
   required_count: number;
   days_of_week: number[];
   priority?: string | null;
+  priority_overrides?: Record<string, string> | null;
   is_active?: boolean;
   area?: { name?: string };
   position?: { name?: string };
@@ -143,6 +195,7 @@ export function buildWeeklyMatrix(templates: TemplateLike[]): MatrixPositionGrou
         shiftName: tmpl.shift?.name || 'Desconocido',
         startTime: tmpl.shift?.start_time || '99:99:99',
         priority: tmplPriority,
+        priorityOverrides: {},
         counts: [0, 0, 0, 0, 0, 0, 0],
         weeklyTotal: 0,
         templateCount: 0,
@@ -150,6 +203,17 @@ export function buildWeeklyMatrix(templates: TemplateLike[]): MatrixPositionGrou
       group.shiftMap.set(shiftId, shiftRow);
     } else if (PRIORITY_RANK[tmplPriority] > PRIORITY_RANK[shiftRow.priority]) {
       shiftRow.priority = tmplPriority;
+    }
+
+    if (tmpl.priority_overrides && typeof tmpl.priority_overrides === 'object') {
+      for (const [k, v] of Object.entries(tmpl.priority_overrides)) {
+        if (!/^[0-6]$/.test(k) || typeof v !== 'string') continue;
+        const ov = normalizePriority(v);
+        const cur = shiftRow.priorityOverrides[k];
+        if (!cur || PRIORITY_RANK[ov] > PRIORITY_RANK[cur]) {
+          shiftRow.priorityOverrides[k] = ov;
+        }
+      }
     }
 
     shiftRow.templateCount += 1;
@@ -177,6 +241,11 @@ export function buildWeeklyMatrix(templates: TemplateLike[]): MatrixPositionGrou
     let weeklyTotal = 0;
 
     for (const row of shifts) {
+      row.priorityOverrides = normalizePriorityOverrides(
+        row.priorityOverrides,
+        row.priority,
+        row.counts
+      );
       for (let i = 0; i < 7; i++) {
         dailyTotals[i] += row.counts[i];
       }

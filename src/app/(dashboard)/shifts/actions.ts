@@ -9,7 +9,13 @@ import { parseISO, format, endOfWeek, startOfWeek, isAfter, startOfMonth, endOfM
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
 import { es as esLocale } from 'date-fns/locale';
 import { buildConsolidatedRequirements, filterMissingRequirements } from './dotacion/materialize-utils';
-import { groupDailyCountsToTemplates, normalizePriority, type OperationalPriority } from './dotacion/matrix-utils';
+import {
+  groupDailyCountsToTemplates,
+  normalizePriority,
+  normalizePriorityOverrides,
+  type OperationalPriority,
+  type PriorityOverridesMap,
+} from './dotacion/matrix-utils';
 import { getUserRole } from '@/app/role-actions';
 import { hasPermission } from '@/lib/auth/roles';
 import type { Role } from '@/types/database';
@@ -371,12 +377,14 @@ export interface WeeklyMatrixRowChange {
   position_id: string;
   shift_id: string;
   priority?: OperationalPriority;
+  priority_overrides?: PriorityOverridesMap;
   /** 7 integer counts >= 0 ordered Monday..Sunday */
   counts: number[];
   /** Optimistic concurrency fields */
   is_new?: boolean;
   expected_counts?: number[];
   expected_priority?: OperationalPriority;
+  expected_priority_overrides?: PriorityOverridesMap;
 }
 
 export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) {
@@ -400,10 +408,12 @@ export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) 
     position_id: string;
     shift_id: string;
     priority: OperationalPriority;
+    priority_overrides: PriorityOverridesMap;
     specs: Array<{ required_count: number; days_of_week: number[] }>;
     is_new?: boolean;
     expected_counts?: number[];
     expected_priority?: OperationalPriority;
+    expected_priority_overrides?: PriorityOverridesMap;
   }> = [];
 
   try {
@@ -412,11 +422,18 @@ export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) 
         return { success: false, error: 'Faltan identificadores de área, cargo o turno.' };
       }
       const specs = groupDailyCountsToTemplates(item.counts);
+      const priority = normalizePriority(item.priority);
+      const priority_overrides = normalizePriorityOverrides(
+        item.priority_overrides,
+        priority,
+        item.counts
+      );
       prepared.push({
         area_id: item.area_id,
         position_id: item.position_id,
         shift_id: item.shift_id,
-        priority: normalizePriority(item.priority),
+        priority,
+        priority_overrides,
         specs,
         ...(item.is_new ? { is_new: true } : {}),
         ...(Array.isArray(item.expected_counts) && item.expected_counts.length === 7
@@ -424,6 +441,11 @@ export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) 
           : {}),
         ...(item.expected_priority
           ? { expected_priority: normalizePriority(item.expected_priority) }
+          : {}),
+        ...(!item.is_new
+          ? {
+              expected_priority_overrides: item.expected_priority_overrides || {},
+            }
           : {}),
       });
     }

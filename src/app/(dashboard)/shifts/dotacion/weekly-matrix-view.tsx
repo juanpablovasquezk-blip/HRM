@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,14 +16,19 @@ import {
   Plus,
   Trash2,
   Lock,
+  Check,
 } from 'lucide-react';
 import {
+  arePriorityOverridesEqual,
   buildWeeklyMatrix,
   MATRIX_DAYS_ORDER,
   PRIORITY_OPTIONS,
   isValidQuantity,
   normalizePriority,
+  normalizePriorityOverrides,
+  resolveDayPriority,
   type OperationalPriority,
+  type PriorityOverridesMap,
   type TemplateLike,
 } from './matrix-utils';
 import type { WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
@@ -54,7 +59,19 @@ interface NewRuleDraft {
   positionId: string;
   shiftId: string;
   priority: OperationalPriority;
+  priorityOverrides: PriorityOverridesMap;
   counts: string[];
+}
+
+interface ActivePopoverState {
+  rowId: string;
+  dbDay: number;
+  dayLabel: string;
+  isNewRow: boolean;
+  generalPriority: OperationalPriority;
+  currentOverride?: OperationalPriority;
+  top: number;
+  left: number;
 }
 
 function rowKey(areaId: string, positionId: string, shiftId: string): string {
@@ -87,25 +104,52 @@ export function WeeklyMatrixView({
   const [isEditing, setIsEditing] = useState(false);
   const [draftValues, setDraftValues] = useState<Record<string, string[]>>({});
   const [draftPriorities, setDraftPriorities] = useState<Record<string, OperationalPriority>>({});
+  const [draftOverrides, setDraftOverrides] = useState<Record<string, PriorityOverridesMap>>({});
   const [newRows, setNewRows] = useState<NewRuleDraft[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [activePopover, setActivePopover] = useState<ActivePopoverState | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
 
   // Reset drafts whenever server templates update
   useEffect(() => {
     setDraftValues({});
     setDraftPriorities({});
+    setDraftOverrides({});
     setNewRows([]);
+    setActivePopover(null);
   }, [templates]);
 
-  const { baseCountsMap, basePriorityMap, allExistingKeys } = useMemo(() => {
+  // Close popover on outside click or Escape
+  useEffect(() => {
+    if (!activePopover) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setActivePopover(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setActivePopover(null);
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activePopover]);
+
+  const { baseCountsMap, basePriorityMap, baseOverridesMap, allExistingKeys } = useMemo(() => {
     const counts = new Map<string, number[]>();
     const priorities = new Map<string, OperationalPriority>();
+    const overrides = new Map<string, PriorityOverridesMap>();
     const allKeys = new Set<string>();
+
     for (const g of baseGroups) {
       for (const s of g.shifts) {
         const key = rowKey(g.areaId, g.positionId, s.shiftId);
         counts.set(key, [...s.counts]);
         priorities.set(key, s.priority);
+        overrides.set(key, { ...s.priorityOverrides });
         allKeys.add(key);
       }
     }
@@ -115,7 +159,12 @@ export function WeeklyMatrixView({
         allKeys.add(rowKey(tmpl.area_id, tmpl.position_id, tmpl.shift_id));
       }
     }
-    return { baseCountsMap: counts, basePriorityMap: priorities, allExistingKeys: allKeys };
+    return {
+      baseCountsMap: counts,
+      basePriorityMap: priorities,
+      baseOverridesMap: overrides,
+      allExistingKeys: allKeys,
+    };
   }, [baseGroups, allTemplates]);
 
   const {
@@ -123,6 +172,7 @@ export function WeeklyMatrixView({
     invalidCellCount,
     dirtyCellCount,
     dirtyPriorityCount,
+    dirtyOverrideCount,
     newRowErrors,
     validNewChanges,
   } = useMemo(() => {
@@ -130,13 +180,13 @@ export function WeeklyMatrixView({
     let invalidCount = 0;
     let dirtyCells = 0;
     let dirtyPrios = 0;
+    let dirtyOvs = 0;
 
     for (const g of baseGroups) {
       for (const s of g.shifts) {
         const key = rowKey(g.areaId, g.positionId, s.shiftId);
         const draft = draftValues[key];
-        const draftPrio = draftPriorities[key];
-        const effectivePrio = draftPrio ?? s.priority;
+        const effectivePrio = draftPriorities[key] ?? s.priority;
         const prioChanged = effectivePrio !== s.priority;
         if (prioChanged) dirtyPrios++;
 
@@ -158,15 +208,26 @@ export function WeeklyMatrixView({
           }
         }
 
-        if ((rowHasCellDiff || prioChanged) && rowValid) {
+        const rawEffectiveOverrides = draftOverrides[key] ?? s.priorityOverrides;
+        const normalizedOverrides = normalizePriorityOverrides(
+          rawEffectiveOverrides,
+          effectivePrio,
+          rowValid ? parsedNums : undefined
+        );
+        const ovChanged = !arePriorityOverridesEqual(normalizedOverrides, s.priorityOverrides);
+        if (ovChanged) dirtyOvs++;
+
+        if ((rowHasCellDiff || prioChanged || ovChanged) && rowValid) {
           changes.push({
             area_id: g.areaId,
             position_id: g.positionId,
             shift_id: s.shiftId,
             priority: effectivePrio,
+            priority_overrides: normalizedOverrides,
             counts: parsedNums,
             expected_counts: [...s.counts],
             expected_priority: s.priority,
+            expected_priority_overrides: { ...s.priorityOverrides },
           });
         }
       }
@@ -216,11 +277,15 @@ export function WeeklyMatrixView({
         continue;
       }
 
+      const generalPrio = normalizePriority(nr.priority);
+      const cleanOverrides = normalizePriorityOverrides(nr.priorityOverrides, generalPrio, nums);
+
       newChanges.push({
         area_id: nr.areaId,
         position_id: nr.positionId,
         shift_id: nr.shiftId,
-        priority: normalizePriority(nr.priority),
+        priority: generalPrio,
+        priority_overrides: cleanOverrides,
         counts: nums,
         is_new: true,
       });
@@ -231,12 +296,14 @@ export function WeeklyMatrixView({
       invalidCellCount: invalidCount,
       dirtyCellCount: dirtyCells,
       dirtyPriorityCount: dirtyPrios,
+      dirtyOverrideCount: dirtyOvs,
       newRowErrors: rowErrs,
       validNewChanges: newChanges,
     };
-  }, [baseGroups, draftValues, draftPriorities, newRows, allExistingKeys]);
+  }, [baseGroups, draftValues, draftPriorities, draftOverrides, newRows, allExistingKeys]);
 
-  const hasPending = dirtyCellCount > 0 || dirtyPriorityCount > 0 || newRows.length > 0;
+  const hasPending =
+    dirtyCellCount > 0 || dirtyPriorityCount > 0 || dirtyOverrideCount > 0 || newRows.length > 0;
   const newRowErrorCount = Object.keys(newRowErrors).length;
   const allChanges = [...dirtyChanges, ...validNewChanges];
 
@@ -257,18 +324,99 @@ export function WeeklyMatrixView({
       current[dayIdx] = value;
       return { ...prev, [key]: current };
     });
+
+    // Clear daily priority exception automatically when count becomes 0 or invalid
+    const parsed = parseCell(value);
+    const dbDay = MATRIX_DAYS_ORDER[dayIdx].dbDay;
+    if (!parsed.valid || parsed.num <= 0) {
+      setDraftOverrides((prev) => {
+        const current = { ...(prev[key] ?? baseOverridesMap.get(key) ?? {}) };
+        if (!(String(dbDay) in current)) return prev;
+        delete current[String(dbDay)];
+        return { ...prev, [key]: current };
+      });
+      if (activePopover && !activePopover.isNewRow && activePopover.rowId === key && activePopover.dbDay === dbDay) {
+        setActivePopover(null);
+      }
+    }
   };
 
   const handlePriorityChange = (key: string, priority: OperationalPriority) => {
-    const base = basePriorityMap.get(key) || 'NORMAL';
+    const basePrio = basePriorityMap.get(key) || 'NORMAL';
     setDraftPriorities((prev) => {
-      if (priority === base) {
+      if (priority === basePrio) {
         const next = { ...prev };
         delete next[key];
         return next;
       }
       return { ...prev, [key]: priority };
     });
+
+    // Remove overrides that match the new general priority
+    setDraftOverrides((prev) => {
+      const current = prev[key] ?? baseOverridesMap.get(key);
+      if (!current) return prev;
+      const cleaned = normalizePriorityOverrides(current, priority);
+      return { ...prev, [key]: cleaned };
+    });
+  };
+
+  const handleSetDayOverride = (
+    rowId: string,
+    isNewRow: boolean,
+    dbDay: number,
+    generalPriority: OperationalPriority,
+    overrideValue: OperationalPriority | null
+  ) => {
+    if (isNewRow) {
+      setNewRows((prev) =>
+        prev.map((row) => {
+          if (row.tempId !== rowId) return row;
+          const next = { ...row.priorityOverrides };
+          if (!overrideValue || overrideValue === generalPriority) {
+            delete next[String(dbDay)];
+          } else {
+            next[String(dbDay)] = overrideValue;
+          }
+          return { ...row, priorityOverrides: next };
+        })
+      );
+    } else {
+      setDraftOverrides((prev) => {
+        const current = { ...(prev[rowId] ?? baseOverridesMap.get(rowId) ?? {}) };
+        if (!overrideValue || overrideValue === generalPriority) {
+          delete current[String(dbDay)];
+        } else {
+          current[String(dbDay)] = overrideValue;
+        }
+        return { ...prev, [rowId]: current };
+      });
+    }
+    setActivePopover(null);
+  };
+
+  const openCellPopover = (
+    e: React.MouseEvent<HTMLButtonElement>,
+    params: {
+      rowId: string;
+      dbDay: number;
+      dayLabel: string;
+      isNewRow: boolean;
+      generalPriority: OperationalPriority;
+      currentOverride?: OperationalPriority;
+    }
+  ) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const popoverWidth = 200;
+    const left = Math.min(Math.max(8, rect.left - popoverWidth + 24), window.innerWidth - popoverWidth - 8);
+    const top = Math.min(rect.bottom + 6, window.innerHeight - 220);
+
+    setActivePopover((prev) =>
+      prev && prev.rowId === params.rowId && prev.dbDay === params.dbDay && prev.isNewRow === params.isNewRow
+        ? null
+        : { ...params, top, left }
+    );
   };
 
   const handleAddNewRow = () => {
@@ -281,6 +429,7 @@ export function WeeklyMatrixView({
         positionId: '',
         shiftId: '',
         priority: 'NORMAL',
+        priorityOverrides: {},
         counts: ['0', '0', '0', '0', '0', '0', '0'],
       },
     ]);
@@ -288,23 +437,39 @@ export function WeeklyMatrixView({
 
   const handleUpdateNewRow = (tempId: string, patch: Partial<NewRuleDraft>) => {
     setNewRows((prev) =>
-      prev.map((row) => (row.tempId === tempId ? { ...row, ...patch } : row))
+      prev.map((row) => {
+        if (row.tempId !== tempId) return row;
+        const updated = { ...row, ...patch };
+        if (patch.priority) {
+          updated.priorityOverrides = normalizePriorityOverrides(updated.priorityOverrides, patch.priority);
+        }
+        return updated;
+      })
     );
   };
 
   const handleUpdateNewRowCell = (tempId: string, dayIdx: number, value: string) => {
+    const parsed = parseCell(value);
+    const dbDay = MATRIX_DAYS_ORDER[dayIdx].dbDay;
     setNewRows((prev) =>
       prev.map((row) => {
         if (row.tempId !== tempId) return row;
         const nextCounts = [...row.counts];
         nextCounts[dayIdx] = value;
-        return { ...row, counts: nextCounts };
+        const nextOverrides = { ...row.priorityOverrides };
+        if (!parsed.valid || parsed.num <= 0) {
+          delete nextOverrides[String(dbDay)];
+        }
+        return { ...row, counts: nextCounts, priorityOverrides: nextOverrides };
       })
     );
   };
 
   const handleRemoveNewRow = (tempId: string) => {
     setNewRows((prev) => prev.filter((row) => row.tempId !== tempId));
+    if (activePopover?.isNewRow && activePopover.rowId === tempId) {
+      setActivePopover(null);
+    }
   };
 
   const handleCancel = () => {
@@ -316,7 +481,9 @@ export function WeeklyMatrixView({
     }
     setDraftValues({});
     setDraftPriorities({});
+    setDraftOverrides({});
     setNewRows([]);
+    setActivePopover(null);
     setIsEditing(false);
   };
 
@@ -330,12 +497,14 @@ export function WeeklyMatrixView({
     ) {
       return;
     }
+    setActivePopover(null);
     setIsSaving(true);
     try {
       const res = await onSaveChanges(allChanges);
       if (res.success) {
         setDraftValues({});
         setDraftPriorities({});
+        setDraftOverrides({});
         setNewRows([]);
         setIsEditing(false);
       }
@@ -358,7 +527,7 @@ export function WeeklyMatrixView({
             : 'border-slate-200/80 bg-white dark:border-slate-800 dark:bg-slate-950/50'
         }`}
       >
-        <div className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-2">
+        <div className="text-xs text-slate-600 dark:text-slate-300 flex flex-wrap items-center gap-2">
           {!canEdit ? (
             <span className="inline-flex items-center gap-1.5 text-slate-500">
               <Lock className="h-3.5 w-3.5 shrink-0" />
@@ -366,7 +535,7 @@ export function WeeklyMatrixView({
             </span>
           ) : !isEditing ? (
             <span>
-              Matriz semanal permanente en modo consulta. Haz clic en <strong>Editar matriz</strong> para modificar cantidades, prioridades o agregar reglas.
+              Matriz semanal permanente en modo consulta. Los puntos de color indican días con prioridad especial; haz clic en <strong>Editar matriz</strong> para modificar.
             </span>
           ) : invalidCellCount > 0 || newRowErrorCount > 0 ? (
             <span className="inline-flex items-center gap-1.5 text-red-600 dark:text-red-400 font-semibold">
@@ -379,7 +548,7 @@ export function WeeklyMatrixView({
             </span>
           ) : (
             <span>
-              Modo edición activo. Ajusta cantidades (≥ 0) o prioridades, o agrega nuevas reglas.
+              Modo edición activo. Ajusta cantidades (≥ 0), prioridad general o haz clic en el punto de cada día (&gt; 0) para definir excepciones.
             </span>
           )}
         </div>
@@ -588,28 +757,62 @@ export function WeeklyMatrixView({
                           ))}
                         </select>
                       </td>
-                      {parsedCells.map((cell, idx) => (
-                        <td key={idx} className="py-1.5 px-0.5 text-center align-top tabular-nums">
-                          <input
-                            type="number"
-                            min={0}
-                            step={1}
-                            aria-label={`Nueva regla ${MATRIX_DAYS_ORDER[idx].fullName}`}
-                            value={cell.raw}
-                            disabled={isSaving}
-                            onChange={(e) =>
-                              handleUpdateNewRowCell(nr.tempId, idx, e.target.value)
-                            }
-                            className={`w-9 h-7 text-center rounded text-xs font-bold tabular-nums border outline-none ${
-                              !cell.valid
-                                ? 'border-red-500 bg-red-50 text-red-700'
-                                : cell.num > 0
-                                ? 'border-blue-300 bg-blue-50 text-blue-700'
-                                : 'border-slate-200 bg-white text-slate-500'
-                            }`}
-                          />
-                        </td>
-                      ))}
+                      {parsedCells.map((cell, idx) => {
+                        const dayMeta = MATRIX_DAYS_ORDER[idx];
+                        const dayOv = nr.priorityOverrides[String(dayMeta.dbDay)];
+                        const hasOv = Boolean(dayOv && dayOv !== nr.priority && cell.num > 0);
+                        const ovMeta = hasOv && dayOv ? getPriorityMeta(dayOv) : null;
+
+                        return (
+                          <td key={idx} className="py-1.5 px-0.5 text-center align-top tabular-nums">
+                            <div className="relative inline-flex items-center justify-center">
+                              <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                aria-label={`Nueva regla ${dayMeta.fullName}`}
+                                value={cell.raw}
+                                disabled={isSaving}
+                                onChange={(e) =>
+                                  handleUpdateNewRowCell(nr.tempId, idx, e.target.value)
+                                }
+                                className={`w-9 h-7 text-center rounded text-xs font-bold tabular-nums border outline-none ${
+                                  !cell.valid
+                                    ? 'border-red-500 bg-red-50 text-red-700'
+                                    : cell.num > 0
+                                    ? 'border-blue-300 bg-blue-50 text-blue-700'
+                                    : 'border-slate-200 bg-white text-slate-500'
+                                }`}
+                              />
+                              {cell.valid && cell.num > 0 && (
+                                <button
+                                  type="button"
+                                  disabled={isSaving}
+                                  onClick={(e) =>
+                                    openCellPopover(e, {
+                                      rowId: nr.tempId,
+                                      dbDay: dayMeta.dbDay,
+                                      dayLabel: dayMeta.fullName,
+                                      isNewRow: true,
+                                      generalPriority: nr.priority,
+                                      currentOverride: dayOv,
+                                    })
+                                  }
+                                  title={
+                                    ovMeta
+                                      ? `Prioridad ${dayMeta.fullName}: ${ovMeta.label}`
+                                      : `Definir prioridad especial para ${dayMeta.fullName}`
+                                  }
+                                  aria-label={`Prioridad ${dayMeta.fullName} nueva regla`}
+                                  className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-slate-950 transition-transform hover:scale-125 ${
+                                    ovMeta ? ovMeta.dotClass : 'bg-slate-300 hover:bg-orange-400'
+                                  }`}
+                                />
+                              )}
+                            </div>
+                          </td>
+                        );
+                      })}
                       <td className="py-2 px-2 text-right font-bold tabular-nums align-top text-slate-700 dark:text-slate-200">
                         {rowTotal}
                       </td>
@@ -654,16 +857,38 @@ export function WeeklyMatrixView({
               const draft = draftValues[key];
               const effectivePrio = draftPriorities[key] ?? shift.priority;
               const prioChanged = effectivePrio !== shift.priority;
+              const rawOverrides = draftOverrides[key] ?? shift.priorityOverrides;
               let rowTotal = 0;
 
-              const cells = MATRIX_DAYS_ORDER.map((_, idx) => {
+              const cells = MATRIX_DAYS_ORDER.map((dayMeta, idx) => {
                 const raw = draft ? draft[idx] : String(shift.counts[idx]);
                 const { valid, num } = parseCell(raw);
                 const isDirty = raw.trim() !== String(shift.counts[idx]);
                 const effectiveNum = valid ? num : 0;
+                const dayKey = String(dayMeta.dbDay);
+                const baseOv = shift.priorityOverrides[dayKey];
+                const curOv = effectiveNum > 0 ? rawOverrides[dayKey] : undefined;
+                const effectiveDayPrio = resolveDayPriority(
+                  effectivePrio,
+                  effectiveNum > 0 ? rawOverrides : undefined,
+                  dayMeta.dbDay
+                );
+                const hasOverride = Boolean(effectiveNum > 0 && curOv && curOv !== effectivePrio);
+                const ovDirty = (curOv ?? null) !== (baseOv ?? null);
+
                 liveDailyTotals[idx] += effectiveNum;
                 rowTotal += effectiveNum;
-                return { raw, valid, num: effectiveNum, isDirty };
+                return {
+                  raw,
+                  valid,
+                  num: effectiveNum,
+                  isDirty,
+                  dayMeta,
+                  curOv,
+                  effectiveDayPrio,
+                  hasOverride,
+                  ovDirty,
+                };
               });
 
               liveGroupWeeklyTotal += rowTotal;
@@ -764,36 +989,83 @@ export function WeeklyMatrixView({
                                 </span>
                               )}
                             </td>
-                            {cells.map((cell, idx) => (
-                              <td key={idx} className="py-1 px-0.5 text-center tabular-nums">
-                                {activeEdit ? (
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    step={1}
-                                    aria-label={`${group.areaName} ${group.positionName} ${shift.shiftName} ${MATRIX_DAYS_ORDER[idx].fullName}`}
-                                    value={cell.raw}
-                                    disabled={isSaving}
-                                    onChange={(e) => handleCellChange(key, idx, e.target.value)}
-                                    className={`w-9 h-6 text-center rounded text-xs font-bold tabular-nums border outline-none transition-all ${
-                                      !cell.valid
-                                        ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400 dark:bg-red-950/40 dark:text-red-300'
-                                        : cell.isDirty
-                                        ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-400 dark:bg-blue-950/40 dark:text-blue-200'
-                                        : cell.num > 0
-                                        ? 'border-orange-200 bg-orange-50/80 text-orange-700 focus:border-orange-500 dark:border-orange-900/60 dark:bg-orange-950/40 dark:text-orange-300'
-                                        : 'border-slate-200 bg-white text-slate-400 focus:border-orange-400 focus:text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-600'
-                                    }`}
-                                  />
-                                ) : cell.num > 0 ? (
-                                  <span className="inline-flex items-center justify-center min-w-[22px] h-5 px-1 rounded bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 font-bold text-[11px]">
-                                    {cell.num}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-300 dark:text-slate-700 text-[11px]">0</span>
-                                )}
-                              </td>
-                            ))}
+                            {cells.map((cell, idx) => {
+                              const ovMeta = cell.hasOverride
+                                ? getPriorityMeta(cell.effectiveDayPrio)
+                                : null;
+
+                              return (
+                                <td key={idx} className="py-1 px-0.5 text-center tabular-nums">
+                                  {activeEdit ? (
+                                    <div className="relative inline-flex items-center justify-center">
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        step={1}
+                                        aria-label={`${group.areaName} ${group.positionName} ${shift.shiftName} ${cell.dayMeta.fullName}`}
+                                        value={cell.raw}
+                                        disabled={isSaving}
+                                        onChange={(e) => handleCellChange(key, idx, e.target.value)}
+                                        className={`w-9 h-6 text-center rounded text-xs font-bold tabular-nums border outline-none transition-all ${
+                                          !cell.valid
+                                            ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400 dark:bg-red-950/40 dark:text-red-300'
+                                            : cell.isDirty || cell.ovDirty
+                                            ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-400 dark:bg-blue-950/40 dark:text-blue-200'
+                                            : cell.num > 0
+                                            ? 'border-orange-200 bg-orange-50/80 text-orange-700 focus:border-orange-500 dark:border-orange-900/60 dark:bg-orange-950/40 dark:text-orange-300'
+                                            : 'border-slate-200 bg-white text-slate-400 focus:border-orange-400 focus:text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-600'
+                                        }`}
+                                      />
+                                      {cell.valid && cell.num > 0 && (
+                                        <button
+                                          type="button"
+                                          disabled={isSaving}
+                                          onClick={(e) =>
+                                            openCellPopover(e, {
+                                              rowId: key,
+                                              dbDay: cell.dayMeta.dbDay,
+                                              dayLabel: cell.dayMeta.fullName,
+                                              isNewRow: false,
+                                              generalPriority: effectivePrio,
+                                              currentOverride: cell.curOv,
+                                            })
+                                          }
+                                          title={
+                                            ovMeta
+                                              ? `${cell.dayMeta.fullName}: Prioridad especial ${ovMeta.label} (General: ${prioMeta.label})`
+                                              : `${cell.dayMeta.fullName}: Hereda prioridad general (${prioMeta.label}). Clic para excepción.`
+                                          }
+                                          aria-label={`Prioridad ${cell.dayMeta.fullName} ${shift.shiftName}`}
+                                          className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-slate-950 transition-transform hover:scale-125 ${
+                                            ovMeta
+                                              ? ovMeta.dotClass
+                                              : 'bg-slate-300 hover:bg-orange-400 dark:bg-slate-700'
+                                          }`}
+                                        />
+                                      )}
+                                    </div>
+                                  ) : cell.num > 0 ? (
+                                    <span
+                                      title={
+                                        ovMeta
+                                          ? `${cell.dayMeta.fullName}: Prioridad especial ${ovMeta.label} (General: ${prioMeta.label})`
+                                          : undefined
+                                      }
+                                      className="relative inline-flex items-center justify-center min-w-[22px] h-5 px-1 rounded bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 font-bold text-[11px]"
+                                    >
+                                      {cell.num}
+                                      {ovMeta && (
+                                        <span
+                                          className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full ring-1 ring-white dark:ring-slate-950 ${ovMeta.dotClass}`}
+                                        />
+                                      )}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-300 dark:text-slate-700 text-[11px]">0</span>
+                                  )}
+                                </td>
+                              );
+                            })}
                             <td className="py-1.5 px-2.5 text-right font-bold tabular-nums text-slate-700 dark:text-slate-200">
                               {rowTotal}
                             </td>
@@ -819,6 +1091,71 @@ export function WeeklyMatrixView({
                   </table>
                 </CardContent>
               </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Floating compact daily priority popover */}
+      {activeEdit && activePopover && (
+        <div
+          ref={popoverRef}
+          style={{ top: activePopover.top, left: activePopover.left }}
+          className="fixed z-50 w-52 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg dark:border-slate-800 dark:bg-slate-950"
+        >
+          <div className="px-2 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 border-b border-slate-100 dark:border-slate-800 mb-1">
+            {activePopover.dayLabel} — Excepción
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              handleSetDayOverride(
+                activePopover.rowId,
+                activePopover.isNewRow,
+                activePopover.dbDay,
+                activePopover.generalPriority,
+                null
+              )
+            }
+            className={`w-full flex items-center justify-between rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-slate-100 dark:hover:bg-slate-900 ${
+              !activePopover.currentOverride ? 'font-semibold text-blue-700 dark:text-blue-300 bg-blue-50/60 dark:bg-blue-950/30' : 'text-slate-700 dark:text-slate-200'
+            }`}
+          >
+            <span>Usar prioridad general ({getPriorityMeta(activePopover.generalPriority).label})</span>
+            {!activePopover.currentOverride && <Check className="h-3.5 w-3.5 shrink-0" />}
+          </button>
+          <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+          {PRIORITY_OPTIONS.map((opt) => {
+            const isSelected = activePopover.currentOverride === opt.value;
+            const isSameAsGeneral = opt.value === activePopover.generalPriority;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={isSameAsGeneral}
+                onClick={() =>
+                  handleSetDayOverride(
+                    activePopover.rowId,
+                    activePopover.isNewRow,
+                    activePopover.dbDay,
+                    activePopover.generalPriority,
+                    opt.value
+                  )
+                }
+                className={`w-full flex items-center justify-between rounded px-2 py-1 text-left text-xs transition-colors ${
+                  isSameAsGeneral
+                    ? 'opacity-40 cursor-not-allowed'
+                    : isSelected
+                    ? 'font-semibold bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100'
+                    : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200'
+                }`}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${opt.dotClass}`} />
+                  {opt.label}
+                </span>
+                {isSelected && <Check className="h-3.5 w-3.5 shrink-0" />}
+              </button>
             );
           })}
         </div>

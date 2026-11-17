@@ -1,4 +1,11 @@
 import { eachDayOfInterval, format, getDay, parseISO } from 'date-fns';
+import {
+  normalizePriority,
+  normalizePriorityOverrides,
+  PRIORITY_RANK,
+  resolveDayPriority,
+  type OperationalPriority,
+} from './matrix-utils';
 
 export interface RequirementTemplateRow {
   area_id: string;
@@ -6,6 +13,8 @@ export interface RequirementTemplateRow {
   shift_id: string;
   required_count: number;
   days_of_week: number[];
+  priority?: string | null;
+  priority_overrides?: Record<string, string> | null;
   is_active?: boolean;
 }
 
@@ -14,6 +23,7 @@ export interface MaterializedRequirementInsert {
   position_id: string;
   shift_id: string;
   required_count: number;
+  priority: OperationalPriority;
   date: string;
   is_extra: false;
 }
@@ -70,15 +80,23 @@ export function buildConsolidatedRequirements(
         date: dateStr,
       });
 
+      const generalPriority = normalizePriority(template.priority);
+      const overrides = normalizePriorityOverrides(template.priority_overrides, generalPriority);
+      const effectivePriority = resolveDayPriority(generalPriority, overrides, dayOfWeek);
+
       const existing = groupedInserts.get(key);
       if (existing) {
         existing.required_count += Number(template.required_count) || 0;
+        if (PRIORITY_RANK[effectivePriority] > PRIORITY_RANK[existing.priority]) {
+          existing.priority = effectivePriority;
+        }
       } else {
         groupedInserts.set(key, {
           area_id: template.area_id,
           position_id: template.position_id,
           shift_id: template.shift_id,
           required_count: Number(template.required_count) || 0,
+          priority: effectivePriority,
           date: dateStr,
           is_extra: false,
         });
