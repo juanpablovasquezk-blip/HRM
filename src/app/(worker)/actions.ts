@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { parseISO, format, addMonths, startOfMonth, endOfMonth, addDays } from 'date-fns';
@@ -10,31 +11,14 @@ import { calculateDynamicExpiration } from '@/lib/utils/document-calc';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 import { validateAntecedentesPDF } from '@/lib/documents/validation';
 
-export async function loginAsWorker(email: string) {
-  const supabase = await createClient();
-  
-  const { data, error } = await supabase
-    .from('personnel')
-    .select('id, first_name, email')
-    .eq('email', email)
-    .eq('is_active', true)
-    .single();
-
-  if (error || !data) {
-    return { success: false, error: 'Email no encontrado o trabajador inactivo' };
-  }
-
+export async function loginAsWorker(_email: string) {
   const cookieStore = await cookies();
-  cookieStore.set('worker_email', email, { 
-    maxAge: 60 * 60 * 24 * 30, // 30 days
-    path: '/'
-  });
-  cookieStore.set('worker_id', data.id, { 
-    maxAge: 60 * 60 * 24 * 30,
-    path: '/'
-  });
-
-  return { success: true };
+  cookieStore.delete('worker_email');
+  cookieStore.delete('worker_id');
+  return {
+    success: false,
+    error: 'Método de acceso heredado deshabilitado. Inicia sesión desde /login.',
+  };
 }
 
 export async function logoutWorker() {
@@ -48,41 +32,37 @@ export async function logoutWorker() {
 }
 
 export async function getWorkerSession() {
-  const cookieStore = await cookies();
-  let id = cookieStore.get('worker_id')?.value;
-  
-  const supabase = await createClient();
+  const auth = await requireActionAuth();
+  if (!auth.ok) return null;
 
-  if (!id) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data: personnel } = await supabase
-        .from('personnel')
-        .select('id, is_active')
-        .eq('email', user.email?.trim().toLowerCase())
-        .maybeSingle();
-      
-      if (personnel && personnel.is_active !== false) {
-        id = personnel.id;
-      }
+  const admin = createAdminClient();
+
+  const { data: byUserId, error: byUserIdErr } = await admin
+    .from('personnel')
+    .select('*')
+    .eq('user_id', auth.userId)
+    .limit(2);
+
+  if (!byUserIdErr && byUserId) {
+    if (byUserId.length === 1) {
+      return byUserId[0].is_active === false ? null : byUserId[0];
+    }
+    if (byUserId.length > 1) return null;
+  }
+
+  if (auth.email) {
+    const { data: byEmail, error: byEmailErr } = await admin
+      .from('personnel')
+      .select('*')
+      .eq('email', auth.email.trim().toLowerCase())
+      .limit(2);
+
+    if (!byEmailErr && byEmail && byEmail.length === 1) {
+      return byEmail[0].is_active === false ? null : byEmail[0];
     }
   }
 
-  if (!id) return null;
-  
-  const { data } = await supabase
-    .from('personnel')
-    .select('*')
-    .eq('id', id)
-    .single();
-    
-  if (!data || data.is_active === false) {
-    cookieStore.delete('worker_email');
-    cookieStore.delete('worker_id');
-    return null;
-  }
-
-  return data;
+  return null;
 }
 export async function getWorkerTomorrowData() {
   const session = await getWorkerSession();
@@ -569,6 +549,14 @@ export async function uploadDocumentRecord(record: any) {
 }
 
 export async function requestFreeDays(personnelId: string, dates: string[]) {
+  const session = await getWorkerSession();
+  if (!session?.id) {
+    return { success: false, error: 'Usuario no autenticado.' };
+  }
+  if (personnelId !== session.id) {
+    return { success: false, error: 'No autorizado para solicitar días libres para otro trabajador.' };
+  }
+
   const supabase = createAdminClient();
   
   if (!dates || dates.length === 0) return { success: true };
@@ -612,6 +600,11 @@ export async function requestFreeDays(personnelId: string, dates: string[]) {
 }
 
 export async function getWorkerFreeRequests(personnelId: string) {
+  const session = await getWorkerSession();
+  if (!session?.id || personnelId !== session.id) {
+    return { data: [], error: 'No autorizado' };
+  }
+
   const supabase = await createClient();
   const today = new Date();
   const nextMonth = addMonths(today, 1);
@@ -631,11 +624,17 @@ export async function getWorkerFreeRequests(personnelId: string) {
 }
 
 export async function deleteWorkerLeave(leaveId: string) {
+  const session = await getWorkerSession();
+  if (!session?.id) {
+    return { success: false, error: 'Usuario no autenticado.' };
+  }
+
   const supabase = await createClient();
   const { error } = await supabase
     .from('leaves')
     .delete()
     .eq('id', leaveId)
+    .eq('personnel_id', session.id)
     .eq('reason', 'Solicitud mensual de días libres'); // Security: only monthly requests
 
   if (error) return { success: false, error: error.message };

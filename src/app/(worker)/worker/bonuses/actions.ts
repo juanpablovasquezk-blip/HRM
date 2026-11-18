@@ -1,5 +1,7 @@
-import { createClient } from '@/lib/supabase/server';
+'use server';
+
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { getWorkerSession } from '../../actions';
 import { BonusRecord } from '@/types/database';
 
@@ -12,6 +14,11 @@ export async function getWorkerBonuses(filters: {
   otNumber?: string;
 } = {}) {
   try {
+    const auth = await requireActionAuth();
+    if (!auth.ok) {
+      return { success: false, error: auth.error, data: [] };
+    }
+
     const session = await getWorkerSession();
     if (!session?.id) {
       return { success: false, error: 'Sesión no válida', data: [] };

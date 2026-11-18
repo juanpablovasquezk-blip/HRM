@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getUserRole } from '@/app/role-actions';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { Role } from '@/types/database';
 
 export interface SystemUserItem {
@@ -18,9 +18,9 @@ export interface SystemUserItem {
 
 export async function getSystemUsers(): Promise<{ success: boolean; data?: SystemUserItem[]; error?: string }> {
   try {
-    const role = await getUserRole();
-    if (role !== 'ADMIN' && role !== 'HR') {
-      return { success: false, error: 'No tiene permisos para gestionar usuarios.' };
+    const auth = await requireActionAuth({ roles: ['ADMIN'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const adminClient = createAdminClient();
@@ -92,9 +92,9 @@ export async function createSystemUser(data: {
   role: Role;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    const currentRole = await getUserRole();
-    if (currentRole !== 'ADMIN' && currentRole !== 'HR') {
-      return { success: false, error: 'No tiene permisos para crear usuarios.' };
+    const auth = await requireActionAuth({ roles: ['ADMIN'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const cleanEmail = data.email.trim().toLowerCase();
@@ -187,9 +187,9 @@ export async function updateSystemUserRole(
   newRole: Role
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const currentRole = await getUserRole();
-    if (currentRole !== 'ADMIN' && currentRole !== 'HR') {
-      return { success: false, error: 'No tiene permisos para modificar roles.' };
+    const auth = await requireActionAuth({ roles: ['ADMIN'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const adminClient = createAdminClient();

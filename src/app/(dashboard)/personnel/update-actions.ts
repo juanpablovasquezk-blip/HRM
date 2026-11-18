@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { revalidatePath } from 'next/cache';
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
 import type { Personnel } from '@/types/database';
@@ -22,6 +23,11 @@ export async function createPersonnelUpdateToken(
   personnelId: string,
   expirationDays: number = 7
 ): Promise<{ success: boolean; token: string | null; expiresAt: string | null; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, token: null, expiresAt: null, error: auth.error };
+  }
+
   const supabase = await createClient();
   const expires = new Date();
   expires.setDate(expires.getDate() + expirationDays);
@@ -280,6 +286,11 @@ export async function sendFichaUpdateWhatsApp(
   origin: string
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
 
     // 1. Obtener detalles del trabajador
