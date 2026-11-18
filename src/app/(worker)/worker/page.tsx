@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { getWorkerTomorrowData, getWorkerSession, getWorkerFreeRequests } from '../actions';
+import { getWorkerTomorrowData, getWorkerSession, getWorkerFreeRequests, getWorkerSizeRequirements } from '../actions';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { format, parseISO, differenceInDays } from 'date-fns';
@@ -38,7 +38,10 @@ export default async function WorkerHomePage() {
   */
   let bannerConfig = null;
 
-  const { data: freeRequests } = await getWorkerFreeRequests(session.id);
+  const [{ data: freeRequests }, sizeRequirements] = await Promise.all([
+    getWorkerFreeRequests(session.id),
+    getWorkerSizeRequirements(),
+  ]);
 
   return (
     <div className="p-6 space-y-6 max-w-lg mx-auto pb-24">
@@ -53,7 +56,32 @@ export default async function WorkerHomePage() {
           </div>
         </div>
 
-        {/* Banner disabled during debug */}
+        {/* Missing EPP / Uniform Sizes Banner */}
+        {sizeRequirements.hasMissingSizes && (
+          <Link
+            href="/worker/profile#clothing"
+            className="block rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm hover:bg-amber-100/70 transition-colors"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-xl bg-amber-100 p-2 text-amber-700">
+                  <AlertCircle className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-amber-950">
+                    Tallas de uniforme / EPP pendientes
+                  </p>
+                  <p className="text-xs text-amber-800 leading-relaxed">
+                    Completa tus tallas requeridas ({sizeRequirements.missingFields.map(f => f.productName).join(', ')}).
+                  </p>
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-orange-700 pt-0.5">
+                    Ir a Tallas EPP <ChevronRight className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+              </div>
+            </div>
+          </Link>
+        )}
       </div>
 
       {/* Main Content */}

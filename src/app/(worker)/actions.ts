@@ -657,6 +657,219 @@ export async function getWorkerProfile() {
   return data;
 }
 
+const STANDARD_CLOTHING_FIELDS = [
+  'clothing_tshirt_size',
+  'clothing_polar_size',
+  'clothing_pants_size_letter',
+  'clothing_pants_size_number',
+  'clothing_shoe_size',
+  'clothing_parka_size',
+  'clothing_overall_size',
+] as const;
+
+export interface WorkerSizeRequirementItem {
+  sizeField: string;
+  productName: string;
+  sizeType: 'LETTER' | 'NUMBER' | 'SHOE';
+  isCustom: boolean;
+  currentValue: string | null;
+  isMissing: boolean;
+}
+
+export interface WorkerSizeRequirementsResult {
+  hasPosition: boolean;
+  requiredFields: WorkerSizeRequirementItem[];
+  missingFields: WorkerSizeRequirementItem[];
+  hasMissingSizes: boolean;
+}
+
+export async function getWorkerSizeRequirements(): Promise<WorkerSizeRequirementsResult> {
+  const session = await getWorkerSession();
+  if (!session || !session.main_position) {
+    return {
+      hasPosition: Boolean(session?.main_position),
+      requiredFields: [],
+      missingFields: [],
+      hasMissingSizes: false,
+    };
+  }
+
+  const adminClient = createAdminClient();
+  const [reqsRes, catalogRes] = await Promise.all([
+    adminClient
+      .from('epp_position_requirements')
+      .select('product_name, size_field, quantity')
+      .eq('position_id', session.main_position)
+      .gt('quantity', 0),
+    adminClient
+      .from('epp_product_catalog')
+      .select('name, uses_sizes, size_field, size_type')
+      .eq('is_active', true),
+  ]);
+
+  const requirements = reqsRes.data || [];
+  const catalog = catalogRes.data || [];
+
+  const catalogBySizeField = new Map<string, any>();
+  const catalogByName = new Map<string, any>();
+  for (const item of catalog) {
+    if (item.size_field) {
+      catalogBySizeField.set(item.size_field, item);
+    }
+    if (item.name) {
+      catalogByName.set(item.name.trim().toLowerCase(), item);
+    }
+  }
+
+  const customSizes = (session.custom_clothing_sizes as Record<string, string> | null) || {};
+  const seenFields = new Set<string>();
+  const requiredFields: WorkerSizeRequirementItem[] = [];
+
+  for (const req of requirements) {
+    const byName = req.product_name ? catalogByName.get(String(req.product_name).trim().toLowerCase()) : null;
+    const sizeField: string | null = req.size_field || byName?.size_field || null;
+    if (!sizeField) continue;
+
+    const isAllowedField =
+      (STANDARD_CLOTHING_FIELDS as readonly string[]).includes(sizeField) ||
+      sizeField.startsWith('clothing_custom_');
+    if (!isAllowedField || seenFields.has(sizeField)) continue;
+
+    const catItem = catalogBySizeField.get(sizeField) || byName;
+    if (catItem && catItem.uses_sizes === false) continue;
+
+    seenFields.add(sizeField);
+    const isCustom = sizeField.startsWith('clothing_custom_');
+    const rawVal = isCustom ? customSizes[sizeField] : session[sizeField];
+    const currentValue = typeof rawVal === 'string' && rawVal.trim() !== '' ? rawVal.trim().toUpperCase() : null;
+
+    let sizeType: 'LETTER' | 'NUMBER' | 'SHOE' = 'LETTER';
+    if (catItem?.size_type === 'NUMBER' || catItem?.size_type === 'SHOE' || catItem?.size_type === 'LETTER') {
+      sizeType = catItem.size_type;
+    } else if (sizeField === 'clothing_shoe_size') {
+      sizeType = 'SHOE';
+    } else if (sizeField === 'clothing_pants_size_number') {
+      sizeType = 'NUMBER';
+    }
+
+    requiredFields.push({
+      sizeField,
+      productName: catItem?.name || req.product_name || sizeField,
+      sizeType,
+      isCustom,
+      currentValue,
+      isMissing: !currentValue,
+    });
+  }
+
+  const missingFields = requiredFields.filter(f => f.isMissing);
+  return {
+    hasPosition: true,
+    requiredFields,
+    missingFields,
+    hasMissingSizes: missingFields.length > 0,
+  };
+}
+
+const ALLOWED_LETTER_SIZES = new Set(['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '3XL', '4XL']);
+const ALLOWED_PANTS_NUMBER_SIZES = new Set(['36', '38', '40', '42', '44', '46', '48', '50', '52', '54', '56', '58', '60']);
+const ALLOWED_SHOE_SIZES = new Set(['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48']);
+
+function isValidSizeForType(value: string, sizeType: 'LETTER' | 'NUMBER' | 'SHOE'): boolean {
+  if (sizeType === 'NUMBER') return ALLOWED_PANTS_NUMBER_SIZES.has(value);
+  if (sizeType === 'SHOE') return ALLOWED_SHOE_SIZES.has(value);
+  return ALLOWED_LETTER_SIZES.has(value);
+}
+
+export async function updateOwnWorkerClothingSizes(
+  sizes: Record<string, string | null | undefined>
+): Promise<{ success: boolean; error: string | null }> {
+  const session = await getWorkerSession();
+  if (!session) return { success: false, error: 'No hay sesión activa' };
+
+  if (!sizes || typeof sizes !== 'object' || Array.isArray(sizes)) {
+    return { success: false, error: 'Formato de tallas inválido' };
+  }
+
+  const adminClient = createAdminClient();
+  const updateData: Record<string, any> = {};
+  const existingCustom = { ...((session.custom_clothing_sizes as Record<string, string> | null) || {}) };
+  let hasCustomChanges = false;
+
+  const customKeys = Object.keys(sizes).filter(k => k.startsWith('clothing_custom_'));
+  const customTypeMap = new Map<string, 'LETTER' | 'NUMBER' | 'SHOE'>();
+  if (customKeys.length > 0) {
+    const { data: catalogItems } = await adminClient
+      .from('epp_product_catalog')
+      .select('size_field, size_type')
+      .eq('is_active', true)
+      .in('size_field', customKeys);
+    for (const item of catalogItems || []) {
+      if (item.size_field && (item.size_type === 'NUMBER' || item.size_type === 'SHOE' || item.size_type === 'LETTER')) {
+        customTypeMap.set(item.size_field, item.size_type);
+      }
+    }
+  }
+
+  for (const [key, val] of Object.entries(sizes)) {
+    if (val !== null && val !== undefined && typeof val !== 'string') {
+      return { success: false, error: `Valor malformado para ${key}` };
+    }
+
+    const isStandard = (STANDARD_CLOTHING_FIELDS as readonly string[]).includes(key);
+    const isCustom = /^clothing_custom_[a-zA-Z0-9_]+$/.test(key);
+    if (!isStandard && !isCustom) {
+      return { success: false, error: `Campo de talla no permitido: ${key}` };
+    }
+
+    const cleanVal = typeof val === 'string' && val.trim() !== '' ? val.trim().toUpperCase() : null;
+    if (cleanVal) {
+      let expectedType: 'LETTER' | 'NUMBER' | 'SHOE' = 'LETTER';
+      if (key === 'clothing_shoe_size') expectedType = 'SHOE';
+      else if (key === 'clothing_pants_size_number') expectedType = 'NUMBER';
+      else if (isCustom) expectedType = customTypeMap.get(key) || 'LETTER';
+
+      if (!isValidSizeForType(cleanVal, expectedType)) {
+        return { success: false, error: `Talla inválida para ${key}: ${cleanVal}` };
+      }
+    }
+
+    if (isStandard) {
+      updateData[key] = cleanVal;
+    } else if (isCustom) {
+      hasCustomChanges = true;
+      if (cleanVal) {
+        existingCustom[key] = cleanVal;
+      } else {
+        delete existingCustom[key];
+      }
+    }
+  }
+
+  if (hasCustomChanges) {
+    updateData.custom_clothing_sizes = existingCustom;
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    return { success: false, error: 'No se enviaron tallas válidas para actualizar' };
+  }
+
+  const { error } = await adminClient
+    .from('personnel')
+    .update(updateData)
+    .eq('id', session.id);
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath('/worker');
+  revalidatePath('/worker/profile');
+  revalidatePath('/epp');
+  revalidatePath('/personnel');
+  return { success: true, error: null };
+}
+
 export async function updateWorkerProfile(formData: Record<string, any>) {
   const session = await getWorkerSession();
   if (!session) return { success: false, error: 'No hay sesión activa' };
@@ -704,6 +917,23 @@ export async function updateWorkerProfile(formData: Record<string, any>) {
   if (formData.clothing_shoe_size) updatePayload.clothing_shoe_size = toUpper(formData.clothing_shoe_size);
   if (formData.clothing_parka_size) updatePayload.clothing_parka_size = toUpper(formData.clothing_parka_size);
   if (formData.clothing_overall_size) updatePayload.clothing_overall_size = toUpper(formData.clothing_overall_size);
+
+  const existingCustom = { ...((session.custom_clothing_sizes as Record<string, string> | null) || {}) };
+  let customUpdated = false;
+  for (const [key, val] of Object.entries(formData)) {
+    if (key.startsWith('clothing_custom_')) {
+      customUpdated = true;
+      const cleanVal = typeof val === 'string' && val.trim() !== '' ? val.trim().toUpperCase() : null;
+      if (cleanVal) {
+        existingCustom[key] = cleanVal;
+      } else {
+        delete existingCustom[key];
+      }
+    }
+  }
+  if (customUpdated) {
+    updatePayload.custom_clothing_sizes = existingCustom;
+  }
 
   try {
     const { error } = await adminClient

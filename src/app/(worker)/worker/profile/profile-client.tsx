@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { updateWorkerProfile } from '../../actions';
+import { updateWorkerProfile, updateOwnWorkerClothingSizes, type WorkerSizeRequirementsResult } from '../../actions';
 import { toast } from 'sonner';
 import { User, Phone, MapPin, Building, Activity, CreditCard, Shirt, AlertCircle, Save, X, Edit2, ShieldAlert } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,7 +18,13 @@ const CLOTHING_SIZES_LETTER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
 const PANTS_SIZES_NUMBER = ['36', '38', '40', '42', '44', '46', '48', '50', '52', '54', '56', '58', '60'];
 const SHOE_SIZES = ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48'];
 
-export default function ProfileClient({ profile }: { profile: any }) {
+export default function ProfileClient({
+  profile,
+  sizeRequirements,
+}: {
+  profile: any;
+  sizeRequirements?: WorkerSizeRequirementsResult;
+}) {
   const router = useRouter();
   
   const isFichaIncompleta = (person: any) => {
@@ -38,6 +44,7 @@ export default function ProfileClient({ profile }: { profile: any }) {
   const [editSection, setEditSection] = useState<string | null>(null);
   const [formData, setFormData] = useState<any>({
     ...profile,
+    ...(profile.custom_clothing_sizes || {}),
     address_street: profile.address?.street || '',
     address_city: profile.address?.city || '',
     address_comuna: profile.address?.comuna || '',
@@ -57,11 +64,31 @@ export default function ProfileClient({ profile }: { profile: any }) {
 
   const handleSave = async (section: string) => {
     setIsSubmitting(true);
-    const result = await updateWorkerProfile(formData);
+    let result: { success: boolean; error: string | null };
+
+    if (section === 'clothing') {
+      const sizePayload: Record<string, string> = {
+        clothing_tshirt_size: formData.clothing_tshirt_size || '',
+        clothing_polar_size: formData.clothing_polar_size || '',
+        clothing_pants_size_letter: formData.clothing_pants_size_letter || '',
+        clothing_pants_size_number: formData.clothing_pants_size_number || '',
+        clothing_shoe_size: formData.clothing_shoe_size || '',
+        clothing_parka_size: formData.clothing_parka_size || '',
+        clothing_overall_size: formData.clothing_overall_size || '',
+      };
+      for (const [k, v] of Object.entries(formData)) {
+        if (k.startsWith('clothing_custom_')) {
+          sizePayload[k] = typeof v === 'string' ? v : '';
+        }
+      }
+      result = await updateOwnWorkerClothingSizes(sizePayload);
+    } else {
+      result = await updateWorkerProfile(formData);
+    }
     setIsSubmitting(false);
 
     if (result.success) {
-      toast.success('Ficha actualizada correctamente');
+      toast.success(section === 'clothing' ? 'Tallas actualizadas correctamente' : 'Ficha actualizada correctamente');
       setEditSection(null);
       router.refresh();
     } else {
@@ -267,27 +294,102 @@ export default function ProfileClient({ profile }: { profile: any }) {
           )}
         </SectionCard>
 
-        <SectionCard 
-          id="clothing" 
-          title="Tallas EPP" 
-          icon={Shirt}
-          editSection={editSection}
-          setEditSection={setEditSection}
-          handleSave={handleSave}
-          isSubmitting={isSubmitting}
-        >
-          {(isEditing: boolean) => (
-            <div className="grid grid-cols-2 gap-4">
-              {renderField('Polera', formData.clothing_tshirt_size, isEditing, 'clothing_tshirt_size', 'select', CLOTHING_SIZES_LETTER)}
-              {renderField('Polar', formData.clothing_polar_size, isEditing, 'clothing_polar_size', 'select', CLOTHING_SIZES_LETTER)}
-              {renderField('Pantalón (Letra)', formData.clothing_pants_size_letter, isEditing, 'clothing_pants_size_letter', 'select', CLOTHING_SIZES_LETTER)}
-              {renderField('Pantalón (N°)', formData.clothing_pants_size_number, isEditing, 'clothing_pants_size_number', 'select', PANTS_SIZES_NUMBER)}
-              {renderField('Calzado', formData.clothing_shoe_size, isEditing, 'clothing_shoe_size', 'select', SHOE_SIZES)}
-              {renderField('Parka', formData.clothing_parka_size, isEditing, 'clothing_parka_size', 'select', CLOTHING_SIZES_LETTER)}
-              {renderField('Overol', formData.clothing_overall_size, isEditing, 'clothing_overall_size', 'select', CLOTHING_SIZES_LETTER)}
-            </div>
-          )}
-        </SectionCard>
+        <div id="clothing">
+          <SectionCard
+            id="clothing"
+            title="Tallas EPP"
+            icon={Shirt}
+            editSection={editSection}
+            setEditSection={setEditSection}
+            handleSave={handleSave}
+            isSubmitting={isSubmitting}
+          >
+            {(isEditing: boolean) => {
+              const requiredList = sizeRequirements?.requiredFields || [];
+              const requiredSet = new Set(requiredList.map(r => r.sizeField));
+              const missingList = requiredList.filter(r => {
+                const v = formData[r.sizeField];
+                return !v || String(v).trim() === '';
+              });
+              const getOptionsForType = (sizeType: 'LETTER' | 'NUMBER' | 'SHOE') => {
+                if (sizeType === 'NUMBER') return PANTS_SIZES_NUMBER;
+                if (sizeType === 'SHOE') return SHOE_SIZES;
+                return CLOTHING_SIZES_LETTER;
+              };
+              const standardDefs: { key: string; label: string; options: string[] }[] = [
+                { key: 'clothing_tshirt_size', label: 'Polera', options: CLOTHING_SIZES_LETTER },
+                { key: 'clothing_polar_size', label: 'Polar', options: CLOTHING_SIZES_LETTER },
+                { key: 'clothing_pants_size_letter', label: 'Pantalón (Letra)', options: CLOTHING_SIZES_LETTER },
+                { key: 'clothing_pants_size_number', label: 'Pantalón (N°)', options: PANTS_SIZES_NUMBER },
+                { key: 'clothing_shoe_size', label: 'Calzado', options: SHOE_SIZES },
+                { key: 'clothing_parka_size', label: 'Parka', options: CLOTHING_SIZES_LETTER },
+                { key: 'clothing_overall_size', label: 'Overol', options: CLOTHING_SIZES_LETTER },
+              ];
+              const optionalStandards = standardDefs.filter(s => !requiredSet.has(s.key));
+
+              return (
+                <div className="space-y-4">
+                  {missingList.length > 0 && (
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
+                      <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">Tallas obligatorias pendientes ({missingList.length})</p>
+                        <p className="text-amber-800 mt-0.5">
+                          Faltan por completar según tu cargo: {missingList.map(m => m.productName).join(', ')}.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {requiredList.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-orange-600">
+                        Requeridas por tu cargo
+                      </p>
+                      <div className="grid grid-cols-2 gap-4">
+                        {requiredList.map(req => {
+                          const isMissing = !formData[req.sizeField] || String(formData[req.sizeField]).trim() === '';
+                          return (
+                            <div
+                              key={req.sizeField}
+                              className={isMissing ? 'p-2 rounded-xl bg-amber-50/60 border border-amber-200' : ''}
+                            >
+                              {renderField(
+                                `${req.productName} *`,
+                                formData[req.sizeField],
+                                isEditing,
+                                req.sizeField,
+                                'select',
+                                getOptionsForType(req.sizeType)
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {optionalStandards.length > 0 && (
+                    <div className="space-y-2 pt-1">
+                      {requiredList.length > 0 && (
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Otras tallas estándar
+                        </p>
+                      )}
+                      <div className="grid grid-cols-2 gap-4">
+                        {optionalStandards.map(item => (
+                          <React.Fragment key={item.key}>
+                            {renderField(item.label, formData[item.key], isEditing, item.key, 'select', item.options)}
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            }}
+          </SectionCard>
+        </div>
       </div>
     </div>
   );

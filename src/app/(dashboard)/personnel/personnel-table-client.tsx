@@ -51,7 +51,6 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { createOnboardingToken, approveOnboarding, rejectOnboarding, deletePersonnel } from './actions';
-import { createWorkerSizeToken } from '../epp/actions';
 import { createPersonnelUpdateToken, sendFichaUpdateWhatsApp } from './update-actions';
 import { generateDismissalActa } from './generate-dismissal-acta';
 import { addDays, parseISO, format } from 'date-fns';
@@ -609,21 +608,6 @@ export default function PersonnelTableClient({
         </div>
       </TableHead>
     );
-  };
-
-  const handleCopyWorkerSizeTokenLink = async (person: Personnel) => {
-    try {
-      const res = await createWorkerSizeToken(person.id, 3);
-      if (res.success && res.token) {
-        const link = `${window.location.origin}/tallas?token=${res.token}`;
-        navigator.clipboard.writeText(link);
-        toast.success(`¡Link de tallas exclusivo para ${person.first_name} ${person.last_name_father} copiado! (Válido 3 días)`);
-      } else {
-        toast.error('Error al generar el enlace de tallas');
-      }
-    } catch (e) {
-      toast.error('Error de conexión');
-    }
   };
 
   const handleCopyUpdateFichaLink = async (person: Personnel) => {

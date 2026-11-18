@@ -29,7 +29,6 @@ import {
   Save,
   Edit,
   Grid3X3,
-  Link2,
   Tag,
   Barcode,
   FileSpreadsheet,
@@ -93,7 +92,6 @@ import {
   getAllPositionsWithAreas,
   bulkSaveRequirementsMatrix,
   updateWorkerClothingSizes,
-  createWorkerSizeToken,
   ProductCatalogItem,
   registerBulkHistoricalDelivery,
   HistoricalItemInput,
@@ -231,28 +229,6 @@ export default function EPPPage() {
   const [catRenewalDays, setCatRenewalDays] = useState(180);
   const [catSizeType, setCatSizeType] = useState<'LETTER' | 'NUMBER' | 'SHOE'>('LETTER');
   const [catContractEligibility, setCatContractEligibility] = useState<'PLAZO_FIJO' | 'INDEFINIDO' | 'AMBOS'>('AMBOS');
-
-  const handleCopyWorkerSelfServiceLink = async (workerId?: string, workerName?: string) => {
-    if (!workerId) {
-      const baseUrl = window.location.origin + '/tallas';
-      navigator.clipboard.writeText(baseUrl);
-      toast.success('¡Enlace general para funcionarios copiado!');
-      return;
-    }
-
-    try {
-      const res = await createWorkerSizeToken(workerId, 3); // 3 días de expiración
-      if (res.success && res.token) {
-        const link = `${window.location.origin}/tallas?token=${res.token}`;
-        navigator.clipboard.writeText(link);
-        toast.success(`¡Enlace exclusivo con expiración para ${workerName || 'funcionario'} copiado! (Válido 3 días)`);
-      } else {
-        toast.error('Error al generar enlace exclusivo');
-      }
-    } catch (e) {
-      toast.error('Error al generar enlace');
-    }
-  };
 
   // Catalog & Matrix Data
   const [catalog, setCatalog] = useState<ProductCatalogItem[]>([]);
@@ -1744,15 +1720,6 @@ export default function EPPPage() {
 
         {canManageEppAdmin && (
           <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => handleCopyWorkerSelfServiceLink()}
-              variant="outline"
-              className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 text-xs font-semibold flex items-center gap-1.5 h-10 px-3 shadow-sm"
-              title="Copiar enlace público de autoservicio de tallas para funcionarios"
-            >
-              <Link2 className="h-4 w-4 text-orange-600" />
-              Copiar Link para Funcionarios
-            </Button>
             <Button 
               onClick={() => setIsAddStockOpen(true)}
               className="bg-orange-600 hover:bg-orange-700 text-white shadow-sm flex items-center gap-1.5 h-10"
@@ -1897,33 +1864,16 @@ export default function EPPPage() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
-                          {!isReadOnly && (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleCopyWorkerSelfServiceLink(worker.id, `${worker.first_name} ${worker.last_name_father}`);
-                                }}
-                                className="border-orange-300 bg-orange-50 hover:bg-orange-100 text-orange-950 h-8 text-xs gap-1 font-semibold dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800 shadow-sm"
-                                title="Generar enlace único con vencimiento de 3 días para WhatsApp"
-                              >
-                                <Link2 className="h-3.5 w-3.5 text-orange-600" />
-                                Link WhatsApp
-                              </Button>
-                              {hasMissingSizes && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => { e.stopPropagation(); openQuickEditSizes(worker); }}
-                                  className="border-amber-300 bg-amber-100/70 hover:bg-amber-200 text-amber-950 h-8 text-xs gap-1 font-semibold"
-                                >
-                                  <Edit className="h-3.5 w-3.5 text-amber-700" />
-                                  Registrar Tallas
-                                </Button>
-                              )}
-                            </>
+                          {canManageEppAdmin && hasMissingSizes && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => { e.stopPropagation(); openQuickEditSizes(worker); }}
+                              className="border-amber-300 bg-amber-100/70 hover:bg-amber-200 text-amber-950 h-8 text-xs gap-1 font-semibold"
+                            >
+                              <Edit className="h-3.5 w-3.5 text-amber-700" />
+                              Registrar Tallas
+                            </Button>
                           )}
                           <Badge variant="outline" className={overallStatusBadge}>
                             {worker.overallStatus === 'RED' ? 'Pendiente / Vencido' :
@@ -4137,30 +4087,18 @@ export default function EPPPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            {!isReadOnly && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleCopyWorkerSelfServiceLink(worker.id, `${worker.first_name} ${worker.last_name_father}`)}
-                                  className="border-slate-300 text-slate-700 hover:bg-slate-100 h-7 text-[11px] px-2 gap-1 font-medium"
-                                  title="Generar y copiar enlace exclusivo con vencimiento de 3 días para enviar por WhatsApp"
-                                >
-                                  <Link2 className="h-3 w-3 text-orange-600" />
-                                  Link WhatsApp
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  onClick={() => {
-                                    setIsMissingSizesDialogOpen(false);
-                                    openQuickEditSizes(worker);
-                                  }}
-                                  className="bg-orange-600 hover:bg-orange-700 text-white h-7 text-[11px] px-2 gap-1"
-                                >
-                                  <Edit className="h-3 w-3" />
-                                  Cargar Talla
-                                </Button>
-                              </>
+                            {canManageEppAdmin && (
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  setIsMissingSizesDialogOpen(false);
+                                  openQuickEditSizes(worker);
+                                }}
+                                className="bg-orange-600 hover:bg-orange-700 text-white h-7 text-[11px] px-2 gap-1"
+                              >
+                                <Edit className="h-3 w-3" />
+                                Cargar Talla
+                              </Button>
                             )}
                           </div>
                         </TableCell>

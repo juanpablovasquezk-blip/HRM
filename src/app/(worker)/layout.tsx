@@ -31,20 +31,23 @@ export default function WorkerLayout({
   const [role, setRole] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const [fichaIncomplete, setFichaIncomplete] = useState(false);
+  const [sizesIncomplete, setSizesIncomplete] = useState(false);
   const [docsIncomplete, setDocsIncomplete] = useState(false);
 
   useEffect(() => {
     const getRole = async () => {
       const { getUserRole } = await import('@/app/role-actions');
-      const { getWorkerSession, getWorkerDocsStatus } = await import('./actions');
-      const [currentRole, session, docsStatus] = await Promise.all([
+      const { getWorkerSession, getWorkerDocsStatus, getWorkerSizeRequirements } = await import('./actions');
+      const [currentRole, session, docsStatus, sizeReqs] = await Promise.all([
         getUserRole(),
         getWorkerSession(),
-        getWorkerDocsStatus()
+        getWorkerDocsStatus(),
+        getWorkerSizeRequirements(),
       ]);
       setRole(currentRole || 'USER');
       setUserName(session?.first_name || '');
       setDocsIncomplete(docsStatus.hasAlert);
+      setSizesIncomplete(Boolean(sizeReqs?.hasMissingSizes));
       
       if (session) {
         setFichaIncomplete(
@@ -119,7 +122,7 @@ export default function WorkerLayout({
                     : "text-slate-400 hover:text-slate-600"
                 )}
               >
-                {fichaIncomplete && item.href === '/worker/profile' && (
+                {(fichaIncomplete || sizesIncomplete) && item.href === '/worker/profile' && (
                   <span className="absolute -top-0.5 right-2 flex h-2.5 w-2.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
