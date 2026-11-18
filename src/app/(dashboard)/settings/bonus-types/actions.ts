@@ -4,12 +4,16 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { BonusType } from '@/types/database';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 
 /**
  * Obtener todos los tipos de bonos (ordenados por nombre o fecha)
  */
 export async function getBonusTypes(onlyActive: boolean = false) {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error, data: [] };
+
     const supabase = await createClient();
     let query = supabase
       .from('bonus_types')
@@ -46,11 +50,8 @@ export async function createBonusType(formData: {
   active?: boolean;
 }) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: 'Usuario no autenticado' };
-    }
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
 
     const admin = createAdminClient();
 
@@ -109,11 +110,8 @@ export async function updateBonusType(
   }
 ) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: 'Usuario no autenticado' };
-    }
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
 
     const admin = createAdminClient();
 

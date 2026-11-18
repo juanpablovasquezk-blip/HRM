@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { revalidatePath } from 'next/cache';
 import { DocumentDefinition } from '@/types/database';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 
 // Admin Supabase client (bypasses RLS — safe for server-only use)
 function getAdminClient() {
@@ -14,6 +15,9 @@ function getAdminClient() {
 }
 
 export async function getDocumentDefinitions() {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SAFETY_OFFICER'] });
+  if (!auth.ok) return [];
+
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('document_definitions')
@@ -29,6 +33,9 @@ export async function getDocumentDefinitions() {
 }
 
 export async function getPositions() {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SAFETY_OFFICER'] });
+  if (!auth.ok) return [];
+
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('positions')
@@ -45,11 +52,9 @@ export async function getPositions() {
 
 export async function saveDocumentDefinition(definition: Partial<DocumentDefinition>) {
   try {
-    // Verify the caller is authenticated
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: 'Usuario no autenticado' };
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     // Use admin client to bypass RLS for this admin-only operation
@@ -59,7 +64,7 @@ export async function saveDocumentDefinition(definition: Partial<DocumentDefinit
     const { data: userData } = await admin
       .from('users')
       .select('company_id')
-      .eq('id', user.id)
+      .eq('id', auth.userId)
       .single();
 
     // Build clean data — omit undefined fields to avoid Supabase serialization issues
@@ -91,11 +96,9 @@ export async function saveDocumentDefinition(definition: Partial<DocumentDefinit
 
 export async function deleteDocumentDefinition(id: string) {
   try {
-    // Verify the caller is authenticated
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: 'Usuario no autenticado' };
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const admin = getAdminClient();

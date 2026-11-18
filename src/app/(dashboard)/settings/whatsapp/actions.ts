@@ -2,9 +2,13 @@
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 
 export async function saveWhatsAppSettings(settings: Record<string, string>) {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
+
     const supabase = await createAdminClient();
 
     // Parse groups to maintain legacy keys for backward compatibility
@@ -77,6 +81,9 @@ export async function saveWhatsAppSettings(settings: Record<string, string>) {
 
 export async function getWhatsAppSettings() {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
+
     const supabase = await createAdminClient();
     const { data, error } = await supabase.from('system_settings').select('*');
     

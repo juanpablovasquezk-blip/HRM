@@ -2,20 +2,36 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth, getOwnPersonnelId } from '@/lib/auth/action-guard';
+import { hasPermission } from '@/lib/auth/roles';
 import { revalidatePath } from 'next/cache';
 import { partialRecalculate } from '@/lib/scheduler';
 import { resolveLeaveOverlap, isFreeDayRequest } from '@/lib/leaves/leave-overlap';
 import { parseISO, format, addDays, subDays } from 'date-fns';
 
 export async function requestLeave(formData: FormData) {
+  const auth = await requireActionAuth();
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
+  const canManageLeaves = hasPermission(auth.role, 'manageLeaves');
+  const canApproveLeaves = hasPermission(auth.role, 'approveLeaves');
+  const personnelId = formData.get('personnel_id') as string;
+  if (!canManageLeaves && !canApproveLeaves) {
+    const ownPersonnelId = await getOwnPersonnelId(auth.userId, auth.email);
+    if (!ownPersonnelId || personnelId !== ownPersonnelId) {
+      return { success: false, error: 'Solo puedes solicitar licencias para tu propio perfil.' };
+    }
+  }
+
   const supabaseAdmin = createAdminClient();
 
-  const personnelId = formData.get('personnel_id') as string;
   const type = formData.get('type') as string;
   const rawStartDate = formData.get('start_date') as string;
   const rawEndDate = formData.get('end_date') as string;
   const reason = (formData.get('reason') as string) || null;
-  const status = (formData.get('status') as string) || 'pending';
+  const status = canManageLeaves ? ((formData.get('status') as string) || 'pending') : 'pending';
 
   // Automatically resolve overlaps: if continues an existing leave, shift start_date to prevent day superposition.
   // Las Vacaciones y Licencias Médicas tienen mayor prioridad que los días solicitados (días libres).
@@ -88,8 +104,10 @@ export async function requestLeave(formData: FormData) {
 }
 
 export async function approveLeave(leaveId: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const auth = await requireActionAuth({ permission: 'approveLeaves' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
 
   const supabaseAdmin = createAdminClient();
 
@@ -145,7 +163,7 @@ export async function approveLeave(leaveId: string) {
     .from('leaves')
     .update({
       status: 'approved',
-      approved_by: user?.id,
+      approved_by: auth.userId,
       approved_at: new Date().toISOString(),
     })
     .eq('id', leaveId);
@@ -199,6 +217,11 @@ export async function approveLeave(leaveId: string) {
 }
 
 export async function updateLeave(id: string, formData: FormData) {
+  const auth = await requireActionAuth({ permission: 'manageLeaves' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const supabaseAdmin = createAdminClient();
 
   // Get current leave details to know the personnel_id before update
@@ -305,8 +328,10 @@ export async function updateLeave(id: string, formData: FormData) {
 }
 
 export async function rejectLeave(leaveId: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const auth = await requireActionAuth({ permission: 'approveLeaves' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
 
   const supabaseAdmin = createAdminClient();
 
@@ -314,7 +339,7 @@ export async function rejectLeave(leaveId: string) {
     .from('leaves')
     .update({
       status: 'rejected',
-      approved_by: user?.id,
+      approved_by: auth.userId,
       approved_at: new Date().toISOString(),
     })
     .eq('id', leaveId);
@@ -326,6 +351,11 @@ export async function rejectLeave(leaveId: string) {
 }
 
 export async function deleteLeave(id: string) {
+  const auth = await requireActionAuth({ permission: 'manageLeaves' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const supabaseAdmin = createAdminClient();
   const { error } = await supabaseAdmin.from('leaves').delete().eq('id', id);
   if (error) return { success: false, error: error.message };
@@ -337,11 +367,24 @@ export async function deleteLeave(id: string) {
 }
 
 export async function listLeaves(status?: string) {
+  const auth = await requireActionAuth();
+  if (!auth.ok) {
+    return { data: [], error: auth.error };
+  }
+
   const supabase = await createClient();
   let query = supabase
     .from('leaves')
     .select('*, personnel:personnel(first_name, last_name_father, rut)')
     .order('created_at', { ascending: false });
+
+  if (!hasPermission(auth.role, 'approveLeaves') && !hasPermission(auth.role, 'manageLeaves')) {
+    const ownPersonnelId = await getOwnPersonnelId(auth.userId, auth.email);
+    if (!ownPersonnelId) {
+      return { data: [], error: null };
+    }
+    query = query.eq('personnel_id', ownPersonnelId);
+  }
 
   if (status) query = query.eq('status', status);
   const { data, error } = await query;

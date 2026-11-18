@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { BonusRecord, BonusType } from '@/types/database';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 
 export interface BonusFilters {
   startDate?: string;
@@ -21,7 +22,11 @@ export interface BonusFilters {
  */
 export async function getBonusRecords(filters: BonusFilters = {}) {
   try {
-    const supabase = await createClient();
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error, data: [] };
+    }
+
     const admin = createAdminClient();
 
     let query = admin
@@ -102,11 +107,11 @@ export async function createBonusRecord(payload: {
   observations?: string | null;
 }) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: 'Usuario no autenticado' };
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
+    const user = { id: auth.userId };
 
     const admin = createAdminClient();
 
@@ -197,11 +202,11 @@ export async function createBatchBonusRecord(payload: {
   observations?: string | null;
 }) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: 'Usuario no autenticado' };
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
+    const user = { id: auth.userId };
 
     if (!payload.personnel_ids || payload.personnel_ids.length === 0) {
       return { success: false, error: 'Debes seleccionar al menos un colaborador.' };
@@ -286,11 +291,11 @@ export async function createBatchBonusRecord(payload: {
  */
 export async function voidBonusRecord(id: string, reason: string) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: 'Usuario no autenticado' };
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
+    const user = { id: auth.userId };
 
     if (!reason || reason.trim().length < 4) {
       return { success: false, error: 'Debes indicar un motivo de anulación detallado.' };
@@ -355,10 +360,9 @@ export async function updateBonusRecord(
   }
 ) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: 'Usuario no autenticado' };
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const admin = createAdminClient();
@@ -415,10 +419,9 @@ export async function updateBonusRecord(
  */
 export async function bulkUpdateBonusPaidMonth(ids: string[], paidMonth: string | null) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: 'Usuario no autenticado' };
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     if (!ids || ids.length === 0) {
@@ -455,10 +458,9 @@ export async function bulkUpdateBonusPaidMonth(ids: string[], paidMonth: string 
  */
 export async function deleteBonusRecord(id: string) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: 'Usuario no autenticado' };
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const admin = createAdminClient();

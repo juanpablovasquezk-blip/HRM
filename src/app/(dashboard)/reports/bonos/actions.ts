@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 
 export interface BonosReportFilters {
   from: string;
@@ -10,6 +11,11 @@ export interface BonosReportFilters {
 }
 
 export async function getBonosReportData(filters: BonosReportFilters) {
+  const auth = await requireActionAuth({ permission: 'viewReports' });
+  if (!auth.ok) {
+    throw new Error(auth.error);
+  }
+
   const supabase = await createClient();
   const { from, to, companyId } = filters;
 
@@ -143,6 +149,11 @@ export async function getBonosReportData(filters: BonosReportFilters) {
 
 export async function updateShiftPaidMonth(id: string, paidMonth: string | null) {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
     const { error } = await supabase
       .from('shift_assignments')
@@ -160,6 +171,11 @@ export async function updateShiftPaidMonth(id: string, paidMonth: string | null)
 
 export async function updateTransportPaidMonth(id: string, paidMonth: string | null) {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
     const { error } = await supabase
       .from('transport_requests')
@@ -182,6 +198,11 @@ export async function bulkUpdatePaidMonth(
   paidMonth: string | null
 ) {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const adminSupabase = createAdminClient();
     const value = paidMonth || null;
     let shiftSuccess = true;
@@ -243,17 +264,15 @@ export async function bulkUpdatePaidMonth(
 
 export async function createSpecialBonus(data: { personnel_id: string; date: string; reason: string; amount: number }) {
   try {
-    const supabase = await createClient();
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    
-    if (userError) {
-      console.error('Error getting user for special bonus:', userError);
-      return { success: false, error: userError.message };
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
+    const supabase = await createClient();
     const { error } = await supabase.from('special_bonuses').insert({
       ...data,
-      created_by: userData.user.id
+      created_by: auth.userId
     });
 
     if (error) {
@@ -269,6 +288,11 @@ export async function createSpecialBonus(data: { personnel_id: string; date: str
 
 export async function updateSpecialBonus(id: string, data: { date?: string; reason?: string; amount?: number }) {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
 
     // Prevent editing liquidated bonuses
@@ -299,6 +323,11 @@ export async function updateSpecialBonus(id: string, data: { date?: string; reas
 
 export async function deleteSpecialBonus(id: string) {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
 
     // Prevent deleting liquidated bonuses
@@ -329,6 +358,11 @@ export async function deleteSpecialBonus(id: string) {
 
 export async function updateSpecialBonusPaidMonth(id: string, paidMonth: string | null) {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
     const { error } = await supabase
       .from('special_bonuses')
@@ -347,6 +381,11 @@ export async function updateSpecialBonusPaidMonth(id: string, paidMonth: string 
 
 export async function searchPersonnel(query: string) {
   try {
+    const auth = await requireActionAuth({ permission: 'viewReports' });
+    if (!auth.ok) {
+      return { error: auth.error };
+    }
+
     const supabase = await createClient();
     const { data, error } = await supabase
       .from('personnel')

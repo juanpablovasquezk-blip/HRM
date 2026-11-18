@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 
 export interface CompanyDetailsInput {
   name: string;
@@ -18,6 +19,9 @@ export interface CompanyDetailsInput {
 }
 
 export async function createCompany(name: string) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { data: null, error: auth.error };
+
   const supabase = await createClient();
   
   const { data, error } = await supabase
@@ -34,6 +38,9 @@ export async function createCompany(name: string) {
 }
 
 export async function updateCompanyDetails(id: string, details: CompanyDetailsInput) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { data: null, error: auth.error };
+
   const supabase = await createClient();
   
   const { data, error } = await supabase
@@ -66,6 +73,9 @@ export async function updateCompany(id: string, name: string) {
 }
 
 export async function deleteCompany(id: string) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { error: auth.error };
+
   const supabase = await createClient();
   
   const { error } = await supabase
@@ -86,6 +96,9 @@ export async function deleteCompany(id: string) {
 
 export async function uploadCompanyDocument(formData: FormData) {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
+
     const companyId = formData.get('companyId') as string;
     const category = (formData.get('category') as string) || 'GENERAL';
     const title = formData.get('title') as string;
@@ -156,6 +169,9 @@ export async function uploadCompanyDocument(formData: FormData) {
 
 export async function deleteCompanyDocument(documentId: string, companyId: string) {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
+
     const adminSupabase = createAdminClient();
     
     const { error } = await adminSupabase
