@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import type { TransportRequestWithDetails } from '@/types/database';
 
 // =============================================================================
@@ -55,6 +56,11 @@ export async function getTransportReportData(filters: {
   endDate?: string;
   companyId?: string;
 }) {
+  const auth = await requireActionAuth({ permission: 'viewReports' });
+  if (!auth.ok) {
+    return { error: auth.error };
+  }
+
   const supabase = await createClient();
 
   let query = supabase
@@ -113,9 +119,8 @@ export async function importTransportCosts(
   costMap: Record<string, number>
 ): Promise<{ updated: number; notFound: string[]; error?: string }> {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { updated: 0, notFound: [], error: 'No autorizado' };
+    const auth = await requireActionAuth({ roles: ['ADMIN'] });
+    if (!auth.ok) return { updated: 0, notFound: [], error: auth.error };
 
     const adminSupabase = createAdminClient();
     const reservationNumbers = Object.keys(costMap).filter(Boolean);

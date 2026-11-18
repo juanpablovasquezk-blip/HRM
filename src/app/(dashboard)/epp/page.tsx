@@ -112,8 +112,9 @@ import { useUser } from '@/hooks/use-user';
 
 export default function EPPPage() {
   const supabase = createClient();
-  const { role } = useUser();
+  const { role, loading: userLoading } = useUser();
   const isReadOnly = role === 'SAFETY_OFFICER';
+  const canManageEppAdmin = role === 'ADMIN' || role === 'HR';
   const [isPending, startTransition] = useTransition();
 
   // Data States
@@ -425,12 +426,13 @@ export default function EPPPage() {
   const [filterMissingSizes, setFilterMissingSizes] = useState(false);
 
   // Fetch initial data
-  const fetchData = async () => {
+  const fetchData = async (currentRole = role) => {
+    const isAdminOrHr = currentRole === 'ADMIN' || currentRole === 'HR';
     const [res, catRes, posRes, suppRes] = await Promise.all([
       getEPPPersonnelData(),
       getProductCatalog(),
-      getAllPositionsWithAreas(),
-      getEPPSuppliers(),
+      isAdminOrHr ? getAllPositionsWithAreas() : Promise.resolve({ data: [], error: null }),
+      isAdminOrHr ? getEPPSuppliers() : Promise.resolve({ data: [], error: null }),
     ]);
 
     if (res.error) {
@@ -645,8 +647,10 @@ export default function EPPPage() {
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (!userLoading && role) {
+      fetchData(role);
+    }
+  }, [role, userLoading]);
 
   const toggleWorker = (id: string) => {
     setExpandedWorkers(prev => ({ ...prev, [id]: !prev[id] }));
@@ -1738,7 +1742,7 @@ export default function EPPPage() {
           </p>
         </div>
 
-        {!isReadOnly && (
+        {canManageEppAdmin && (
           <div className="flex flex-wrap gap-2">
             <Button
               onClick={() => handleCopyWorkerSelfServiceLink()}
@@ -1767,7 +1771,7 @@ export default function EPPPage() {
             <Users className="h-4 w-4" />
             Entregas a Personal
           </TabsTrigger>
-          {!isReadOnly && (
+          {canManageEppAdmin && (
             <>
               <TabsTrigger value="stock" className="flex items-center gap-1.5 rounded-lg px-4 py-2">
                 <Boxes className="h-4 w-4" />

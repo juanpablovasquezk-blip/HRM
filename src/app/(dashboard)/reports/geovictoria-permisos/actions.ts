@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { parseISO, eachDayOfInterval, differenceInCalendarDays, format } from 'date-fns';
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,8 @@ function cleanRut(rut: string | null | undefined): string {
 // ---------------------------------------------------------------------------
 
 export async function getPersonnelForFilter(): Promise<{ data: PersonnelFilterItem[] }> {
+  const auth = await requireActionAuth({ permission: 'viewReports' });
+  if (!auth.ok) return { data: [] };
   const supabase = await createClient();
   const { data } = await supabase
     .from('personnel')
@@ -56,6 +59,8 @@ export async function getGeoVictoriaPermisosData(filters: {
   onlyNew: boolean;          // true = SOLO CAMBIOS (not yet downloaded)
   personnelIds?: string[];
 }): Promise<{ data: GeoVictoriaPermisoRecord[]; leaveIds: string[]; assignmentIds: string[] }> {
+  const auth = await requireActionAuth({ permission: 'viewReports' });
+  if (!auth.ok) return { data: [], leaveIds: [], assignmentIds: [] };
   const supabase = await createClient();
 
   try {
@@ -222,6 +227,8 @@ export async function markPermisosAsDownloaded(
   leaveIds: string[],
   assignmentIds: string[],
 ): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireActionAuth({ permission: 'viewReports' });
+  if (!auth.ok) return { success: false, error: auth.error };
   const supabase = createAdminClient();
   const now = new Date().toISOString();
 

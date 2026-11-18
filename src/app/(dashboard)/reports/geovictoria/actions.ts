@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { format, parseISO, eachDayOfInterval, isSaturday, isSunday, isWeekend } from 'date-fns';
 
 export interface GeoVictoriaRecord {
@@ -19,6 +20,8 @@ export interface PersonnelFilterItem {
 }
 
 export async function getPersonnelForFilter(): Promise<{ data: PersonnelFilterItem[] }> {
+  const auth = await requireActionAuth({ permission: 'viewReports' });
+  if (!auth.ok) return { data: [] };
   const supabase = await createClient();
   const { data } = await supabase
     .from('personnel')
@@ -36,6 +39,8 @@ export async function getGeoVictoriaData(filters: {
   personnelIds?: string[];
   costCenterId?: string;
 }): Promise<{ data: GeoVictoriaRecord[] }> {
+  const auth = await requireActionAuth({ permission: 'viewReports' });
+  if (!auth.ok) return { data: [] };
   const supabase = await createClient();
 
   const start = parseISO(filters.startDate);

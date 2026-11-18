@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { revalidatePath } from 'next/cache';
 import { calculateExpiration } from '@/lib/documents/expiration-engine';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
@@ -11,6 +12,11 @@ import { calculateDynamicExpiration } from '@/lib/utils/document-calc';
 export async function uploadDocument(
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'manageDocuments' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const supabase = await createClient();
 
   const file = formData.get('file') as File;
@@ -41,9 +47,7 @@ export async function uploadDocument(
     }
   }
 
-  // Get current user for audit via the normal client to verify identity
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { success: false, error: 'Not authenticated' };
+  const user = { id: auth.userId };
 
   // Use service role client to bypass RLS for creating documents securely
   const adminClient = createSupabaseClient(
@@ -213,6 +217,11 @@ export async function listDocuments(filters?: {
   type?: string;
   status?: 'valid' | 'expiring_soon' | 'expired';
 }) {
+  const auth = await requireActionAuth({ permission: 'viewPersonnel' });
+  if (!auth.ok) {
+    return { data: [], error: auth.error };
+  }
+
   const supabase = await createClient();
 
   let query = supabase
@@ -236,6 +245,11 @@ export async function listDocuments(filters?: {
 export async function deleteDocument(
   id: string
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'manageDocuments' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const adminClient = createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -271,6 +285,11 @@ export async function checkExpirations(): Promise<{
   expiring: number;
   expired: number;
 }> {
+  const auth = await requireActionAuth({ permission: 'viewPersonnel' });
+  if (!auth.ok) {
+    return { expiring: 0, expired: 0 };
+  }
+
   const supabase = await createClient();
   const today = new Date().toISOString().split('T')[0];
   const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)

@@ -2,11 +2,15 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { startOfDay, endOfDay, eachDayOfInterval, format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { sendWhatsAppMedia } from '@/lib/ultramsg';
 
 export async function getIndividualRoster(personnelId: string, startDate: string, endDate: string) {
+  const auth = await requireActionAuth({ permission: 'viewReports' });
+  if (!auth.ok) return { error: auth.error };
+
   const supabase = await createClient();
 
   // 1. Fetch Personnel Info
@@ -79,6 +83,11 @@ export async function sendRosterWhatsApp(
   endDate: string
 ) {
   try {
+    const auth = await requireActionAuth({ permission: 'viewReports' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const adminClient = createAdminClient();
 
     // 1. Fetch Personnel Info (to get name and phone)

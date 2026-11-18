@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
-import { getUserRole } from '@/app/role-actions';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 
 function safeRevalidatePath(path: string) {
   try {
@@ -19,9 +19,8 @@ function safeRevalidatePath(path: string) {
 export async function uploadLetter(formData: FormData) {
   try {
     // 1. Authorization check
-    const role = await getUserRole();
-    const isAuthorized = ['ADMIN', 'AIRPORT_ASSISTANT', 'ASSISTANT'].includes(role);
-    if (!isAuthorized) {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'AIRPORT_ASSISTANT'] });
+    if (!auth.ok) {
       return { success: false, error: 'Acceso denegado: Permisos insuficientes' };
     }
 
@@ -99,9 +98,8 @@ export async function uploadLetter(formData: FormData) {
 export async function deleteLetter(id: string) {
   try {
     // 1. Authorization check
-    const role = await getUserRole();
-    const isAuthorized = ['ADMIN', 'AIRPORT_ASSISTANT', 'ASSISTANT'].includes(role);
-    if (!isAuthorized) {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'AIRPORT_ASSISTANT'] });
+    if (!auth.ok) {
       return { success: false, error: 'Acceso denegado: Permisos insuficientes' };
     }
 
@@ -151,6 +149,10 @@ export async function deleteLetter(id: string) {
 
 export async function getLetters(personnelId: string) {
   try {
+    const auth = await requireActionAuth({ permission: 'viewPersonnel' });
+    if (!auth.ok) {
+      return [];
+    }
     const supabase = await createClient();
     const { data, error } = await supabase
       .from('personnel_letters')

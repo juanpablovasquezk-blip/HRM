@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { revalidatePath } from 'next/cache';
 import { addDays, parseISO, format } from 'date-fns';
 
@@ -94,6 +95,8 @@ export interface ProductSupplierCode {
 // --- 1. Inventory Actions ---
 
 export async function getEPPInventory(): Promise<{ data: InventoryItem[]; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { data: [], error: auth.error };
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('epp_inventory')
@@ -123,6 +126,8 @@ export async function addInventoryBatch(payload: {
   stockQty?: number;
   items?: InventoryBatchItemInput[];
 }): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
   const supabase = await createClient();
   
   let rows: any[] = [];
@@ -166,6 +171,8 @@ export async function addInventoryBatch(payload: {
 // --- 2. Position Requirements Actions ---
 
 export async function getEPPRequirements(): Promise<{ data: PositionRequirement[]; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { data: [], error: auth.error };
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('epp_position_requirements')
@@ -191,6 +198,8 @@ export async function saveEPPRequirement(payload: {
   renewalDays: number;
   sizeField: string | null;
 }): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
   const supabase = await createClient();
   let error;
   const renewalDaysVal = (payload.renewalDays && payload.renewalDays > 0) ? payload.renewalDays : 36500;
@@ -227,6 +236,8 @@ export async function saveEPPRequirement(payload: {
 }
 
 export async function deleteEPPRequirement(id: string): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
   const supabase = await createClient();
   const { error } = await supabase
     .from('epp_position_requirements')
@@ -249,6 +260,14 @@ export async function getEPPPersonnelData(): Promise<{
   };
   error: string | null;
 }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR', 'SAFETY_OFFICER'] });
+  if (!auth.ok) {
+    return {
+      data: { personnel: [], requirements: [], inventory: [], companies: [] },
+      error: auth.error,
+    };
+  }
+  const canViewAdminInventory = auth.role === 'ADMIN' || auth.role === 'HR';
   const supabase = await createClient();
 
   // Fetch all personnel
@@ -271,12 +290,17 @@ export async function getEPPPersonnelData(): Promise<{
 
   if (reqsErr) console.warn('Warning fetching epp_position_requirements:', reqsErr.message);
 
-  // Fetch inventory
-  const { data: inventory, error: invErr } = await supabase
-    .from('epp_inventory')
-    .select('*');
-
-  if (invErr) console.warn('Warning fetching epp_inventory:', invErr.message);
+  // Fetch inventory only for ADMIN/HR (avoids exposing batch costs/invoices to SUPERVISOR or SAFETY_OFFICER)
+  let inventory: any[] | null = [];
+  let invErr: any = null;
+  if (canViewAdminInventory) {
+    const invRes = await supabase
+      .from('epp_inventory')
+      .select('*');
+    inventory = invRes.data;
+    invErr = invRes.error;
+    if (invErr) console.warn('Warning fetching epp_inventory:', invErr.message);
+  }
 
   // Fetch companies for select
   const { data: companies, error: compErr } = await supabase
@@ -500,10 +524,10 @@ export async function registerDeliveryEvent(
   items: DeliveryItemInput[],
   signedFormUrl?: string
 ): Promise<{ success: boolean; eventId?: string; formNumber?: number; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
   const supabase = await createClient();
-
-  // Get logged-in user
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = { id: auth.userId };
 
   // 1. (Optional stock check removed to allow delivery registration even if inventory hasn't been logged in software)
 
@@ -617,6 +641,8 @@ export async function registerDeliveryEvent(
 }
 
 export async function deleteDeliveryEvent(eventId: string): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
   const supabase = await createClient();
 
   // Restore inventory stock if any non-past delivery items are linked to inventory
@@ -662,6 +688,8 @@ export async function returnDeliveryItem(
   deliveryItemId: string,
   quantityToReturn: number
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
   const supabase = await createClient();
 
   // Get delivery item details
@@ -724,10 +752,9 @@ export async function uploadSignedFormUrl(
   fileUrl: string
 ): Promise<{ success: boolean; error: string | null }> {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return { success: false, error: 'No autenticado' };
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const adminClient = createAdminClient();
@@ -749,10 +776,9 @@ export async function uploadEPPReceiptFile(
   formData: FormData
 ): Promise<{ success: boolean; publicUrl: string | null; error: string | null }> {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return { success: false, publicUrl: null, error: 'No autenticado' };
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR'] });
+    if (!auth.ok) {
+      return { success: false, publicUrl: null, error: auth.error };
     }
 
     const file = formData.get('file') as File | null;
@@ -801,6 +827,9 @@ export async function getMonthlyEPPForecastReport(
   monthStr: string, // e.g. "2026-08"
   supplierId?: string // Optional filter/enrichment by supplier
 ): Promise<{ data: ForecastReportItem[]; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { data: [], error: auth.error };
+
   const [dataResult, catalogResult] = await Promise.all([
     getEPPPersonnelData(),
     getProductCatalog(),
@@ -920,6 +949,8 @@ export async function getMonthlyEPPForecastReport(
 // --- 8. Product Catalog Actions ---
 
 export async function getProductCatalog(): Promise<{ data: ProductCatalogItem[]; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR', 'SAFETY_OFFICER'] });
+  if (!auth.ok) return { data: [], error: auth.error };
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('epp_product_catalog')
@@ -942,6 +973,8 @@ export async function saveProductCatalogItem(payload: {
   contractEligibility?: 'PLAZO_FIJO' | 'INDEFINIDO' | 'AMBOS';
   renewalDays: number;
 }): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
   const supabase = await createClient();
   let error;
 
@@ -982,6 +1015,8 @@ export async function saveProductCatalogItem(payload: {
 }
 
 export async function deleteProductCatalogItem(id: string): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
   const supabase = await createClient();
   const { error } = await supabase
     .from('epp_product_catalog')
@@ -996,6 +1031,8 @@ export async function deleteProductCatalogItem(id: string): Promise<{ success: b
 // --- 9. Positions for Matrix ---
 
 export async function getAllPositionsWithAreas(): Promise<{ data: any[]; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { data: [], error: auth.error };
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('positions')
@@ -1020,6 +1057,8 @@ export async function bulkSaveRequirementsMatrix(
   allCatalogItemIds: string[]
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
     const supabase = await createClient();
 
     if (allPositionIds.length === 0) {
@@ -1234,6 +1273,8 @@ export async function createWorkerSizeToken(
   personnelId: string,
   expirationDays: number = 3
 ): Promise<{ success: boolean; token: string | null; expiresAt: string | null; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+  if (!auth.ok) return { success: false, token: null, expiresAt: null, error: auth.error };
   const supabase = await createClient();
   const expires = new Date();
   expires.setDate(expires.getDate() + expirationDays);
@@ -1387,8 +1428,10 @@ export async function registerBulkHistoricalDelivery(
   items: HistoricalItemInput[],
   signedFormUrl?: string
 ): Promise<{ success: boolean; eventCount: number; error: string | null }> {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, eventCount: 0, error: auth.error };
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = { id: auth.userId };
 
   if (items.length === 0) {
     return { success: false, eventCount: 0, error: 'Debe ingresar al menos un ítem' };
@@ -1469,6 +1512,8 @@ export async function registerBulkHistoricalDelivery(
 
 export async function getEPPSuppliers(): Promise<{ data: EPPSupplier[]; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { data: [], error: auth.error };
     const supabase = await createClient();
     const { data, error } = await supabase
       .from('epp_suppliers')
@@ -1497,6 +1542,8 @@ export async function saveEPPSupplier(payload: {
   contactPhone?: string | null;
 }): Promise<{ success: boolean; data?: EPPSupplier; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
     const supabase = await createClient();
     let res;
     if (payload.id) {
@@ -1542,6 +1589,8 @@ export async function saveEPPSupplier(payload: {
 
 export async function deleteEPPSupplier(id: string): Promise<{ success: boolean; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
     const supabase = await createClient();
     const { error } = await supabase
       .from('epp_suppliers')
@@ -1558,6 +1607,8 @@ export async function deleteEPPSupplier(id: string): Promise<{ success: boolean;
 
 export async function getProductSupplierCodes(supplierId?: string): Promise<{ data: ProductSupplierCode[]; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { data: [], error: auth.error };
     const supabase = await createClient();
     let query = supabase.from('epp_product_supplier_codes').select('*');
     if (supplierId) {
@@ -1582,6 +1633,8 @@ export async function bulkSaveSupplierCodes(
   codes: { productCatalogId: string; size: string; supplierCode: string; supplierItemName?: string }[]
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
     const supabase = await createClient();
 
     // 1. Delete existing codes for this supplier

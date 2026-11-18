@@ -1,7 +1,7 @@
 'use server';
 
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getUserRole } from '@/app/role-actions';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { revalidatePath } from 'next/cache';
 
 export interface RiohsDashboardWorker {
@@ -36,6 +36,10 @@ export interface RiohsDashboardData {
 
 export async function getRiohsDashboardData(): Promise<{ success: boolean; data?: RiohsDashboardData; error?: string }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SAFETY_OFFICER', 'SUPERVISOR'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
     const supabase = createAdminClient();
 
     const [
@@ -165,8 +169,8 @@ export async function markBatchAuthGenerated(
   items: { personnelId: string; companyId: string }[]
 ): Promise<{ success: boolean; updatedCount: number; error?: string }> {
   try {
-    const role = await getUserRole();
-    if (role !== 'ADMIN' && role !== 'HR' && role !== 'SAFETY_OFFICER') {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SAFETY_OFFICER'] });
+    if (!auth.ok) {
       return { success: false, updatedCount: 0, error: 'No tiene permisos para realizar esta acción.' };
     }
 

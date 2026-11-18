@@ -2,28 +2,28 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { calculateDynamicExpiration } from '@/lib/utils/document-calc';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 
 // Get notifications for the current user
 export async function getNotifications(limit: number = 20) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { notifications: [], unreadCount: 0 };
+  const auth = await requireActionAuth();
+  if (!auth.ok) return { notifications: [], unreadCount: 0 };
 
   const adminClient = createAdminClient();
   
   const { data: notifications } = await adminClient
     .from('notifications')
     .select('*')
-    .eq('user_id', user.id)
+    .eq('user_id', auth.userId)
     .order('created_at', { ascending: false })
     .limit(limit);
 
   const { count } = await adminClient
     .from('notifications')
     .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id)
+    .eq('user_id', auth.userId)
     .eq('is_read', false);
 
   return {
@@ -34,37 +34,34 @@ export async function getNotifications(limit: number = 20) {
 
 // Mark notification as read
 export async function markNotificationRead(notificationId: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  const auth = await requireActionAuth();
+  if (!auth.ok) return;
 
   const adminClient = createAdminClient();
   await adminClient
     .from('notifications')
     .update({ is_read: true })
     .eq('id', notificationId)
-    .eq('user_id', user.id);
+    .eq('user_id', auth.userId);
 }
 
 // Mark all as read
 export async function markAllNotificationsRead() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  const auth = await requireActionAuth();
+  if (!auth.ok) return;
 
   const adminClient = createAdminClient();
   await adminClient
     .from('notifications')
     .update({ is_read: true })
-    .eq('user_id', user.id)
+    .eq('user_id', auth.userId)
     .eq('is_read', false);
 }
 
 // Get dashboard alerts (documents expiring/expired, fichas incomplete, etc.)
 export async function getDashboardAlerts() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { alerts: [] };
+  const auth = await requireActionAuth({ permission: 'viewPersonnel' });
+  if (!auth.ok) return { alerts: [] };
 
   const adminClient = createAdminClient();
   
@@ -209,7 +206,7 @@ export async function getDashboardAlerts() {
   const { data: recentUpdates, count: updateCount } = await adminClient
     .from('notifications')
     .select('*', { count: 'exact' })
-    .eq('user_id', user.id)
+    .eq('user_id', auth.userId)
     .eq('title', 'Ficha Actualizada')
     .eq('is_read', false)
     .gte('created_at', sevenDaysAgo.toISOString());

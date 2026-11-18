@@ -70,7 +70,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
     // Specific filtering for Airport Assistant role
     if (role === 'AIRPORT_ASSISTANT') {
-      const hiddenLabels = ['Turnos', 'Licencias', 'Reportes'];
+      const hiddenLabels = ['Turnos', 'Licencias', 'Reportes', 'EPP y Uniformes'];
       if (hiddenLabels.includes(item.label)) return false;
     }
 
