@@ -1,5 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { getSupervisorSession } from '../../actions';
 
 /**
@@ -12,6 +12,11 @@ export async function getSupervisorBonuses(filters: {
   otNumber?: string;
 } = {}) {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error, data: [] };
+    }
+
     const session = await getSupervisorSession();
     if (!session) {
       return { success: false, error: 'Sesión no válida', data: [] };

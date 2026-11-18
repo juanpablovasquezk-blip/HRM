@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
@@ -10,53 +11,14 @@ import { format, addDays, parseISO } from 'date-fns';
 import { sendWhatsAppMessage, getSystemSettings } from '@/lib/ultramsg';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 
-export async function loginAsSupervisor(email: string) {
-  const supabase = await createClient();
-  
-  // First, find all IDs for positions containing 'Supervisor'
-  const { data: posList } = await supabase
-    .from('positions')
-    .select('id')
-    .ilike('name', '%Supervisor%');
-
-  const supervisorPosIds = posList?.map(p => p.id) || [];
-
-  // Find personnel with this email
-  const query = supabase
-    .from('personnel')
-    .select('*')
-    .eq('email', email.trim().toLowerCase());
-
-  const { data: personnel, error } = await query.single();
-
-  if (error || !personnel) {
-    return { success: false, error: 'Acceso denegado. No se encontró el usuario.' };
-  }
-
-  const isSupervisor = 
-    personnel.role === 'Supervisor' || 
-    personnel.role === 'Admin' ||
-    (personnel.main_position && supervisorPosIds.includes(personnel.main_position));
-
-  if (!isSupervisor) {
-    return { success: false, error: 'Acceso denegado. No tienes cargo de supervisor.' };
-  }
-
+export async function loginAsSupervisor(_email: string) {
   const cookieStore = await cookies();
-  cookieStore.set('supervisor_id', personnel.id, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 60 * 60 * 24 * 30, // 30 days
-    path: '/'
-  });
-  cookieStore.set('supervisor_email', email, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 60 * 60 * 24 * 30,
-    path: '/'
-  });
-
-  return { success: true };
+  cookieStore.delete('supervisor_id');
+  cookieStore.delete('supervisor_email');
+  return {
+    success: false,
+    error: 'Método de acceso heredado deshabilitado. Inicia sesión desde /login.',
+  };
 }
 
 export async function logoutSupervisor() {
@@ -70,35 +32,37 @@ export async function logoutSupervisor() {
 }
 
 export async function getSupervisorSession() {
-  const cookieStore = await cookies();
-  let id = cookieStore.get('supervisor_id')?.value;
-  
-  const supabase = await createClient();
-  
-  if (!id) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data: personnel } = await supabase
-        .from('personnel')
-        .select('*')
-        .eq('email', user.email?.trim().toLowerCase())
-        .single();
-      
-      if (personnel) {
-        id = personnel.id;
-      }
+  const auth = await requireActionAuth({
+    roles: ['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'],
+  });
+  if (!auth.ok) return null;
+
+  const admin = createAdminClient();
+
+  const { data: byUserId, error: byUserIdErr } = await admin
+    .from('personnel')
+    .select('*')
+    .eq('user_id', auth.userId)
+    .limit(2);
+
+  if (!byUserIdErr && byUserId) {
+    if (byUserId.length === 1) return byUserId[0];
+    if (byUserId.length > 1) return null;
+  }
+
+  if (auth.email) {
+    const { data: byEmail, error: byEmailErr } = await admin
+      .from('personnel')
+      .select('*')
+      .eq('email', auth.email.trim().toLowerCase())
+      .limit(2);
+
+    if (!byEmailErr && byEmail && byEmail.length === 1) {
+      return byEmail[0];
     }
   }
 
-  if (!id) return null;
-
-  const { data } = await supabase
-    .from('personnel')
-    .select('*')
-    .eq('id', id)
-    .single();
-    
-  return data;
+  return null;
 }
 
 export async function getDailyPlanning(date?: string) {
@@ -157,8 +121,11 @@ export async function getDailyPlanning(date?: string) {
 }
 
 export async function updateAssignmentShift(assignmentId: string, newShiftId: string) {
+  const auth = await requireActionAuth({ permission: 'manageShifts' });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const session = await getSupervisorSession();
-  if (!session) return { success: false, error: 'No session' };
+  if (!session) return { success: false, error: 'No autorizado' };
 
   const supabase = await createAdminClient();
   const userName = `${session.first_name} ${session.last_name_father}`;
@@ -181,8 +148,11 @@ export async function updateAssignmentShift(assignmentId: string, newShiftId: st
 }
 
 export async function updateAttendance(assignmentId: string, status: 'present' | 'absent', comment?: string) {
+  const auth = await requireActionAuth({ permission: 'manageShifts' });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const session = await getSupervisorSession();
-  if (!session) return { success: false, error: 'No session' };
+  if (!session) return { success: false, error: 'No autorizado' };
 
   const supabase = await createAdminClient();
   const userName = `${session.first_name} ${session.last_name_father}`;
@@ -217,11 +187,13 @@ export async function updateAttendance(assignmentId: string, status: 'present' |
     }
   }
 
-  revalidatePath('/supervisor/attendance');
   return { success: true };
 }
 
 export async function updateTransportObservation(personnelId: string, date: string, observations: string) {
+  const auth = await requireActionAuth({ permission: 'manageTransport' });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const session = await getSupervisorSession();
   if (!session) return { success: false };
 
@@ -244,6 +216,9 @@ export async function updateTransportObservation(personnelId: string, date: stri
 }
 
 export async function updateTransportMobilization(personnelId: string, date: string, mobilization: string, assignmentId: string) {
+  const auth = await requireActionAuth({ permission: 'manageTransport' });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const session = await getSupervisorSession();
   if (!session) return { success: false };
 
@@ -444,8 +419,11 @@ export async function updateTransportMobilization(personnelId: string, date: str
 }
 
 export async function updateTransportType(requestId: string, type: 'PROPIO' | 'EMPRESA') {
+  const auth = await requireActionAuth({ permission: 'manageTransport' });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const session = await getSupervisorSession();
-  if (!session) return { success: false, error: 'No session' };
+  if (!session) return { success: false, error: 'No autorizado' };
 
   const supabase = await createAdminClient();
   const userName = `${session.first_name} ${session.last_name_father}`;
@@ -465,6 +443,9 @@ export async function updateTransportType(requestId: string, type: 'PROPIO' | 'E
 }
 
 export async function updateArrivalStatus(personnelId: string, date: string, status: string, comment?: string) {
+  const auth = await requireActionAuth({ permission: 'manageTransport' });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const session = await getSupervisorSession();
   if (!session) return { success: false };
 
@@ -487,6 +468,11 @@ export async function updateArrivalStatus(personnelId: string, date: string, sta
 }
 
 export async function getMonthlyPlanning(month?: string) {
+  const auth = await requireActionAuth({
+    roles: ['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT'],
+  });
+  if (!auth.ok) return null;
+
   const supabase = await createAdminClient();
   const targetMonth = month || format(new Date(), 'yyyy-MM');
   const startDate = `${targetMonth}-01`;
@@ -539,11 +525,10 @@ export async function getMonthlyPlanning(month?: string) {
 
 export async function uploadSupervisorDocument(formData: FormData): Promise<{ success: boolean; error?: string; file_url?: string }> {
   try {
-    const { getUserRole } = await import('@/app/role-actions');
-    const role = await getUserRole();
-    const authorizedRoles = ['ADMIN', 'HR', 'SUPERVISOR', 'SAFETY_OFFICER', 'AIRPORT_ASSISTANT', 'ASSISTANT'];
-
-    if (!role || !authorizedRoles.includes(role)) {
+    const auth = await requireActionAuth({
+      roles: ['ADMIN', 'HR', 'SUPERVISOR', 'SAFETY_OFFICER', 'AIRPORT_ASSISTANT'],
+    });
+    if (!auth.ok) {
       return { success: false, error: 'Acceso denegado. No tiene permisos para subir documentos.' };
     }
 
