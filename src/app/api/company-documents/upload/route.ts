@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireApiAuth } from '@/lib/auth/api-guard';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  const auth = await requireApiAuth(['ADMIN', 'HR']);
+  if (!auth.ok) return auth.response;
+
   try {
     const formData = await req.formData();
     const companyId = formData.get('companyId') as string;

@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireApiAuth } from '@/lib/auth/api-guard';
 
 export async function GET(request: Request) {
+  const auth = await requireApiAuth(['ADMIN']);
+  if (!auth.ok) return auth.response;
+
   const url = new URL(request.url);
   const name = url.searchParams.get('name') || 'MATIAS PABLO';
   

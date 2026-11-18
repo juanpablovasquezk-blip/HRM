@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireApiAuth } from '@/lib/auth/api-guard';
 import nodemailer from 'nodemailer';
 import { Resend } from 'resend';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 export async function POST(req: NextRequest) {
+  const auth = await requireApiAuth(['ADMIN', 'HR', 'SAFETY_OFFICER']);
+  if (!auth.ok) return auth.response;
+
   console.log('[RIOHS-EMAIL] Route handler invoked');
   try {
     const body = await req.json();
