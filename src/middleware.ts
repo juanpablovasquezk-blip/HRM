@@ -14,7 +14,8 @@ export const config = {
      * - favicon.ico (favicon file)
      * - api routes (handled separately)
      * - public assets
+     * - PWA / TWA technical files (manifest.json, sw.js, .well-known/assetlinks.json)
      */
-    '/((?!_next/static|_next/image|favicon.ico|api/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api/|manifest\\.json$|sw\\.js$|\\.well-known/assetlinks\\.json$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
