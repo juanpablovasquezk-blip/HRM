@@ -1,3 +1,5 @@
+'use server';
+
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireActionAuth } from '@/lib/auth/action-guard';
 import { getSupervisorSession } from '../../actions';
