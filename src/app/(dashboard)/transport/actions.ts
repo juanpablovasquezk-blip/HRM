@@ -2,51 +2,18 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
+import { generateTransportRequestsForDate, isWithinTransportWindow } from '@/lib/transport/generate-requests';
 import { revalidatePath } from 'next/cache';
 import { format, parseISO } from 'date-fns';
 
 import { sendWhatsAppMessage, getSystemSettings } from '@/lib/ultramsg';
 
-async function getAuthorizedRole() {
-  try {
-    const supabase = await createClient();
-    
-    // 1. Try to get user with a timeout to prevent hangs
-    const userPromise = supabase.auth.getUser();
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Auth Timeout')), 5000)
-    );
-    
-    const { data: { user } } = await Promise.race([userPromise, timeoutPromise]) as any;
-    if (!user) return null;
-
-    // 2. Check metadata first (fastest)
-    let role = (user.user_metadata?.role || '').toUpperCase();
-    
-    // 3. Emergency override for Marcela (Management access)
-    if (user.email?.toUpperCase().includes('MARCELA')) {
-      return 'AIRPORT_ASSISTANT';
-    }
-
-    if (role) return role;
-    
-    // 4. Fallback to DB check
-    const adminSupabase = createAdminClient();
-    const { data: dbUser } = await adminSupabase.from('users').select('role').eq('id', user.id).single();
-    if (dbUser?.role) return dbUser.role.toUpperCase();
-    
-    return 'USER';
-  } catch (error) {
-    console.error('[AUTH] getAuthorizedRole error:', error);
-    return null;
-  }
-}
-
 export async function updateTransportRequest(id: string, updates: any) {
   try {
-    const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
-      throw new Error('No autorizado');
+    const auth = await requireActionAuth({ permission: 'manageTransport' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const supabase = createAdminClient();
@@ -72,9 +39,9 @@ export async function updateTransportRequest(id: string, updates: any) {
 
 export async function updateTransportCost(requestId: string, cost: number | null) {
   try {
-    const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
-      return { success: false, error: 'No autorizado' };
+    const auth = await requireActionAuth({ permission: 'manageTransport' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const supabase = createAdminClient();
@@ -96,9 +63,9 @@ export async function updateTransportCost(requestId: string, cost: number | null
 
 export async function assignColleaguePickup(passengerRequestId: string, driverPersonnelId: string) {
   try {
-    const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
-      return { success: false, error: 'No autorizado' };
+    const auth = await requireActionAuth({ permission: 'manageTransport' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const supabase = createAdminClient();
@@ -208,9 +175,9 @@ export async function assignColleaguePickup(passengerRequestId: string, driverPe
 
 export async function unassignColleaguePickup(passengerRequestId: string) {
   try {
-    const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
-      return { success: false, error: 'No autorizado' };
+    const auth = await requireActionAuth({ permission: 'manageTransport' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const supabase = createAdminClient();
@@ -257,9 +224,9 @@ export async function unassignColleaguePickup(passengerRequestId: string) {
 
 export async function sendTransportNotification(requestId: string, isTimePending: boolean = false) {
   try {
-    const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
-      throw new Error('No autorizado');
+    const auth = await requireActionAuth({ permission: 'manageTransport' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
     
     const supabase = createAdminClient();
@@ -491,6 +458,11 @@ export async function sendTransportNotification(requestId: string, isTimePending
 
 export async function getAvailableShifts(date: string) {
   try {
+    const auth = await requireActionAuth({ permission: 'manageTransport' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = createAdminClient();
     const { data, error } = await supabase
       .from('shifts')
@@ -506,9 +478,9 @@ export async function getAvailableShifts(date: string) {
 
 export async function updateAssignmentShift(assignmentId: string, newShiftId: string) {
   try {
-    const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
-      throw new Error('No autorizado');
+    const auth = await requireActionAuth({ permission: 'manageTransport' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
 
     const supabase = createAdminClient();
@@ -542,14 +514,12 @@ export async function updateAssignmentShift(assignmentId: string, newShiftId: st
   }
 }
 
-function isWithinTransportWindow(timeStr: string | null | undefined): boolean {
-  if (!timeStr) return false;
-  const [h, m] = timeStr.split(':').map(Number);
-  const val = h * 100 + m;
-  return (val >= 2300 || val <= 630);
-}
-
 export async function getTransportRequests(date: string) {
+  const auth = await requireActionAuth({ permission: 'manageTransport' });
+  if (!auth.ok) {
+    return { data: [], error: auth.error };
+  }
+
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from('transport_requests')
@@ -631,164 +601,18 @@ export async function getTransportRequests(date: string) {
 }
 
 export async function generateTransportRequests(date: string) {
-  try {
-    const role = await getAuthorizedRole();
-    if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
-      return { success: false, error: 'No autorizado' };
-    }
-
-    const supabase = createAdminClient();
-    
-    // Clean up obsolete pending requests for this date (e.g., cancelled assignments or shifts changed to daytime)
-    const { data: currentPending } = await supabase
-      .from('transport_requests')
-      .select('id, type, assignment:shift_assignments(status, shift:shifts(start_time, end_time, requires_transport))')
-      .eq('date', date)
-      .eq('status', 'ABIERTO');
-
-    const toDeleteIds: string[] = [];
-    for (const req of currentPending || []) {
-      const asg = (req as any).assignment;
-      if (!asg || asg.status === 'cancelled') {
-        toDeleteIds.push(req.id);
-      } else if (asg.shift) {
-        if (asg.shift.requires_transport === false) {
-          toDeleteIds.push(req.id);
-        } else {
-          const time = req.type === 'SALIDA' ? asg.shift.end_time : asg.shift.start_time;
-          if (!isWithinTransportWindow(time)) {
-            toDeleteIds.push(req.id);
-          }
-        }
-      }
-    }
-
-    if (toDeleteIds.length > 0) {
-      await supabase.from('transport_requests').delete().in('id', toDeleteIds);
-    }
-
-    // 1. Get all confirmed assignments for that date
-    const { data: assignments, error: assErr } = await supabase
-      .from('shift_assignments')
-      .select(`
-        *,
-        personnel:personnel(*),
-        area:areas(*),
-        position:positions(*),
-        shift:shifts!shift_assignments_shift_id_fkey(*)
-      `)
-      .eq('date', date)
-      .eq('is_confirmed', true)
-      .neq('status', 'cancelled');
-
-    if (assErr) throw assErr;
-    if (!assignments || assignments.length === 0) return { success: true, message: 'No hay asignaciones confirmadas.' };
-
-    // Filter out assignments for inactive or terminated personnel
-    const activeAssignments = assignments.filter(ass => {
-      const p = ass.personnel;
-      if (!p) return false;
-      if (p.termination_date && date > p.termination_date) return false;
-      const todayStr = new Date().toLocaleDateString('sv');
-      if (!p.is_active && date >= todayStr) return false;
-      return true;
-    });
-
-    if (activeAssignments.length === 0) return { success: true, message: 'No hay asignaciones de personal activo.' };
-
-    // 2. Get existing requests to avoid duplicates
-    const { data: existingReqs } = await supabase
-      .from('transport_requests')
-      .select('assignment_id')
-      .eq('date', date);
-    
-    const existingIds = new Set(existingReqs?.map(r => r.assignment_id) || []);
-
-    const newRequests: any[] = [];
-
-    for (const ass of activeAssignments) {
-      if (existingIds.has(ass.id)) continue;
-      if (!ass.personnel || !ass.shift) continue;
-      if (ass.shift.requires_transport === false) continue;
-
-      const personnel = ass.personnel;
-      const shift = ass.shift;
-      const area = (ass as any).area;
-      const areaName = (area?.name || '').toUpperCase();
-
-      // Better Address Parsing
-      let homeAddress = "DIRECCIÓN NO INFORMADA EN FICHA";
-      const addr = personnel.address;
-      if (addr) {
-        if (typeof addr === 'string') {
-          homeAddress = addr.replace(/[\r\n]+/g, ' ').trim();
-        } else if (typeof addr === 'object') {
-          const a = addr as any;
-          const parts = [
-            String(a.street || '').replace(/[\r\n]+/g, ' ').trim(),
-            String(a.city || '').replace(/[\r\n]+/g, ' ').trim(),
-            String(a.commune || a.region || '').replace(/[\r\n]+/g, ' ').trim()
-          ].filter(Boolean);
-          homeAddress = parts.length > 0 ? parts.join(', ') : (a.full_address || JSON.stringify(a));
-        }
-      }
-
-      // Smart Plant Mapping
-      let plantAddress = "MINERQUIM PLANTA"; 
-      if (areaName.includes('BLUE')) plantAddress = "Los Maitenes Sur 9800, Pudahuel";
-      else if (areaName.includes('BODEGA') || areaName.includes('DHL') || areaName.includes('FEDEX')) plantAddress = "Osvaldo Croquevielle 2207, Pudahuel";
-      else if (areaName.includes('AEROPUERTO')) plantAddress = "Armando Cortinez Oriente 1704";
-
-      const isSupervisor = ((ass as any).position?.name || '').toUpperCase().includes('SUPERVISOR');
-      const defaultTransportType = isSupervisor ? 'PROPIO' : 'PENDIENTE';
-
-      // ENTRADA
-      if (isWithinTransportWindow(shift.start_time)) {
-        newRequests.push({
-          personnel_id: ass.personnel_id,
-          assignment_id: ass.id,
-          date: ass.date,
-          type: 'ENTRADA',
-          status: 'ABIERTO',
-          transport_type: defaultTransportType,
-          pickup_address: homeAddress,
-          destination_address: plantAddress
-        });
-      }
-
-      // SALIDA
-      if (isWithinTransportWindow(shift.end_time)) {
-        newRequests.push({
-          personnel_id: ass.personnel_id,
-          assignment_id: ass.id,
-          date: ass.date,
-          type: 'SALIDA',
-          status: 'ABIERTO',
-          transport_type: defaultTransportType,
-          pickup_address: plantAddress,
-          destination_address: homeAddress
-        });
-      }
-    }
-
-    if (newRequests.length > 0) {
-      const { error: insErr } = await supabase.from('transport_requests').insert(newRequests);
-      if (insErr) throw insErr;
-    }
-
-    revalidatePath('/transport');
-    revalidatePath('/worker');
-    return { success: true, count: newRequests.length };
-  } catch (error: any) {
-    console.error('Error generateTransportRequests:', error);
-    return { success: false, error: error.message };
+  const auth = await requireActionAuth({ permission: 'manageTransport' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
   }
+
+  return generateTransportRequestsForDate(date);
 }
 
 export async function clearTransportRequests(date: string) {
-  const role = await getAuthorizedRole();
-  if (!role || !['ADMIN', 'SUPERVISOR', 'AIRPORT_ASSISTANT', 'HR'].includes(role)) {
-    return { success: false, error: 'No autorizado' };
+  const auth = await requireActionAuth({ permission: 'manageTransport' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
   }
 
   const supabase = createAdminClient();
@@ -808,9 +632,12 @@ export async function clearTransportRequests(date: string) {
 
 export async function createTransportLog(formData: FormData) {
   try {
+    const auth = await requireActionAuth({ permission: 'manageTransport' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('No autorizado');
 
     const personnel_id = formData.get('personnel_id') as string;
     const date = formData.get('date') as string;
@@ -826,7 +653,7 @@ export async function createTransportLog(formData: FormData) {
         reservation_number: reservation_number || null,
         issues: issues || null,
         used_company_transport,
-        logged_by: user.id
+        logged_by: auth.userId
       });
 
     if (error) throw error;

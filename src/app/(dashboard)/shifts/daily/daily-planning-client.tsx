@@ -55,6 +55,7 @@ interface Props {
   shifts: Shift[];
   selectedDate: string;
   readOnly?: boolean;
+  userRole?: string;
 }
 
 export default function DailyPlanningClient({
@@ -64,8 +65,17 @@ export default function DailyPlanningClient({
   positions,
   shifts,
   selectedDate,
-  readOnly = false
+  readOnly = false,
+  userRole
 }: Props) {
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+
+  useEffect(() => {
+    const checkViewport = () => setIsMobileViewport(window.innerWidth < 1024);
+    checkViewport();
+    window.addEventListener('resize', checkViewport);
+    return () => window.removeEventListener('resize', checkViewport);
+  }, []);
   const router = useRouter();
   const reportRef = useRef<HTMLDivElement>(null);
   const [isAddingExtra, setIsAddingExtra] = useState(false);
@@ -649,6 +659,17 @@ export default function DailyPlanningClient({
       document.title = originalTitle;
     }, 100);
   };
+
+  if (userRole === 'SUPERVISOR' && isMobileViewport) {
+    return (
+      <div className="p-8 max-w-lg mx-auto text-center text-slate-600 space-y-2 border rounded-xl bg-slate-50">
+        <h2 className="text-lg font-bold text-slate-800">Acceso exclusivo desde PC / Escritorio</h2>
+        <p className="text-sm">
+          Para el rol SUPERVISOR, la Planificación Diaria está habilitada únicamente desde pantallas de escritorio.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">

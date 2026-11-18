@@ -63,6 +63,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { user, role, signOut } = useUser();
 
   const filteredNavItems = navItems.filter((item) => {
+    // Planificación Diaria: solo ADMIN y SUPERVISOR
+    if (item.href === '/shifts/daily') {
+      return role === 'ADMIN' || role === 'SUPERVISOR';
+    }
+
     // Specific filtering for Airport Assistant role
     if (role === 'AIRPORT_ASSISTANT') {
       const hiddenLabels = ['Turnos', 'Licencias', 'Reportes'];
@@ -139,6 +144,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 title={collapsed ? item.label : undefined}
                 className={cn(
                   'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                  item.href === '/shifts/daily' && role === 'SUPERVISOR' && 'hidden lg:flex',
                   isActive
                     ? 'bg-gradient-to-r from-orange-50 to-orange-100 text-orange-700 dark:from-orange-950/50 dark:to-orange-900/50 dark:text-orange-300 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800/50',

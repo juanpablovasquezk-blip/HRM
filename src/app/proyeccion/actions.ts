@@ -1,7 +1,7 @@
 'use server';
 
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getDailyOperationalData } from '@/app/(dashboard)/shifts/daily/actions';
+import { fetchDailyOperationalData } from '@/lib/shifts/daily-operational-data';
 import { calculateExpiration } from '@/lib/documents/expiration-engine';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -101,7 +101,7 @@ export async function getProyeccionData(targetDate?: string): Promise<{ data?: P
       { data: positions },
       { data: shifts },
     ] = await Promise.all([
-      getDailyOperationalData(date),
+      fetchDailyOperationalData(date),
       supabase.from('areas').select('*').order('name'),
       supabase.from('positions').select('*').order('name'),
       supabase.from('shifts').select('*').order('start_time'),
@@ -347,11 +347,28 @@ export async function getProyeccionData(targetDate?: string): Promise<{ data?: P
       year: 'numeric',
     }).format(new Date(`${date}T12:00:00`));
 
+    // Sanitize personnel PII before returning to public /proyeccion client
+    const publicDailyAssignments = activeAssignments.map((a: any) => ({
+      ...a,
+      personnel: a.personnel
+        ? {
+            id: a.personnel.id,
+            first_name: a.personnel.first_name,
+            last_name_father: a.personnel.last_name_father,
+            last_name_mother: a.personnel.last_name_mother,
+            is_active: a.personnel.is_active,
+            termination_date: a.personnel.termination_date,
+            main_position: a.personnel.main_position,
+            secondary_positions: a.personnel.secondary_positions,
+          }
+        : null,
+    }));
+
     return {
       data: {
         daily: {
           date,
-          assignments: activeAssignments,
+          assignments: publicDailyAssignments,
           requirements: dailyResult.requirements || [],
           areas: areas || [],
           positions: positions || [],

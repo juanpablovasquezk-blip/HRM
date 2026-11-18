@@ -2,13 +2,18 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { revalidatePath } from 'next/cache';
 import { parseISO, format, addDays, subDays } from 'date-fns';
 import type { ShiftAssignmentWithDetails, PersonnelWithDetails, ShiftRequirementWithDetails, Position, Shift } from '@/types/database';
-import { generateTransportRequests } from '../../transport/actions';
+import { fetchDailyOperationalData } from '@/lib/shifts/daily-operational-data';
+import { generateTransportRequestsForDate } from '@/lib/transport/generate-requests';
 import { validatePersonnelAvailabilityForDates } from '../actions';
 
 export async function updateAssignmentShift(assignmentId: string, shiftId: string) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const supabase = createAdminClient();
   const { error } = await supabase
     .from('shift_assignments')
@@ -29,6 +34,9 @@ export async function updateAssignmentDetails(
   positionId: string,
   areaId: string
 ) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const supabase = createAdminClient();
 
   // Fetch existing assignment for audit log
@@ -77,125 +85,12 @@ export async function updateAssignmentDetails(
  * Fetch all data for the daily operational view
  */
 export async function getDailyOperationalData(date: string) {
-  const supabase = createAdminClient();
-
-  // 1. Get all assignments for this day
-  const { data: assignments, error: assErr } = await supabase
-    .from('shift_assignments')
-    .select('*, personnel:personnel(*), shift:shifts!shift_assignments_shift_id_fkey(*), area:areas(*), position:positions(*)')
-    .eq('date', date);
-
-  // 1.1. Get all approved leaves for this day to exclude personnel with medical/vacation leaves
-  const { data: activeLeaves } = await supabase
-    .from('leaves')
-    .select('personnel_id')
-    .eq('status', 'approved')
-    .lte('start_date', date)
-    .gte('end_date', date);
-
-  const leavePersonnelIds = new Set((activeLeaves || []).map(l => l.personnel_id));
-
-  // 2. Get all requirements (regular + extra) for this day
-  const { data: requirements, error: reqErr } = await supabase
-    .from('shift_requirements')
-    .select('*, shift:shifts(*), area:areas(*), position:positions(*)')
-    .eq('date', date);
-
-  if (assErr || reqErr) {
-    console.error('Error fetching daily data:', assErr || reqErr);
-    return { error: 'Error al cargar datos operativos' };
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) {
+    return { error: auth.error };
   }
 
-  // 3. Count how many active extra assignments exist for each requirement slot (server-side)
-  const { data: extraAssignments, error: extraErr } = await supabase
-    .from('shift_assignments')
-    .select('shift_id, area_id, position_id, personnel_id, status')
-    .eq('date', date)
-    .eq('is_extra', true)
-    .neq('status', 'cancelled');
-
-  console.log(`[getDailyOperationalData] date=${date} extraAssignments found: ${extraAssignments?.length ?? 0}`, 
-    extraErr ? `ERROR: ${extraErr.message}` : '',
-    JSON.stringify(extraAssignments?.map(e => ({ sid: e.shift_id, aid: e.area_id, pid: e.position_id, per: e.personnel_id, st: e.status })))
-  );
-
-  // Build a lookup: "shift_id|area_id|position_id" -> count
-  const extraFillCount = new Map<string, number>();
-  for (const ea of extraAssignments || []) {
-    const key = `${ea.shift_id}|${ea.area_id}|${ea.position_id}`;
-    extraFillCount.set(key, (extraFillCount.get(key) || 0) + 1);
-  }
-
-  // Attach filled_count to each extra requirement
-  const extraReqs = (requirements || []).filter(r => r.is_extra);
-  for (const r of extraReqs) {
-    const key = `${r.shift_id}|${r.area_id}|${r.position_id}`;
-    const count = extraFillCount.get(key) || 0;
-    console.log(`[getDailyOperationalData] Extra req: key=${key} required=${r.required_count} filled=${count}`);
-  }
-
-  const requirementsWithFill = (requirements || []).map(r => ({
-    ...r,
-    filled_count: r.is_extra
-      ? (extraFillCount.get(`${r.shift_id}|${r.area_id}|${r.position_id}`) || 0)
-      : 0,
-  }));
-
-  const assignmentsWithLeave = (assignments || []).map(a => ({
-    ...a,
-    is_on_leave: leavePersonnelIds.has((a as any).personnel_id),
-  }));
-
-  const activeAssignments = assignmentsWithLeave.filter(a => {
-    const p = a.personnel as any;
-    if (!p) return false;
-    if (p.termination_date && date > p.termination_date) return false;
-    const todayStr = new Date().toLocaleDateString('sv');
-    if (!p.is_active && date >= todayStr) return false;
-    return true;
-  }) as ShiftAssignmentWithDetails[];
-
-  // Deduplicate non-extra assignments per person: keep only the most recent one
-  // (highest created_at / id) and auto-delete older duplicates from DB.
-  const seenPersonNormal = new Map<string, ShiftAssignmentWithDetails>();
-  const duplicateIds: string[] = [];
-
-  for (const a of activeAssignments) {
-    if ((a as any).is_extra) continue; // extra shifts are allowed to coexist
-    const pid = (a as any).personnel_id as string;
-    const prev = seenPersonNormal.get(pid);
-    if (!prev) {
-      seenPersonNormal.set(pid, a);
-    } else {
-      // Keep the one with the greater id (more recently created), discard the other
-      if (a.id > prev.id) {
-        duplicateIds.push(prev.id);
-        seenPersonNormal.set(pid, a);
-      } else {
-        duplicateIds.push(a.id);
-      }
-    }
-  }
-
-  // Async cleanup of duplicates in the background (non-blocking)
-  if (duplicateIds.length > 0) {
-    const adminClient = createAdminClient();
-    adminClient.from('shift_assignments').delete().in('id', duplicateIds)
-      .then(({ error }) => {
-        if (error) console.error('[getDailyOperationalData] Error deleting duplicate assignments:', error.message);
-        else console.log(`[getDailyOperationalData] Auto-deleted ${duplicateIds.length} duplicate assignment(s) for ${date}`);
-      });
-  }
-
-  // Rebuild deduplicated list: all extra + one non-extra per person
-  const dedupedAssignments = activeAssignments.filter(a =>
-    (a as any).is_extra || seenPersonNormal.get((a as any).personnel_id)?.id === a.id
-  );
-
-  return {
-    assignments: dedupedAssignments,
-    requirements: requirementsWithFill as ShiftRequirementWithDetails[],
-  };
+  return fetchDailyOperationalData(date);
 }
 
 
@@ -225,6 +120,9 @@ function getShiftInterval(dateStr: string, startTime: string, endTime: string): 
  * Filters out those who already have a shift or are on leave.
  */
 export async function getAvailableForExtra(date: string, positionId: string, extraShiftId?: string) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { error: auth.error };
+
   const supabase = createAdminClient();
 
   // 1. Get all personnel qualified for this position
@@ -383,6 +281,9 @@ export async function getAvailableForExtra(date: string, positionId: string, ext
  * Add an extra requirement for a specific day
  */
 export async function addExtraRequirement(formData: FormData) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const supabase = createAdminClient();
   
   const date = formData.get('date') as string;
@@ -435,6 +336,9 @@ export async function assignExtraPersonnel(
   positionId: string,
   personnelId: string
 ) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const supabase = createAdminClient();
 
   // Validate personnel availability
@@ -493,6 +397,9 @@ export async function assignExtraPersonnel(
  * Confirm the daily plan (sets is_confirmed = true for all assignments of that day)
  */
 export async function confirmDailyPlan(date: string) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const supabase = createAdminClient();
 
   const { error } = await supabase
@@ -502,7 +409,7 @@ export async function confirmDailyPlan(date: string) {
 
   if (error) return { success: false, error: error.message };
 
-  await generateTransportRequests(date);
+  await generateTransportRequestsForDate(date);
 
   revalidatePath('/shifts/daily');
   return { success: true };
@@ -512,6 +419,9 @@ export async function confirmDailyPlan(date: string) {
  * Cancel an assignment (mark as cancelled instead of deleting)
  */
 export async function cancelAssignment(id: string) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const supabase = createAdminClient();
   const { error } = await supabase
     .from('shift_assignments')
@@ -536,6 +446,9 @@ export async function cancelAssignment(id: string) {
  * Reactivate a cancelled assignment (return worker to shift)
  */
 export async function reactivateAssignment(id: string) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const supabase = createAdminClient();
 
   const { data: assignment } = await supabase
@@ -597,6 +510,9 @@ export async function reactivateAssignment(id: string) {
 }
 
 export async function resetDailyPlan(date: string) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const supabase = createAdminClient();
 
   // 1. Remove all extra assignments for this day
@@ -664,6 +580,9 @@ export async function resetDailyPlan(date: string) {
 }
 
 export async function confirmPlan(date: string) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const supabase = createAdminClient();
   
   // Mark all active assignments for this day as confirmed
@@ -675,13 +594,16 @@ export async function confirmPlan(date: string) {
 
   if (error) return { success: false, error: error.message };
   
-  const transportRes = await generateTransportRequests(date);
+  const transportRes = await generateTransportRequestsForDate(date);
   
   revalidatePath('/shifts/daily');
   return transportRes;
 }
 
 export async function swapAssignments(id1: string, id2: string) {
+  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+  if (!auth.ok) return { success: false, error: auth.error };
+
   const supabase = createAdminClient();
 
   // 1. Fetch both assignments with shift details
@@ -774,7 +696,7 @@ export async function swapAssignments(id1: string, id2: string) {
       .in('assignment_id', [id1, id2]);
       
     // Regenerate transport requests for this date
-    await generateTransportRequests(ass1.date);
+    await generateTransportRequestsForDate(ass1.date);
   }
 
   revalidatePath('/shifts/daily');

@@ -1,10 +1,16 @@
 'use server';
 
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { sendWhatsAppMedia } from '@/lib/ultramsg';
 
 export async function sendDailyPlanScreenshotAction(base64Image: string, date: string) {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     if (!base64Image) {
       return { success: false, error: 'Imagen base64 vacía' };
     }
