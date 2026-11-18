@@ -2,8 +2,9 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { revalidatePath } from 'next/cache';
-import { deletePersonnelDocumentsAndLetters } from './actions';
+import { deletePersonnelDocumentsAndLetters } from '@/lib/personnel/cleanup-documents';
 
 function safeRevalidatePath(path: string) {
   try {
@@ -17,6 +18,11 @@ function safeRevalidatePath(path: string) {
 }
 
 export async function getDismissalRecords(personnelId: string) {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { data: [], error: auth.error };
+  }
+
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('dismissal_records')
@@ -35,16 +41,17 @@ export async function uploadDismissalReceipt(
   recordId: string,
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const file = formData.get('file') as File;
   if (!file) {
     return { success: false, error: 'No se ha seleccionado ningún archivo' };
   }
 
-  const supabase = await createClient();
   const adminClient = createAdminClient();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { success: false, error: 'No autenticado' };
 
   // 1. Get record and check ownership/existence
   const { data: record, error: recError } = await adminClient
@@ -89,7 +96,7 @@ export async function uploadDismissalReceipt(
       receipt_file_url: receiptUrl,
       status: 'completed',
       completed_at: new Date().toISOString(),
-      created_by: user.id
+      created_by: auth.userId
     })
     .eq('id', recordId);
 
@@ -117,6 +124,11 @@ export async function updateCredentialDeliveryStatus(
   recordId: string,
   delivered: boolean
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const adminClient = createAdminClient();
   const { data: record, error: recError } = await adminClient
     .from('dismissal_records')
@@ -146,6 +158,11 @@ export async function updateCredentialDeliveryStatus(
 export async function executeDirectCloseDismissal(
   personnelId: string
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const adminClient = createAdminClient();
   const { error } = await checkAndCompleteDismissal(personnelId, adminClient);
   if (error) return { success: false, error };

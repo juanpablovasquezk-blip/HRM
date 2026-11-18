@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import type { Personnel } from '@/types/database';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireActionAuth } from '@/lib/auth/action-guard';
+import { deletePersonnelDocumentsAndLetters } from '@/lib/personnel/cleanup-documents';
 import { createClient as createSupabaseAdminClient } from '@supabase/supabase-js';
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
@@ -27,6 +29,11 @@ export async function listPersonnel(
   positionId?: string,
   activeOnly: boolean = true
 ): Promise<{ data: Personnel[]; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'viewPersonnel' });
+  if (!auth.ok) {
+    return { data: [], error: auth.error };
+  }
+
   const supabase = await createClient();
 
   let query = supabase
@@ -76,6 +83,11 @@ export async function listPersonnel(
 export async function getPersonnel(
   id: string
 ): Promise<{ data: Personnel | null; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'viewPersonnel' });
+  if (!auth.ok) {
+    return { data: null, error: auth.error };
+  }
+
   const supabase = await createClient();
 
   const { data, error } = await supabase
@@ -96,6 +108,11 @@ function toUpper(val: any): any {
 export async function createPersonnel(
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const supabase = await createClient();
 
   const secondaryPositions = formData.get('secondary_positions') as string;
@@ -236,6 +253,11 @@ export async function updatePersonnel(
   id: string,
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const supabase = await createClient();
 
   const secondaryPositions = formData.get('secondary_positions') as string;
@@ -462,6 +484,11 @@ export async function deletePersonnel(
   refusedPcp: boolean = false,
   terminationDate?: string
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const supabase = await createClient();
   const adminClient = createAdminClient();
 
@@ -568,6 +595,11 @@ export async function deletePersonnel(
 export async function bulkImportPersonnel(
   rawData: any[]
 ): Promise<{ imported: number; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { imported: 0, error: auth.error };
+  }
+
   const supabase = await createClient();
 
   // 1. Fetch lookup maps
@@ -620,6 +652,11 @@ export async function updateDocumentStatus(
   status: 'APPROVED' | 'REJECTED' | 'PENDING',
   rejectionReason?: string
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'manageDocuments' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const supabase = await createClient();
 
   const { error } = await supabase
@@ -705,6 +742,11 @@ export async function enablePersonnelAccess(
   email: string,
   role: 'SUPERVISOR' | 'USER'
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const supabase = await createClient();
   const adminClient = createAdminClient();
 
@@ -772,6 +814,11 @@ export async function enablePersonnelAccess(
 export async function disablePersonnelAccess(
   personnelId: string
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const supabase = await createClient();
   const adminClient = createAdminClient();
 
@@ -818,6 +865,11 @@ export async function disablePersonnelAccess(
 export async function resetPasswordToRut(
   personnelId: string
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const supabase = await createClient();
   const adminClient = createAdminClient();
 
@@ -850,6 +902,11 @@ export async function resetPasswordToRut(
 export async function deleteDocumentAction(
   id: string
 ): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'manageDocuments' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
   const adminClient = createSupabaseAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -888,18 +945,21 @@ export async function createOnboardingToken(
   companyId: string
 ): Promise<{ success: boolean; token: string | null; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) {
+      return { success: false, token: null, error: auth.error };
+    }
+
     const supabase = await createClient();
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // Expiración en 7 días
 
-    const { data: { user } } = await supabase.auth.getUser();
-    
     const { data, error } = await supabase
       .from('onboarding_tokens')
       .insert({
         company_id: companyId,
         expires_at: expiresAt.toISOString(),
-        created_by: user?.id || null
+        created_by: auth.userId
       })
       .select('token')
       .single();
@@ -917,6 +977,11 @@ export async function listPendingOnboarding(
   companyId?: string
 ): Promise<{ data: Personnel[]; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) {
+      return { data: [], error: auth.error };
+    }
+
     const supabase = await createClient();
     let query = supabase
       .from('personnel')
@@ -949,6 +1014,11 @@ export async function approveOnboarding(
   contractStartDate?: string | null
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
     const admin = createAdminClient();
 
@@ -997,7 +1067,6 @@ export async function approveOnboarding(
     if (updateErr) throw updateErr;
 
     // Insert first contract history record
-    const { data: { user } } = await supabase.auth.getUser();
     await admin.from('personnel_contract_history').insert({
       personnel_id: personnelId,
       contract_type: contractType,
@@ -1005,7 +1074,7 @@ export async function approveOnboarding(
       duration_days: duration,
       end_date: endDate,
       notes: 'Contrato inicial al aprobar postulación',
-      created_by: user?.id || null,
+      created_by: auth.userId,
     });
 
     // 3. Create system access if email is present and requested
@@ -1033,68 +1102,17 @@ export async function approveOnboarding(
   }
 }
 
-// Helper to delete all documents and letters of a worker to free up space
-export async function deletePersonnelDocumentsAndLetters(
-  personnelId: string,
-  adminClient: any
-): Promise<void> {
-  try {
-    // 1. Delete files from storage and rows from 'documents' table
-    const { data: docs } = await adminClient
-      .from('documents')
-      .select('file_url')
-      .eq('personnel_id', personnelId);
-
-    if (docs && docs.length > 0) {
-      const paths = docs
-        .map((d: any) => {
-          if (!d.file_url) return null;
-          const marker = '/documents/';
-          const idx = d.file_url.lastIndexOf(marker);
-          return idx !== -1 ? d.file_url.substring(idx + marker.length) : null;
-        })
-        .filter(Boolean) as string[];
-
-      if (paths.length > 0) {
-        await adminClient.storage.from('documents').remove(paths);
-      }
-    }
-    await adminClient.from('documents').delete().eq('personnel_id', personnelId);
-
-    // 2. Delete files from storage and rows from 'personnel_letters' table
-    const { data: letters } = await adminClient
-      .from('personnel_letters')
-      .select('file_url')
-      .eq('personnel_id', personnelId);
-
-    if (letters && letters.length > 0) {
-      const paths = letters
-        .map((l: any) => {
-          if (!l.file_url) return null;
-          const marker = '/documents/';
-          const idx = l.file_url.lastIndexOf(marker);
-          return idx !== -1 ? l.file_url.substring(idx + marker.length) : null;
-        })
-        .filter(Boolean) as string[];
-
-      if (paths.length > 0) {
-        await adminClient.storage.from('documents').remove(paths);
-      }
-    }
-    await adminClient.from('personnel_letters').delete().eq('personnel_id', personnelId);
-
-    console.log(`[CLEANUP] Successfully deleted documents and letters for personnel ${personnelId}`);
-  } catch (err) {
-    console.error(`[CLEANUP] Error in deletePersonnelDocumentsAndLetters for ${personnelId}:`, err);
-  }
-}
-
 // Rechazar postulación
 export async function rejectOnboarding(
   personnelId: string,
   reason: string
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const admin = createAdminClient();
     const { error } = await admin
       .from('personnel')
@@ -1126,6 +1144,11 @@ export async function changeToIndefiniteContract(
   notes?: string
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
     const admin = createAdminClient();
 
@@ -1188,6 +1211,11 @@ export async function renewFixedContract(
   notes?: string
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
     const admin = createAdminClient();
 
@@ -1248,6 +1276,11 @@ export async function getContractHistory(
   personnelId: string
 ): Promise<{ data: any[]; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ permission: 'viewPersonnel' });
+    if (!auth.ok) {
+      return { data: [], error: auth.error };
+    }
+
     const supabase = await createClient();
     const { data, error } = await supabase
       .from('personnel_contract_history')
@@ -1275,6 +1308,11 @@ export async function updateContractHistory(
   }
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
     const admin = createAdminClient();
 
@@ -1337,6 +1375,11 @@ export async function deleteContractHistory(
   personnelId: string
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const auth = await requireActionAuth({ permission: 'managePersonnel' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
     const supabase = await createClient();
     const admin = createAdminClient();
 
