@@ -146,6 +146,7 @@ export interface RawLeaveRecord {
 export interface PersonnelScheduleProfile {
   personnel_id: string;
   first_name?: string;
+  full_name?: string;
   birth_date?: string | null;
   main_position: string | null;
   main_position_name?: string;
@@ -167,6 +168,8 @@ export interface PersonnelScheduleProfile {
    */
   min_rest_hours?: number | null;
   fixed_shift_id?: string | null;
+  exclusive_shift_id?: string | null;
+  exclusive_shift_start?: string | null;
   area_id?: string | null;
   /**
    * Day/night preference flags; in v2 these do NOT exclude operators.

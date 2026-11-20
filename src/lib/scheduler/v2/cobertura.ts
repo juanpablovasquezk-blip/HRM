@@ -19,6 +19,7 @@ import {
   prepareDotacionSlots,
 } from './dotacion';
 import {
+  canPersonTakeShiftInterval,
   evaluatePermissionsForWeek,
   getApplicableWeeklyHoursLimit,
   getShiftOccupiedDates,
@@ -65,14 +66,6 @@ function getPositionMatch(
   if (person.main_position === positionId) return 'primary';
   if ((person.secondary_positions || []).includes(positionId)) return 'secondary';
   return null;
-}
-
-function canTakeFixedShift(
-  person: PersonnelScheduleProfile,
-  shiftId: string
-): boolean {
-  if (!person.fixed_shift_id) return true;
-  return person.fixed_shift_id === shiftId;
 }
 
 function getTotalHours(shifts: ScheduledShiftInterval[]): number {
@@ -481,7 +474,15 @@ export function scheduleCrossArea(params: {
       if (p.personnel_id === excludePersonId) continue;
       const matchType = getPositionMatch(p, slot.position_id);
       if (!matchType) continue;
-      if (!canTakeFixedShift(p, slot.shift_id)) continue;
+      if (
+        !canPersonTakeShiftInterval(p, {
+          shift_id: slot.shift_id,
+          shift_start: slot.shift_start,
+          shift_name: slot.shift_name,
+        })
+      ) {
+        continue;
+      }
 
       const pShifts = shiftsByPerson.get(p.personnel_id) || [];
       const violations = validateJornadaConstraints(
@@ -547,7 +548,16 @@ export function scheduleCrossArea(params: {
       if (!person) continue;
 
       const matchForTarget = getPositionMatch(person, slot.position_id);
-      if (!matchForTarget || !canTakeFixedShift(person, slot.shift_id)) continue;
+      if (
+        !matchForTarget ||
+        !canPersonTakeShiftInterval(person, {
+          shift_id: slot.shift_id,
+          shift_start: slot.shift_start,
+          shift_name: slot.shift_name,
+        })
+      ) {
+        continue;
+      }
 
       const shiftsWithoutExisting = removeShiftInstance(
         shiftsByPerson.get(person.personnel_id) || [],
@@ -1022,7 +1032,14 @@ export function scheduleCrossArea(params: {
             ) {
               continue;
             }
-            if (!canTakeFixedShift(p, cfg.shift_id)) continue;
+            if (
+              !canPersonTakeShiftInterval(p, {
+                shift_id: cfg.shift_id,
+                shift_start: cfg.shift_start,
+              })
+            ) {
+              continue;
+            }
             if (getTotalHours(weekShifts) + cfg.duration_hours > weeklyLimit) {
               continue;
             }

@@ -2501,6 +2501,7 @@ export async function previewCompareSchedulers(
       return {
         personnel_id: p.id,
         first_name: p.first_name,
+        full_name: [p.first_name, p.last_name_father].filter(Boolean).join(' '),
         birth_date: p.birth_date || null,
         main_position: p.main_position,
         main_position_name: mainPos?.name,
@@ -2869,6 +2870,8 @@ export async function runSchedulerV2(params: {
       .map((p: any) => ({
         personnel_id: p.id,
         first_name: p.first_name,
+        full_name: [p.first_name, p.last_name_father].filter(Boolean).join(' '),
+        birth_date: p.birth_date ?? null,
         main_position: p.main_position ?? null,
         secondary_positions: Array.isArray(p.secondary_positions) ? p.secondary_positions : [],
         rotation_pattern: p.rotation_pattern ?? null,

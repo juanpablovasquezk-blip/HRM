@@ -752,3 +752,140 @@ test('ROSTER-05: refuerzos de Aeropuerto solo L-V con AM07 y Bodegas con AM04 en
   assert.equal(dhlRes.reinforcements[0].position_id, 'pos-bodega-dhl');
   assert.equal(dhlRes.reinforcements[0].shift_id, 'shift-am04');
 });
+
+test('Exclusividades de horario en v2: solo titulares 4x4 (NS22) e Ítalo Guerra (PM 13:30); turno fijo antiguo no bloquea otros horarios', () => {
+  const opLegacyFixed: PersonnelScheduleProfile = {
+    personnel_id: 'op-legacy',
+    first_name: 'Operador',
+    full_name: 'Operador Legado',
+    main_position: 'pos-aero',
+    secondary_positions: ['pos-base'],
+    fixed_shift_id: 'shift-legacy-am08',
+    prefers_night: false,
+    avoids_night: true,
+    rotation_pattern: '5X2_ANTIGUO',
+    area_id: 'area-aero',
+  };
+
+  const italo: PersonnelScheduleProfile = {
+    personnel_id: 'italo-id',
+    first_name: 'Ítalo',
+    full_name: 'Ítalo Guerra',
+    main_position: 'pos-base',
+    secondary_positions: ['pos-aero'],
+    area_id: 'area-base',
+  };
+
+  const titular1: PersonnelScheduleProfile = {
+    personnel_id: 'tit-1',
+    first_name: 'Titular 1',
+    main_position: 'pos-aero',
+    secondary_positions: ['pos-base'],
+    rotation_pattern: '4x4',
+    area_id: 'area-aero',
+  };
+
+  const titular2: PersonnelScheduleProfile = {
+    personnel_id: 'tit-2',
+    first_name: 'Titular 2',
+    main_position: 'pos-aero',
+    secondary_positions: ['pos-base'],
+    rotation_pattern: '4x4',
+    area_id: 'area-aero',
+  };
+
+  const res = scheduleCrossArea({
+    startDate: '2026-11-09', // lunes
+    endDate: '2026-11-09',
+    rawRequirements: [
+      // Titular 1 ausente -> requiere reemplazo NS22 (22:00)
+      {
+        id: 'req-ns22',
+        date: '2026-11-09',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_id: 'shift-ns22',
+        required_count: 1,
+        priority: 'Crítico',
+        shift: { name: 'NS 22', start_time: '22:00', end_time: '07:00', duration_hours: 8 },
+      },
+      // Cupo PM 13:30 en Base -> debe tomarlo Ítalo Guerra
+      {
+        id: 'req-pm1330',
+        date: '2026-11-09',
+        area_id: 'area-base',
+        position_id: 'pos-base',
+        shift_id: 'shift-pm1330',
+        required_count: 1,
+        priority: 'Normal',
+        shift: { name: 'PM 13:30', start_time: '13:30', end_time: '22:00', duration_hours: 8 },
+      },
+      // Cupo AM 08 en Base -> Ítalo NO puede tomarlo; Titular 2 NO puede tomarlo
+      {
+        id: 'req-am08-extra',
+        date: '2026-11-09',
+        area_id: 'area-base',
+        position_id: 'pos-base',
+        shift_id: 'shift-am08',
+        required_count: 1,
+        priority: 'Normal',
+        shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+      },
+    ],
+    existingAssignments: [],
+    personnel: [opLegacyFixed, italo, titular1, titular2],
+    approvedLeaves: [
+      {
+        personnel_id: 'tit-1',
+        type: 'vacation',
+        start_date: '2026-11-09',
+        end_date: '2026-11-09',
+        status: 'approved',
+      },
+    ],
+    ns22Config: {
+      titulares: [
+        { personnel_id: 'tit-1', anchor_date: '2026-11-09', cycle_offset: 0, confirmed_4x4_regime: true },
+        { personnel_id: 'tit-2', anchor_date: '2026-11-09', cycle_offset: 4, confirmed_4x4_regime: true },
+      ],
+      shiftDef: {
+        shift_id: 'shift-ns22',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_start: '22:00',
+        shift_end: '07:00',
+        duration_hours: 8,
+      },
+    },
+    reinforcementConfig: {
+      'pos-base': {
+        shift_id: 'shift-am04',
+        shift_start: '04:00',
+        shift_end: '12:00',
+        duration_hours: 8,
+        area_id: 'area-base',
+        position_id: 'pos-base',
+      },
+    },
+    referenceDate: REF_DATE,
+  });
+
+  // 1) Operador con fixed_shift_id antiguo + avoids_night sí cubre el reemplazo NS22 (otro horario)
+  const ns22Ass = res.ordinary_assignments.find((a) => a.shift_id === 'shift-ns22');
+  assert.equal(ns22Ass?.personnel_id, 'op-legacy');
+
+  // 2) Ítalo Guerra cubre únicamente PM 13:30 y NO es asignado a AM 08 ni a refuerzo AM 04
+  const italoOrd = res.ordinary_assignments.filter((a) => a.personnel_id === 'italo-id');
+  assert.equal(italoOrd.length, 1);
+  assert.equal(italoOrd[0].shift_id, 'shift-pm1330');
+  const italoReinf = res.reinforcements.filter((a) => a.personnel_id === 'italo-id');
+  assert.equal(italoReinf.length, 0);
+
+  // 3) Titular 2 (4x4 Aeropuerto) no es asignado fuera de NS22 (ni a AM 08 ni a refuerzo AM 04)
+  assert.equal(
+    res.assignments.filter((a) => a.personnel_id === 'tit-2' && a.shift_id !== 'shift-ns22').length,
+    0
+  );
+  // El cupo AM 08 queda vacante porque ni Ítalo ni Titular 2 pueden salir de su exclusividad y opLegacy ya tomó NS22
+  assert.ok(res.remaining_vacancies.some((v) => v.shift_id === 'shift-am08'));
+});

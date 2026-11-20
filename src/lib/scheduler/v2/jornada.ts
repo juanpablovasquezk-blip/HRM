@@ -34,6 +34,48 @@ function normUpper(value?: string | null): string {
     .toUpperCase();
 }
 
+export function isExclusiveItaloGuerra(
+  person: Pick<PersonnelScheduleProfile, 'first_name' | 'full_name' | 'exclusive_shift_start'>
+): boolean {
+  if (person.exclusive_shift_start === '13:30') return true;
+  const candidateNames = [person.full_name, person.first_name].filter(Boolean);
+  for (const raw of candidateNames) {
+    const n = normUpper(raw);
+    if (n.includes('ITALO') && n.includes('GUERRA')) return true;
+  }
+  return false;
+}
+
+/**
+ * Enforces personal schedule exclusivities in v2:
+ * - Only Aeropuerto 4x4 titulares (NS22 only, handled via titular exclusion)
+ *   and Ítalo Guerra (PM 13:30 only) have exclusive schedules.
+ * - Legacy fixed_shift_id, prefers_night, avoids_night, and rotation_pattern
+ *   do NOT block compatible assignments for any other worker.
+ */
+export function canPersonTakeShiftInterval(
+  person: PersonnelScheduleProfile,
+  shift: { shift_id?: string | null; shift_start?: string | null; shift_name?: string | null }
+): boolean {
+  if (isExclusiveItaloGuerra(person)) {
+    const start = (shift.shift_start || '').slice(0, 5);
+    const name = normUpper(shift.shift_name);
+    if (start) return start === '13:30';
+    if (name) return name.includes('13:30') || name.includes('PM 13');
+    if (person.exclusive_shift_id && shift.shift_id) {
+      return person.exclusive_shift_id === shift.shift_id;
+    }
+    return false;
+  }
+  if (person.exclusive_shift_start) {
+    return (shift.shift_start || '').slice(0, 5) === person.exclusive_shift_start.slice(0, 5);
+  }
+  if (person.exclusive_shift_id && shift.shift_id) {
+    return person.exclusive_shift_id === shift.shift_id;
+  }
+  return true;
+}
+
 /**
  * Identifies workers who have legacy indicators (has_special_contract or special rotation_pattern)
  * without an explicit confirmed_regime, so they can be reviewed rather than silently exempted.

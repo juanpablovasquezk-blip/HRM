@@ -8,6 +8,7 @@ import {
 import { buildDotacionSlotKey, normalizeIsoDate } from './dotacion';
 import { resolveShiftDurationHours } from '../../../app/(dashboard)/shifts/shift-duration';
 import {
+  canPersonTakeShiftInterval,
   checkMinRestBetweenShifts,
   expandApprovedLeaves,
   getShiftOccupiedDates,
@@ -517,9 +518,17 @@ export function scheduleAirportNs22(params: {
     };
   }
 
-  // 2. Prepare mutable shift history for replacement candidates (excluding titulares)
+  // 2. Prepare mutable shift history for replacement candidates (excluding titulares and exclusive non-NS22 workers)
   const qualifiedCandidates = replacementCandidates
-    .filter((c) => !titularSet.has(c.personnel_id))
+    .filter(
+      (c) =>
+        !titularSet.has(c.personnel_id) &&
+        canPersonTakeShiftInterval(c, {
+          shift_id: shiftDef.shift_id,
+          shift_start: NS22_START_TIME,
+          shift_name: 'NS 22',
+        })
+    )
     .map((c) => ({
       profile: c,
       ...isQualifiedForAirportNs22(c, shiftDef.position_id),
