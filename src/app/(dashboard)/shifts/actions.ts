@@ -8,6 +8,7 @@ import {
   buildBlueExpressApplyPlan,
   calculateBlueExpressNightStaffingProposal,
   getTwoMonthHistoryWindow,
+  validateApprovedTrucksByWeekday,
   type BlueExpressNightProposal,
 } from '@/lib/scheduler/v2/blue-express';
 import { compareEnginesPreview } from '@/lib/scheduler/v2/preview-compare';
@@ -33,6 +34,11 @@ import { requireActionAuth } from '@/lib/auth/action-guard';
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
 import { es as esLocale } from 'date-fns/locale';
 import { buildConsolidatedRequirements, filterMissingRequirements } from './dotacion/materialize-utils';
+import {
+  buildOrdinaryRequirementRangePreview,
+  type OrdinaryRequirementRangeDeletePreview,
+  type OrdinaryRequirementRangeFilter,
+} from './dotacion/range-delete-utils';
 import {
   groupDailyCountsToTemplates,
   normalizePriority,
@@ -299,6 +305,112 @@ export async function deleteRequirement(id: string) {
   if (error) return { success: false, error: error.message };
   revalidatePath('/shifts/requirements');
   return { success: true, error: null };
+}
+
+/**
+ * Vista previa en solo lectura de requerimientos ordinarios fechados a eliminar por rango y filtros.
+ */
+export async function previewDeleteOrdinaryRequirementsByRange(
+  filter: OrdinaryRequirementRangeFilter
+): Promise<{ success: boolean; preview: OrdinaryRequirementRangeDeletePreview | null; error: string | null }> {
+  try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+    if (!auth.ok) return { success: false, preview: null, error: auth.error };
+
+    if (!filter.startDate || !filter.endDate || filter.startDate > filter.endDate) {
+      return {
+        success: false,
+        preview: null,
+        error: 'El rango de fechas es inválido (la fecha inicial debe ser menor o igual a la final).',
+      };
+    }
+
+    const supabase = await createClient();
+    const paged = await fetchAllPaginated<any>(async (from, to) => {
+      let q = supabase
+        .from('shift_requirements')
+        .select('id, date, area_id, position_id, shift_id, required_count, is_extra, area:areas(name), position:positions(name), shift:shifts(name)')
+        .eq('is_extra', false)
+        .gte('date', filter.startDate)
+        .lte('date', filter.endDate)
+        .order('date', { ascending: true })
+        .order('id', { ascending: true });
+
+      if (filter.areaId && filter.areaId !== 'all') q = q.eq('area_id', filter.areaId);
+      if (filter.positionId && filter.positionId !== 'all') q = q.eq('position_id', filter.positionId);
+      if (filter.shiftId && filter.shiftId !== 'all') q = q.eq('shift_id', filter.shiftId);
+      return q.range(from, to);
+    });
+
+    if (paged.error || !paged.data) {
+      return {
+        success: false,
+        preview: null,
+        error: paged.error || 'Error cargando vista previa de requerimientos.',
+      };
+    }
+
+    const preview = buildOrdinaryRequirementRangePreview(paged.data, filter);
+    return { success: true, preview, error: null };
+  } catch (err) {
+    return {
+      success: false,
+      preview: null,
+      error: err instanceof Error ? err.message : 'Error calculando vista previa de eliminación',
+    };
+  }
+}
+
+/**
+ * Elimina en una sola operación únicamente los requerimientos ordinarios fechados (`is_extra = false`)
+ * dentro del rango y filtros elegidos. Conserva Matriz Semanal, requerimientos extra y asignaciones.
+ */
+export async function deleteOrdinaryRequirementsByRange(
+  filter: OrdinaryRequirementRangeFilter
+): Promise<{ success: boolean; deletedCount: number; error: string | null }> {
+  try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+    if (!auth.ok) return { success: false, deletedCount: 0, error: auth.error };
+
+    if (!filter.startDate || !filter.endDate || filter.startDate > filter.endDate) {
+      return {
+        success: false,
+        deletedCount: 0,
+        error: 'El rango de fechas es inválido.',
+      };
+    }
+
+    const supabase = await createClient();
+    let delQuery = supabase
+      .from('shift_requirements')
+      .delete()
+      .eq('is_extra', false)
+      .gte('date', filter.startDate)
+      .lte('date', filter.endDate);
+
+    if (filter.areaId && filter.areaId !== 'all') delQuery = delQuery.eq('area_id', filter.areaId);
+    if (filter.positionId && filter.positionId !== 'all') delQuery = delQuery.eq('position_id', filter.positionId);
+    if (filter.shiftId && filter.shiftId !== 'all') delQuery = delQuery.eq('shift_id', filter.shiftId);
+
+    const { data, error } = await delQuery.select('id');
+    if (error) {
+      return { success: false, deletedCount: 0, error: error.message };
+    }
+
+    if (process.env.ROSTER_ISOLATED_TEST !== 'true') {
+      revalidatePath('/shifts/dotacion');
+      revalidatePath('/shifts/requirements');
+      revalidatePath('/shifts/daily');
+    }
+
+    return { success: true, deletedCount: data?.length || 0, error: null };
+  } catch (err) {
+    return {
+      success: false,
+      deletedCount: 0,
+      error: err instanceof Error ? err.message : 'Error eliminando necesidades por rango',
+    };
+  }
 }
 
 export async function listRequirements(startDate?: string, endDate?: string) {
@@ -722,12 +834,22 @@ export async function previewBlueExpressNightStaffing(
  */
 export async function applyBlueExpressNightStaffingProposal(
   startDate: string,
-  endDate: string
+  endDate: string,
+  approvedByWeekday?: Record<number, number>
 ): Promise<{ success: boolean; upsertedCount: number; proposal: BlueExpressNightProposal | null; error: string | null }> {
   try {
     const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
     if (!auth.ok) {
       return { success: false, upsertedCount: 0, proposal: null, error: auth.error };
+    }
+
+    let validatedApproved: Record<number, number> | undefined;
+    if (approvedByWeekday) {
+      const check = validateApprovedTrucksByWeekday(approvedByWeekday);
+      if (!check.ok) {
+        return { success: false, upsertedCount: 0, proposal: null, error: check.error };
+      }
+      validatedApproved = check.normalized;
     }
 
     const preview = await previewBlueExpressNightStaffing(startDate, endDate);
@@ -740,7 +862,7 @@ export async function applyBlueExpressNightStaffingProposal(
       };
     }
 
-    const rows = buildBlueExpressApplyPlan(preview.proposal);
+    const rows = buildBlueExpressApplyPlan(preview.proposal, validatedApproved);
     const supabase = createAdminClient();
     let upsertedCount = 0;
     const CHUNK_SIZE = 200;

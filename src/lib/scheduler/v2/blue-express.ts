@@ -93,16 +93,45 @@ export interface BlueExpressApplyUpsertRow {
   is_extra: false;
 }
 
+export function validateApprovedTrucksByWeekday(
+  approvedByWeekday?: Record<number, number> | null
+): { ok: true; normalized: Record<number, number> } | { ok: false; error: string } {
+  if (!approvedByWeekday) {
+    return { ok: false, error: 'Falta la pauta aprobada de camiones por día de la semana.' };
+  }
+  const normalized: Record<number, number> = {};
+  for (let w = 1; w <= 7; w++) {
+    const raw = Number(approvedByWeekday[w]);
+    if (!Number.isInteger(raw) || raw < 1 || raw > 3) {
+      return {
+        ok: false,
+        error: `Cantidad aprobada inválida para ${WEEKDAY_LABELS[w]} (${approvedByWeekday[w]}). Debe ser un entero entre 1 y 3 camiones.`,
+      };
+    }
+    normalized[w] = raw;
+  }
+  return { ok: true, normalized };
+}
+
 /**
  * Construye los registros ordinarios (`is_extra = false`) a actualizar o crear para
- * Blue Express AM 00 (Conductor Camion y Ayudante), sin tocar turnos diurnos ni extras.
+ * Blue Express AM 00 (Conductor Camion y Ayudante) usando las cantidades aprobadas,
+ * sin tocar turnos diurnos ni extras.
  */
 export function buildBlueExpressApplyPlan(
-  proposal: BlueExpressNightProposal
+  proposal: BlueExpressNightProposal,
+  approvedByWeekday?: Record<number, number> | null
 ): BlueExpressApplyUpsertRow[] {
   const recByWeekday = new Map<number, number>(
     proposal.weekdays.map((w) => [w.isoWeekday, w.recommended_trucks])
   );
+  if (approvedByWeekday) {
+    const check = validateApprovedTrucksByWeekday(approvedByWeekday);
+    if (!check.ok) throw new Error(check.error);
+    for (let w = 1; w <= 7; w++) {
+      recByWeekday.set(w, check.normalized[w]);
+    }
+  }
   const days = eachDayOfInterval({
     start: parseISO(proposal.target_start_date),
     end: parseISO(proposal.target_end_date),

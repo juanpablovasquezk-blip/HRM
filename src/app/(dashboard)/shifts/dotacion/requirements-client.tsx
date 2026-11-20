@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, previewBlueExpressNightStaffing, applyBlueExpressNightStaffingProposal, type WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
+import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, previewBlueExpressNightStaffing, applyBlueExpressNightStaffingProposal, previewDeleteOrdinaryRequirementsByRange, deleteOrdinaryRequirementsByRange, type WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
 import type { BlueExpressNightProposal } from '@/lib/scheduler/v2/blue-express';
+import type { OrdinaryRequirementRangeDeletePreview } from './range-delete-utils';
 import { Layers, Plus, Trash2, Calendar, MapPin, Briefcase, Clock, Loader2, RefreshCw, Shield, ChevronDown, Edit2, X, TableProperties, LayoutGrid } from 'lucide-react';
 import { toast } from 'sonner';
 import { WeeklyMatrixView } from './weekly-matrix-view';
@@ -18,6 +19,7 @@ interface ReqClientProps {
   templates: any[];
   areas: any[];
   shifts: any[];
+  positions?: any[];
   companyId: string;
   canEdit?: boolean;
 }
@@ -25,13 +27,37 @@ interface ReqClientProps {
 const DAY_NAMES: Record<number, string> = { 0: 'Dom', 1: 'Lun', 2: 'Mar', 3: 'Mié', 4: 'Jue', 5: 'Vie', 6: 'Sáb' };
 const DAY_LABELS_SHORT: Record<number, string> = { 0: 'D', 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V', 6: 'S' };
 
-export function RequirementsClient({ initialReqs, templates, areas, shifts, companyId, canEdit = false }: ReqClientProps) {
+export function RequirementsClient({ initialReqs, templates, areas, shifts, positions = [], companyId, canEdit = false }: ReqClientProps) {
   const [isPending, startTransition] = useTransition();
   const [selectedAreaId, setSelectedAreaId] = useState('');
   const [showGenerate, setShowGenerate] = useState(false);
   const [blueProposal, setBlueProposal] = useState<BlueExpressNightProposal | null>(null);
+  const [blueApprovedByWeekday, setBlueApprovedByWeekday] = useState<Record<number, number>>({});
   const [blueStart, setBlueStart] = useState('2026-12-07');
   const [blueEnd, setBlueEnd] = useState('2027-01-03');
+
+  const initBlueApproved = (proposal: BlueExpressNightProposal) => {
+    const map: Record<number, number> = {};
+    for (const w of proposal.weekdays) {
+      map[w.isoWeekday] = w.recommended_trucks;
+    }
+    // Pauta aprobada para 2026-12-07..2027-01-03: ajuste visible en Martes (3 -> 2)
+    if (
+      proposal.target_start_date === '2026-12-07' &&
+      proposal.target_end_date === '2027-01-03' &&
+      map[2] === 3
+    ) {
+      map[2] = 2;
+    }
+    setBlueApprovedByWeekday(map);
+  };
+  const [showRangeDelete, setShowRangeDelete] = useState(false);
+  const [delStart, setDelStart] = useState('2026-12-07');
+  const [delEnd, setDelEnd] = useState('2027-01-03');
+  const [delAreaId, setDelAreaId] = useState('all');
+  const [delPositionId, setDelPositionId] = useState('all');
+  const [delShiftId, setDelShiftId] = useState('all');
+  const [delPreview, setDelPreview] = useState<OrdinaryRequirementRangeDeletePreview | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterAreaId, setFilterAreaId] = useState('all');
   const [filterPositionId, setFilterPositionId] = useState('all');
@@ -500,6 +526,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
                         return;
                       }
                       setBlueProposal(res.proposal);
+                      initBlueApproved(res.proposal);
                     });
                   }}
                 >
@@ -536,7 +563,10 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
                     onClick={() => {
                       startTransition(async () => {
                         const res = await previewBlueExpressNightStaffing(blueStart, blueEnd);
-                        if (res.success && res.proposal) setBlueProposal(res.proposal);
+                        if (res.success && res.proposal) {
+                          setBlueProposal(res.proposal);
+                          initBlueApproved(res.proposal);
+                        }
                       });
                     }}
                   >
@@ -552,7 +582,8 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
                         startTransition(async () => {
                           const res = await applyBlueExpressNightStaffingProposal(
                             blueProposal.target_start_date,
-                            blueProposal.target_end_date
+                            blueProposal.target_end_date,
+                            blueApprovedByWeekday
                           );
                           if (!res.success) {
                             toast.error('No se pudo aplicar la propuesta Blue Express AM 00', {
@@ -561,7 +592,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
                             return;
                           }
                           toast.success('Dotación Blue Express AM 00 aplicada', {
-                            description: `${res.upsertedCount} cupos ordinarios nocturnos actualizados/creados entre ${blueProposal.target_start_date} y ${blueProposal.target_end_date}.`,
+                            description: `${res.upsertedCount} cupos ordinarios nocturnos guardados según pauta aprobada (${blueProposal.target_start_date} al ${blueProposal.target_end_date}).`,
                           });
                           if (res.proposal) setBlueProposal(res.proposal);
                           router.refresh();
@@ -584,6 +615,28 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
                 </div>
               )}
 
+              {blueProposal.weekdays.some((w) => (blueApprovedByWeekday[w.isoWeekday] ?? w.recommended_trucks) !== w.recommended_trucks) && (
+                <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-900">
+                  Ajuste aprobado antes de guardar:{' '}
+                  {blueProposal.weekdays
+                    .filter((w) => (blueApprovedByWeekday[w.isoWeekday] ?? w.recommended_trucks) !== w.recommended_trucks)
+                    .map((w) => `${w.label} ${w.recommended_trucks} → ${blueApprovedByWeekday[w.isoWeekday]}`)
+                    .join(', ')}{' '}
+                  · Total pauta aprobada:{' '}
+                  {(() => {
+                    const start = new Date(`${blueProposal.target_start_date}T00:00:00Z`);
+                    const end = new Date(`${blueProposal.target_end_date}T00:00:00Z`);
+                    let sum = 0;
+                    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+                      const iso = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
+                      const wObj = blueProposal.weekdays.find((x) => x.isoWeekday === iso);
+                      sum += blueApprovedByWeekday[iso] ?? wObj?.recommended_trucks ?? 1;
+                    }
+                    return `${sum} cupos de Conductor y ${sum} de Ayudante`;
+                  })()}.
+                </div>
+              )}
+
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full text-xs">
                   <thead className="bg-muted/50 text-left">
@@ -593,28 +646,49 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
                       <th className="p-2">Historial duplas</th>
                       <th className="p-2">Últimas 3</th>
                       <th className="p-2">Cancel. / Incomp. / Sin asist.</th>
-                      <th className="p-2">Camiones propuestos</th>
-                      <th className="p-2">Cupos (Cond. / Ayud.)</th>
+                      <th className="p-2">Sugerido</th>
+                      <th className="p-2">Aprobado (1–3)</th>
+                      <th className="p-2">Cupos a guardar (Cond. / Ayud.)</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {blueProposal.weekdays.map((w) => (
-                      <tr key={w.isoWeekday} className="border-t">
-                        <td className="p-2 font-medium">{w.label}</td>
-                        <td className="p-2">
-                          {w.nights_with_data} ({w.nights_without_data} s/d · {w.nights_zero_confirmed} cero)
-                        </td>
-                        <td className="p-2">{w.history_duplas.join(', ') || '—'}</td>
-                        <td className="p-2">{w.last_three_duplas.join(', ') || '—'}</td>
-                        <td className="p-2">
-                          {w.cancellations_total} / {w.incomplete_duplas_total} / {w.unconfirmed_attendance_total}
-                        </td>
-                        <td className="p-2 font-semibold">{w.recommended_trucks}</td>
-                        <td className="p-2">
-                          {w.proposed_conductores} / {w.proposed_ayudantes}
-                        </td>
-                      </tr>
-                    ))}
+                    {blueProposal.weekdays.map((w) => {
+                      const approved = blueApprovedByWeekday[w.isoWeekday] ?? w.recommended_trucks;
+                      return (
+                        <tr key={w.isoWeekday} className="border-t">
+                          <td className="p-2 font-medium">{w.label}</td>
+                          <td className="p-2">
+                            {w.nights_with_data} ({w.nights_without_data} s/d · {w.nights_zero_confirmed} cero)
+                          </td>
+                          <td className="p-2">{w.history_duplas.join(', ') || '—'}</td>
+                          <td className="p-2">{w.last_three_duplas.join(', ') || '—'}</td>
+                          <td className="p-2">
+                            {w.cancellations_total} / {w.incomplete_duplas_total} / {w.unconfirmed_attendance_total}
+                          </td>
+                          <td className="p-2">{w.recommended_trucks}</td>
+                          <td className="p-2">
+                            <select
+                              aria-label={`Camiones aprobados ${w.label}`}
+                              className="h-7 rounded border bg-background px-1.5 text-xs font-semibold"
+                              value={approved}
+                              onChange={(e) =>
+                                setBlueApprovedByWeekday((prev) => ({
+                                  ...prev,
+                                  [w.isoWeekday]: Number(e.target.value),
+                                }))
+                              }
+                            >
+                              <option value={1}>1</option>
+                              <option value={2}>2</option>
+                              <option value={3}>3</option>
+                            </select>
+                          </td>
+                          <td className="p-2 font-semibold">
+                            {approved} / {approved}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -634,6 +708,236 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
       </Card>
 
       {/* ═══ SECTION 3: Generated Requirements (grouped) ═══ */}
+      {canEdit && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="font-semibold text-sm">Requerimientos Generados</h3>
+                <p className="text-xs text-muted-foreground">
+                  Elimina en una sola operación únicamente los requerimientos ordinarios fechados por rango y filtros.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-red-700 border-red-200 hover:bg-red-50"
+                onClick={() => {
+                  setShowRangeDelete((v) => !v);
+                  setDelPreview(null);
+                }}
+              >
+                <Trash2 className="h-4 w-4 mr-1.5" />
+                Eliminar necesidades por rango
+              </Button>
+            </div>
+
+            {showRangeDelete && (
+              <div className="pt-3 border-t space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Desde (inclusivo)</Label>
+                    <Input
+                      type="date"
+                      value={delStart}
+                      onChange={(e) => {
+                        setDelStart(e.target.value);
+                        setDelPreview(null);
+                      }}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Hasta (inclusivo)</Label>
+                    <Input
+                      type="date"
+                      value={delEnd}
+                      onChange={(e) => {
+                        setDelEnd(e.target.value);
+                        setDelPreview(null);
+                      }}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Área</Label>
+                    <select
+                      className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                      value={delAreaId}
+                      onChange={(e) => {
+                        setDelAreaId(e.target.value);
+                        setDelPreview(null);
+                      }}
+                    >
+                      <option value="all">Todas las áreas</option>
+                      {areas.map((a: any) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Cargo</Label>
+                    <select
+                      className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                      value={delPositionId}
+                      onChange={(e) => {
+                        setDelPositionId(e.target.value);
+                        setDelPreview(null);
+                      }}
+                    >
+                      <option value="all">Todos los cargos</option>
+                      {positions.map((p: any) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Turno</Label>
+                    <select
+                      className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                      value={delShiftId}
+                      onChange={(e) => {
+                        setDelShiftId(e.target.value);
+                        setDelPreview(null);
+                      }}
+                    >
+                      <option value="all">Todos los turnos</option>
+                      {shifts.map((s: any) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={isPending}
+                    onClick={() => {
+                      startTransition(async () => {
+                        const res = await previewDeleteOrdinaryRequirementsByRange({
+                          startDate: delStart,
+                          endDate: delEnd,
+                          areaId: delAreaId,
+                          positionId: delPositionId,
+                          shiftId: delShiftId,
+                        });
+                        if (!res.success || !res.preview) {
+                          toast.error('No se pudo generar la vista previa', {
+                            description: res.error || 'Error desconocido',
+                          });
+                          return;
+                        }
+                        setDelPreview(res.preview);
+                      });
+                    }}
+                  >
+                    {isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+                    Vista previa
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setShowRangeDelete(false);
+                      setDelPreview(null);
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+
+                {delPreview && (
+                  <div className="rounded-md border bg-muted/20 p-3 space-y-2.5">
+                    {delPreview.allAreasSelected && (
+                      <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs font-medium text-red-900">
+                        Atención: seleccionaste TODAS las áreas. Verifica el desglose antes de confirmar la eliminación.
+                      </div>
+                    )}
+                    <div className="text-xs font-medium">
+                      Requerimientos ordinarios fechados afectados: <span className="font-bold">{delPreview.totalCount}</span> ({delPreview.startDate} al {delPreview.endDate})
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Se conservarán intactas las reglas de la Matriz Semanal, los requerimientos extra y todas las asignaciones del roster.
+                    </p>
+
+                    {delPreview.groups.length > 0 ? (
+                      <div className="overflow-x-auto rounded border bg-background">
+                        <table className="w-full text-xs">
+                          <thead className="bg-muted/50 text-left">
+                            <tr>
+                              <th className="p-2">Área</th>
+                              <th className="p-2">Cargo</th>
+                              <th className="p-2">Turno</th>
+                              <th className="p-2">Rango afectado</th>
+                              <th className="p-2 text-right">Registros</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {delPreview.groups.map((g) => (
+                              <tr key={g.key} className="border-t">
+                                <td className="p-2">{g.area_name}</td>
+                                <td className="p-2">{g.position_name}</td>
+                                <td className="p-2">{g.shift_name}</td>
+                                <td className="p-2">{g.min_date} .. {g.max_date}</td>
+                                <td className="p-2 text-right font-semibold">{g.count}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground">
+                        No hay requerimientos ordinarios fechados que coincidan con los filtros seleccionados.
+                      </div>
+                    )}
+
+                    {delPreview.totalCount > 0 && (
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          disabled={isPending}
+                          onClick={() => {
+                            startTransition(async () => {
+                              const res = await deleteOrdinaryRequirementsByRange({
+                                startDate: delStart,
+                                endDate: delEnd,
+                                areaId: delAreaId,
+                                positionId: delPositionId,
+                                shiftId: delShiftId,
+                              });
+                              if (!res.success) {
+                                toast.error('Error al eliminar necesidades', {
+                                  description: res.error || 'Error desconocido',
+                                });
+                                return;
+                              }
+                              toast.success(`${res.deletedCount} requerimientos ordinarios eliminados`);
+                              setDelPreview(null);
+                              setShowRangeDelete(false);
+                              router.refresh();
+                            });
+                          }}
+                        >
+                          {isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+                          Confirmar y eliminar ({delPreview.totalCount})
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <GroupedRequirements reqs={initialReqs} onDelete={handleDeleteReq} isPending={isPending} />
     </div>
   );

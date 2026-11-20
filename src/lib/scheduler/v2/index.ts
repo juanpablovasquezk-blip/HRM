@@ -9,6 +9,7 @@ export {
   buildBlueExpressApplyPlan,
   calculateBlueExpressNightStaffingProposal,
   getTwoMonthHistoryWindow,
+  validateApprovedTrucksByWeekday,
   type BlueExpressApplyUpsertRow,
   type BlueExpressHistoryAssignment,
   type BlueExpressHistoryRequirement,

@@ -4,6 +4,7 @@ import {
   buildBlueExpressApplyPlan,
   calculateBlueExpressNightStaffingProposal,
   getTwoMonthHistoryWindow,
+  validateApprovedTrucksByWeekday,
   type BlueExpressHistoryAssignment,
   type BlueExpressHistoryRequirement,
   type BlueExpressIdentifiers,
@@ -249,4 +250,97 @@ test('ROSTER-09: aplicar dotación nocturna AM 00 deja 1 conductor y 1 ayudante 
   );
   assert.equal(dec10NightCond?.required_count, 1);
   assert.equal(dec10NightAyud?.required_count, 1);
+});
+
+test('ROSTER-09: historial recomienda 3 los martes y usuario aprueba 2 -> 48 conductor / 48 ayudante, jueves 10 con 1 y conserva diurnos y extras', () => {
+  const proposal = calculateBlueExpressNightStaffingProposal({
+    identifiers: IDS,
+    targetStartDate: '2026-12-07',
+    targetEndDate: '2027-01-03',
+    referenceDate: '2026-11-20',
+    historyAssignments: [
+      // Martes: últimas 3 ocurrencias recomiendan 3 camiones
+      ...makeDupla('2026-11-03', 1),
+      ...makeDupla('2026-11-03', 2),
+      ...makeDupla('2026-11-03', 3),
+      ...makeDupla('2026-11-10', 1),
+      ...makeDupla('2026-11-10', 2),
+      ...makeDupla('2026-11-10', 3),
+      ...makeDupla('2026-11-17', 1),
+      ...makeDupla('2026-11-17', 2),
+      ...makeDupla('2026-11-17', 3),
+    ],
+    historyRequirements: [],
+    targetExistingRequirements: [],
+  });
+
+  const martes = proposal.weekdays.find((w) => w.isoWeekday === 2)!;
+  assert.equal(martes.recommended_trucks, 3);
+
+  // Pauta aprobada: Lunes 3, Martes 2, Miércoles 2, Jueves 1, Viernes 2, Sábado 1, Domingo 1
+  const approvedByWeekday: Record<number, number> = {
+    1: 3,
+    2: 2,
+    3: 2,
+    4: 1,
+    5: 2,
+    6: 1,
+    7: 1,
+  };
+  const validation = validateApprovedTrucksByWeekday(approvedByWeekday);
+  assert.equal(validation.ok, true);
+  assert.equal(validateApprovedTrucksByWeekday({ ...approvedByWeekday, 2: 0 }).ok, false);
+  assert.equal(validateApprovedTrucksByWeekday({ ...approvedByWeekday, 2: 4 }).ok, false);
+
+  const upserts = buildBlueExpressApplyPlan(proposal, approvedByWeekday);
+  const store: Array<{
+    date: string;
+    area_id: string;
+    position_id: string;
+    shift_id: string;
+    required_count: number;
+    is_extra: boolean;
+  }> = [
+    { date: '2026-12-10', area_id: IDS.areaId, position_id: IDS.conductorPositionId, shift_id: 'sh-am08', required_count: 2, is_extra: false },
+    { date: '2026-12-10', area_id: IDS.areaId, position_id: IDS.ayudantePositionId, shift_id: 'sh-am08', required_count: 2, is_extra: false },
+    { date: '2026-12-10', area_id: IDS.areaId, position_id: IDS.conductorPositionId, shift_id: 'sh-pm14', required_count: 1, is_extra: false },
+    { date: '2026-12-10', area_id: IDS.areaId, position_id: IDS.ayudantePositionId, shift_id: 'sh-pm14', required_count: 1, is_extra: false },
+    { date: '2026-12-10', area_id: IDS.areaId, position_id: IDS.conductorPositionId, shift_id: IDS.shiftId, required_count: 1, is_extra: true },
+  ];
+
+  for (const row of upserts) {
+    const idx = store.findIndex(
+      (r) =>
+        r.date === row.date &&
+        r.area_id === row.area_id &&
+        r.position_id === row.position_id &&
+        r.shift_id === row.shift_id &&
+        r.is_extra === row.is_extra
+    );
+    if (idx >= 0) store[idx] = { ...row };
+    else store.push({ ...row });
+  }
+
+  const nightCondTotal = store
+    .filter((r) => r.shift_id === IDS.shiftId && !r.is_extra && r.position_id === IDS.conductorPositionId)
+    .reduce((sum, r) => sum + r.required_count, 0);
+  const nightAyudTotal = store
+    .filter((r) => r.shift_id === IDS.shiftId && !r.is_extra && r.position_id === IDS.ayudantePositionId)
+    .reduce((sum, r) => sum + r.required_count, 0);
+
+  assert.equal(nightCondTotal, 48);
+  assert.equal(nightAyudTotal, 48);
+
+  const dec10Cond = store.find(
+    (r) => r.date === '2026-12-10' && r.shift_id === IDS.shiftId && !r.is_extra && r.position_id === IDS.conductorPositionId
+  );
+  const dec10Ayud = store.find(
+    (r) => r.date === '2026-12-10' && r.shift_id === IDS.shiftId && !r.is_extra && r.position_id === IDS.ayudantePositionId
+  );
+  assert.equal(dec10Cond?.required_count, 1);
+  assert.equal(dec10Ayud?.required_count, 1);
+
+  // Diurnos y extras conservados
+  assert.equal(store.filter((r) => r.date === '2026-12-10' && r.shift_id !== IDS.shiftId && !r.is_extra).length, 4);
+  assert.equal(store.filter((r) => r.date === '2026-12-10' && r.shift_id === IDS.shiftId && r.is_extra).length, 1);
 });
