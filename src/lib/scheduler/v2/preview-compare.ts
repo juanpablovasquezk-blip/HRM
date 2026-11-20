@@ -1,0 +1,460 @@
+import { eachDayOfInterval, format, parseISO } from 'date-fns';
+import { greedyAssign } from '../greedy-assign';
+import { optimizeAssignments } from '../optimizer';
+import type { PersonnelAvailability, ShiftSlot } from '../types';
+import { scheduleCrossArea } from './cobertura';
+import {
+  buildDotacionSlotKey,
+  isAssignmentProtected,
+  measureDotacionCoverage,
+  normalizeIsoDate,
+  prepareDotacionSlots,
+} from './dotacion';
+import { validateJornadaConstraints } from './jornada';
+import type {
+  EnginePreviewMetrics,
+  GeneratedAssignmentRef,
+  JornadaViolation,
+  Ns22ShiftDefinition,
+  Ns22TitularConfig,
+  PersonnelScheduleProfile,
+  PreviewComparisonResult,
+  RawExistingAssignment,
+  RawLeaveRecord,
+  RawShiftRequirement,
+  ReinforcementShiftConfig,
+  ScheduledShiftInterval,
+} from './types';
+
+function buildV1PersonnelPool(params: {
+  personnel: PersonnelScheduleProfile[];
+  existingAssignments: RawExistingAssignment[];
+  approvedLeaves: RawLeaveRecord[];
+  startDate: string;
+  endDate: string;
+  positionFilter?: string[] | null;
+}): PersonnelAvailability[] {
+  const {
+    personnel,
+    existingAssignments,
+    approvedLeaves,
+    startDate,
+    endDate,
+    positionFilter,
+  } = params;
+
+  const sDate = parseISO(normalizeIsoDate(startDate));
+  const eDate = parseISO(normalizeIsoDate(endDate));
+
+  // Mirror current v1 engine: positionFilter only keeps main_position matches
+  const filtered =
+    positionFilter && positionFilter.length > 0
+      ? personnel.filter((p) => p.main_position && positionFilter.includes(p.main_position))
+      : personnel;
+
+  return filtered.map((p) => {
+    const hash = (p.personnel_id || '')
+      .split('')
+      .reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    const leaveDates = new Set<string>();
+
+    for (const l of approvedLeaves) {
+      if (l.personnel_id !== p.personnel_id || l.status !== 'approved') continue;
+      const ls = parseISO(normalizeIsoDate(l.start_date));
+      const le = parseISO(normalizeIsoDate(l.end_date));
+      const cs = ls < sDate ? sDate : ls;
+      const ce = le > eDate ? eDate : le;
+      if (cs <= ce) {
+        for (const d of eachDayOfInterval({ start: cs, end: ce })) {
+          leaveDates.add(format(d, 'yyyy-MM-dd'));
+        }
+      }
+    }
+
+    return {
+      personnel_id: p.personnel_id,
+      birth_date: null,
+      first_name: p.first_name || p.personnel_id,
+      main_position: p.main_position || '',
+      main_position_name: p.main_position_name,
+      secondary_positions: p.secondary_positions || [],
+      prefers_night: Boolean(p.prefers_night),
+      avoids_night: Boolean(p.avoids_night),
+      fixed_shift_id: p.fixed_shift_id ?? null,
+      rotation_pattern: p.rotation_pattern ?? null,
+      has_special_contract: Boolean(p.has_special_contract),
+      hire_date: null,
+      termination_date: null,
+      weekly_hours: 0,
+      days_off_count: 0,
+      last_shift_end: null,
+      assigned_dates: new Set(
+        existingAssignments
+          .filter((a) => a.personnel_id === p.personnel_id && a.status !== 'cancelled')
+          .map((a) => normalizeIsoDate(a.date))
+      ),
+      leave_dates: leaveDates,
+      area_id: p.area_id || '',
+      is_turn_b: hash % 2 !== 0,
+      requires_transport: true,
+    };
+  });
+}
+
+function buildV1ShiftSlots(params: {
+  rawRequirements: RawShiftRequirement[];
+  existingAssignments: RawExistingAssignment[];
+  startDate: string;
+  endDate: string;
+  areaFilter?: string | null;
+  positionFilter?: string[] | null;
+  areaNameById?: Map<string, string>;
+  positionNameById?: Map<string, string>;
+  referenceDate: Date;
+}): ShiftSlot[] {
+  const {
+    rawRequirements,
+    existingAssignments,
+    startDate,
+    endDate,
+    areaFilter,
+    positionFilter,
+    areaNameById,
+    positionNameById,
+    referenceDate,
+  } = params;
+
+  const normStart = normalizeIsoDate(startDate);
+  const normEnd = normalizeIsoDate(endDate);
+  const protectedAssignments = existingAssignments.filter((a) =>
+    isAssignmentProtected(a, referenceDate)
+  );
+
+  return rawRequirements
+    .filter((req) => {
+      const d = normalizeIsoDate(req.date);
+      if (d < normStart || d > normEnd) return false;
+      if (areaFilter && req.area_id !== areaFilter) return false;
+      if (positionFilter && positionFilter.length > 0 && !positionFilter.includes(req.position_id)) {
+        return false;
+      }
+      return true;
+    })
+    .map((req) => {
+      const d = normalizeIsoDate(req.date);
+      const filled = protectedAssignments.filter(
+        (a) =>
+          normalizeIsoDate(a.date) === d &&
+          a.shift_id === req.shift_id &&
+          a.area_id === req.area_id &&
+          a.position_id === req.position_id
+      ).length;
+      const posName = req.position?.name ?? req.positions?.name ?? positionNameById?.get(req.position_id);
+      const areaName = req.area?.name ?? areaNameById?.get(req.area_id);
+
+      return {
+        requirement_id: req.id,
+        date: d,
+        shift_id: req.shift_id,
+        area_id: req.area_id,
+        position_id: req.position_id,
+        shift_start: req.shift?.start_time || '00:00',
+        shift_end: req.shift?.end_time || '00:00',
+        shift_duration_hours: Number(req.shift?.duration_hours) || 8,
+        required_count: req.required_count,
+        filled_count: filled,
+        is_extra: Boolean(req.is_extra),
+        position_name: posName ?? undefined,
+        area_name: areaName ?? undefined,
+        shift_name: req.shift?.name ?? undefined,
+        requires_transport: Boolean(req.shift?.requires_transport),
+      };
+    })
+    .filter((s) => s.filled_count < s.required_count);
+}
+
+/**
+ * Compares v1 (current engine in dry-run mode) vs v2 (parallel engine)
+ * with the exact same dotación, availability, absences, and protected shifts.
+ * Never writes to the database and never calls `generateSchedule`.
+ */
+export function compareEnginesPreview(params: {
+  startDate: string;
+  endDate: string;
+  rawRequirements: RawShiftRequirement[];
+  existingAssignments: RawExistingAssignment[];
+  personnel: PersonnelScheduleProfile[];
+  approvedLeaves?: RawLeaveRecord[];
+  allShifts?: Array<{
+    id: string;
+    name: string;
+    start_time: string;
+    end_time: string;
+    duration_hours: number;
+    requires_transport?: boolean;
+  }>;
+  blueAreaId?: string;
+  areaFilter?: string | null;
+  positionFilter?: string[] | null;
+  ns22Config?: {
+    titulares: Ns22TitularConfig[];
+    shiftDef: Ns22ShiftDefinition;
+  } | null;
+  reinforcementConfig?: Record<
+    string,
+    ReinforcementShiftConfig | ReinforcementShiftConfig[]
+  > | null;
+  areaNameById?: Map<string, string>;
+  positionNameById?: Map<string, string>;
+  baseCalendarByPerson?: Map<string, Set<string>> | null;
+  unconfirmedRules?: string[];
+  referenceDate?: Date;
+}): PreviewComparisonResult {
+  const {
+    startDate,
+    endDate,
+    rawRequirements,
+    existingAssignments,
+    personnel,
+    approvedLeaves = [],
+    allShifts = [],
+    blueAreaId = '',
+    areaFilter,
+    positionFilter,
+    ns22Config,
+    reinforcementConfig,
+    areaNameById,
+    positionNameById,
+    baseCalendarByPerson,
+    unconfirmedRules = [],
+    referenceDate = new Date(),
+  } = params;
+
+  const normStart = normalizeIsoDate(startDate);
+  const normEnd = normalizeIsoDate(endDate);
+
+  // Scoped ordinary dotación for apples-to-apples coverage measurement
+  const preparedAll = prepareDotacionSlots(rawRequirements, existingAssignments, {
+    referenceDate,
+    areaNameById,
+    positionNameById,
+  });
+  const scopedPrepared = {
+    ...preparedAll,
+    ordinarySlots: preparedAll.ordinarySlots.filter(
+      (s) =>
+        s.date >= normStart &&
+        s.date <= normEnd &&
+        (!areaFilter || s.area_id === areaFilter) &&
+        (!positionFilter || positionFilter.length === 0 || positionFilter.includes(s.position_id))
+    ),
+    extraSlots: preparedAll.extraSlots.filter(
+      (s) =>
+        s.date >= normStart &&
+        s.date <= normEnd &&
+        (!areaFilter || s.area_id === areaFilter) &&
+        (!positionFilter || positionFilter.length === 0 || positionFilter.includes(s.position_id))
+    ),
+  };
+  const scopedSlotKeys = new Set(scopedPrepared.ordinarySlots.map((s) => s.slot_key));
+
+  // -------------------------------------------------------------------------
+  // 1. Run v1 in memory (greedyAssign + optimizeAssignments, NEVER generateSchedule)
+  // -------------------------------------------------------------------------
+  const t1Start = performance.now();
+  const v1Pool = buildV1PersonnelPool({
+    personnel,
+    existingAssignments,
+    approvedLeaves,
+    startDate,
+    endDate,
+    positionFilter,
+  });
+  const v1Slots = buildV1ShiftSlots({
+    rawRequirements,
+    existingAssignments,
+    startDate,
+    endDate,
+    areaFilter,
+    positionFilter,
+    areaNameById,
+    positionNameById,
+    referenceDate,
+  });
+  const existingForV1Constraints = existingAssignments
+    .filter((a) => a.status !== 'cancelled')
+    .map((a) => ({
+      personnel_id: a.personnel_id,
+      date: normalizeIsoDate(a.date),
+      duration_hours: Number(a.duration_hours) || 8,
+      shift_start: a.shift_start || '08:00',
+      shift_end: a.shift_end || '16:00',
+    }));
+
+  const greedyRes = greedyAssign(
+    v1Slots,
+    v1Pool,
+    existingForV1Constraints,
+    normStart,
+    normEnd,
+    allShifts,
+    blueAreaId
+  );
+  const v1Opt = optimizeAssignments(greedyRes.assignments, v1Pool, v1Slots);
+  const t1Ms = performance.now() - t1Start;
+
+  const v1Refs: GeneratedAssignmentRef[] = [];
+  let v1PrimaryCount = 0;
+  let v1SecondaryCount = 0;
+  let v1ReinforcementCount = 0;
+
+  for (const a of v1Opt.assignments) {
+    const key = buildDotacionSlotKey({
+      date: a.date,
+      area_id: a.area_id,
+      position_id: a.position_id,
+      shift_id: a.shift_id,
+    });
+    if (!scopedSlotKeys.has(key)) {
+      v1ReinforcementCount++;
+      continue;
+    }
+    v1Refs.push({
+      personnel_id: a.personnel_id,
+      date: a.date,
+      area_id: a.area_id,
+      position_id: a.position_id,
+      shift_id: a.shift_id,
+      is_extra: Boolean(a.is_extra),
+    });
+    const person = personnel.find((p) => p.personnel_id === a.personnel_id);
+    if (person?.main_position === a.position_id) {
+      v1PrimaryCount++;
+    } else {
+      v1SecondaryCount++;
+    }
+  }
+
+  const v1Coverage = measureDotacionCoverage(scopedPrepared, v1Refs);
+  const v1Conflicts: JornadaViolation[] = [];
+  const shiftMap = new Map(allShifts.map((s) => [s.id, s]));
+
+  // Audit v1 assignments under the same ROSTER-03 jornada rules
+  const v1ShiftsByPerson = new Map<string, ScheduledShiftInterval[]>();
+  for (const a of existingAssignments) {
+    if (a.status === 'cancelled') continue;
+    if (!isAssignmentProtected(a, referenceDate) && normalizeIsoDate(a.date) >= normStart && normalizeIsoDate(a.date) <= normEnd) {
+      continue;
+    }
+    if (!v1ShiftsByPerson.has(a.personnel_id)) v1ShiftsByPerson.set(a.personnel_id, []);
+    v1ShiftsByPerson.get(a.personnel_id)!.push({
+      date: normalizeIsoDate(a.date),
+      shift_start: a.shift_start || '08:00',
+      shift_end: a.shift_end || '16:00',
+      duration_hours: Number(a.duration_hours) || 8,
+    });
+  }
+  for (const a of v1Opt.assignments) {
+    const person = personnel.find((p) => p.personnel_id === a.personnel_id);
+    if (!person) continue;
+    const sh = shiftMap.get(a.shift_id);
+    const interval: ScheduledShiftInterval = {
+      date: normalizeIsoDate(a.date),
+      shift_start: sh?.start_time || '08:00',
+      shift_end: sh?.end_time || '16:00',
+      duration_hours: Number(sh?.duration_hours) || 8,
+      shift_id: a.shift_id,
+      area_id: a.area_id,
+      position_id: a.position_id,
+    };
+    const prev = v1ShiftsByPerson.get(a.personnel_id) || [];
+    const violations = validateJornadaConstraints(person, interval, prev, approvedLeaves);
+    for (const err of violations.filter((v) => v.severity === 'error')) {
+      v1Conflicts.push(err);
+    }
+    v1ShiftsByPerson.set(a.personnel_id, [...prev, interval]);
+  }
+
+  const v1Metrics: EnginePreviewMetrics = {
+    engine: 'v1',
+    label: 'Motor Actual (v1 · Predeterminado)',
+    total_required: v1Coverage.ordinary.total_required,
+    total_covered: v1Coverage.ordinary.total_covered,
+    total_vacancies: v1Coverage.ordinary.total_vacancies,
+    coverage_percent: v1Coverage.ordinary.coverage_percent,
+    covered_primary_count: v1PrimaryCount,
+    covered_secondary_count: v1SecondaryCount,
+    reinforcement_count: v1ReinforcementCount,
+    jornada_conflicts_count: v1Conflicts.length,
+    vacancies: v1Coverage.ordinary.slots.filter((s) => s.vacancy_count > 0),
+    conflicts: v1Conflicts,
+    holiday_warnings: [],
+    execution_time_ms: Math.round(t1Ms * 100) / 100,
+  };
+
+  // -------------------------------------------------------------------------
+  // 2. Run v2 in memory (scheduleCrossArea, zero DB writes)
+  // -------------------------------------------------------------------------
+  const t2Start = performance.now();
+  const v2Res = scheduleCrossArea({
+    startDate,
+    endDate,
+    rawRequirements,
+    existingAssignments,
+    personnel,
+    approvedLeaves,
+    areaFilter,
+    positionFilter,
+    ns22Config,
+    reinforcementConfig,
+    areaNameById,
+    positionNameById,
+    baseCalendarByPerson,
+    referenceDate,
+  });
+  const t2Ms = performance.now() - t2Start;
+
+  const v2Metrics: EnginePreviewMetrics = {
+    engine: 'v2',
+    label: 'Motor Nuevo (v2 · Paralelo)',
+    total_required: v2Res.stats.total_required,
+    total_covered: v2Res.stats.total_covered,
+    total_vacancies: v2Res.stats.total_vacancies,
+    coverage_percent: v2Res.stats.coverage_percent,
+    covered_primary_count: v2Res.stats.covered_primary_count,
+    covered_secondary_count: v2Res.stats.covered_secondary_count,
+    reinforcement_count: v2Res.stats.reinforcement_count,
+    jornada_conflicts_count: v2Res.audit_violations.length,
+    vacancies: v2Res.remaining_vacancies,
+    conflicts: v2Res.audit_violations,
+    holiday_warnings: v2Res.holiday_warnings,
+    execution_time_ms: Math.round(t2Ms * 100) / 100,
+  };
+
+  const collectedUnconfirmed = Array.from(
+    new Set([
+      ...unconfirmedRules,
+      ...(v2Res.ns22_result?.verification_notices || []),
+      ...v2Res.permission_cases
+        .filter((c) => c.status === 'pending_relocation')
+        .map((c) => c.message),
+    ])
+  );
+
+  return {
+    default_engine: 'v1',
+    dry_run: true,
+    called_v1_save_route: false,
+    v1: v1Metrics,
+    v2: v2Metrics,
+    unconfirmed_rules: collectedUnconfirmed,
+    deltas: {
+      coverage_diff: v2Metrics.total_covered - v1Metrics.total_covered,
+      vacancies_diff: v2Metrics.total_vacancies - v1Metrics.total_vacancies,
+      primary_diff: v2Metrics.covered_primary_count - v1Metrics.covered_primary_count,
+      secondary_diff: v2Metrics.covered_secondary_count - v1Metrics.covered_secondary_count,
+      reinforcements_diff: v2Metrics.reinforcement_count - v1Metrics.reinforcement_count,
+      conflicts_diff: v2Metrics.jornada_conflicts_count - v1Metrics.jornada_conflicts_count,
+    },
+  };
+}

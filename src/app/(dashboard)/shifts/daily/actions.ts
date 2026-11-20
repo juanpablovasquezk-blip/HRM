@@ -10,6 +10,12 @@ import { fetchDailyOperationalData } from '@/lib/shifts/daily-operational-data';
 import { generateTransportRequestsForDate } from '@/lib/transport/generate-requests';
 import { validatePersonnelAvailabilityForDates } from '../actions';
 
+function safeRevalidateDaily() {
+  if (process.env.ROSTER_ISOLATED_TEST !== 'true') {
+    revalidatePath('/shifts/daily');
+  }
+}
+
 export async function updateAssignmentShift(assignmentId: string, shiftId: string) {
   const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
   if (!auth.ok) return { success: false, error: auth.error };
@@ -24,7 +30,7 @@ export async function updateAssignmentShift(assignmentId: string, shiftId: strin
     .eq('id', assignmentId);
 
   if (error) return { success: false, error: error.message };
-  revalidatePath('/shifts/daily');
+  safeRevalidateDaily();
   return { success: true };
 }
 
@@ -322,7 +328,7 @@ export async function addExtraRequirement(formData: FormData) {
     if (error) return { success: false, error: error.message };
   }
 
-  revalidatePath('/shifts/daily');
+  safeRevalidateDaily();
   return { success: true };
 }
 
@@ -334,46 +340,99 @@ export async function assignExtraPersonnel(
   shiftId: string,
   areaId: string,
   positionId: string,
-  personnelId: string
+  personnelId: string,
+  options?: {
+    extraTarget?: 'manual' | 'v2_vacancy';
+    linkedRequirementId?: string | null;
+    testHooks?: {
+      supabase?: any;
+      skipAvailability?: boolean;
+    };
+  }
 ) {
-  const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
-  if (!auth.ok) return { success: false, error: auth.error };
+  const isIsolatedTest =
+    process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(options?.testHooks?.supabase);
+  if (!isIsolatedTest) {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
+  }
 
-  const supabase = createAdminClient();
+  const supabase = isIsolatedTest ? options!.testHooks!.supabase : createAdminClient();
+  const persistV2Link = process.env.ROSTER_V2_EXTRA_LINKS === 'true';
 
   // Validate personnel availability
-  const validation = await validatePersonnelAvailabilityForDates(personnelId, [date]);
-  if (!validation.success) {
-    return { success: false, error: validation.error };
+  if (!isIsolatedTest || !options?.testHooks?.skipAvailability) {
+    const validation = await validatePersonnelAvailabilityForDates(personnelId, [date]);
+    if (!validation.success) {
+      return { success: false, error: validation.error };
+    }
   }
 
   // Check if the extra assignment already exists (could be active or cancelled)
+  const selectCols = persistV2Link
+    ? 'id, status, area_id, position_id, extra_target, linked_requirement_id'
+    : 'id, status';
   const { data: existing } = await supabase
     .from('shift_assignments')
-    .select('id, status')
+    .select(selectCols)
     .eq('date', date)
     .eq('shift_id', shiftId)
     .eq('personnel_id', personnelId)
     .eq('is_extra', true)
     .maybeSingle();
 
-  if (existing) {
-    if (existing.status === 'cancelled') {
+  const existingRow = existing as
+    | {
+        id: string;
+        status: string;
+        area_id?: string;
+        position_id?: string;
+        extra_target?: 'manual' | 'v2_vacancy' | null;
+        linked_requirement_id?: string | null;
+      }
+    | null;
+
+  if (existingRow) {
+    if (existingRow.status === 'cancelled') {
       // Re-activate the cancelled assignment instead of inserting a new one
-      console.log(`[assignExtraPersonnel] Reactivating cancelled assignment ${existing.id}`);
+      console.log(`[assignExtraPersonnel] Reactivating cancelled assignment ${existingRow.id}`);
+      const reactivatePayload: Record<string, unknown> = {
+        status: 'scheduled',
+        area_id: areaId,
+        position_id: positionId,
+        is_manual: true,
+      };
+      if (persistV2Link) {
+        reactivatePayload.extra_target = options?.extraTarget ?? null;
+        reactivatePayload.linked_requirement_id = options?.linkedRequirementId ?? null;
+      }
       const { error } = await supabase
         .from('shift_assignments')
-        .update({ status: 'scheduled', area_id: areaId, position_id: positionId, is_manual: true })
-        .eq('id', existing.id);
+        .update(reactivatePayload)
+        .eq('id', existingRow.id);
       if (error) return { success: false, error: error.message };
     } else {
-      console.log(`[assignExtraPersonnel] Already active: ${existing.id}`);
+      if (persistV2Link) {
+        const sameSlot =
+          existingRow.area_id === areaId &&
+          existingRow.position_id === positionId &&
+          (existingRow.extra_target ?? null) === (options?.extraTarget ?? null) &&
+          (existingRow.linked_requirement_id ?? null) === (options?.linkedRequirementId ?? null);
+        if (!sameSlot) {
+          return {
+            success: false,
+            error:
+              'El trabajador ya tiene un turno extra activo en otro cupo para esta fecha y horario; su vínculo original se conserva.',
+          };
+        }
+      }
+      console.log(`[assignExtraPersonnel] Already active: ${existingRow.id}`);
     }
-    revalidatePath('/shifts/daily');
+    safeRevalidateDaily();
     return { success: true };
   }
 
-  const { error } = await supabase.from('shift_assignments').insert({
+  const insertPayload: Record<string, unknown> = {
     date,
     shift_id: shiftId,
     area_id: areaId,
@@ -381,15 +440,21 @@ export async function assignExtraPersonnel(
     personnel_id: personnelId,
     is_extra: true,
     is_manual: true,
-    status: 'scheduled'
-  });
+    status: 'scheduled',
+  };
+  if (persistV2Link && options?.extraTarget) {
+    insertPayload.extra_target = options.extraTarget;
+    insertPayload.linked_requirement_id = options.linkedRequirementId ?? null;
+  }
+
+  const { error } = await supabase.from('shift_assignments').insert(insertPayload);
 
   if (error) {
     console.error(`[assignExtraPersonnel] Insert error: ${error.message}`);
     return { success: false, error: error.message };
   }
 
-  revalidatePath('/shifts/daily');
+  safeRevalidateDaily();
   return { success: true };
 }
 
@@ -411,7 +476,7 @@ export async function confirmDailyPlan(date: string) {
 
   await generateTransportRequestsForDate(date);
 
-  revalidatePath('/shifts/daily');
+  safeRevalidateDaily();
   return { success: true };
 }
 
@@ -699,6 +764,6 @@ export async function swapAssignments(id1: string, id2: string) {
     await generateTransportRequestsForDate(ass1.date);
   }
 
-  revalidatePath('/shifts/daily');
+  safeRevalidateDaily();
   return { success: true };
 }

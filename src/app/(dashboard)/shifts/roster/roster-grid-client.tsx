@@ -74,10 +74,13 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { compareEnginesPreview } from '@/lib/scheduler/v2/preview-compare';
+import type { PreviewComparisonResult } from '@/lib/scheduler/v2/types';
 import { 
   createManualAssignment, 
   deleteAssignment, 
   runScheduler, 
+  previewCompareSchedulers,
   clearAutoAssignments,
   bulkDeleteManualAssignments,
   validateAssignments,
@@ -217,6 +220,9 @@ export function RosterGridClient({
   const [audit4x4Data, setAudit4x4Data] = useState<any[]>([]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
+  const [isPreviewComparing, setIsPreviewComparing] = useState(false);
+  const [isPreviewCompareOpen, setIsPreviewCompareOpen] = useState(false);
+  const [previewComparison, setPreviewComparison] = useState<PreviewComparisonResult | null>(null);
   const [draggingAssignment, setDraggingAssignment] = useState<Assignment | null>(null);
   const [reasonDialogOpen, setReasonDialogOpen] = useState<{ open: boolean, assignment: Assignment | null, newDate: string }>({ 
     open: false, assignment: null, newDate: '' 
@@ -2384,8 +2390,41 @@ export function RosterGridClient({
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setIsAiConfigOpen(false)}>Cancelar</Button>
+            {aiActionMode === 'scheduling' && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isPreviewComparing}
+                className="gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                onClick={async () => {
+                  const start = planningRange.from || format(days[0], 'yyyy-MM-dd');
+                  const end = planningRange.to || format(days[days.length - 1], 'yyyy-MM-dd');
+                  setIsPreviewComparing(true);
+                  try {
+                    const res = await previewCompareSchedulers(
+                      start,
+                      end,
+                      areaFilter || undefined,
+                      undefined,
+                      positionFilter.length > 0 ? positionFilter : undefined
+                    );
+                    if (!res.success || !res.comparison) {
+                      toast.error(res.error || 'Error al comparar motores en vista previa');
+                    } else {
+                      setPreviewComparison(res.comparison);
+                      setIsPreviewCompareOpen(true);
+                    }
+                  } finally {
+                    setIsPreviewComparing(false);
+                  }
+                }}
+              >
+                <Sparkles className="h-4 w-4" />
+                {isPreviewComparing ? 'Comparando...' : 'Comparar v1 vs v2 (Vista Previa)'}
+              </Button>
+            )}
             <Button 
               className={cn(
                 "font-bold gap-2 shadow-lg dark:shadow-none",
@@ -2400,6 +2439,182 @@ export function RosterGridClient({
               {aiActionMode === 'scheduling' ? 'Iniciar IA' : 
                aiActionMode === 'needs' ? 'Generar' : 'Confirmar Borrado'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ROSTER-06: Side-by-side Preview Comparison Modal (zero DB writes) */}
+      <Dialog open={isPreviewCompareOpen} onOpenChange={setIsPreviewCompareOpen}>
+        <DialogContent className="sm:max-w-[720px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-indigo-600" />
+              Comparación en Vista Previa (sin guardar)
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Misma dotación, disponibilidad, ausencias y turnos protegidos. El motor actual (v1) sigue siendo el predeterminado para guardar.
+            </p>
+          </DialogHeader>
+          {previewComparison && (
+            <div className="space-y-4">
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-600">
+                    <tr>
+                      <th className="p-2.5 text-left">Métrica</th>
+                      <th className="p-2.5 text-right">{previewComparison.v1.label}</th>
+                      <th className="p-2.5 text-right text-indigo-700">{previewComparison.v2.label}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    <tr>
+                      <td className="p-2.5 font-medium">Cobertura ordinaria</td>
+                      <td className="p-2.5 text-right">
+                        {previewComparison.v1.total_covered}/{previewComparison.v1.total_required} ({previewComparison.v1.coverage_percent}%)
+                      </td>
+                      <td className="p-2.5 text-right font-semibold text-indigo-700">
+                        {previewComparison.v2.total_covered}/{previewComparison.v2.total_required} ({previewComparison.v2.coverage_percent}%)
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-medium">Cargo principal</td>
+                      <td className="p-2.5 text-right">{previewComparison.v1.covered_primary_count}</td>
+                      <td className="p-2.5 text-right font-semibold text-indigo-700">{previewComparison.v2.covered_primary_count}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-medium">Cargo secundario</td>
+                      <td className="p-2.5 text-right">{previewComparison.v1.covered_secondary_count}</td>
+                      <td className="p-2.5 text-right font-semibold text-indigo-700">{previewComparison.v2.covered_secondary_count}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-medium">Vacantes pendientes</td>
+                      <td className="p-2.5 text-right">{previewComparison.v1.total_vacancies}</td>
+                      <td className="p-2.5 text-right font-semibold text-indigo-700">{previewComparison.v2.total_vacancies}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-medium">Refuerzos agregados</td>
+                      <td className="p-2.5 text-right">{previewComparison.v1.reinforcement_count}</td>
+                      <td className="p-2.5 text-right font-semibold text-indigo-700">{previewComparison.v2.reinforcement_count}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-medium">Conflictos de jornada</td>
+                      <td className="p-2.5 text-right">{previewComparison.v1.jornada_conflicts_count}</td>
+                      <td className="p-2.5 text-right font-semibold text-indigo-700">{previewComparison.v2.jornada_conflicts_count}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-medium">Tiempo de cálculo</td>
+                      <td className="p-2.5 text-right">{previewComparison.v1.execution_time_ms} ms</td>
+                      <td className="p-2.5 text-right">{previewComparison.v2.execution_time_ms} ms</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              {previewComparison.unconfirmed_rules.length > 0 && (
+                <div className="rounded-md bg-slate-50 border border-slate-200 p-3 text-xs text-slate-700 space-y-1">
+                  <div className="font-bold text-slate-900">Reglas / datos pendientes de confirmar:</div>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {previewComparison.unconfirmed_rules.map((rule, idx) => (
+                      <li key={idx}>{rule}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {previewComparison.v2.holiday_warnings.length > 0 && (
+                <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+                  {previewComparison.v2.holiday_warnings.join(' ')}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="border-amber-200 text-amber-800 hover:bg-amber-50"
+              onClick={() => {
+                const syntheticShifts = [
+                  { id: 'syn-ns22', name: 'NS 22', start_time: '22:00', end_time: '07:00', duration_hours: 9, requires_transport: true },
+                  { id: 'syn-am07', name: 'AM 07', start_time: '07:00', end_time: '15:00', duration_hours: 8, requires_transport: false },
+                  { id: 'syn-am04', name: 'AM 04', start_time: '04:00', end_time: '12:00', duration_hours: 8, requires_transport: false },
+                ];
+                const weekDates = ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-14', '2026-11-15'];
+                const syntheticReqs = [
+                  ...weekDates.map((d, i) => ({
+                    id: `syn-req-ns22-${i}`,
+                    date: d,
+                    area_id: 'syn-area-aero',
+                    position_id: 'syn-pos-aero',
+                    shift_id: 'syn-ns22',
+                    required_count: 1,
+                    priority: 'HIGH',
+                    is_extra: false,
+                    area: { name: 'Aeropuerto' },
+                    position: { name: 'Operador Aeropuerto' },
+                    shift: syntheticShifts[0],
+                  })),
+                  {
+                    id: 'syn-req-am07-mon',
+                    date: '2026-11-09',
+                    area_id: 'syn-area-aero',
+                    position_id: 'syn-pos-aero',
+                    shift_id: 'syn-am07',
+                    required_count: 1,
+                    priority: 'NORMAL',
+                    is_extra: false,
+                    area: { name: 'Aeropuerto' },
+                    position: { name: 'Operador Aeropuerto' },
+                    shift: syntheticShifts[1],
+                  },
+                ];
+                const syntheticRes = compareEnginesPreview({
+                  startDate: '2026-11-09',
+                  endDate: '2026-11-15',
+                  rawRequirements: syntheticReqs,
+                  existingAssignments: [
+                    {
+                      id: 'syn-prot-mon',
+                      personnel_id: 'syn-op-aero',
+                      date: '2026-11-09',
+                      area_id: 'syn-area-aero',
+                      position_id: 'syn-pos-aero',
+                      shift_id: 'syn-am07',
+                      shift_start: '07:00',
+                      shift_end: '15:00',
+                      duration_hours: 8,
+                      is_manual: true,
+                      is_extra: false,
+                    },
+                  ],
+                  personnel: [
+                    { personnel_id: 'syn-tit-a', first_name: 'Titular A', main_position: 'syn-pos-aero', main_position_name: 'Operador Aeropuerto', rotation_pattern: '4x4', area_id: 'syn-area-aero' },
+                    { personnel_id: 'syn-tit-b', first_name: 'Titular B', main_position: 'syn-pos-aero', main_position_name: 'Operador Aeropuerto', rotation_pattern: '4x4', area_id: 'syn-area-aero' },
+                    { personnel_id: 'syn-op-aero', first_name: 'Operador Aero', main_position: 'syn-pos-aero', main_position_name: 'Operador Aeropuerto', rotation_pattern: '5x2', area_id: 'syn-area-aero' },
+                  ],
+                  approvedLeaves: [
+                    { personnel_id: 'syn-tit-b', type: 'sick', start_date: '2026-11-13', end_date: '2026-11-13', status: 'approved' },
+                  ],
+                  allShifts: syntheticShifts,
+                  ns22Config: {
+                    titulares: [
+                      { personnel_id: 'syn-tit-a', first_name: 'Titular A', anchor_date: '2026-11-09', cycle_offset: 0, confirmed_4x4_regime: false },
+                      { personnel_id: 'syn-tit-b', first_name: 'Titular B', anchor_date: '2026-11-09', cycle_offset: 4, confirmed_4x4_regime: false },
+                    ],
+                    shiftDef: { shift_id: 'syn-ns22', area_id: 'syn-area-aero', position_id: 'syn-pos-aero', shift_start: '22:00', shift_end: '07:00', duration_hours: 9 },
+                  },
+                  reinforcementConfig: {
+                    'syn-pos-aero': { shift_id: 'syn-am07', shift_start: '07:00', shift_end: '15:00', duration_hours: 8, area_id: 'syn-area-aero', position_id: 'syn-pos-aero', days_of_week: [1, 2, 3, 4, 5] },
+                  },
+                  areaNameById: new Map([['syn-area-aero', 'Aeropuerto']]),
+                  positionNameById: new Map([['syn-pos-aero', 'Operador Aeropuerto']]),
+                  referenceDate: new Date('2026-11-01T12:00:00Z'),
+                });
+                setPreviewComparison(syntheticRes);
+                toast.success('Comparación sintética ejecutada en memoria (sin DB)');
+              }}
+            >
+              Probar Semana Sintética (NS22 + Ausencia + Protegido + Refuerzo)
+            </Button>
+            <Button variant="outline" onClick={() => setIsPreviewCompareOpen(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

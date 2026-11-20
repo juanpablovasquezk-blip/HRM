@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, type WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
+import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, previewBlueExpressNightStaffing, applyBlueExpressNightStaffingProposal, type WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
+import type { BlueExpressNightProposal } from '@/lib/scheduler/v2/blue-express';
 import { Layers, Plus, Trash2, Calendar, MapPin, Briefcase, Clock, Loader2, RefreshCw, Shield, ChevronDown, Edit2, X, TableProperties, LayoutGrid } from 'lucide-react';
 import { toast } from 'sonner';
 import { WeeklyMatrixView } from './weekly-matrix-view';
@@ -28,6 +29,9 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
   const [isPending, startTransition] = useTransition();
   const [selectedAreaId, setSelectedAreaId] = useState('');
   const [showGenerate, setShowGenerate] = useState(false);
+  const [blueProposal, setBlueProposal] = useState<BlueExpressNightProposal | null>(null);
+  const [blueStart, setBlueStart] = useState('2026-12-07');
+  const [blueEnd, setBlueEnd] = useState('2027-01-03');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterAreaId, setFilterAreaId] = useState('all');
   const [filterPositionId, setFilterPositionId] = useState('all');
@@ -160,6 +164,11 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
             });
           } else {
             toast.success(`${created} requerimientos generados exitosamente`);
+          }
+          if (Array.isArray(result.holidayWarnings) && result.holidayWarnings.length > 0) {
+            toast.warning('Aviso de calendario de feriados', {
+              description: result.holidayWarnings.join(' '),
+            });
           }
           setShowGenerate(false);
           router.refresh();
@@ -476,12 +485,151 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, comp
                 <Button type="button" variant="ghost" className="h-9" onClick={() => setShowGenerate(false)}>Cancelar</Button>
               </form>
             ) : (
-              <Button onClick={() => setShowGenerate(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                disabled={templates.length === 0}>
-                <Calendar className="h-4 w-4 mr-2" /> Generar Mes
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isPending}
+                  onClick={() => {
+                    startTransition(async () => {
+                      const res = await previewBlueExpressNightStaffing(blueStart, blueEnd);
+                      if (!res.success || !res.proposal) {
+                        toast.error('No se pudo calcular la propuesta Blue Express', {
+                          description: res.error || 'Error desconocido',
+                        });
+                        return;
+                      }
+                      setBlueProposal(res.proposal);
+                    });
+                  }}
+                >
+                  {isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Clock className="h-4 w-4 mr-2" />}
+                  Propuesta Blue Express AM 00 (Solo Lectura)
+                </Button>
+                <Button onClick={() => setShowGenerate(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  disabled={templates.length === 0}>
+                  <Calendar className="h-4 w-4 mr-2" /> Generar Mes
+                </Button>
+              </div>
             )}
           </div>
+
+          {blueProposal && (
+            <div className="mt-4 pt-4 border-t space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="font-semibold text-sm">
+                    ROSTER-09 · Propuesta Nocturna {blueProposal.identifiers.areaName} ({blueProposal.identifiers.shiftName}) — Solo Lectura
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Rango objetivo: {blueProposal.target_start_date} al {blueProposal.target_end_date} · Historial evaluado (noches transcurridas): {blueProposal.history_start_date} al {blueProposal.history_end_date}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input type="date" value={blueStart} onChange={(e) => setBlueStart(e.target.value)} className="h-8 w-36 text-xs" />
+                  <Input type="date" value={blueEnd} onChange={(e) => setBlueEnd(e.target.value)} className="h-8 w-36 text-xs" />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={isPending}
+                    onClick={() => {
+                      startTransition(async () => {
+                        const res = await previewBlueExpressNightStaffing(blueStart, blueEnd);
+                        if (res.success && res.proposal) setBlueProposal(res.proposal);
+                      });
+                    }}
+                  >
+                    Recalcular
+                  </Button>
+                  {canEdit && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      disabled={isPending}
+                      onClick={() => {
+                        startTransition(async () => {
+                          const res = await applyBlueExpressNightStaffingProposal(
+                            blueProposal.target_start_date,
+                            blueProposal.target_end_date
+                          );
+                          if (!res.success) {
+                            toast.error('No se pudo aplicar la propuesta Blue Express AM 00', {
+                              description: res.error || 'Error desconocido',
+                            });
+                            return;
+                          }
+                          toast.success('Dotación Blue Express AM 00 aplicada', {
+                            description: `${res.upsertedCount} cupos ordinarios nocturnos actualizados/creados entre ${blueProposal.target_start_date} y ${blueProposal.target_end_date}.`,
+                          });
+                          if (res.proposal) setBlueProposal(res.proposal);
+                          router.refresh();
+                        });
+                      }}
+                    >
+                      {isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+                      Aplicar Propuesta (AM 00)
+                    </Button>
+                  )}
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setBlueProposal(null)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {blueProposal.estimate_notice && (
+                <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+                  {blueProposal.estimate_notice}
+                </div>
+              )}
+
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50 text-left">
+                    <tr>
+                      <th className="p-2">Día</th>
+                      <th className="p-2">Noches c/datos (sin datos / 0 conf.)</th>
+                      <th className="p-2">Historial duplas</th>
+                      <th className="p-2">Últimas 3</th>
+                      <th className="p-2">Cancel. / Incomp. / Sin asist.</th>
+                      <th className="p-2">Camiones propuestos</th>
+                      <th className="p-2">Cupos (Cond. / Ayud.)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {blueProposal.weekdays.map((w) => (
+                      <tr key={w.isoWeekday} className="border-t">
+                        <td className="p-2 font-medium">{w.label}</td>
+                        <td className="p-2">
+                          {w.nights_with_data} ({w.nights_without_data} s/d · {w.nights_zero_confirmed} cero)
+                        </td>
+                        <td className="p-2">{w.history_duplas.join(', ') || '—'}</td>
+                        <td className="p-2">{w.last_three_duplas.join(', ') || '—'}</td>
+                        <td className="p-2">
+                          {w.cancellations_total} / {w.incomplete_duplas_total} / {w.unconfirmed_attendance_total}
+                        </td>
+                        <td className="p-2 font-semibold">{w.recommended_trucks}</td>
+                        <td className="p-2">
+                          {w.proposed_conductores} / {w.proposed_ayudantes}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {blueProposal.target_range_already_generated ? (
+                <div className="text-xs text-muted-foreground">
+                  Requerimientos ordinarios ya generados en el rango: {blueProposal.target_range_updates.length} ajustes sugeridos en cupos nocturnos de Blue Express (sin guardar).
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground">
+                  Sin requerimientos ordinarios generados aún en el rango objetivo; si se confirma demanda adicional a las 14:00 para el día siguiente, se cubre mediante Dotación Extra habitual.
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

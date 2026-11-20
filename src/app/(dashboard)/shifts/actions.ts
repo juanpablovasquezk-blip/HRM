@@ -4,8 +4,32 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { revalidatePath } from 'next/cache';
 import { generateSchedule, partialRecalculate } from '@/lib/scheduler';
+import {
+  buildBlueExpressApplyPlan,
+  calculateBlueExpressNightStaffingProposal,
+  getTwoMonthHistoryWindow,
+  type BlueExpressNightProposal,
+} from '@/lib/scheduler/v2/blue-express';
+import { compareEnginesPreview } from '@/lib/scheduler/v2/preview-compare';
+import { deriveNs22AnchorFromHistory } from '@/lib/scheduler/v2/aeropuerto-ns22';
+import { fetchAllPaginated } from '@/lib/scheduler/v2/pagination';
+import { scheduleCrossArea } from '@/lib/scheduler/v2/cobertura';
+import {
+  isProtectedPersistedAssignment,
+  isV2SaveEnabled,
+  recoverRosterFromSnapshot,
+  saveV2Schedule,
+  validateNs22OperationalConfig,
+  type Ns22OperationalConfirmation,
+  type PersistedAssignmentRow,
+} from '@/lib/scheduler/v2/save-recover';
+import {
+  createSupabaseRosterPersistenceAdapter,
+  type SupabaseLikeClient,
+} from '@/lib/scheduler/v2/supabase-adapter';
 import type { RecalculationInput } from '@/lib/scheduler/types';
-import { parseISO, format, endOfWeek, startOfWeek, isAfter, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns';
+import { parseISO, format, endOfWeek, startOfWeek, isAfter, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addDays, subDays } from 'date-fns';
+import { requireActionAuth } from '@/lib/auth/action-guard';
 import { sendWhatsAppMessage } from '@/lib/ultramsg';
 import { es as esLocale } from 'date-fns/locale';
 import { buildConsolidatedRequirements, filterMissingRequirements } from './dotacion/materialize-utils';
@@ -16,7 +40,7 @@ import {
   type OperationalPriority,
   type PriorityOverridesMap,
 } from './dotacion/matrix-utils';
-import { calcEffectiveShiftDuration } from './shift-duration';
+import { calcEffectiveShiftDuration, resolveShiftDurationHours } from './shift-duration';
 import { getUserRole } from '@/app/role-actions';
 import { hasPermission } from '@/lib/auth/roles';
 import type { Role } from '@/types/database';
@@ -465,17 +489,36 @@ export async function materializeTemplates(startDate: string, endDate: string) {
 
   const supabase = await createClient();
 
-  // 1. Obtener todas las reglas activas
-  const { data: templates, error: tError } = await supabase.from('requirement_templates').select('*');
+  // 1. Obtener todas las reglas activas y catálogos de área/cargo para feriados nacionales
+  const [{ data: templates, error: tError }, { data: areas }, { data: positions }] = await Promise.all([
+    supabase.from('requirement_templates').select('*'),
+    supabase.from('areas').select('id, name'),
+    supabase.from('positions').select('id, name'),
+  ]);
   if (tError) return { success: false, error: tError.message, count: 0, createdCount: 0, skippedCount: 0 };
   if (!templates || templates.length === 0) {
     return { success: true, error: null, count: 0, createdCount: 0, skippedCount: 0 };
   }
 
-  // 2. Consolidar reglas día por día en memoria
-  const inserts = buildConsolidatedRequirements(templates, startDate, endDate);
+  const areaNameById = new Map<string, string>((areas || []).map((a) => [a.id, a.name]));
+  const positionNameById = new Map<string, string>((positions || []).map((p) => [p.id, p.name]));
+  const holidayWarnings: string[] = [];
+
+  // 2. Consolidar reglas día por día en memoria (aplicando feriados nacionales de Chile)
+  const inserts = buildConsolidatedRequirements(templates, startDate, endDate, {
+    areaNameById,
+    positionNameById,
+    warningsOut: holidayWarnings,
+  });
   if (inserts.length === 0) {
-    return { success: true, error: null, count: 0, createdCount: 0, skippedCount: 0 };
+    return {
+      success: true,
+      error: null,
+      count: 0,
+      createdCount: 0,
+      skippedCount: 0,
+      holidayWarnings,
+    };
   }
 
   // 3. Consultar necesidades ordinarias ya existentes en el rango (paginado)
@@ -540,7 +583,209 @@ export async function materializeTemplates(startDate: string, endDate: string) {
     createdCount,
     skippedCount,
     totalEvaluated: inserts.length,
+    holidayWarnings,
   };
+}
+
+/**
+ * ROSTER-09: Propuesta en solo lectura de dotación nocturna (AM 00) de Blue Express
+ * para Dotación -> Generar Mes. Nunca modifica historial ni requerimientos.
+ */
+export async function previewBlueExpressNightStaffing(
+  startDate: string,
+  endDate: string
+): Promise<{ success: boolean; proposal: BlueExpressNightProposal | null; error: string | null }> {
+  try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+    if (!auth.ok) {
+      return { success: false, proposal: null, error: auth.error };
+    }
+
+    const supabase = await createClient();
+    const referenceDate = format(new Date(), 'yyyy-MM-dd');
+    const { historyStartDate, elapsedEndDate } = getTwoMonthHistoryWindow(startDate, referenceDate);
+
+    const [{ data: areas, error: aErr }, { data: shifts, error: sErr }, { data: positions, error: pErr }] =
+      await Promise.all([
+        supabase.from('areas').select('id, name'),
+        supabase.from('shifts').select('id, name, start_time, end_time'),
+        supabase.from('positions').select('id, name'),
+      ]);
+
+    if (aErr || sErr || pErr) {
+      return {
+        success: false,
+        proposal: null,
+        error: aErr?.message || sErr?.message || pErr?.message || 'Error cargando catálogos HRM',
+      };
+    }
+
+    const blueArea = (areas || []).find((a: any) => /blue/i.test(a.name || ''));
+    const am00Shift = (shifts || []).find(
+      (s: any) => /am\s*00/i.test(s.name || '') || String(s.start_time || '').startsWith('00:')
+    );
+    const conductorPos = (positions || []).find((p: any) => /conductor/i.test(p.name || ''));
+    const ayudantePos = (positions || []).find((p: any) => /ayudante/i.test(p.name || ''));
+
+    if (!blueArea || !am00Shift || !conductorPos || !ayudantePos) {
+      return {
+        success: false,
+        proposal: null,
+        error: `No se pudieron identificar todos los registros de Blue Express AM 00 (área=${blueArea ? 'OK' : 'faltante'}, turno AM 00=${am00Shift ? 'OK' : 'faltante'}, conductor=${conductorPos ? 'OK' : 'faltante'}, ayudante=${ayudantePos ? 'OK' : 'faltante'}).`,
+      };
+    }
+
+    const [histAssigns, histReqs, targetReqs] = await Promise.all([
+      fetchAllPaginated<any>(async (from, to) =>
+        supabase
+          .from('shift_assignments')
+          .select('id, date, area_id, position_id, shift_id, personnel_id, status, is_extra, attendance_status')
+          .eq('area_id', blueArea.id)
+          .eq('shift_id', am00Shift.id)
+          .gte('date', historyStartDate)
+          .lte('date', elapsedEndDate)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)
+      ),
+      fetchAllPaginated<any>(async (from, to) =>
+        supabase
+          .from('shift_requirements')
+          .select('id, date, area_id, position_id, shift_id, required_count, is_extra')
+          .eq('area_id', blueArea.id)
+          .eq('shift_id', am00Shift.id)
+          .gte('date', historyStartDate)
+          .lte('date', elapsedEndDate)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)
+      ),
+      fetchAllPaginated<any>(async (from, to) =>
+        supabase
+          .from('shift_requirements')
+          .select('id, date, area_id, position_id, shift_id, required_count, is_extra')
+          .eq('area_id', blueArea.id)
+          .eq('shift_id', am00Shift.id)
+          .eq('is_extra', false)
+          .gte('date', startDate)
+          .lte('date', endDate)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)
+      ),
+    ]);
+
+    if (histAssigns.error || !histAssigns.data || histReqs.error || !histReqs.data || targetReqs.error || !targetReqs.data) {
+      return {
+        success: false,
+        proposal: null,
+        error:
+          histAssigns.error ||
+          histReqs.error ||
+          targetReqs.error ||
+          'Error cargando historial de Blue Express AM 00.',
+      };
+    }
+
+    const proposal = calculateBlueExpressNightStaffingProposal({
+      identifiers: {
+        areaId: blueArea.id,
+        areaName: blueArea.name,
+        shiftId: am00Shift.id,
+        shiftName: am00Shift.name,
+        conductorPositionId: conductorPos.id,
+        conductorPositionName: conductorPos.name,
+        ayudantePositionId: ayudantePos.id,
+        ayudantePositionName: ayudantePos.name,
+      },
+      targetStartDate: startDate,
+      targetEndDate: endDate,
+      referenceDate,
+      historyAssignments: histAssigns.data,
+      historyRequirements: histReqs.data,
+      targetExistingRequirements: targetReqs.data,
+    });
+
+    return { success: true, proposal, error: null };
+  } catch (err) {
+    return {
+      success: false,
+      proposal: null,
+      error: err instanceof Error ? err.message : 'Error calculando propuesta Blue Express AM 00',
+    };
+  }
+}
+
+/**
+ * ROSTER-09: Aplica la propuesta aprobada de Blue Express AM 00 (Conductor Camion y Ayudante)
+ * a los cupos ordinarios (`is_extra = false`) del rango, conservando turnos diurnos y extras.
+ */
+export async function applyBlueExpressNightStaffingProposal(
+  startDate: string,
+  endDate: string
+): Promise<{ success: boolean; upsertedCount: number; proposal: BlueExpressNightProposal | null; error: string | null }> {
+  try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+    if (!auth.ok) {
+      return { success: false, upsertedCount: 0, proposal: null, error: auth.error };
+    }
+
+    const preview = await previewBlueExpressNightStaffing(startDate, endDate);
+    if (!preview.success || !preview.proposal) {
+      return {
+        success: false,
+        upsertedCount: 0,
+        proposal: null,
+        error: preview.error || 'No se pudo calcular la propuesta Blue Express AM 00.',
+      };
+    }
+
+    const rows = buildBlueExpressApplyPlan(preview.proposal);
+    const supabase = createAdminClient();
+    let upsertedCount = 0;
+    const CHUNK_SIZE = 200;
+
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const { data, error } = await supabase
+        .from('shift_requirements')
+        .upsert(chunk, {
+          onConflict: 'area_id,position_id,shift_id,date,is_extra',
+          ignoreDuplicates: false,
+        })
+        .select('id');
+
+      if (error) {
+        return {
+          success: false,
+          upsertedCount,
+          proposal: preview.proposal,
+          error: error.message,
+        };
+      }
+      upsertedCount += data?.length || chunk.length;
+    }
+
+    if (process.env.ROSTER_ISOLATED_TEST !== 'true') {
+      revalidatePath('/shifts/dotacion');
+      revalidatePath('/shifts/requirements');
+      revalidatePath('/shifts/daily');
+    }
+
+    return {
+      success: true,
+      upsertedCount,
+      proposal: preview.proposal,
+      error: null,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      upsertedCount: 0,
+      proposal: null,
+      error: err instanceof Error ? err.message : 'Error aplicando dotación Blue Express AM 00',
+    };
+  }
 }
 
 // ─── Assignments ──────────────────────────────────────────────────────────────
@@ -1713,6 +1958,665 @@ export async function runScheduler(startDate: string, endDate: string, areaId?: 
       success: false,
       data: null,
       error: err instanceof Error ? err.message : 'Scheduler failed',
+    };
+  }
+}
+
+/**
+ * ROSTER-06: Read-only side-by-side preview comparison of v1 (default) vs v2 (parallel).
+ * Never writes to the database and never calls `generateSchedule`.
+ */
+export async function previewCompareSchedulers(
+  startDate: string,
+  endDate: string,
+  areaId?: string,
+  personnelIds?: string[],
+  positionFilter?: string | string[]
+) {
+  try {
+    const auth = await requireActionAuth({ permission: 'runScheduler' });
+    if (!auth.ok) {
+      return { success: false, comparison: null, error: auth.error };
+    }
+
+    const supabase = createAdminClient();
+    const sDate = parseISO(startDate);
+    const eDate = parseISO(endDate);
+
+    // Load full calendar month(s) + 14d lookback / 7d lookahead for weeks, Sundays, streaks, and 12h rests
+    const monthBoundStart = format(startOfMonth(sDate), 'yyyy-MM-dd');
+    const weekLookbackStart = format(startOfWeek(subDays(sDate, 14), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    const extendedStart = monthBoundStart < weekLookbackStart ? monthBoundStart : weekLookbackStart;
+
+    const monthBoundEnd = format(endOfMonth(eDate), 'yyyy-MM-dd');
+    const weekLookaheadEnd = format(endOfWeek(addDays(eDate, 7), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    const extendedEnd = monthBoundEnd > weekLookaheadEnd ? monthBoundEnd : weekLookaheadEnd;
+
+    const [
+      reqRes,
+      persRes,
+      posRes,
+      shiftRes,
+      areaRes,
+      assRes,
+      leaveRes,
+    ] = await Promise.all([
+      fetchAllPaginated<any>(async (from, to) =>
+        await supabase
+          .from('shift_requirements')
+          .select('*, shift:shifts(name, start_time, end_time, duration_hours, requires_transport), area:areas(name), positions(name)')
+          .gte('date', startDate)
+          .lte('date', endDate)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)
+      ),
+      supabase.from('personnel').select('*').eq('is_active', true),
+      supabase.from('positions').select('*'),
+      supabase.from('shifts').select('*'),
+      supabase.from('areas').select('id, name'),
+      fetchAllPaginated<any>(async (from, to) =>
+        await supabase
+          .from('shift_assignments')
+          .select('*, shift:shifts!shift_id(name, start_time, end_time, duration_hours)')
+          .gte('date', extendedStart)
+          .lte('date', extendedEnd)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)
+      ),
+      fetchAllPaginated<any>(async (from, to) =>
+        await supabase
+          .from('leaves')
+          .select('*')
+          .eq('status', 'approved')
+          .lte('start_date', extendedEnd)
+          .gte('end_date', extendedStart)
+          .order('start_date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)
+      ),
+    ]);
+
+    const queryErrors = [
+      reqRes.error && `shift_requirements: ${reqRes.error}`,
+      persRes.error && `personnel: ${persRes.error.message}`,
+      posRes.error && `positions: ${posRes.error.message}`,
+      shiftRes.error && `shifts: ${shiftRes.error.message}`,
+      areaRes.error && `areas: ${areaRes.error.message}`,
+      assRes.error && `shift_assignments: ${assRes.error}`,
+      leaveRes.error && `leaves: ${leaveRes.error}`,
+    ].filter(Boolean);
+
+    if (queryErrors.length > 0) {
+      return {
+        success: false,
+        comparison: null,
+        error: `Error al cargar datos para vista previa (${queryErrors.join(' | ')})`,
+      };
+    }
+
+    const rawRequirements = reqRes.data || [];
+    const personnelRaw = persRes.data || [];
+    const positions = posRes.data || [];
+    const allShifts = shiftRes.data || [];
+    const areas = areaRes.data || [];
+    const existingAssignments = assRes.data || [];
+    const leaves = leaveRes.data || [];
+
+    const unconfirmedRules: string[] = [];
+    const areaNameById = new Map<string, string>(areas.map((a) => [a.id, a.name]));
+    const positionNameById = new Map<string, string>(positions.map((p) => [p.id, p.name]));
+    const blueAreaId = areas.find((a) => (a.name || '').toLowerCase().includes('blue'))?.id || '';
+
+    const rawPosFilters = Array.isArray(positionFilter)
+      ? positionFilter
+      : positionFilter && positionFilter !== 'none'
+        ? [positionFilter]
+        : [];
+    const targetPositionIds =
+      rawPosFilters.length > 0
+        ? positions
+            .filter((pos) =>
+              rawPosFilters.some((f) => (pos.name || '').toLowerCase().includes(f.trim().toLowerCase()))
+            )
+            .map((pos) => pos.id)
+        : null;
+
+    const activePersonnel = personnelRaw.filter((p) => {
+      if (p.requires_shifts === false) return false;
+      const mainPos = positions.find((pos) => pos.id === p.main_position);
+      if (mainPos && mainPos.requires_shifts === false) return false;
+      if (personnelIds && personnelIds.length > 0 && !personnelIds.includes(p.id)) return false;
+      return true;
+    });
+
+    const personnelProfiles = activePersonnel.map((p) => {
+      const mainPos = positions.find((pos) => pos.id === p.main_position);
+      return {
+        personnel_id: p.id,
+        first_name: p.first_name,
+        main_position: p.main_position,
+        main_position_name: mainPos?.name,
+        secondary_positions: p.secondary_positions || [],
+        rotation_pattern: p.rotation_pattern,
+        has_special_contract: Boolean(p.has_special_contract),
+        fixed_shift_id: p.fixed_shift_id,
+        area_id: mainPos?.area_id || '',
+        prefers_night: Boolean(p.prefers_night),
+        avoids_night: Boolean(p.avoids_night),
+      };
+    });
+
+    // Build NS22 config for v2 from DB metadata + record unconfirmed items
+    const norm = (v?: string | null) =>
+      (v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    const aeroArea = areas.find((a) => norm(a.name).includes('AEROPUERTO'));
+    const aeroPos = positions.find((p) => norm(p.name).includes('AEROPUERTO'));
+    const ns22Shift = allShifts.find(
+      (s) => norm(s.name).includes('NS 22') || (s.start_time || '').startsWith('22:00')
+    );
+
+    const aero4x4Workers = activePersonnel.filter((p) => {
+      const mainPos = positions.find((pos) => pos.id === p.main_position);
+      return (
+        norm(p.rotation_pattern).includes('4X4') &&
+        norm(mainPos?.name).includes('AEROPUERTO')
+      );
+    });
+
+    let ns22Config: {
+      titulares: Array<{
+        personnel_id: string;
+        first_name?: string;
+        anchor_date: string;
+        cycle_offset?: number;
+        confirmed_4x4_regime?: boolean;
+      }>;
+      shiftDef: {
+        shift_id: string;
+        area_id: string;
+        position_id: string;
+        shift_start?: string;
+        shift_end?: string;
+        duration_hours?: number;
+      };
+    } | null = null;
+
+    if (aeroArea && aeroPos && ns22Shift && aero4x4Workers.length === 2) {
+      const preStartDt = subDays(sDate, 1);
+      const extStartDt = parseISO(extendedStart);
+      const observedWindowDates =
+        extStartDt <= preStartDt
+          ? eachDayOfInterval({ start: extStartDt, end: preStartDt }).map((d) =>
+              format(d, 'yyyy-MM-dd')
+            )
+          : [];
+
+      const titulares = aero4x4Workers.map((w) => {
+        const pastNs22 = existingAssignments
+          .filter(
+            (a: any) =>
+              a.personnel_id === w.id &&
+              a.shift_id === ns22Shift.id &&
+              a.status !== 'cancelled' &&
+              String(a.date).split('T')[0] < startDate
+          )
+          .map((a: any) => String(a.date).split('T')[0]);
+
+        const personLeaveDates = new Set<string>();
+        for (const l of leaves as any[]) {
+          if (l.personnel_id !== w.id || l.status !== 'approved') continue;
+          const ls = parseISO(String(l.start_date).split('T')[0]);
+          const le = parseISO(String(l.end_date).split('T')[0]);
+          if (!isNaN(ls.getTime()) && !isNaN(le.getTime()) && ls <= le) {
+            for (const d of eachDayOfInterval({ start: ls, end: le })) {
+              personLeaveDates.add(format(d, 'yyyy-MM-dd'));
+            }
+          }
+        }
+
+        const resolved = deriveNs22AnchorFromHistory({
+          personnelId: w.id,
+          firstName: w.first_name,
+          confirmedAnchorDate: (w as any).ns22_anchor_date ?? null,
+          observedNs22Dates: pastNs22,
+          observedWindowDates,
+          leaveDates: personLeaveDates,
+        });
+
+        if (resolved.notice) {
+          unconfirmedRules.push(resolved.notice);
+        }
+
+        return {
+          personnel_id: w.id,
+          first_name: w.first_name,
+          anchor_date: resolved.anchor_date,
+          cycle_offset: resolved.cycle_offset,
+          confirmed_4x4_regime: false,
+        };
+      });
+
+      ns22Config = {
+        titulares,
+        shiftDef: {
+          shift_id: ns22Shift.id,
+          area_id: aeroArea.id,
+          position_id: aeroPos.id,
+          shift_start: ns22Shift.start_time,
+          shift_end: ns22Shift.end_time,
+          duration_hours: resolveShiftDurationHours(ns22Shift).hours,
+        },
+      };
+    } else {
+      unconfirmedRules.push(
+        `Regla NS22 4x4 sin evaluar completamente en vista previa (área=${aeroArea ? 'OK' : 'faltante'}, cargo=${aeroPos ? 'OK' : 'faltante'}, turno NS22=${ns22Shift ? 'OK' : 'faltante'}, titulares 4x4=${aero4x4Workers.length}).`
+      );
+    }
+
+    // Build reinforcement rules: Airport AM07 Mon-Fri + Bodegas AM04 in enabled Bodegas
+    const reinforcementConfig: Record<string, any> = {};
+    const am07Shift = allShifts.find(
+      (s) => norm(s.name).includes('AM 07') || (s.start_time || '').startsWith('07:00')
+    );
+    const am04Shift = allShifts.find(
+      (s) => norm(s.name).includes('AM 04') || (s.start_time || '').startsWith('04:00')
+    );
+
+    if (aeroPos && aeroArea && am07Shift) {
+      reinforcementConfig[aeroPos.id] = {
+        shift_id: am07Shift.id,
+        shift_start: am07Shift.start_time,
+        shift_end: am07Shift.end_time,
+        duration_hours: Number(am07Shift.duration_hours) || 8,
+        area_id: aeroArea.id,
+        position_id: aeroPos.id,
+        days_of_week: [1, 2, 3, 4, 5],
+      };
+    } else {
+      unconfirmedRules.push('Refuerzo Aeropuerto AM07 (L-V) sin evaluar: falta turno AM07 o catálogo de Aeropuerto.');
+    }
+
+    const bodegaPositions = positions.filter((p) => {
+      const pn = norm(p.name);
+      return pn.includes('BODEGA') || pn.includes('FEDEX') || pn.includes('DHL');
+    });
+    if (am04Shift && bodegaPositions.length > 0) {
+      for (const bp of bodegaPositions) {
+        if (!bp.area_id) continue;
+        reinforcementConfig[bp.id] = {
+          shift_id: am04Shift.id,
+          shift_start: am04Shift.start_time,
+          shift_end: am04Shift.end_time,
+          duration_hours: Number(am04Shift.duration_hours) || 8,
+          area_id: bp.area_id,
+          position_id: bp.id,
+        };
+      }
+    } else {
+      unconfirmedRules.push('Refuerzo Bodegas AM04 sin evaluar: falta turno AM04 o cargos de Bodega.');
+    }
+
+    // Build base calendar per person from existing non-extra assignments in range
+    const baseCalendarByPerson = new Map<string, Set<string>>();
+    for (const a of existingAssignments as any[]) {
+      if (a.status === 'cancelled' || a.is_extra) continue;
+      const d = String(a.date).split('T')[0];
+      if (!baseCalendarByPerson.has(a.personnel_id)) {
+        baseCalendarByPerson.set(a.personnel_id, new Set<string>());
+      }
+      baseCalendarByPerson.get(a.personnel_id)!.add(d);
+    }
+
+    const comparison = compareEnginesPreview({
+      startDate,
+      endDate,
+      rawRequirements: rawRequirements as any,
+      existingAssignments: existingAssignments.map((a: any) => ({
+        ...a,
+        shift_start: a.shift?.start_time,
+        shift_end: a.shift?.end_time,
+        duration_hours: a.shift?.duration_hours,
+      })),
+      personnel: personnelProfiles,
+      approvedLeaves: leaves as any,
+      allShifts: allShifts as any,
+      blueAreaId,
+      areaFilter: areaId && areaId !== 'all' ? areaId : null,
+      positionFilter: targetPositionIds,
+      ns22Config,
+      reinforcementConfig,
+      areaNameById,
+      positionNameById,
+      baseCalendarByPerson,
+      unconfirmedRules,
+    });
+
+    return { success: true, comparison, error: null };
+  } catch (err) {
+    return {
+      success: false,
+      comparison: null,
+      error: err instanceof Error ? err.message : 'Preview comparison failed',
+    };
+  }
+}
+
+function safeRevalidateRosterPaths() {
+  if (process.env.ROSTER_ISOLATED_TEST === 'true') return;
+  revalidatePath('/shifts/assignments');
+  revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
+}
+
+/**
+ * ROSTER-07: Guardado operativo de `v2` con respaldo previo, transacción y bloqueo por falta de confirmación NS22.
+ * Deshabilitado por defecto (`ROSTER_V2_SAVE_ENABLED !== 'true'`) hasta aprobación expresa.
+ */
+export async function runSchedulerV2(params: {
+  startDate: string;
+  endDate: string;
+  areaId?: string;
+  personnelIds?: string[];
+  positionFilter?: string | string[];
+  shouldValidate?: boolean;
+  ns22Confirmation?: Ns22OperationalConfirmation | null;
+  expectedBaselineAt?: string | null;
+  expectedBaselineHash?: string | null;
+  testHooks?: {
+    supabase?: SupabaseLikeClient;
+    authOk?: boolean;
+  };
+}) {
+  try {
+    const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(params.testHooks?.supabase);
+    if (!isIsolatedTest) {
+      const auth = await requireActionAuth({ permission: 'runScheduler' });
+      if (!auth.ok) {
+        return { success: false, rolledBack: false, snapshotId: null, error: auth.error };
+      }
+    } else if (params.testHooks?.authOk === false) {
+      return { success: false, rolledBack: false, snapshotId: null, error: 'No autorizado.' };
+    }
+
+    if (!isV2SaveEnabled()) {
+      return {
+        success: false,
+        rolledBack: false,
+        snapshotId: null,
+        error:
+          'El guardado operativo de v2 está deshabilitado hasta aprobación expresa de ROSTER-07. v1 sigue siendo el motor predeterminado.',
+      };
+    }
+
+    const gate = validateNs22OperationalConfig(params.ns22Confirmation);
+    if (!gate.ok || !params.ns22Confirmation) {
+      return {
+        success: false,
+        rolledBack: false,
+        snapshotId: null,
+        error: `Guardado operativo v2 bloqueado: ${gate.unconfirmedReasons.join(' ')}`,
+        unconfirmedReasons: gate.unconfirmedReasons,
+      };
+    }
+
+    const supabase: any = isIsolatedTest ? params.testHooks!.supabase : createAdminClient();
+    const sDate = parseISO(params.startDate);
+    const eDate = parseISO(params.endDate);
+
+    const monthBoundStart = format(startOfMonth(sDate), 'yyyy-MM-dd');
+    const weekLookbackStart = format(startOfWeek(subDays(sDate, 14), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    const extendedStart = monthBoundStart < weekLookbackStart ? monthBoundStart : weekLookbackStart;
+
+    const monthBoundEnd = format(endOfMonth(eDate), 'yyyy-MM-dd');
+    const weekLookaheadEnd = format(endOfWeek(addDays(eDate, 7), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    const extendedEnd = monthBoundEnd > weekLookaheadEnd ? monthBoundEnd : weekLookaheadEnd;
+
+    const [
+      { data: personnelRaw, error: persErr },
+      { data: positions, error: posErr },
+      { data: allShifts, error: shiftErr },
+      { data: areas, error: areaErr },
+    ] = await Promise.all([
+      supabase.from('personnel').select('*').eq('is_active', true),
+      supabase.from('positions').select('*'),
+      supabase.from('shifts').select('*'),
+      supabase.from('areas').select('id, name'),
+    ]);
+
+    if (persErr || posErr || shiftErr || areaErr) {
+      const msg = persErr?.message || posErr?.message || shiftErr?.message || areaErr?.message || 'Error cargando catálogos';
+      return { success: false, rolledBack: false, snapshotId: null, error: msg };
+    }
+
+    const [reqPaged, assignPaged, leavePaged] = await Promise.all([
+      fetchAllPaginated<any>((from, to) =>
+        supabase
+          .from('shift_requirements')
+          .select('id, date, area_id, position_id, shift_id, required_count, is_extra, priority')
+          .gte('date', extendedStart)
+          .lte('date', extendedEnd)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)
+      ),
+      fetchAllPaginated<any>((from, to) =>
+        supabase
+          .from('shift_assignments')
+          .select('*, shift:shifts!shift_assignments_shift_id_fkey(name, start_time, end_time, duration_hours)')
+          .gte('date', extendedStart)
+          .lte('date', extendedEnd)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)
+      ),
+      fetchAllPaginated<any>((from, to) =>
+        supabase
+          .from('leaves')
+          .select('*')
+          .eq('status', 'approved')
+          .lte('start_date', extendedEnd)
+          .gte('end_date', extendedStart)
+          .order('start_date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)
+      ),
+    ]);
+
+    if (reqPaged.error || !reqPaged.data || assignPaged.error || !assignPaged.data || leavePaged.error || !leavePaged.data) {
+      return {
+        success: false,
+        rolledBack: false,
+        snapshotId: null,
+        error: reqPaged.error || assignPaged.error || leavePaged.error || 'Error cargando datos paginados.',
+      };
+    }
+
+    const posById = new Map((positions || []).map((p: any) => [p.id, p]));
+    const rawFilters = Array.isArray(params.positionFilter)
+      ? params.positionFilter
+      : params.positionFilter && params.positionFilter !== 'none'
+        ? [params.positionFilter]
+        : [];
+    const targetPositionIds: string[] = [];
+    if (rawFilters.length > 0) {
+      for (const pos of positions || []) {
+        const pname = (pos.name || '').toLowerCase();
+        if (rawFilters.some((f) => pname.includes(f.trim().toLowerCase()))) {
+          targetPositionIds.push(pos.id);
+        }
+      }
+    }
+
+    const personnelProfiles = (personnelRaw || [])
+      .filter((p: any) => {
+        if (p.requires_shifts === false) return false;
+        const mainPos = posById.get(p.main_position) as any;
+        if (mainPos && mainPos.requires_shifts === false) return false;
+        if (params.personnelIds && params.personnelIds.length > 0 && !params.personnelIds.includes(p.id)) {
+          return false;
+        }
+        return true;
+      })
+      .map((p: any) => ({
+        personnel_id: p.id,
+        first_name: p.first_name,
+        main_position: p.main_position ?? null,
+        secondary_positions: Array.isArray(p.secondary_positions) ? p.secondary_positions : [],
+        rotation_pattern: p.rotation_pattern ?? null,
+        has_special_contract: Boolean(p.has_special_contract),
+        confirmed_weekly_limit_hours: p.confirmed_weekly_limit_hours ?? null,
+        confirmed_regime: p.confirmed_regime ?? null,
+      }));
+
+    const areaNameById = new Map<string, string>((areas || []).map((a: any) => [a.id, a.name]));
+    const positionNameById = new Map<string, string>((positions || []).map((p: any) => [p.id, p.name]));
+
+    const aeroArea = (areas || []).find((a: any) => (a.name || '').toLowerCase().includes('aeropuerto'));
+    const ns22Shift = (allShifts || []).find(
+      (s: any) => (s.name || '').toUpperCase().includes('NS22') || (s.name || '').toUpperCase().includes('NS 22')
+    );
+    const ns22Pos = (positions || []).find((p: any) => (p.name || '').toLowerCase().includes('operador'));
+
+    const ns22Config =
+      aeroArea && ns22Shift && ns22Pos
+        ? {
+            titulares: params.ns22Confirmation.titulares.map((t) => ({
+              personnel_id: t.personnelId,
+              first_name: t.name || t.personnelId,
+              anchor_date: t.confirmedAnchorDate || params.startDate,
+              cycle_offset: 0,
+              confirmed_4x4_regime: params.ns22Confirmation!.regimeConfirmed,
+            })),
+            shiftDef: {
+              shift_id: ns22Shift.id,
+              area_id: aeroArea.id,
+              position_id: ns22Pos.id,
+              shift_start: ns22Shift.start_time,
+              shift_end: ns22Shift.end_time,
+              duration_hours: resolveShiftDurationHours(ns22Shift).hours,
+            },
+          }
+        : undefined;
+
+    const shiftById = new Map((allShifts || []).map((s: any) => [s.id, s]));
+    const activeAreaFilter = params.areaId && params.areaId !== 'all' ? params.areaId : null;
+    const activePosSet = targetPositionIds.length > 0 ? new Set(targetPositionIds) : null;
+    const activePersSet =
+      params.personnelIds && params.personnelIds.length > 0 ? new Set(params.personnelIds) : null;
+
+    // Excluir borradores ordinarios reemplazables dentro del alcance para que v2 genere la dotación completa
+    const preservedForV2 = assignPaged.data.filter((a: any) => {
+      if (a.is_extra) return true;
+      const d = String(a.date).split('T')[0];
+      const inRange = d >= params.startDate && d <= params.endDate;
+      if (!inRange) return true;
+      if (activeAreaFilter && a.area_id !== activeAreaFilter) return true;
+      if (activePosSet && !activePosSet.has(a.position_id)) return true;
+      if (activePersSet && !activePersSet.has(a.personnel_id)) return true;
+      return isProtectedPersistedAssignment(a as PersistedAssignmentRow);
+    });
+
+    const v2Result = scheduleCrossArea({
+      startDate: params.startDate,
+      endDate: params.endDate,
+      rawRequirements: reqPaged.data.map((r: any) => ({
+        ...r,
+        shift: r.shift || shiftById.get(r.shift_id) || undefined,
+      })),
+      existingAssignments: preservedForV2.map((a: any) => ({
+        ...a,
+        shift_start: a.shift?.start_time,
+        shift_end: a.shift?.end_time,
+        duration_hours: a.shift?.duration_hours,
+      })),
+      personnel: personnelProfiles,
+      approvedLeaves: leavePaged.data,
+      areaFilter: activeAreaFilter,
+      positionFilter: targetPositionIds.length > 0 ? targetPositionIds : null,
+      ns22Config,
+      areaNameById,
+      positionNameById,
+    });
+
+    const adapter = createSupabaseRosterPersistenceAdapter(supabase);
+    const saveRes = await saveV2Schedule(adapter, {
+      startDate: params.startDate,
+      endDate: params.endDate,
+      areaId: params.areaId ?? null,
+      personnelIds: params.personnelIds,
+      positionIds: targetPositionIds,
+      ns22Config: params.ns22Confirmation,
+      v2Result,
+      shouldValidate: params.shouldValidate,
+      expectedBaselineAt: params.expectedBaselineAt ?? null,
+      expectedBaselineHash: params.expectedBaselineHash ?? null,
+    });
+
+    if (saveRes.success) {
+      safeRevalidateRosterPaths();
+    }
+
+    return {
+      ...saveRes,
+      v2Result,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      rolledBack: false,
+      snapshotId: null,
+      error: err instanceof Error ? err.message : 'Error ejecutando guardado v2',
+    };
+  }
+}
+
+/**
+ * ROSTER-07: Recupera el roster previo desde un respaldo (`roster_v2_snapshots`) sin sobrescribir cambios posteriores.
+ */
+export async function recoverV2RosterAction(params: {
+  snapshotId: string;
+  force?: boolean;
+  testHooks?: {
+    supabase?: SupabaseLikeClient;
+    authOk?: boolean;
+  };
+}) {
+  try {
+    const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(params.testHooks?.supabase);
+    if (!isIsolatedTest) {
+      const auth = await requireActionAuth({ permission: 'runScheduler' });
+      if (!auth.ok) {
+        return { success: false, snapshotId: params.snapshotId, error: auth.error };
+      }
+    } else if (params.testHooks?.authOk === false) {
+      return { success: false, snapshotId: params.snapshotId, error: 'No autorizado.' };
+    }
+
+    if (!isV2SaveEnabled()) {
+      return {
+        success: false,
+        snapshotId: params.snapshotId,
+        error: 'El modo de recuperación v2 está deshabilitado hasta habilitar ROSTER_V2_SAVE_ENABLED=true.',
+      };
+    }
+
+    const supabase: any = isIsolatedTest ? params.testHooks!.supabase : createAdminClient();
+    const adapter = createSupabaseRosterPersistenceAdapter(supabase);
+    const result = await recoverRosterFromSnapshot(adapter, params.snapshotId, {
+      force: params.force,
+    });
+
+    if (result.success) {
+      safeRevalidateRosterPaths();
+    }
+    return result;
+  } catch (err) {
+    return {
+      success: false,
+      snapshotId: params.snapshotId,
+      error: err instanceof Error ? err.message : 'Error recuperando respaldo v2',
     };
   }
 }

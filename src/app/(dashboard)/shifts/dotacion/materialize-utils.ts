@@ -1,5 +1,11 @@
 import { eachDayOfInterval, format, getDay, parseISO } from 'date-fns';
 import {
+  CHILE_NATIONAL_HOLIDAYS_BY_YEAR,
+  getChileNationalHolidaysForRange,
+  isHolidayZeroStaffingPair,
+  type VerifiedHolidayYearCalendar,
+} from '../../../../lib/scheduler/v2/chile-holidays';
+import {
   normalizePriority,
   normalizePriorityOverrides,
   PRIORITY_RANK,
@@ -45,19 +51,38 @@ export function buildRequirementSlotKey(row: {
   return `${row.area_id}|${row.position_id}|${row.shift_id}|${row.date}`;
 }
 
+export interface MaterializeHolidayOptions {
+  areaNameById?: Map<string, string>;
+  positionNameById?: Map<string, string>;
+  calendarRegistry?: Record<number, VerifiedHolidayYearCalendar>;
+  warningsOut?: string[];
+}
+
 /**
  * Consolidates active templates into daily requirement rows for [startDate, endDate].
  * Sums required_count when multiple templates match the same (area, position, shift, date).
+ * On verified Chilean national holidays, leaves ordinary staffing at 0 for
+ * Atrex—Operador de grúa, Base—Operador de grúa, and Base—Supervisor.
  */
 export function buildConsolidatedRequirements(
   templates: RequirementTemplateRow[],
   startDate: string,
-  endDate: string
+  endDate: string,
+  holidayOptions?: MaterializeHolidayOptions
 ): MaterializedRequirementInsert[] {
   const start = parseISO(startDate);
   const end = parseISO(endDate);
   if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
     return [];
+  }
+
+  const holidayLookup = getChileNationalHolidaysForRange(
+    startDate,
+    endDate,
+    holidayOptions?.calendarRegistry ?? CHILE_NATIONAL_HOLIDAYS_BY_YEAR
+  );
+  if (holidayOptions?.warningsOut && holidayLookup.warnings.length > 0) {
+    holidayOptions.warningsOut.push(...holidayLookup.warnings);
   }
 
   const days = eachDayOfInterval({ start, end });
@@ -66,11 +91,20 @@ export function buildConsolidatedRequirements(
   for (const day of days) {
     const dayOfWeek = getDay(day); // 0=Dom, 1=Lun ... 6=Sab
     const dateStr = format(day, 'yyyy-MM-dd');
+    const isNationalHoliday = holidayLookup.holidaysByDate.has(dateStr);
 
     for (const template of templates) {
       if (template.is_active === false) continue;
       if (!Array.isArray(template.days_of_week) || !template.days_of_week.includes(dayOfWeek)) {
         continue;
+      }
+
+      if (isNationalHoliday && holidayOptions?.areaNameById && holidayOptions?.positionNameById) {
+        const areaName = holidayOptions.areaNameById.get(template.area_id);
+        const positionName = holidayOptions.positionNameById.get(template.position_id);
+        if (isHolidayZeroStaffingPair(areaName, positionName)) {
+          continue;
+        }
       }
 
       const key = buildRequirementSlotKey({

@@ -36,6 +36,13 @@ import { deleteAssignment, deleteRequirement } from '../actions';
 import { getAvailableForExtra, addExtraRequirement, assignExtraPersonnel, confirmPlan, cancelAssignment, reactivateAssignment, resetDailyPlan, updateAssignmentShift, updateAssignmentDetails } from './actions';
 import { sendDailyPlanScreenshotAction } from './publish-actions';
 import { RotateCcw, Mail, Copy, Camera, UserCheck } from 'lucide-react';
+import {
+  buildExtraSelectorItems,
+  createExtraAssignmentFromSelector,
+  evaluateDailyPlanningVacancies,
+  type ExtraSelectorItem,
+} from '@/lib/scheduler/v2/vacantes-diaria';
+import type { DailyPlanningAssignmentRef } from '@/lib/scheduler/v2/types';
 import { 
   Dialog, 
   DialogContent, 
@@ -79,6 +86,217 @@ export default function DailyPlanningClient({
   const router = useRouter();
   const reportRef = useRef<HTMLDivElement>(null);
   const [isAddingExtra, setIsAddingExtra] = useState(false);
+  const [showRoster08Demo, setShowRoster08Demo] = useState(false);
+  const [demoAssignments, setDemoAssignments] = useState<DailyPlanningAssignmentRef[]>(() => [
+    {
+      personnel_id: 'demo-op-1',
+      date: selectedDate,
+      area_id: 'demo-area-aero',
+      position_id: 'demo-pos-aero',
+      shift_id: 'demo-shift-am07',
+      is_extra: false,
+    },
+    {
+      personnel_id: 'demo-op-2',
+      date: selectedDate,
+      area_id: 'demo-area-aero',
+      position_id: 'demo-pos-aero',
+      shift_id: 'demo-shift-am07',
+      is_extra: false,
+    },
+  ]);
+
+  useEffect(() => {
+    setDemoAssignments([
+      {
+        personnel_id: 'demo-op-1',
+        date: selectedDate,
+        area_id: 'demo-area-aero',
+        position_id: 'demo-pos-aero',
+        shift_id: 'demo-shift-am07',
+        is_extra: false,
+      },
+      {
+        personnel_id: 'demo-op-2',
+        date: selectedDate,
+        area_id: 'demo-area-aero',
+        position_id: 'demo-pos-aero',
+        shift_id: 'demo-shift-am07',
+        is_extra: false,
+      },
+    ]);
+  }, [selectedDate]);
+
+  const hasV2LinkedExtras = useMemo(
+    () => initialRequirements.some((r: any) => Number(r.auto_vacancy_count || 0) > 0),
+    [initialRequirements]
+  );
+
+  const v2VacancySummary = useMemo(() => {
+    if (showRoster08Demo) {
+      return evaluateDailyPlanningVacancies({
+        date: selectedDate,
+        ordinaryRequirements: [
+          {
+            id: 'demo-req-ord',
+            date: selectedDate,
+            area_id: 'demo-area-aero',
+            position_id: 'demo-pos-aero',
+            shift_id: 'demo-shift-am07',
+            required_count: 3,
+            priority: 'HIGH',
+            is_extra: false,
+          },
+        ],
+        extraRequirements: [
+          {
+            id: 'demo-req-ext',
+            date: selectedDate,
+            area_id: 'demo-area-aero',
+            position_id: 'demo-pos-aero',
+            shift_id: 'demo-shift-am07',
+            manual_count: 1,
+            auto_vacancy_count: 1,
+            required_count: 2,
+            linked_requirement_id: 'demo-req-ord',
+          },
+        ],
+        assignments: demoAssignments,
+        areaNameById: new Map([['demo-area-aero', 'Aeropuerto (Demo)']]),
+        positionNameById: new Map([['demo-pos-aero', 'Operador Aeropuerto']]),
+      });
+    }
+
+    if (!hasV2LinkedExtras) return null;
+
+    const areaMap = new Map(areas.map((a) => [a.id, a.name]));
+    const posMap = new Map(positions.map((p) => [p.id, p.name]));
+
+    return evaluateDailyPlanningVacancies({
+      date: selectedDate,
+      ordinaryRequirements: initialRequirements
+        .filter((r) => !r.is_extra)
+        .map((r) => ({
+          id: r.id,
+          date: r.date,
+          area_id: r.area_id,
+          position_id: r.position_id,
+          shift_id: r.shift_id,
+          required_count: r.required_count,
+          is_extra: false,
+        })),
+      extraRequirements: initialRequirements
+        .filter((r) => r.is_extra)
+        .map((r: any) => ({
+          id: r.id,
+          date: r.date,
+          area_id: r.area_id,
+          position_id: r.position_id,
+          shift_id: r.shift_id,
+          required_count: r.required_count,
+          manual_count: r.manual_extra_count,
+          auto_vacancy_count: r.auto_vacancy_count,
+          linked_requirement_id: r.linked_requirement_id,
+        })),
+      assignments: initialAssignments.map((a: any) => ({
+        personnel_id: a.personnel_id,
+        date: a.date,
+        area_id: a.area_id,
+        position_id: a.position_id,
+        shift_id: a.shift_id,
+        is_extra: a.is_extra,
+        extra_target: a.extra_target,
+        linked_requirement_id: a.linked_requirement_id,
+        status: a.status,
+        is_on_leave: a.is_on_leave,
+      })),
+      areaNameById: areaMap,
+      positionNameById: posMap,
+    });
+  }, [showRoster08Demo, demoAssignments, hasV2LinkedExtras, selectedDate, initialRequirements, initialAssignments, areas, positions]);
+
+  const extraSelectorItems = useMemo<ExtraSelectorItem[]>(() => {
+    if (showRoster08Demo) {
+      return buildExtraSelectorItems({
+        date: selectedDate,
+        ordinaryRequirements: [
+          {
+            id: 'demo-req-ord',
+            date: selectedDate,
+            area_id: 'demo-area-aero',
+            position_id: 'demo-pos-aero',
+            shift_id: 'demo-shift-am07',
+            required_count: 3,
+            priority: 'HIGH',
+            is_extra: false,
+          },
+        ],
+        extraRequirements: [
+          {
+            id: 'demo-req-ext',
+            date: selectedDate,
+            area_id: 'demo-area-aero',
+            position_id: 'demo-pos-aero',
+            shift_id: 'demo-shift-am07',
+            manual_count: 1,
+            auto_vacancy_count: 1,
+            required_count: 2,
+            linked_requirement_id: 'demo-req-ord',
+          },
+        ],
+        assignments: demoAssignments,
+        areaNameById: new Map([['demo-area-aero', 'Aeropuerto (Demo)']]),
+        positionNameById: new Map([['demo-pos-aero', 'Operador Aeropuerto']]),
+      });
+    }
+
+    if (!hasV2LinkedExtras) return [];
+
+    const areaMap = new Map(areas.map((a) => [a.id, a.name]));
+    const posMap = new Map(positions.map((p) => [p.id, p.name]));
+
+    return buildExtraSelectorItems({
+      date: selectedDate,
+      ordinaryRequirements: initialRequirements
+        .filter((r) => !r.is_extra)
+        .map((r) => ({
+          id: r.id,
+          date: r.date,
+          area_id: r.area_id,
+          position_id: r.position_id,
+          shift_id: r.shift_id,
+          required_count: r.required_count,
+          is_extra: false,
+        })),
+      extraRequirements: initialRequirements
+        .filter((r) => r.is_extra)
+        .map((r: any) => ({
+          id: r.id,
+          date: r.date,
+          area_id: r.area_id,
+          position_id: r.position_id,
+          shift_id: r.shift_id,
+          required_count: r.required_count,
+          manual_count: r.manual_extra_count,
+          auto_vacancy_count: r.auto_vacancy_count,
+          linked_requirement_id: r.linked_requirement_id,
+        })),
+      assignments: initialAssignments.map((a: any) => ({
+        personnel_id: a.personnel_id,
+        date: a.date,
+        area_id: a.area_id,
+        position_id: a.position_id,
+        shift_id: a.shift_id,
+        is_extra: a.is_extra,
+        extra_target: a.extra_target,
+        linked_requirement_id: a.linked_requirement_id,
+        status: a.status,
+        is_on_leave: a.is_on_leave,
+      })),
+      areaNameById: areaMap,
+      positionNameById: posMap,
+    });
+  }, [showRoster08Demo, demoAssignments, hasV2LinkedExtras, selectedDate, initialRequirements, initialAssignments, areas, positions]);
   const [loadingAvailable, setLoadingAvailable] = useState<string | null>(null);
   const [availablePersonnel, setAvailablePersonnel] = useState<Record<string, any[]>>({});
   const [isConfirmed, setIsConfirmed] = useState(initialAssignments.some(a => a.is_confirmed));
@@ -637,8 +855,30 @@ export default function DailyPlanningClient({
     setLoadingAvailable(null);
   };
 
-  const handleAssignExtra = async (posId: string, shiftId: string, areaId: string, persId: string) => {
-    const res = await assignExtraPersonnel(selectedDate, shiftId, areaId, posId, persId);
+  const handleAssignExtra = async (
+    posId: string,
+    shiftId: string,
+    areaId: string,
+    persId: string,
+    extraTarget?: 'manual' | 'v2_vacancy',
+    linkedRequirementId?: string | null,
+    selectorItem?: ExtraSelectorItem
+  ) => {
+    if (showRoster08Demo && selectorItem) {
+      const nextAss = createExtraAssignmentFromSelector(selectorItem, persId);
+      setDemoAssignments((prev) => [...prev, nextAss]);
+      toast.success(
+        extraTarget === 'v2_vacancy'
+          ? 'Demo: cubierto por Dotación Extra vinculada a falta ordinaria'
+          : 'Demo: cubierto por Dotación Extra manual (falta ordinaria sigue abierta)'
+      );
+      return;
+    }
+
+    const res = await assignExtraPersonnel(selectedDate, shiftId, areaId, posId, persId, {
+      extraTarget,
+      linkedRequirementId,
+    });
     if (res.success) {
       toast.success('Personal asignado correctamente');
       // Force full browser reload to bypass all Next.js caches
@@ -781,6 +1021,21 @@ export default function DailyPlanningClient({
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Dotación Extra</span>
+            </button>
+          )}
+
+          {!readOnly && (
+            <button
+              onClick={() => setShowRoster08Demo((prev) => !prev)}
+              className={`flex flex-col items-center justify-center gap-1 w-28 h-16 rounded-xl transition-all font-bold uppercase tracking-tight text-[9px] shadow-sm text-center leading-tight whitespace-normal p-2 ${
+                showRoster08Demo
+                  ? 'bg-amber-600 text-white hover:bg-amber-700'
+                  : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+              }`}
+              title="Vista de prueba sintética ROSTER-08 sin escribir en base de datos"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>Demo Vacantes v2</span>
             </button>
           )}
 
@@ -1274,8 +1529,221 @@ export default function DailyPlanningClient({
           {bluePairs.length === 0 && <p className="text-slate-400 italic text-center py-2 text-xs">No hay rutas planificadas para hoy</p>}
         </section>
 
-        {/* EXTRA SLOTS */}
-        {initialRequirements.filter(r => r.is_extra).map(req => {
+        {/* V2 VACANCIES & LINKED EXTRA SLOTS (ROSTER-08) */}
+        {v2VacancySummary && (
+          <div className="mt-4 p-4 border-2 border-amber-300 rounded-xl bg-amber-50/40 space-y-3 no-print">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-extrabold uppercase tracking-wide text-amber-900">
+                  {showRoster08Demo
+                    ? 'Demo Sintética ROSTER-08 · Falta Ordinaria y Dotación Extra Asociada (sin DB)'
+                    : 'Faltas Ordinarias y Cupos Extra Asociados (Motor v2)'}
+                </h3>
+                <p className="text-[11px] text-amber-800">
+                  Faltas abiertas: <strong>{v2VacancySummary.total_open_faltas}</strong> · Cupos extra vinculados abiertos:{' '}
+                  <strong>{v2VacancySummary.total_open_linked_extras}</strong> · Extras manuales abiertos:{' '}
+                  <strong>{v2VacancySummary.total_open_manual_extras}</strong>
+                </p>
+              </div>
+              {showRoster08Demo && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDemoAssignments((prev) =>
+                        prev.some((a) => a.personnel_id === 'demo-op-3-ord')
+                          ? prev
+                          : [
+                              ...prev,
+                              {
+                                personnel_id: 'demo-op-3-ord',
+                                date: selectedDate,
+                                area_id: 'demo-area-aero',
+                                position_id: 'demo-pos-aero',
+                                shift_id: 'demo-shift-am07',
+                                is_extra: false,
+                              },
+                            ]
+                      )
+                    }
+                    className="px-2.5 py-1 rounded bg-emerald-600 text-white text-[11px] font-bold hover:bg-emerald-700"
+                  >
+                    Cubrir Falta Ordinaria
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDemoAssignments([
+                        {
+                          personnel_id: 'demo-op-1',
+                          date: selectedDate,
+                          area_id: 'demo-area-aero',
+                          position_id: 'demo-pos-aero',
+                          shift_id: 'demo-shift-am07',
+                          is_extra: false,
+                        },
+                        {
+                          personnel_id: 'demo-op-2',
+                          date: selectedDate,
+                          area_id: 'demo-area-aero',
+                          position_id: 'demo-pos-aero',
+                          shift_id: 'demo-shift-am07',
+                          is_extra: false,
+                        },
+                      ])
+                    }
+                    className="px-2.5 py-1 rounded bg-white border border-amber-300 text-amber-900 text-[11px] font-bold hover:bg-amber-100"
+                  >
+                    Reiniciar Demo
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {v2VacancySummary.slots.map((slot) => {
+                const areaLabel = showRoster08Demo
+                  ? 'Aeropuerto (Demo)'
+                  : areas.find((a) => a.id === slot.area_id)?.name || slot.area_id;
+                const posLabel = showRoster08Demo
+                  ? 'Operador Aeropuerto'
+                  : positions.find((p) => p.id === slot.position_id)?.name || slot.position_id;
+                const shiftLabel = showRoster08Demo
+                  ? 'AM 07'
+                  : shifts.find((s) => s.id === slot.shift_id)?.name || slot.shift_id;
+
+                return (
+                  <div
+                    key={slot.slot_key}
+                    className="p-2.5 bg-white rounded-lg border border-amber-200 flex flex-wrap items-center justify-between gap-2 text-xs"
+                  >
+                    <div>
+                      <span className="font-bold text-slate-900">
+                        {areaLabel} — {posLabel} ({shiftLabel})
+                      </span>
+                      <span className="ml-2 text-slate-600">
+                        Cobertura efectiva: <strong>{slot.effective_ordinary_coverage}/{slot.ordinary_required}</strong>
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
+                      <span
+                        className={`px-2 py-0.5 rounded-full ${
+                          slot.open_falta_count > 0
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-emerald-100 text-emerald-700'
+                        }`}
+                      >
+                        Falta ordinaria: {slot.open_falta_count}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full ${
+                          slot.open_linked_extra_count > 0
+                            ? 'bg-indigo-100 text-indigo-700'
+                            : 'bg-emerald-100 text-emerald-700'
+                        }`}
+                      >
+                        Extra vinculado a falta: {slot.open_linked_extra_count}
+                      </span>
+                      {slot.manual_extra_slots > 0 && (
+                        <span
+                          className={`px-2 py-0.5 rounded-full ${
+                            slot.open_manual_extra_count > 0
+                              ? 'bg-slate-200 text-slate-800'
+                              : 'bg-emerald-100 text-emerald-700'
+                          }`}
+                        >
+                          Extra manual: {slot.open_manual_extra_count}/{slot.manual_extra_slots}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* EXTRA SLOTS (habitual selector list: deduplicated for v2, unchanged for legacy) */}
+        {(showRoster08Demo || hasV2LinkedExtras)
+          ? extraSelectorItems.map((item) => {
+              const areaLabel = showRoster08Demo
+                ? 'Aeropuerto (Demo)'
+                : areas.find((a) => a.id === item.area_id)?.name || item.area_id;
+              const posLabel = showRoster08Demo
+                ? 'Operador Aeropuerto'
+                : positions.find((p) => p.id === item.position_id)?.name || item.position_id;
+              const shiftLabel = showRoster08Demo
+                ? 'AM 07'
+                : shifts.find((s) => s.id === item.shift_id)?.name || item.shift_id;
+              const isVacancyLinked = item.extra_target === 'v2_vacancy';
+
+              return (
+                <div
+                  key={item.key}
+                  className="mt-4 p-3 border-2 border-dashed border-indigo-200 rounded-xl bg-indigo-50/20 no-print"
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="text-indigo-800 font-bold text-xs">
+                      DOTACIÓN EXTRA ({isVacancyLinked ? 'VACANTE ORDINARIA' : 'MANUAL'}): {areaLabel} - {posLabel} ({shiftLabel})
+                    </div>
+                    <span className="text-[10px] bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full uppercase">
+                      {item.open_count} pendientes
+                    </span>
+                  </div>
+                  {!readOnly && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {Array.from({ length: item.open_count }).map((_, i) => (
+                        <select
+                          key={i}
+                          className="w-full p-1.5 bg-white rounded border border-indigo-200 text-xs font-bold uppercase"
+                          onFocus={() => !showRoster08Demo && loadAvailable(item.position_id, item.shift_id)}
+                          onChange={(e) =>
+                            handleAssignExtra(
+                              item.position_id,
+                              item.shift_id,
+                              item.area_id,
+                              e.target.value,
+                              item.extra_target,
+                              item.linked_requirement_id,
+                              item
+                            )
+                          }
+                          defaultValue=""
+                        >
+                          <option value="" disabled>
+                            Seleccionar libre...
+                          </option>
+                          {showRoster08Demo ? (
+                            <>
+                              <option value="demo-op-manual-1">Operador Extra Manual (Demo)</option>
+                              <option value="demo-op-linked-1">Operador Reemplazo Vacante (Demo)</option>
+                            </>
+                          ) : loadingAvailable === item.position_id ? (
+                            <option>Cargando...</option>
+                          ) : (
+                            (availablePersonnel[item.position_id] || []).map((p) => {
+                              const displayName = `${p.first_name} ${p.last_name_father}${
+                                p.already_assigned ? ` (EN TURNO: ${p.current_shift_name})` : ''
+                              }${p.fatigue_warnings.length > 0 ? ' (⚠️)' : ''}`;
+                              return (
+                                <option
+                                  key={p.id}
+                                  value={p.id}
+                                  style={p.already_assigned ? { color: '#d97706', fontWeight: 'bold' } : undefined}
+                                >
+                                  {displayName}
+                                </option>
+                              );
+                            })
+                          )}
+                        </select>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          : initialRequirements.filter(r => r.is_extra).map(req => {
           const filled = (req as any).filled_count ?? activeAssignments.filter(a => (a as any).is_extra && a.shift_id === req.shift_id && a.position_id === req.position_id && a.area_id === req.area_id).length;
           const left = req.required_count - filled;
           if (left <= 0) return null;

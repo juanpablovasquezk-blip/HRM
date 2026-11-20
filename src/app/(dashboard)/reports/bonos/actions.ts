@@ -10,13 +10,20 @@ export interface BonosReportFilters {
   companyId?: string;
 }
 
-export async function getBonosReportData(filters: BonosReportFilters) {
-  const auth = await requireActionAuth({ permission: 'viewReports' });
-  if (!auth.ok) {
-    throw new Error(auth.error);
+export async function getBonosReportData(
+  filters: BonosReportFilters,
+  testHooks?: { supabase?: any }
+) {
+  const isIsolatedTest =
+    process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  if (!isIsolatedTest) {
+    const auth = await requireActionAuth({ permission: 'viewReports' });
+    if (!auth.ok) {
+      throw new Error(auth.error);
+    }
   }
 
-  const supabase = await createClient();
+  const supabase = isIsolatedTest ? testHooks!.supabase : await createClient();
   const { from, to, companyId } = filters;
 
   // 1. Fetch extra shifts (is_extra = true)

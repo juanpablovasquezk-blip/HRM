@@ -6,8 +6,12 @@ import type { ShiftAssignmentWithDetails, ShiftRequirementWithDetails } from '@/
  * Must NOT have 'use server' so it is never exposed as a public Server Action.
  * Used by both the protected dashboard action (getDailyOperationalData) and /proyeccion.
  */
-export async function fetchDailyOperationalData(date: string) {
-  const supabase = createAdminClient();
+export async function fetchDailyOperationalData(
+  date: string,
+  testSupabase?: ReturnType<typeof createAdminClient>
+) {
+  const supabase: ReturnType<typeof createAdminClient> =
+    process.env.ROSTER_ISOLATED_TEST === 'true' && testSupabase ? testSupabase : createAdminClient();
 
   // 1. Get all assignments for this day
   const { data: assignments, error: assErr } = await supabase

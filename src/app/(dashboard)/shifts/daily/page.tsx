@@ -45,7 +45,10 @@ export default async function DailyPlanningPage(props: {
   const date = searchParams.date || format(new Date(), 'yyyy-MM-dd');
 
   // Fetch baseline data
-  let { assignments, requirements, error } = await getDailyOperationalData(date);
+  const dailyData = await getDailyOperationalData(date);
+  const error = 'error' in dailyData ? dailyData.error : undefined;
+  const assignments = 'assignments' in dailyData ? dailyData.assignments : [];
+  const requirements = 'requirements' in dailyData ? dailyData.requirements : [];
   
   // Fetch metadata for the "Add Extra" form
   const { data: areas } = await supabase.from('areas').select('*').order('name');
