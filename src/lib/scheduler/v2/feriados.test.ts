@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildConsolidatedRequirements } from '../../../app/(dashboard)/shifts/dotacion/materialize-utils';
-import { CHILE_NATIONAL_HOLIDAYS_BY_YEAR } from './chile-holidays';
+import {
+  buildGenerateMonthHolidayPreview,
+  CHILE_NATIONAL_HOLIDAYS_BY_YEAR,
+  findHolidayZeroStaffingRequirementIds,
+  getChileNationalHolidaysForRange,
+} from './chile-holidays';
+import {
+  buildBlueExpressApplyPlan,
+  calculateBlueExpressNightStaffingProposal,
+  getInitialApprovedTrucksByWeekday,
+} from './blue-express';
 import { scheduleCrossArea } from './cobertura';
 import type {
   PersonnelScheduleProfile,
@@ -29,12 +39,12 @@ test('ROSTER-02A: calendario nacional verificado registra fuente, fecha y avisa 
   const warnings: string[] = [];
   buildConsolidatedRequirements(
     [],
-    '2027-05-01',
-    '2027-05-31',
+    '2030-05-01',
+    '2030-05-31',
     { areaNameById, positionNameById, warningsOut: warnings }
   );
   assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /2027/);
+  assert.match(warnings[0], /2030/);
 });
 
 test('ROSTER-02A: Generar Mes deja en cero los 3 pares en feriado nacional y mantiene normal en día hábil y feriado regional', () => {
@@ -305,4 +315,337 @@ test('ROSTER-02A: nombre parecido como Bodega Base — Supervisor de Bodega mant
   assert.equal(v2Res.ordinary_assignments.length, 1);
   assert.equal(v2Res.ordinary_assignments[0].area_id, 'area-bodega-base');
   assert.equal(v2Res.ordinary_assignments[0].position_id, 'pos-sup-bodega');
+});
+
+test('ROSTER-02A (2027): calendario 2027 verificado, limpieza puntual 2027-01-01 y sin faltas en vista previa ni Planificación Diaria', async () => {
+  const {
+    CHILE_NATIONAL_HOLIDAYS_BY_YEAR,
+    evaluateDailyPlanningVacancies,
+    findHolidayZeroStaffingRequirementIds,
+  } = await import('./index');
+
+  assert.ok(CHILE_NATIONAL_HOLIDAYS_BY_YEAR[2027]);
+  assert.ok(CHILE_NATIONAL_HOLIDAYS_BY_YEAR[2027].source.includes('Gob.cl'));
+  assert.equal(CHILE_NATIONAL_HOLIDAYS_BY_YEAR[2027].holidays.length, 17);
+  assert.ok(CHILE_NATIONAL_HOLIDAYS_BY_YEAR[2027].holidays.some((h) => h.date === '2027-01-01' && h.irrenunciable));
+
+  // Simular requerimientos generados en HRM el 2027-01-01 con nombres reales de catálogo
+  const jan01Rows = [
+    {
+      id: 'atrex-grua',
+      date: '2027-01-01',
+      area_id: 'a-atrex',
+      position_id: 'p-grua',
+      shift_id: 's-am0830',
+      required_count: 1,
+      is_extra: false,
+      area: { name: 'Atrex' },
+      position: { name: 'Operador Grúa Horquilla' },
+    },
+    {
+      id: 'base-grua',
+      date: '2027-01-01',
+      area_id: 'a-base',
+      position_id: 'p-grua',
+      shift_id: 's-am07',
+      required_count: 1,
+      is_extra: false,
+      area: { name: 'Base Minerquim' },
+      position: { name: 'Operador Grúa Horquilla' },
+    },
+    {
+      id: 'base-sup',
+      date: '2027-01-01',
+      area_id: 'a-base',
+      position_id: 'p-sup',
+      shift_id: 's-am07',
+      required_count: 1,
+      is_extra: false,
+      area: { name: 'Base Minerquim' },
+      position: { name: 'Supervisor Base' },
+    },
+    {
+      id: 'blue-cond',
+      date: '2027-01-01',
+      area_id: 'a-blue',
+      position_id: 'p-cond',
+      shift_id: 's-am00',
+      required_count: 2,
+      is_extra: false,
+      area: { name: 'BlueExpress' },
+      position: { name: 'Conductor Camion' },
+    },
+    {
+      id: 'atrex-grua-extra',
+      date: '2027-01-01',
+      area_id: 'a-atrex',
+      position_id: 'p-grua',
+      shift_id: 's-am0830',
+      required_count: 1,
+      is_extra: true,
+      area: { name: 'Atrex' },
+      position: { name: 'Operador Grúa Horquilla' },
+    },
+  ];
+
+  // 1. Corrección puntual: selecciona solo los 3 pares ordinarios y conserva BlueExpress y extras
+  const cleanup = findHolidayZeroStaffingRequirementIds(jan01Rows, '2027-01-01');
+  assert.equal(cleanup.isNationalHoliday, true);
+  assert.equal(cleanup.holidayName, 'Año Nuevo');
+  assert.deepEqual(cleanup.matchedIds, ['atrex-grua', 'base-grua', 'base-sup']);
+
+  // 2. Vista previa v2 no reporta esos 3 pares como vacantes ni faltantes el 2027-01-01
+  const areaNames = new Map([
+    ['a-atrex', 'Atrex'],
+    ['a-base', 'Base Minerquim'],
+    ['a-blue', 'BlueExpress'],
+  ]);
+  const posNames = new Map([
+    ['p-grua', 'Operador Grúa Horquilla'],
+    ['p-sup', 'Supervisor Base'],
+    ['p-cond', 'Conductor Camion'],
+  ]);
+  const v2Res = scheduleCrossArea({
+    startDate: '2027-01-01',
+    endDate: '2027-01-01',
+    rawRequirements: jan01Rows.filter((r) => !r.is_extra),
+    existingAssignments: [],
+    personnel: [],
+    areaNameById: areaNames,
+    positionNameById: posNames,
+  });
+  assert.equal(v2Res.stats.total_required, 2);
+  assert.equal(v2Res.remaining_vacancies.length, 1);
+  assert.equal(v2Res.remaining_vacancies[0].area_id, 'a-blue');
+
+  // 3. Planificación Diaria tampoco reporta esos 3 pares como faltantes el 2027-01-01
+  const daily = evaluateDailyPlanningVacancies({
+    date: '2027-01-01',
+    ordinaryRequirements: jan01Rows.filter((r) => !r.is_extra),
+    extraRequirements: [],
+    assignments: [],
+    areaNameById: areaNames,
+    positionNameById: posNames,
+  });
+  const atrexSlot = daily.slots.find((s) => s.area_id === 'a-atrex');
+  assert.equal(atrexSlot?.suppressed_by_holiday, true);
+  assert.equal(atrexSlot?.open_falta_count, 0);
+  const blueSlot = daily.slots.find((s) => s.area_id === 'a-blue');
+  assert.equal(blueSlot?.open_falta_count, 2);
+});
+
+test('Generar Mes: rango que cruza de año (2026-12-07..2027-01-03), bloqueo si falta año (2030) y cálculo Blue Express en el mismo flujo', () => {
+  // 1. Rango 2026-12-07 al 2027-01-03 detecta feriados de ambos años y los 3 cupos existentes del 1 de enero a corregir
+  const preview2627 = buildGenerateMonthHolidayPreview({
+    startDate: '2026-12-07',
+    endDate: '2027-01-03',
+    existingOrdinaryRows: [
+      {
+        id: 'atrex-grua',
+        date: '2027-01-01',
+        required_count: 1,
+        is_extra: false,
+        area: { name: 'Atrex' },
+        position: { name: 'Operador Grúa Horquilla' },
+        shift: { name: 'Turno Día' },
+      },
+      {
+        id: 'base-grua',
+        date: '2027-01-01',
+        required_count: 1,
+        is_extra: false,
+        area: { name: 'Base Minerquim' },
+        position: { name: 'Operador Grúa Horquilla' },
+        shift: { name: 'Turno Día' },
+      },
+      {
+        id: 'base-sup',
+        date: '2027-01-01',
+        required_count: 1,
+        is_extra: false,
+        area: { name: 'Base Minerquim' },
+        position: { name: 'Supervisor Base' },
+        shift: { name: 'Turno Día' },
+      },
+      {
+        id: 'blue-keep',
+        date: '2027-01-01',
+        required_count: 2,
+        is_extra: false,
+        area: { name: 'BlueExpress' },
+        position: { name: 'Conductor Camion' },
+        shift: { name: 'AM 00' },
+      },
+      {
+        id: 'atrex-extra-keep',
+        date: '2027-01-01',
+        required_count: 1,
+        is_extra: true,
+        area: { name: 'Atrex' },
+        position: { name: 'Operador Grúa Horquilla' },
+        shift: { name: 'Turno Día' },
+      },
+    ],
+  });
+
+  assert.equal(preview2627.has_unverified_years, false);
+  assert.deepEqual(preview2627.missing_years, []);
+  assert.deepEqual(
+    preview2627.holidays.map((h) => h.date),
+    ['2026-12-08', '2026-12-25', '2027-01-01']
+  );
+  assert.deepEqual(
+    preview2627.existing_zero_staffing_to_fix.map((x) => x.id),
+    ['atrex-grua', 'base-grua', 'base-sup']
+  );
+
+  // 2. Rango que cruza a un año sin cobertura verificada (2030) bloquea el guardado automático
+  const previewMissingYear = buildGenerateMonthHolidayPreview({
+    startDate: '2029-12-28',
+    endDate: '2030-01-04',
+    existingOrdinaryRows: [],
+  });
+  assert.equal(previewMissingYear.has_unverified_years, true);
+  assert.ok(previewMissingYear.missing_years.includes(2030));
+  assert.ok(previewMissingYear.warnings.some((w) => w.includes('2030')));
+
+  // 3. En el mismo flujo de Generar Mes, Blue Express sigue calculando su propuesta para 2026-12-07..2027-01-03
+  const blueProposal = calculateBlueExpressNightStaffingProposal({
+    targetStartDate: '2026-12-07',
+    targetEndDate: '2027-01-03',
+    referenceDate: '2026-11-20',
+    identifiers: {
+      areaId: 'a-blue',
+      areaName: 'BlueExpress',
+      shiftId: 's-am00',
+      shiftName: 'AM 00',
+      conductorPositionId: 'p-cond',
+      conductorPositionName: 'Conductor Camion',
+      ayudantePositionId: 'p-ayud',
+      ayudantePositionName: 'Ayudante Carga/Descarga',
+    },
+    historyRequirements: [],
+    historyAssignments: [],
+    targetExistingRequirements: [],
+  });
+  assert.equal(blueProposal.target_start_date, '2026-12-07');
+  assert.equal(blueProposal.target_end_date, '2027-01-03');
+  assert.equal(blueProposal.weekdays.length, 7);
+});
+
+test('Generar Mes ruta integrada 2026-12-07..2027-01-03: 17 cupos 2027-01-01 (limpia solo 3 y conserva 14 + extras) y aplica pauta aprobada Blue Express (48/48)', () => {
+  const jan1Other14 = Array.from({ length: 14 }, (_, idx) => ({
+    id: `other-ord-${idx + 1}`,
+    date: '2027-01-01',
+    required_count: 1,
+    is_extra: false,
+    area: { name: idx < 2 ? 'BlueExpress' : `Area ${idx + 1}` },
+    position: { name: idx < 2 ? (idx === 0 ? 'Conductor Camion' : 'Ayudante Carga/Descarga') : `Cargo ${idx + 1}` },
+    shift: { name: idx < 2 ? 'AM 00' : 'AM 08' },
+  }));
+  const jan1All17 = [
+    {
+      id: '478a2b9a-9408-49ce-bf59-d31413919e15',
+      date: '2027-01-01',
+      required_count: 1,
+      is_extra: false,
+      area: { name: 'Atrex' },
+      position: { name: 'Operador Grúa Horquilla' },
+      shift: { name: 'AM 08' },
+    },
+    {
+      id: '05ee61d0-9da9-4ac2-ab02-27fd80371711',
+      date: '2027-01-01',
+      required_count: 1,
+      is_extra: false,
+      area: { name: 'Base Minerquim' },
+      position: { name: 'Operador Grúa Horquilla' },
+      shift: { name: 'AM 08' },
+    },
+    {
+      id: 'a55ccbc0-f9e6-4b53-aadb-d9d0d42fdeda',
+      date: '2027-01-01',
+      required_count: 1,
+      is_extra: false,
+      area: { name: 'Base Minerquim' },
+      position: { name: 'Supervisor Base' },
+      shift: { name: 'AM 08' },
+    },
+    ...jan1Other14,
+  ];
+  const jan1Extra = {
+    id: 'extra-keep-1',
+    date: '2027-01-01',
+    required_count: 1,
+    is_extra: true,
+    area: { name: 'Atrex' },
+    position: { name: 'Operador Grúa Horquilla' },
+    shift: { name: 'AM 08' },
+  };
+
+  // Vista previa antes de confirmar muestra los 3 cupos del 1 de enero a corregir
+  const preview = buildGenerateMonthHolidayPreview({
+    startDate: '2026-12-07',
+    endDate: '2027-01-03',
+    existingOrdinaryRows: [...jan1All17, jan1Extra],
+  });
+  assert.deepEqual(
+    preview.existing_zero_staffing_to_fix.map((x) => x.id),
+    [
+      '478a2b9a-9408-49ce-bf59-d31413919e15',
+      '05ee61d0-9da9-4ac2-ab02-27fd80371711',
+      'a55ccbc0-f9e6-4b53-aadb-d9d0d42fdeda',
+    ]
+  );
+
+  // Limpieza en Generar Mes usa findHolidayZeroStaffingRequirementIds por cada fecha feriada y matchedIds
+  const rangeLookup = getChileNationalHolidaysForRange('2026-12-07', '2027-01-03');
+  const holidayDatesInRange = Array.from(rangeLookup.holidaysByDate.keys());
+  assert.deepEqual(holidayDatesInRange, ['2026-12-08', '2026-12-25', '2027-01-01']);
+
+  const allRows = [...jan1All17, jan1Extra];
+  const idsToDelete: string[] = [];
+  for (const holidayDate of holidayDatesInRange) {
+    const rowsForDate = allRows.filter((r) => r.date === holidayDate);
+    const { matchedIds } = findHolidayZeroStaffingRequirementIds(rowsForDate, holidayDate);
+    idsToDelete.push(...matchedIds);
+  }
+  assert.deepEqual(idsToDelete, [
+    '478a2b9a-9408-49ce-bf59-d31413919e15',
+    '05ee61d0-9da9-4ac2-ab02-27fd80371711',
+    'a55ccbc0-f9e6-4b53-aadb-d9d0d42fdeda',
+  ]);
+  const remainingOrdinary = jan1All17.filter((r) => !idsToDelete.includes(r.id));
+  assert.equal(remainingOrdinary.length, 14);
+  assert.ok(!idsToDelete.includes(jan1Extra.id));
+
+  // Propuesta aprobada Blue Express (3,2,2,1,2,1,1 -> 48 conductor y 48 ayudante) en el mismo rango
+  const blueProposal = calculateBlueExpressNightStaffingProposal({
+    targetStartDate: '2026-12-07',
+    targetEndDate: '2027-01-03',
+    referenceDate: '2026-11-20',
+    identifiers: {
+      areaId: 'a-blue',
+      areaName: 'BlueExpress',
+      shiftId: 's-am00',
+      shiftName: 'AM 00',
+      conductorPositionId: 'p-cond',
+      conductorPositionName: 'Conductor Camion',
+      ayudantePositionId: 'p-ayud',
+      ayudantePositionName: 'Ayudante Carga/Descarga',
+    },
+    historyRequirements: [],
+    historyAssignments: [],
+    targetExistingRequirements: [],
+  });
+  const approved = { 1: 3, 2: 2, 3: 2, 4: 1, 5: 2, 6: 1, 7: 1 };
+  const applyPlan = buildBlueExpressApplyPlan(blueProposal, approved);
+  const totalCond = applyPlan
+    .filter((r) => r.position_id === 'p-cond')
+    .reduce((acc, r) => acc + r.required_count, 0);
+  const totalAyud = applyPlan
+    .filter((r) => r.position_id === 'p-ayud')
+    .reduce((acc, r) => acc + r.required_count, 0);
+  assert.equal(totalCond, 48);
+  assert.equal(totalAyud, 48);
 });

@@ -21,7 +21,10 @@ import {
 import {
   evaluatePermissionsForWeek,
   getApplicableWeeklyHoursLimit,
+  getShiftOccupiedDates,
   hasMandatoryJornadaViolation,
+  isBirthdayOnDate,
+  synthesizeBirthdayLeavesForRange,
   validateJornadaConstraints,
 } from './jornada';
 import type {
@@ -345,10 +348,17 @@ export function scheduleCrossArea(params: {
         positionFilter.includes(shiftDef.position_id));
 
     if (ns22MatchesFilter) {
+      const enrichedTitulares = titulares.map((t) => ({
+        ...t,
+        birth_date:
+          t.birth_date ??
+          personnel.find((p) => p.personnel_id === t.personnel_id)?.birth_date ??
+          null,
+      }));
       ns22Result = scheduleAirportNs22({
         startDate,
         endDate,
-        titulares,
+        titulares: enrichedTitulares,
         shiftDef,
         replacementCandidates: [],
         ns22Slots: scopedOrdinarySlots,
@@ -842,6 +852,39 @@ export function scheduleCrossArea(params: {
     }
   }
 
+  // Flag protected assignments (ordinary or extra) in scope that coincide with a mandatory birthday
+  const ns22ConflictKeys = new Set(
+    (ns22Result?.titular_conflicts || []).map((c) => `${c.personnel_id}|${normalizeIsoDate(c.date)}`)
+  );
+  for (const pa of [...prepared.protectedOrdinaryAssignments, ...prepared.protectedExtraAssignments]) {
+    const paDate = normalizeIsoDate(pa.date);
+    if (paDate < normStart || paDate > normEnd) continue;
+    if (areaFilter && pa.area_id !== areaFilter) continue;
+    if (positionFilter && positionFilter.length > 0 && !positionFilter.includes(pa.position_id)) {
+      continue;
+    }
+    const person = personnel.find((p) => p.personnel_id === pa.personnel_id);
+    if (!person?.birth_date) continue;
+    if (ns22ConflictKeys.has(`${pa.personnel_id}|${paDate}`)) continue;
+
+    const occDates = getShiftOccupiedDates({
+      date: paDate,
+      shift_start: pa.shift_start || '08:00',
+      shift_end: pa.shift_end || '16:00',
+      duration_hours: Number(pa.duration_hours) || 8,
+    });
+    const birthdayHit = occDates.find((d) => isBirthdayOnDate(person.birth_date, d));
+    if (birthdayHit) {
+      auditViolations.push({
+        type: 'leave_conflict',
+        severity: 'error',
+        personnel_id: pa.personnel_id,
+        date: paDate,
+        message: `Turno protegido el ${paDate} coincide con el cumpleaños obligatorio (${birthdayHit}) de ${person.first_name || pa.personnel_id}; requiere revisión.`,
+      });
+    }
+  }
+
   // Sync NS22 result summary
   if (ns22Result) {
     const ns22ReplAssignments = ordinaryAssignments.filter(
@@ -1050,7 +1093,9 @@ export function scheduleCrossArea(params: {
     const personLeaves = approvedLeaves.filter(
       (l) => l.personnel_id === p.personnel_id && l.status === 'approved'
     );
-    if (personLeaves.length === 0) continue;
+    const syntheticBirthdays = synthesizeBirthdayLeavesForRange(p, normStart, normEnd);
+    const effectivePersonLeaves = [...personLeaves, ...syntheticBirthdays];
+    if (effectivePersonLeaves.length === 0) continue;
 
     const baseCal = baseCalendarByPerson?.get(p.personnel_id) ?? null;
     const personGeneratedAll = [...ordinaryAssignments, ...reinforcements]
@@ -1083,7 +1128,7 @@ export function scheduleCrossArea(params: {
         compatibleSlots: compatibleForPerson,
         existingShifts: [],
         confirmedRosterAssignments: availableConfirmed,
-        approvedLeaves: personLeaves,
+        approvedLeaves: effectivePersonLeaves,
       });
 
       for (const c of wkCases) {

@@ -12,6 +12,7 @@ import {
   expandApprovedLeaves,
   getShiftOccupiedDates,
   hasMandatoryJornadaViolation,
+  isBirthdayOnDate,
   validateJornadaConstraints,
 } from './jornada';
 import type {
@@ -378,14 +379,6 @@ export function scheduleAirportNs22(params: {
       const summary = cycleSummaries.get(titular.personnel_id)!;
       summary.scheduled_nights.push(dateStr);
 
-      // Case 1: Titular already has this NS22 shift protected -> keep it, do not regenerate
-      const titularAlreadyProtectedHere = slotProtected.some(
-        (pa) => pa.personnel_id === titular.personnel_id
-      );
-      if (titularAlreadyProtectedHere) {
-        continue;
-      }
-
       const shiftInterval: ScheduledShiftInterval = {
         date: dateStr,
         shift_start: NS22_START_TIME,
@@ -397,11 +390,31 @@ export function scheduleAirportNs22(params: {
       };
       const occupiedDates = getShiftOccupiedDates(shiftInterval);
 
-      // Case 2: Titular has an approved leave invading this NS22 interval
-      const { allLeaveDates } = expandApprovedLeaves(approvedLeaves, titular.personnel_id);
-      const hasLeaveConflict = occupiedDates.some((d) => allLeaveDates.has(d));
+      // Case 1: Titular already has this NS22 shift protected -> keep it, do not regenerate;
+      // if it coincides with their mandatory birthday, flag conflict for review.
+      const titularAlreadyProtectedHere = slotProtected.some(
+        (pa) => pa.personnel_id === titular.personnel_id
+      );
+      if (titularAlreadyProtectedHere) {
+        const birthdayHit = occupiedDates.find((d) => isBirthdayOnDate(titular.birth_date, d));
+        if (birthdayHit) {
+          summary.conflict_nights.push(dateStr);
+          titularConflicts.push({
+            date: dateStr,
+            personnel_id: titular.personnel_id,
+            message: `Titular ${titular.first_name || titular.personnel_id} tiene turno protegido NS22 el ${dateStr} que coincide con su cumpleaños obligatorio (${birthdayHit}); se conserva el turno protegido para revisión sin mover el ancla 4x4.`,
+          });
+        }
+        continue;
+      }
 
-      if (hasLeaveConflict) {
+      // Case 2: Titular has an approved leave or mandatory birthday invading this NS22 interval
+      const { allLeaveDates } = expandApprovedLeaves(approvedLeaves, titular.personnel_id);
+      const hasLeaveOrBirthdayConflict = occupiedDates.some(
+        (d) => allLeaveDates.has(d) || isBirthdayOnDate(titular.birth_date, d)
+      );
+
+      if (hasLeaveOrBirthdayConflict) {
         summary.absent_nights.push(dateStr);
         if (remainingNeeded > 0) {
           vacantNights.push({ date: dateStr, titularId: titular.personnel_id });

@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, previewBlueExpressNightStaffing, previewDeleteOrdinaryRequirementsByRange, deleteOrdinaryRequirementsByRange, type WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
+import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, previewGenerateMonth, previewDeleteOrdinaryRequirementsByRange, deleteOrdinaryRequirementsByRange, type WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
 import { getInitialApprovedTrucksByWeekday, type BlueExpressNightProposal } from '@/lib/scheduler/v2/blue-express';
+import type { GenerateMonthHolidayPreview } from '@/lib/scheduler/v2/chile-holidays';
 import type { OrdinaryRequirementRangeDeletePreview } from './range-delete-utils';
 import { Layers, Plus, Trash2, Calendar, MapPin, Briefcase, Clock, Loader2, RefreshCw, Shield, ChevronDown, Edit2, X, TableProperties, LayoutGrid } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,6 +33,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
   const [selectedAreaId, setSelectedAreaId] = useState('');
   const [showGenerate, setShowGenerate] = useState(false);
   const [blueProposal, setBlueProposal] = useState<BlueExpressNightProposal | null>(null);
+  const [holidayPreview, setHolidayPreview] = useState<GenerateMonthHolidayPreview | null>(null);
   const [blueApprovedByWeekday, setBlueApprovedByWeekday] = useState<Record<number, number>>({});
   const [blueStart, setBlueStart] = useState('2026-12-07');
   const [blueEnd, setBlueEnd] = useState('2027-01-03');
@@ -42,15 +44,17 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
 
   const loadBlueProposalForRange = (startDate: string, endDate: string) => {
     startTransition(async () => {
-      const res = await previewBlueExpressNightStaffing(startDate, endDate);
-      if (!res.success || !res.proposal) {
+      const res = await previewGenerateMonth(startDate, endDate);
+      setHolidayPreview(res.holidayPreview);
+      if (!res.success || !res.blueProposal) {
+        setBlueProposal(null);
         toast.error('No se pudo calcular la propuesta Blue Express AM 00', {
           description: res.error || 'Error desconocido',
         });
         return;
       }
-      setBlueProposal(res.proposal);
-      initBlueApproved(res.proposal);
+      setBlueProposal(res.blueProposal);
+      initBlueApproved(res.blueProposal);
     });
   };
   const [showRangeDelete, setShowRangeDelete] = useState(false);
@@ -175,21 +179,35 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
     const endDate = formData.get('gen_end') as string;
     startTransition(async () => {
       try {
-        // Paso 1: Si aún no hay propuesta calculada para este rango, calcular vista previa antes de guardar
+        // Paso 1: Si aún no hay vista previa calculada para este rango, calcular feriados + Blue Express antes de guardar
         if (
+          !holidayPreview ||
+          holidayPreview.start_date !== startDate ||
+          holidayPreview.end_date !== endDate ||
           !blueProposal ||
           blueProposal.target_start_date !== startDate ||
           blueProposal.target_end_date !== endDate
         ) {
-          const previewRes = await previewBlueExpressNightStaffing(startDate, endDate);
-          if (!previewRes.success || !previewRes.proposal) {
+          const previewRes = await previewGenerateMonth(startDate, endDate);
+          setHolidayPreview(previewRes.holidayPreview);
+          if (!previewRes.success || !previewRes.blueProposal) {
+            setBlueProposal(null);
             toast.error('No se pudo calcular la propuesta Blue Express AM 00', {
               description: previewRes.error || 'Error desconocido',
             });
             return;
           }
-          setBlueProposal(previewRes.proposal);
-          initBlueApproved(previewRes.proposal);
+          setBlueProposal(previewRes.blueProposal);
+          initBlueApproved(previewRes.blueProposal);
+          return;
+        }
+
+        if (holidayPreview.has_unverified_years) {
+          toast.error('Cobertura de feriados incompleta', {
+            description:
+              holidayPreview.warnings.join(' ') ||
+              'No se puede guardar porque hay años sin calendario verificado de feriados.',
+          });
           return;
         }
 
@@ -222,6 +240,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
             });
           }
           setBlueProposal(null);
+          setHolidayPreview(null);
           setShowGenerate(false);
           router.refresh();
         }
@@ -532,6 +551,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
                     onChange={(e) => {
                       setBlueStart(e.target.value);
                       setBlueProposal(null);
+                      setHolidayPreview(null);
                     }}
                   />
                 </div>
@@ -546,10 +566,23 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
                     onChange={(e) => {
                       setBlueEnd(e.target.value);
                       setBlueProposal(null);
+                      setHolidayPreview(null);
                     }}
                   />
                 </div>
-                <Button type="submit" disabled={isPending} className="bg-emerald-600 hover:bg-emerald-700 text-white h-9">
+                <Button
+                  type="submit"
+                  disabled={
+                    isPending ||
+                    Boolean(
+                      holidayPreview &&
+                        holidayPreview.start_date === blueStart &&
+                        holidayPreview.end_date === blueEnd &&
+                        holidayPreview.has_unverified_years
+                    )
+                  }
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white h-9"
+                >
                   {isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : blueProposal && blueProposal.target_start_date === blueStart && blueProposal.target_end_date === blueEnd ? (
@@ -565,6 +598,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
                   onClick={() => {
                     setShowGenerate(false);
                     setBlueProposal(null);
+                    setHolidayPreview(null);
                   }}
                 >
                   Cancelar
@@ -583,6 +617,66 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
               </Button>
             )}
           </div>
+
+          {showGenerate && holidayPreview && (
+            <div className="mt-4 pt-4 border-t space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="font-semibold text-sm">
+                  Feriados legales nacionales de Chile en el rango ({holidayPreview.start_date} al {holidayPreview.end_date})
+                </h4>
+                <span className="text-xs text-muted-foreground">
+                  Dotación cero en feriados: Atrex — Operador de grúa · Base — Operador de grúa · Base — Supervisor
+                </span>
+              </div>
+
+              {holidayPreview.has_unverified_years && (
+                <div className="rounded-md bg-red-50 border border-red-300 px-3 py-2 text-xs text-red-900 font-medium">
+                  {holidayPreview.warnings.join(' ')} El guardado queda bloqueado hasta contar con calendario verificado para no tratar esas fechas como días normales.
+                </div>
+              )}
+
+              {holidayPreview.holidays.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {holidayPreview.holidays.map((h) => (
+                    <div
+                      key={h.date}
+                      className="rounded-md border bg-slate-50 px-2.5 py-1 text-xs flex items-center gap-1.5"
+                    >
+                      <span className="font-mono font-semibold">{h.date}</span>
+                      <span>{h.name}</span>
+                      {h.irrenunciable && (
+                        <Badge variant="outline" className="text-[10px] py-0 border-amber-400 text-amber-800">
+                          Irrenunciable
+                        </Badge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                !holidayPreview.has_unverified_years && (
+                  <p className="text-xs text-muted-foreground">No hay feriados nacionales de Chile en este rango.</p>
+                )
+              )}
+
+              {holidayPreview.existing_zero_staffing_to_fix.length > 0 && (
+                <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900 space-y-1">
+                  <div className="font-semibold">
+                    Cupos ordinarios existentes en feriado que se limpiarán al confirmar ({holidayPreview.existing_zero_staffing_to_fix.length}):
+                  </div>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {holidayPreview.existing_zero_staffing_to_fix.map((item) => (
+                      <li key={item.id}>
+                        <span className="font-mono">{item.date}</span> · {item.area_name} — {item.position_name} ({item.shift_name}, cupos actuales: {item.required_count})
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="text-[11px] text-amber-800">
+                    Se conservan Blue Express, los demás cargos, los extras manuales y las asignaciones del roster.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {showGenerate && blueProposal && (
             <div className="mt-4 pt-4 border-t space-y-3">

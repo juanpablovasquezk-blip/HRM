@@ -66,11 +66,15 @@ export {
 export { fetchAllPaginated, type PaginatedFetchResult } from './pagination';
 
 export {
+  buildGenerateMonthHolidayPreview,
   CHILE_NATIONAL_HOLIDAYS_BY_YEAR,
+  findHolidayZeroStaffingRequirementIds,
   getChileNationalHolidaysForRange,
   isHolidayZeroStaffingPair,
   type ChileNationalHoliday,
+  type GenerateMonthHolidayPreview,
   type HolidayRangeLookup,
+  type HolidayZeroStaffingFixItem,
   type VerifiedHolidayYearCalendar,
 } from './chile-holidays';
 

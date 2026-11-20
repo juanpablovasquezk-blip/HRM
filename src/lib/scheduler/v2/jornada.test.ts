@@ -12,6 +12,8 @@ import {
   splitShiftHoursByWeek,
   validateJornadaConstraints,
 } from './jornada';
+import { scheduleCrossArea } from './cobertura';
+import { compareEnginesPreview } from './preview-compare';
 import type {
   PersonnelScheduleProfile,
   RawLeaveRecord,
@@ -405,4 +407,224 @@ test('ROSTER-03: único día disponible tiene cupo real al mediodía que cumple 
   assert.equal(confirmed[0].status, 'relocated');
   assert.equal(confirmed[0].relocated_to, '2026-11-11');
   assert.equal(confirmed[0].relocated_slot_key, '2026-11-11|area-1|pos-1|shift-pm12');
+});
+
+test('Cumpleaños obligatorio: día laboral (reubicación y pendiente), día ya libre, turno nocturno que cruza medianoche, conflicto protegido y comparación v1/v2', () => {
+  // 1. Cumpleaños en día ya libre del calendario base -> no hay turno que mover
+  const workerFree: PersonnelScheduleProfile = {
+    ...baseWorker,
+    personnel_id: 'per-bday-free',
+    birth_date: '1992-11-15', // domingo 2026-11-15 (libre)
+  };
+  const baseCalMonFri = new Set([
+    '2026-11-09',
+    '2026-11-10',
+    '2026-11-11',
+    '2026-11-12',
+    '2026-11-13',
+  ]);
+  const resFree = evaluatePermissionsForWeek({
+    personnel: workerFree,
+    weekStartStr: '2026-11-09',
+    baseCalendarDates: baseCalMonFri,
+    compatibleSlots: [],
+    existingShifts: [],
+    approvedLeaves: [],
+  });
+  assert.equal(resFree.length, 1);
+  assert.equal(resFree[0].leave_category, 'birthday');
+  assert.equal(resFree[0].status, 'on_free_day');
+  assert.equal(resFree[0].requires_relocation, false);
+  assert.equal(resFree[0].relocated_to, null);
+
+  // 2. Cumpleaños en día laboral (jueves 2026-11-12):
+  // 2a. Sin cupo compatible -> respeta cumpleaños e informa reubicación pendiente
+  const workerWork: PersonnelScheduleProfile = {
+    ...baseWorker,
+    personnel_id: 'per-bday-work',
+    birth_date: '1990-11-12', // jueves 2026-11-12
+  };
+  const resPending = evaluatePermissionsForWeek({
+    personnel: workerWork,
+    weekStartStr: '2026-11-09',
+    baseCalendarDates: baseCalMonFri,
+    compatibleSlots: [],
+    existingShifts: [],
+    approvedLeaves: [],
+  });
+  assert.equal(resPending.length, 1);
+  assert.equal(resPending[0].leave_category, 'birthday');
+  assert.equal(resPending[0].status, 'pending_relocation');
+  assert.equal(resPending[0].respected_permission, true);
+  assert.equal(resPending[0].requires_relocation, true);
+  assert.equal(resPending[0].relocated_to, null);
+
+  // 2b. Con cupo real compatible el sábado -> reubica y confirma
+  const satSlot: ScheduledShiftInterval = {
+    date: '2026-11-14',
+    shift_start: '08:00',
+    shift_end: '16:00',
+    duration_hours: 8,
+    shift_id: 'sh-am',
+    area_id: 'area-1',
+    position_id: 'pos-1',
+    slot_key: '2026-11-14|area-1|pos-1|sh-am',
+  };
+  const resRelocated = evaluatePermissionsForWeek({
+    personnel: workerWork,
+    weekStartStr: '2026-11-09',
+    baseCalendarDates: baseCalMonFri,
+    compatibleSlots: [satSlot],
+    existingShifts: [
+      { date: '2026-11-09', shift_start: '08:00', shift_end: '16:00', duration_hours: 8 },
+      { date: '2026-11-10', shift_start: '08:00', shift_end: '16:00', duration_hours: 8 },
+      { date: '2026-11-11', shift_start: '08:00', shift_end: '16:00', duration_hours: 8 },
+      { date: '2026-11-13', shift_start: '08:00', shift_end: '16:00', duration_hours: 8 },
+    ],
+    confirmedRosterAssignments: [satSlot],
+    approvedLeaves: [],
+  });
+  assert.equal(resRelocated.length, 1);
+  assert.equal(resRelocated[0].leave_category, 'birthday');
+  assert.equal(resRelocated[0].status, 'relocated');
+  assert.equal(resRelocated[0].relocated_to, '2026-11-14');
+
+  // 3. Turno que cruza medianoche (NS22 miércoles 22:00 -> jueves 07:00) cuando el titular cumple el jueves:
+  //    No se asigna el NS22 del miércoles ni el del jueves; se busca reemplazo sin mover el ancla 4x4.
+  const ns22Reqs = ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12'].map((d) => ({
+    id: `req-${d}`,
+    date: d,
+    area_id: 'area-aero',
+    position_id: 'pos-aero',
+    shift_id: 'sh-ns22',
+    required_count: 1,
+    priority: 'Crítico',
+    is_extra: false,
+    shift: { name: 'NS 22', start_time: '22:00', end_time: '07:00', duration_hours: 8 },
+  }));
+  const titularBirthday: PersonnelScheduleProfile = {
+    personnel_id: 'titular-a',
+    first_name: 'Titular A',
+    birth_date: '1991-11-12', // jueves 2026-11-12
+    main_position: 'pos-aero',
+    area_id: 'area-aero',
+  };
+  const backupOp: PersonnelScheduleProfile = {
+    personnel_id: 'backup-1',
+    first_name: 'Reemplazo 1',
+    birth_date: '1988-03-01',
+    main_position: 'pos-aero',
+    area_id: 'area-aero',
+  };
+
+  const ns22CrossMidnight = scheduleCrossArea({
+    startDate: '2026-11-09',
+    endDate: '2026-11-12',
+    rawRequirements: ns22Reqs,
+    existingAssignments: [],
+    personnel: [titularBirthday, backupOp],
+    ns22Config: {
+      titulares: [
+        {
+          personnel_id: 'titular-a',
+          first_name: 'Titular A',
+          anchor_date: '2026-11-09', // bloque 9, 10, 11, 12
+          cycle_offset: 0,
+          confirmed_4x4_regime: true,
+        },
+      ],
+      shiftDef: {
+        shift_id: 'sh-ns22',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_start: '22:00',
+        shift_end: '07:00',
+        duration_hours: 8,
+      },
+    },
+  });
+
+  const titularAssignedDates = ns22CrossMidnight.ordinary_assignments
+    .filter((a) => a.personnel_id === 'titular-a')
+    .map((a) => a.date);
+  // Lunes 9 y martes 10 sí; miércoles 11 (termina jueves 07:00) y jueves 12 NO
+  assert.deepEqual(titularAssignedDates, ['2026-11-09', '2026-11-10']);
+  // Reemplazo cubre las noches afectadas (11 y 12) y el ciclo 4x4 del titular conserva su ancla
+  const replDates = ns22CrossMidnight.ordinary_assignments
+    .filter((a) => a.personnel_id === 'backup-1')
+    .map((a) => a.date);
+  assert.deepEqual(replDates, ['2026-11-11', '2026-11-12']);
+  assert.equal(ns22CrossMidnight.ns22_result?.titular_cycles[0].anchor_date, '2026-11-09');
+
+  // 4. Cumpleaños coincide con un turno ya protegido -> conserva turno y muestra conflicto para revisión
+  const protectedConflict = scheduleCrossArea({
+    startDate: '2026-11-11',
+    endDate: '2026-11-12',
+    rawRequirements: ns22Reqs.slice(2),
+    existingAssignments: [
+      {
+        id: 'prot-wed',
+        personnel_id: 'titular-a',
+        date: '2026-11-11',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_id: 'sh-ns22',
+        status: 'scheduled',
+        is_locked: true,
+        shift_start: '22:00',
+        shift_end: '07:00',
+        duration_hours: 8,
+      },
+    ],
+    personnel: [titularBirthday, backupOp],
+    ns22Config: {
+      titulares: [
+        {
+          personnel_id: 'titular-a',
+          first_name: 'Titular A',
+          anchor_date: '2026-11-09',
+          cycle_offset: 0,
+          confirmed_4x4_regime: true,
+        },
+      ],
+      shiftDef: {
+        shift_id: 'sh-ns22',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_start: '22:00',
+        shift_end: '07:00',
+        duration_hours: 8,
+      },
+    },
+  });
+  assert.equal(protectedConflict.ns22_result?.preserved_protected.length, 1);
+  assert.equal(protectedConflict.ns22_result?.titular_conflicts.length, 1);
+  assert.match(protectedConflict.ns22_result!.titular_conflicts[0].message, /cumpleaños/i);
+
+  // 5. Comparación v1 vs v2 carga birth_date para ambos motores y ninguno asigna en el cumpleaños
+  const comp = compareEnginesPreview({
+    startDate: '2026-11-12',
+    endDate: '2026-11-12',
+    rawRequirements: [
+      {
+        id: 'req-day',
+        date: '2026-11-12',
+        area_id: 'area-1',
+        position_id: 'pos-1',
+        shift_id: 'sh-am',
+        required_count: 1,
+        priority: 'Normal',
+        is_extra: false,
+        shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+      },
+    ],
+    existingAssignments: [],
+    personnel: [workerWork], // cumple el 2026-11-12
+    approvedLeaves: [],
+    allShifts: [{ id: 'sh-am', name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 }],
+  });
+  assert.equal(comp.v1.total_covered, 0);
+  assert.equal(comp.v1.total_vacancies, 1);
+  assert.equal(comp.v2.total_covered, 0);
+  assert.equal(comp.v2.total_vacancies, 1);
 });

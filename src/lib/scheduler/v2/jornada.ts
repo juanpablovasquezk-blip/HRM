@@ -183,9 +183,60 @@ export function splitShiftHoursByWeek(
   return byWeek;
 }
 
+export function isBirthdayOnDate(
+  birthDateStr: string | null | undefined,
+  dateStr: string
+): boolean {
+  if (!birthDateStr || !dateStr) return false;
+  const birthNorm = normalizeIsoDate(birthDateStr);
+  const dateNorm = normalizeIsoDate(dateStr);
+  if (birthNorm.length < 10 || dateNorm.length < 10) return false;
+  return birthNorm.slice(5, 10) === dateNorm.slice(5, 10);
+}
+
+export function synthesizeBirthdayLeavesForRange(
+  personnel: PersonnelScheduleProfile,
+  startDate: string,
+  endDate: string
+): RawLeaveRecord[] {
+  if (!personnel.birth_date || !startDate || !endDate) return [];
+  const birthNorm = normalizeIsoDate(personnel.birth_date);
+  const normStart = normalizeIsoDate(startDate);
+  const normEnd = normalizeIsoDate(endDate);
+  if (birthNorm.length < 10 || normStart.length < 10 || normEnd.length < 10 || normStart > normEnd) {
+    return [];
+  }
+
+  const mmDd = birthNorm.slice(5, 10);
+  const startYear = Number(normStart.slice(0, 4));
+  const endYear = Number(normEnd.slice(0, 4));
+  if (isNaN(startYear) || isNaN(endYear)) return [];
+
+  const out: RawLeaveRecord[] = [];
+  for (let year = startYear; year <= endYear; year++) {
+    const candidate = `${year}-${mmDd}`;
+    if (candidate >= normStart && candidate <= normEnd) {
+      const parsed = parseISO(candidate);
+      if (!isNaN(parsed.getTime()) && format(parsed, 'yyyy-MM-dd') === candidate) {
+        out.push({
+          id: `birthday-${personnel.personnel_id}-${candidate}`,
+          personnel_id: personnel.personnel_id,
+          type: 'birthday',
+          start_date: candidate,
+          end_date: candidate,
+          status: 'approved',
+          reason: 'Cumpleaños (día libre obligatorio)',
+        });
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Classifies an approved leave:
  * - monthly_free_choice: Solicitud mensual de días libres (free_request or other with matching reason)
+ * - birthday: Cumpleaños obligatorio del trabajador
  * - generic_personal: Permiso personal/administrativo genérico (type === 'personal')
  * - medical_or_vacation: Licencia médica, vacaciones o fuero maternal
  * - other_absence: Otros permisos
@@ -194,6 +245,9 @@ export function classifyLeave(leave: RawLeaveRecord): LeaveCategory {
   const type = (leave.type || '').trim().toLowerCase();
   const reason = normUpper(leave.reason);
 
+  if (type === 'birthday') {
+    return 'birthday';
+  }
   if (type === 'sick' || type === 'vacation' || type === 'maternity') {
     return 'medical_or_vacation';
   }
@@ -215,12 +269,14 @@ export function expandApprovedLeaves(
 ): {
   allLeaveDates: Set<string>;
   monthlyFreeChoiceDates: Set<string>;
+  birthdayDates: Set<string>;
   genericPersonalDates: Set<string>;
   medicalOrVacationDates: Set<string>;
   leaveByDate: Map<string, RawLeaveRecord>;
 } {
   const allLeaveDates = new Set<string>();
   const monthlyFreeChoiceDates = new Set<string>();
+  const birthdayDates = new Set<string>();
   const genericPersonalDates = new Set<string>();
   const medicalOrVacationDates = new Set<string>();
   const leaveByDate = new Map<string, RawLeaveRecord>();
@@ -239,6 +295,8 @@ export function expandApprovedLeaves(
       allLeaveDates.add(dStr);
       if (category === 'monthly_free_choice') {
         monthlyFreeChoiceDates.add(dStr);
+      } else if (category === 'birthday') {
+        birthdayDates.add(dStr);
       } else if (category === 'generic_personal') {
         genericPersonalDates.add(dStr);
       } else if (category === 'medical_or_vacation') {
@@ -253,6 +311,7 @@ export function expandApprovedLeaves(
   return {
     allLeaveDates,
     monthlyFreeChoiceDates,
+    birthdayDates,
     genericPersonalDates,
     medicalOrVacationDates,
     leaveByDate,
@@ -593,6 +652,14 @@ export function validateJornadaConstraints(
         date: occDate,
         message: `El intervalo del turno invade ausencia aprobada el ${occDate} (${leave?.type || 'ausencia'}).`,
       });
+    } else if (isBirthdayOnDate(personnel.birth_date, occDate)) {
+      violations.push({
+        type: 'leave_conflict',
+        severity: 'error',
+        personnel_id: personnel.personnel_id,
+        date: occDate,
+        message: `El intervalo del turno invade el cumpleaños obligatorio el ${occDate} (día libre).`,
+      });
     }
   }
 
@@ -653,10 +720,25 @@ export function evaluatePermissionsForWeek(params: {
   const weekStart = startOfWeek(parseISO(normalizeIsoDate(weekStartStr)), { weekStartsOn: 1 });
   const weekDays = eachDayOfInterval({ start: weekStart, end: addDays(weekStart, 6) });
   const weekDayStrings = weekDays.map((wd) => format(wd, 'yyyy-MM-dd'));
-  const { monthlyFreeChoiceDates, genericPersonalDates, leaveByDate } = expandApprovedLeaves(
-    approvedLeaves,
-    personnel.personnel_id
+  const syntheticBirthdays = synthesizeBirthdayLeavesForRange(
+    personnel,
+    weekDayStrings[0],
+    weekDayStrings[weekDayStrings.length - 1]
   );
+  const existingKeys = new Set(
+    approvedLeaves.map(
+      (l) => `${l.personnel_id}|${normalizeIsoDate(l.start_date)}|${(l.type || '').toLowerCase()}`
+    )
+  );
+  const mergedLeaves = [
+    ...approvedLeaves,
+    ...syntheticBirthdays.filter(
+      (b) => !existingKeys.has(`${b.personnel_id}|${normalizeIsoDate(b.start_date)}|birthday`)
+    ),
+  ];
+
+  const { monthlyFreeChoiceDates, birthdayDates, genericPersonalDates, leaveByDate } =
+    expandApprovedLeaves(mergedLeaves, personnel.personnel_id);
 
   const simulatedShifts = [...existingShifts];
   const consumedSlotKeys = new Set<string>();
@@ -693,21 +775,28 @@ export function evaluatePermissionsForWeek(params: {
       continue;
     }
 
-    if (!monthlyFreeChoiceDates.has(dStr)) continue;
+    const isBirthday = birthdayDates.has(dStr);
+    const isMonthlyFree = monthlyFreeChoiceDates.has(dStr);
+    if (!isMonthlyFree && !isBirthday) continue;
+
+    const category: LeaveCategory = isBirthday ? 'birthday' : 'monthly_free_choice';
+    const leaveType = isBirthday ? 'birthday' : leave?.type || 'other';
+    const subject = isBirthday ? 'Cumpleaños' : 'Solicitud mensual de libre elección';
+    const subjectShort = isBirthday ? 'Cumpleaños' : 'Solicitud mensual';
 
     if (!baseCalendarDates) {
       results.push({
         personnel_id: personnel.personnel_id,
         permission_date: dStr,
-        leave_type: leave?.type || 'other',
-        leave_category: 'monthly_free_choice',
-        reason: leave?.reason ?? null,
+        leave_type: leaveType,
+        leave_category: category,
+        reason: leave?.reason ?? (isBirthday ? 'Cumpleaños (día libre obligatorio)' : null),
         status: 'pending_relocation',
         reason_code: 'missing_base_calendar',
         respected_permission: true,
         requires_relocation: true,
         relocated_to: null,
-        message: `Solicitud mensual de libre elección el ${dStr} respetada; reubicación pendiente por falta de calendario base real del operador.`,
+        message: `${subject} el ${dStr} respetado; reubicación pendiente por falta de calendario base real del operador.`,
       });
       continue;
     }
@@ -716,14 +805,14 @@ export function evaluatePermissionsForWeek(params: {
       results.push({
         personnel_id: personnel.personnel_id,
         permission_date: dStr,
-        leave_type: leave?.type || 'other',
-        leave_category: 'monthly_free_choice',
-        reason: leave?.reason ?? null,
+        leave_type: leaveType,
+        leave_category: category,
+        reason: leave?.reason ?? (isBirthday ? 'Cumpleaños (día libre obligatorio)' : null),
         status: 'on_free_day',
         respected_permission: true,
         requires_relocation: false,
         relocated_to: null,
-        message: `Solicitud mensual de libre elección el ${dStr} coincide con día libre del calendario base; no genera turno a reubicar.`,
+        message: `${subject} el ${dStr} coincide con día libre del calendario base; no hay turno que mover.`,
       });
       continue;
     }
@@ -742,15 +831,15 @@ export function evaluatePermissionsForWeek(params: {
       results.push({
         personnel_id: personnel.personnel_id,
         permission_date: dStr,
-        leave_type: leave?.type || 'other',
-        leave_category: 'monthly_free_choice',
-        reason: leave?.reason ?? null,
+        leave_type: leaveType,
+        leave_category: category,
+        reason: leave?.reason ?? (isBirthday ? 'Cumpleaños (día libre obligatorio)' : null),
         status: 'pending_relocation',
         reason_code: 'no_compatible_slot',
         respected_permission: true,
         requires_relocation: true,
         relocated_to: null,
-        message: `Solicitud mensual el ${dStr} respetada; reubicación pendiente porque no hay cupos reales compatibles en la semana.`,
+        message: `${subjectShort} el ${dStr} respetado; quedó pendiente la reubicación porque no hay cupos reales compatibles en la semana.`,
       });
       continue;
     }
@@ -763,7 +852,7 @@ export function evaluatePermissionsForWeek(params: {
         personnel,
         slot,
         simulatedShifts,
-        approvedLeaves
+        mergedLeaves
       );
       if (hasMandatoryJornadaViolation(violations)) {
         const errors = violations
@@ -780,16 +869,16 @@ export function evaluatePermissionsForWeek(params: {
       results.push({
         personnel_id: personnel.personnel_id,
         permission_date: dStr,
-        leave_type: leave?.type || 'other',
-        leave_category: 'monthly_free_choice',
-        reason: leave?.reason ?? null,
+        leave_type: leaveType,
+        leave_category: category,
+        reason: leave?.reason ?? (isBirthday ? 'Cumpleaños (día libre obligatorio)' : null),
         status: 'unrelocatable',
         reason_code: 'jornada_blocked',
         respected_permission: true,
         requires_relocation: true,
         relocated_to: null,
         blocking_reasons: blockingReasons,
-        message: `Solicitud mensual el ${dStr} respetada sin reubicación viable; todos los cupos incumplen restricciones obligatorias (${blockingReasons.join(' | ')}).`,
+        message: `${subjectShort} el ${dStr} respetado sin reubicación viable (pendiente); todos los cupos incumplen restricciones obligatorias (${blockingReasons.join(' | ')}).`,
       });
       continue;
     }
@@ -812,16 +901,16 @@ export function evaluatePermissionsForWeek(params: {
       results.push({
         personnel_id: personnel.personnel_id,
         permission_date: dStr,
-        leave_type: leave?.type || 'other',
-        leave_category: 'monthly_free_choice',
-        reason: leave?.reason ?? null,
+        leave_type: leaveType,
+        leave_category: category,
+        reason: leave?.reason ?? (isBirthday ? 'Cumpleaños (día libre obligatorio)' : null),
         status: 'relocated',
         respected_permission: true,
         requires_relocation: true,
         relocated_to: targetDate,
         relocated_slot_key: matchedValid.slot_key ?? null,
         assigned_shift: matchedValid,
-        message: `Solicitud mensual el ${dStr} respetada; turno reubicado y confirmado en el roster del ${targetDate}.`,
+        message: `${subjectShort} el ${dStr} respetado; turno reubicado y confirmado en el roster del ${targetDate}.`,
       });
     } else {
       const proposed = validSlots[0].slot;
@@ -829,9 +918,9 @@ export function evaluatePermissionsForWeek(params: {
       results.push({
         personnel_id: personnel.personnel_id,
         permission_date: dStr,
-        leave_type: leave?.type || 'other',
-        leave_category: 'monthly_free_choice',
-        reason: leave?.reason ?? null,
+        leave_type: leaveType,
+        leave_category: category,
+        reason: leave?.reason ?? (isBirthday ? 'Cumpleaños (día libre obligatorio)' : null),
         status: 'proposed_relocation',
         reason_code: 'proposed_unconfirmed',
         respected_permission: true,

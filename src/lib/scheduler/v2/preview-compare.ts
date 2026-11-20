@@ -73,7 +73,7 @@ function buildV1PersonnelPool(params: {
 
     return {
       personnel_id: p.personnel_id,
-      birth_date: null,
+      birth_date: p.birth_date ?? null,
       first_name: p.first_name || p.personnel_id,
       main_position: p.main_position || '',
       main_position_name: p.main_position_name,

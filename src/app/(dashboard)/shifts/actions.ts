@@ -14,6 +14,12 @@ import {
   type BlueExpressNightProposal,
 } from '@/lib/scheduler/v2/blue-express';
 import { compareEnginesPreview } from '@/lib/scheduler/v2/preview-compare';
+import {
+  buildGenerateMonthHolidayPreview,
+  findHolidayZeroStaffingRequirementIds,
+  getChileNationalHolidaysForRange,
+  type GenerateMonthHolidayPreview,
+} from '@/lib/scheduler/v2/chile-holidays';
 import { deriveNs22AnchorFromHistory } from '@/lib/scheduler/v2/aeropuerto-ns22';
 import { fetchAllPaginated } from '@/lib/scheduler/v2/pagination';
 import { scheduleCrossArea } from '@/lib/scheduler/v2/cobertura';
@@ -415,6 +421,75 @@ export async function deleteOrdinaryRequirementsByRange(
   }
 }
 
+/**
+ * Corrección puntual para feriados nacionales verificados (ej. 2027-01-01):
+ * elimina únicamente los requerimientos ordinarios (`is_extra = false`) de los 3 pares
+ * Atrex—Operador de grúa, Base/Base Minerquim—Operador de grúa y Base/Base Minerquim—Supervisor.
+ * Conserva Blue Express, demás cargos, extras manuales y asignaciones.
+ */
+export async function cleanupHolidayZeroStaffingForDate(
+  targetDate: string
+): Promise<{ success: boolean; deletedCount: number; holidayName: string | null; error: string | null }> {
+  try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+    if (!auth.ok) return { success: false, deletedCount: 0, holidayName: null, error: auth.error };
+
+    const supabase = await createClient();
+    const { data: rows, error: qErr } = await supabase
+      .from('shift_requirements')
+      .select('id, date, is_extra, area:areas(name), position:positions(name)')
+      .eq('date', targetDate)
+      .eq('is_extra', false);
+
+    if (qErr) {
+      return { success: false, deletedCount: 0, holidayName: null, error: qErr.message };
+    }
+
+    const { isNationalHoliday, holidayName, matchedIds } = findHolidayZeroStaffingRequirementIds(
+      (rows || []) as any[],
+      targetDate
+    );
+
+    if (!isNationalHoliday) {
+      return {
+        success: false,
+        deletedCount: 0,
+        holidayName: null,
+        error: `${targetDate} no corresponde a un feriado legal nacional verificado.`,
+      };
+    }
+
+    if (matchedIds.length === 0) {
+      return { success: true, deletedCount: 0, holidayName, error: null };
+    }
+
+    const { error: dErr } = await supabase
+      .from('shift_requirements')
+      .delete()
+      .in('id', matchedIds)
+      .eq('is_extra', false);
+
+    if (dErr) {
+      return { success: false, deletedCount: 0, holidayName, error: dErr.message };
+    }
+
+    if (process.env.ROSTER_ISOLATED_TEST !== 'true') {
+      revalidatePath('/shifts/dotacion');
+      revalidatePath('/shifts/requirements');
+      revalidatePath('/shifts/daily');
+    }
+
+    return { success: true, deletedCount: matchedIds.length, holidayName, error: null };
+  } catch (err) {
+    return {
+      success: false,
+      deletedCount: 0,
+      holidayName: null,
+      error: err instanceof Error ? err.message : 'Error limpiando cupos de feriado nacional',
+    };
+  }
+}
+
 export async function listRequirements(startDate?: string, endDate?: string) {
   const supabase = await createClient();
   const effectiveStart = startDate || format(startOfMonth(new Date()), 'yyyy-MM-dd');
@@ -605,6 +680,20 @@ export async function materializeTemplates(
     return { success: false, error: 'Rango de fechas inválido.', count: 0, createdCount: 0, skippedCount: 0 };
   }
 
+  const holidayRangeCheck = getChileNationalHolidaysForRange(startDate, endDate);
+  if (holidayRangeCheck.missingYears.length > 0) {
+    return {
+      success: false,
+      error:
+        holidayRangeCheck.warnings.join(' ') ||
+        `No hay calendario verificado de feriados nacionales de Chile para: ${holidayRangeCheck.missingYears.join(', ')}.`,
+      count: 0,
+      createdCount: 0,
+      skippedCount: 0,
+      holidayWarnings: holidayRangeCheck.warnings,
+    };
+  }
+
   let validatedBlueApproved: Record<number, number> | undefined;
   if (options?.blueExpressApprovedByWeekday) {
     const check = validateApprovedTrucksByWeekday(options.blueExpressApprovedByWeekday);
@@ -715,6 +804,52 @@ export async function materializeTemplates(
 
   const skippedCount = inserts.length - createdCount;
 
+  // 5b. Limpiar cupos ordinarios preexistentes de los 3 pares con dotación cero en feriados nacionales del rango
+  let holidayZeroCleanedCount = 0;
+  const holidayDatesInRange = Array.from(holidayRangeCheck.holidaysByDate.keys());
+  if (holidayDatesInRange.length > 0) {
+    const { data: holidayReqRows, error: holidayReqErr } = await supabase
+      .from('shift_requirements')
+      .select('id, date, required_count, is_extra, area:areas(name), position:positions(name)')
+      .eq('is_extra', false)
+      .in('date', holidayDatesInRange);
+    if (holidayReqErr) {
+      return {
+        success: false,
+        error: holidayReqErr.message,
+        count: createdCount,
+        createdCount,
+        skippedCount,
+        holidayWarnings,
+      };
+    }
+    const holidayIdsToDelete: string[] = [];
+    for (const holidayDate of holidayDatesInRange) {
+      const rowsForDate = ((holidayReqRows || []) as any[]).filter(
+        (r) => String(r.date).split('T')[0] === holidayDate
+      );
+      const { matchedIds } = findHolidayZeroStaffingRequirementIds(rowsForDate, holidayDate);
+      holidayIdsToDelete.push(...matchedIds);
+    }
+    if (holidayIdsToDelete.length > 0) {
+      const { error: delHolidayErr } = await supabase
+        .from('shift_requirements')
+        .delete()
+        .in('id', holidayIdsToDelete);
+      if (delHolidayErr) {
+        return {
+          success: false,
+          error: delHolidayErr.message,
+          count: createdCount,
+          createdCount,
+          skippedCount,
+          holidayWarnings,
+        };
+      }
+      holidayZeroCleanedCount = holidayIdsToDelete.length;
+    }
+  }
+
   // 6. Guardar o actualizar Blue Express AM 00 desde la propuesta aprobada (sin tocar diurnos ni extras)
   let blueExpressUpsertedCount = 0;
   for (let i = 0; i < blueUpserts.length; i += CHUNK_SIZE) {
@@ -750,9 +885,101 @@ export async function materializeTemplates(
     createdCount,
     skippedCount,
     blueExpressUpsertedCount,
+    holidayZeroCleanedCount,
     totalEvaluated: inserts.length + blueUpserts.length,
     holidayWarnings,
   };
+}
+
+/**
+ * Vista previa unificada de Dotación -> Generar Mes:
+ * - Verifica cobertura de feriados nacionales de Chile para todos los años del rango (sin guardar aún)
+ * - Detecta cupos ordinarios existentes que deben quedar en cero en feriados (Atrex/Base Grúa y Base Supervisor)
+ * - Calcula la propuesta nocturna (AM 00) de Blue Express en el mismo flujo
+ */
+export async function previewGenerateMonth(
+  startDate: string,
+  endDate: string
+): Promise<{
+  success: boolean;
+  blueProposal: BlueExpressNightProposal | null;
+  holidayPreview: GenerateMonthHolidayPreview;
+  error: string | null;
+}> {
+  const emptyHolidayPreview = buildGenerateMonthHolidayPreview({
+    startDate: startDate || '',
+    endDate: endDate || '',
+    existingOrdinaryRows: [],
+  });
+
+  try {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'SUPERVISOR'] });
+    if (!auth.ok) {
+      return {
+        success: false,
+        blueProposal: null,
+        holidayPreview: emptyHolidayPreview,
+        error: auth.error,
+      };
+    }
+
+    if (!startDate || !endDate || startDate > endDate) {
+      return {
+        success: false,
+        blueProposal: null,
+        holidayPreview: emptyHolidayPreview,
+        error: 'Rango de fechas inválido.',
+      };
+    }
+
+    const rangeCheck = getChileNationalHolidaysForRange(startDate, endDate);
+    const holidayDates = Array.from(rangeCheck.holidaysByDate.keys());
+
+    const supabase = await createClient();
+    const [blueRes, existingHolidayRes] = await Promise.all([
+      previewBlueExpressNightStaffing(startDate, endDate),
+      holidayDates.length > 0
+        ? supabase
+            .from('shift_requirements')
+            .select('id, date, required_count, is_extra, area:areas(name), position:positions(name), shift:shifts(name)')
+            .eq('is_extra', false)
+            .in('date', holidayDates)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (existingHolidayRes.error) {
+      return {
+        success: false,
+        blueProposal: blueRes.success ? blueRes.proposal : null,
+        holidayPreview: buildGenerateMonthHolidayPreview({
+          startDate,
+          endDate,
+          existingOrdinaryRows: [],
+        }),
+        error: existingHolidayRes.error.message,
+      };
+    }
+
+    const holidayPreview = buildGenerateMonthHolidayPreview({
+      startDate,
+      endDate,
+      existingOrdinaryRows: (existingHolidayRes.data || []) as any[],
+    });
+
+    return {
+      success: blueRes.success,
+      blueProposal: blueRes.success ? blueRes.proposal : null,
+      holidayPreview,
+      error: blueRes.error,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      blueProposal: null,
+      holidayPreview: emptyHolidayPreview,
+      error: err?.message || 'Error al previsualizar la generación mensual.',
+    };
+  }
 }
 
 /**
@@ -2274,6 +2501,7 @@ export async function previewCompareSchedulers(
       return {
         personnel_id: p.id,
         first_name: p.first_name,
+        birth_date: p.birth_date || null,
         main_position: p.main_position,
         main_position_name: mainPos?.name,
         secondary_positions: p.secondary_positions || [],
@@ -2370,6 +2598,7 @@ export async function previewCompareSchedulers(
         return {
           personnel_id: w.id,
           first_name: w.first_name,
+          birth_date: (w as any).birth_date || null,
           anchor_date: resolved.anchor_date,
           cycle_offset: resolved.cycle_offset,
           confirmed_4x4_regime: false,

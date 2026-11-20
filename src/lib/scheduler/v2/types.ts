@@ -120,6 +120,7 @@ export interface DotacionCoverageSummary {
 
 export type LeaveCategory =
   | 'monthly_free_choice'
+  | 'birthday'
   | 'generic_personal'
   | 'medical_or_vacation'
   | 'other_absence';
@@ -145,6 +146,7 @@ export interface RawLeaveRecord {
 export interface PersonnelScheduleProfile {
   personnel_id: string;
   first_name?: string;
+  birth_date?: string | null;
   main_position: string | null;
   main_position_name?: string;
   secondary_positions?: string[];
@@ -235,6 +237,7 @@ export interface PermissionRelocationCase {
 export interface Ns22TitularConfig {
   personnel_id: string;
   first_name?: string;
+  birth_date?: string | null;
   /**
    * Reference date (YYYY-MM-DD) where cyclePos === 0 (start of a 4-night block).
    * Remains immutable across absences and replacements.
