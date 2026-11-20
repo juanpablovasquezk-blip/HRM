@@ -7,7 +7,9 @@ import { generateSchedule, partialRecalculate } from '@/lib/scheduler';
 import {
   buildBlueExpressApplyPlan,
   calculateBlueExpressNightStaffingProposal,
+  getInitialApprovedTrucksByWeekday,
   getTwoMonthHistoryWindow,
+  isBlueExpressAm00Slot,
   validateApprovedTrucksByWeekday,
   type BlueExpressNightProposal,
 } from '@/lib/scheduler/v2/blue-express';
@@ -594,21 +596,43 @@ export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) 
   };
 }
 
-export async function materializeTemplates(startDate: string, endDate: string) {
+export async function materializeTemplates(
+  startDate: string,
+  endDate: string,
+  options?: { blueExpressApprovedByWeekday?: Record<number, number> }
+) {
   if (!startDate || !endDate || startDate > endDate) {
     return { success: false, error: 'Rango de fechas inválido.', count: 0, createdCount: 0, skippedCount: 0 };
   }
 
+  let validatedBlueApproved: Record<number, number> | undefined;
+  if (options?.blueExpressApprovedByWeekday) {
+    const check = validateApprovedTrucksByWeekday(options.blueExpressApprovedByWeekday);
+    if (!check.ok) {
+      return { success: false, error: check.error, count: 0, createdCount: 0, skippedCount: 0 };
+    }
+    validatedBlueApproved = check.normalized;
+  }
+
   const supabase = await createClient();
 
-  // 1. Obtener todas las reglas activas y catálogos de área/cargo para feriados nacionales
-  const [{ data: templates, error: tError }, { data: areas }, { data: positions }] = await Promise.all([
+  // 1. Obtener todas las reglas activas, catálogos y cálculo Blue Express AM 00
+  const [{ data: templates, error: tError }, { data: areas }, { data: positions }, bluePreview] = await Promise.all([
     supabase.from('requirement_templates').select('*'),
     supabase.from('areas').select('id, name'),
     supabase.from('positions').select('id, name'),
+    previewBlueExpressNightStaffing(startDate, endDate),
   ]);
   if (tError) return { success: false, error: tError.message, count: 0, createdCount: 0, skippedCount: 0 };
-  if (!templates || templates.length === 0) {
+
+  const blueProposal = bluePreview.success ? bluePreview.proposal : null;
+  const blueApprovedMap = blueProposal
+    ? validatedBlueApproved ?? getInitialApprovedTrucksByWeekday(blueProposal)
+    : null;
+  const blueUpserts =
+    blueProposal && blueApprovedMap ? buildBlueExpressApplyPlan(blueProposal, blueApprovedMap) : [];
+
+  if ((!templates || templates.length === 0) && blueUpserts.length === 0) {
     return { success: true, error: null, count: 0, createdCount: 0, skippedCount: 0 };
   }
 
@@ -616,13 +640,19 @@ export async function materializeTemplates(startDate: string, endDate: string) {
   const positionNameById = new Map<string, string>((positions || []).map((p) => [p.id, p.name]));
   const holidayWarnings: string[] = [];
 
-  // 2. Consolidar reglas día por día en memoria (aplicando feriados nacionales de Chile)
-  const inserts = buildConsolidatedRequirements(templates, startDate, endDate, {
-    areaNameById,
-    positionNameById,
-    warningsOut: holidayWarnings,
-  });
-  if (inserts.length === 0) {
+  // 2. Consolidar reglas de la Matriz Semanal excluyendo Blue Express AM 00 (se rige por su propuesta)
+  const rawInserts =
+    templates && templates.length > 0
+      ? buildConsolidatedRequirements(templates, startDate, endDate, {
+          areaNameById,
+          positionNameById,
+          warningsOut: holidayWarnings,
+        })
+      : [];
+  const inserts = blueProposal
+    ? rawInserts.filter((row) => !isBlueExpressAm00Slot(row, blueProposal.identifiers))
+    : rawInserts;
+  if (inserts.length === 0 && blueUpserts.length === 0) {
     return {
       success: true,
       error: null,
@@ -685,16 +715,42 @@ export async function materializeTemplates(startDate: string, endDate: string) {
 
   const skippedCount = inserts.length - createdCount;
 
+  // 6. Guardar o actualizar Blue Express AM 00 desde la propuesta aprobada (sin tocar diurnos ni extras)
+  let blueExpressUpsertedCount = 0;
+  for (let i = 0; i < blueUpserts.length; i += CHUNK_SIZE) {
+    const chunk = blueUpserts.slice(i, i + CHUNK_SIZE);
+    const { data: bRows, error: bErr } = await supabase
+      .from('shift_requirements')
+      .upsert(chunk, {
+        onConflict: 'area_id,position_id,shift_id,date,is_extra',
+        ignoreDuplicates: false,
+      })
+      .select('id');
+
+    if (bErr) {
+      return {
+        success: false,
+        error: bErr.message,
+        count: createdCount + blueExpressUpsertedCount,
+        createdCount,
+        skippedCount,
+        blueExpressUpsertedCount,
+      };
+    }
+    blueExpressUpsertedCount += bRows?.length || chunk.length;
+  }
+
   revalidatePath('/shifts/dotacion');
   revalidatePath('/shifts/requirements');
   revalidatePath('/shifts/daily');
   return {
     success: true,
     error: null,
-    count: createdCount,
+    count: createdCount + blueExpressUpsertedCount,
     createdCount,
     skippedCount,
-    totalEvaluated: inserts.length,
+    blueExpressUpsertedCount,
+    totalEvaluated: inserts.length + blueUpserts.length,
     holidayWarnings,
   };
 }

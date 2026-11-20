@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, previewBlueExpressNightStaffing, applyBlueExpressNightStaffingProposal, previewDeleteOrdinaryRequirementsByRange, deleteOrdinaryRequirementsByRange, type WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
-import type { BlueExpressNightProposal } from '@/lib/scheduler/v2/blue-express';
+import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, previewBlueExpressNightStaffing, previewDeleteOrdinaryRequirementsByRange, deleteOrdinaryRequirementsByRange, type WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
+import { getInitialApprovedTrucksByWeekday, type BlueExpressNightProposal } from '@/lib/scheduler/v2/blue-express';
 import type { OrdinaryRequirementRangeDeletePreview } from './range-delete-utils';
 import { Layers, Plus, Trash2, Calendar, MapPin, Briefcase, Clock, Loader2, RefreshCw, Shield, ChevronDown, Edit2, X, TableProperties, LayoutGrid } from 'lucide-react';
 import { toast } from 'sonner';
@@ -37,19 +37,21 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
   const [blueEnd, setBlueEnd] = useState('2027-01-03');
 
   const initBlueApproved = (proposal: BlueExpressNightProposal) => {
-    const map: Record<number, number> = {};
-    for (const w of proposal.weekdays) {
-      map[w.isoWeekday] = w.recommended_trucks;
-    }
-    // Pauta aprobada para 2026-12-07..2027-01-03: ajuste visible en Martes (3 -> 2)
-    if (
-      proposal.target_start_date === '2026-12-07' &&
-      proposal.target_end_date === '2027-01-03' &&
-      map[2] === 3
-    ) {
-      map[2] = 2;
-    }
-    setBlueApprovedByWeekday(map);
+    setBlueApprovedByWeekday(getInitialApprovedTrucksByWeekday(proposal));
+  };
+
+  const loadBlueProposalForRange = (startDate: string, endDate: string) => {
+    startTransition(async () => {
+      const res = await previewBlueExpressNightStaffing(startDate, endDate);
+      if (!res.success || !res.proposal) {
+        toast.error('No se pudo calcular la propuesta Blue Express AM 00', {
+          description: res.error || 'Error desconocido',
+        });
+        return;
+      }
+      setBlueProposal(res.proposal);
+      initBlueApproved(res.proposal);
+    });
   };
   const [showRangeDelete, setShowRangeDelete] = useState(false);
   const [delStart, setDelStart] = useState('2026-12-07');
@@ -173,29 +175,53 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
     const endDate = formData.get('gen_end') as string;
     startTransition(async () => {
       try {
-        const result = await materializeTemplates(startDate, endDate) as any;
+        // Paso 1: Si aún no hay propuesta calculada para este rango, calcular vista previa antes de guardar
+        if (
+          !blueProposal ||
+          blueProposal.target_start_date !== startDate ||
+          blueProposal.target_end_date !== endDate
+        ) {
+          const previewRes = await previewBlueExpressNightStaffing(startDate, endDate);
+          if (!previewRes.success || !previewRes.proposal) {
+            toast.error('No se pudo calcular la propuesta Blue Express AM 00', {
+              description: previewRes.error || 'Error desconocido',
+            });
+            return;
+          }
+          setBlueProposal(previewRes.proposal);
+          initBlueApproved(previewRes.proposal);
+          return;
+        }
+
+        // Paso 2: Confirmar y guardar Matriz Semanal + Blue Express AM 00 con cantidades en pantalla
+        const result = (await materializeTemplates(startDate, endDate, {
+          blueExpressApprovedByWeekday: blueApprovedByWeekday,
+        })) as any;
         if (result.error) {
           toast.error('Error', { description: result.error });
         } else {
           const created = result.createdCount ?? result.count ?? 0;
           const skipped = result.skippedCount ?? 0;
+          const blueSaved = result.blueExpressUpsertedCount ?? 0;
 
-          if (created === 0 && skipped > 0) {
+          if (created === 0 && skipped > 0 && blueSaved === 0) {
             toast.info('El período ya estaba generado', {
               description: `No se crearon nuevas necesidades (${skipped} existentes se mantuvieron intactas).`,
             });
-          } else if (created > 0 && skipped > 0) {
-            toast.success(`${created} necesidades faltantes creadas`, {
-              description: `${skipped} necesidades ya existentes fueron omitidas sin cambios.`,
-            });
           } else {
-            toast.success(`${created} requerimientos generados exitosamente`);
+            toast.success(`${created} necesidades de Matriz Semanal y ${blueSaved} cupos Blue Express AM 00 guardados`, {
+              description:
+                skipped > 0
+                  ? `${skipped} necesidades ya existentes de la Matriz Semanal fueron omitidas sin cambios.`
+                  : undefined,
+            });
           }
           if (Array.isArray(result.holidayWarnings) && result.holidayWarnings.length > 0) {
             toast.warning('Aviso de calendario de feriados', {
               description: result.holidayWarnings.join(' '),
             });
           }
+          setBlueProposal(null);
           setShowGenerate(false);
           router.refresh();
         }
@@ -494,119 +520,90 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
             </div>
 
             {showGenerate ? (
-              <form action={handleMaterialize} className="flex items-end gap-3">
+              <form action={handleMaterialize} className="flex flex-wrap items-end gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Desde</Label>
-                  <Input name="gen_start" type="date" required className="h-9 w-36"
-                    defaultValue={new Date().toISOString().split('T')[0]} />
+                  <Input
+                    name="gen_start"
+                    type="date"
+                    required
+                    className="h-9 w-36"
+                    value={blueStart}
+                    onChange={(e) => {
+                      setBlueStart(e.target.value);
+                      setBlueProposal(null);
+                    }}
+                  />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Hasta</Label>
-                  <Input name="gen_end" type="date" required className="h-9 w-36"
-                    defaultValue={new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().split('T')[0]} />
+                  <Input
+                    name="gen_end"
+                    type="date"
+                    required
+                    className="h-9 w-36"
+                    value={blueEnd}
+                    onChange={(e) => {
+                      setBlueEnd(e.target.value);
+                      setBlueProposal(null);
+                    }}
+                  />
                 </div>
                 <Button type="submit" disabled={isPending} className="bg-emerald-600 hover:bg-emerald-700 text-white h-9">
-                  {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Generar'}
+                  {isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : blueProposal && blueProposal.target_start_date === blueStart && blueProposal.target_end_date === blueEnd ? (
+                    'Confirmar y Generar Mes'
+                  ) : (
+                    'Calcular Propuesta'
+                  )}
                 </Button>
-                <Button type="button" variant="ghost" className="h-9" onClick={() => setShowGenerate(false)}>Cancelar</Button>
-              </form>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
-                  variant="outline"
-                  disabled={isPending}
+                  variant="ghost"
+                  className="h-9"
                   onClick={() => {
-                    startTransition(async () => {
-                      const res = await previewBlueExpressNightStaffing(blueStart, blueEnd);
-                      if (!res.success || !res.proposal) {
-                        toast.error('No se pudo calcular la propuesta Blue Express', {
-                          description: res.error || 'Error desconocido',
-                        });
-                        return;
-                      }
-                      setBlueProposal(res.proposal);
-                      initBlueApproved(res.proposal);
-                    });
+                    setShowGenerate(false);
+                    setBlueProposal(null);
                   }}
                 >
-                  {isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Clock className="h-4 w-4 mr-2" />}
-                  Propuesta Blue Express AM 00 (Solo Lectura)
+                  Cancelar
                 </Button>
-                <Button onClick={() => setShowGenerate(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                  disabled={templates.length === 0}>
-                  <Calendar className="h-4 w-4 mr-2" /> Generar Mes
-                </Button>
-              </div>
+              </form>
+            ) : (
+              <Button
+                onClick={() => {
+                  setShowGenerate(true);
+                  loadBlueProposalForRange(blueStart, blueEnd);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                disabled={templates.length === 0}
+              >
+                <Calendar className="h-4 w-4 mr-2" /> Generar Mes
+              </Button>
             )}
           </div>
 
-          {blueProposal && (
+          {showGenerate && blueProposal && (
             <div className="mt-4 pt-4 border-t space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h4 className="font-semibold text-sm">
-                    ROSTER-09 · Propuesta Nocturna {blueProposal.identifiers.areaName} ({blueProposal.identifiers.shiftName}) — Solo Lectura
+                    ROSTER-09 · Propuesta Nocturna {blueProposal.identifiers.areaName} ({blueProposal.identifiers.shiftName}) antes de guardar
                   </h4>
                   <p className="text-xs text-muted-foreground">
                     Rango objetivo: {blueProposal.target_start_date} al {blueProposal.target_end_date} · Historial evaluado (noches transcurridas): {blueProposal.history_start_date} al {blueProposal.history_end_date}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Input type="date" value={blueStart} onChange={(e) => setBlueStart(e.target.value)} className="h-8 w-36 text-xs" />
-                  <Input type="date" value={blueEnd} onChange={(e) => setBlueEnd(e.target.value)} className="h-8 w-36 text-xs" />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={isPending}
-                    onClick={() => {
-                      startTransition(async () => {
-                        const res = await previewBlueExpressNightStaffing(blueStart, blueEnd);
-                        if (res.success && res.proposal) {
-                          setBlueProposal(res.proposal);
-                          initBlueApproved(res.proposal);
-                        }
-                      });
-                    }}
-                  >
-                    Recalcular
-                  </Button>
-                  {canEdit && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                      disabled={isPending}
-                      onClick={() => {
-                        startTransition(async () => {
-                          const res = await applyBlueExpressNightStaffingProposal(
-                            blueProposal.target_start_date,
-                            blueProposal.target_end_date,
-                            blueApprovedByWeekday
-                          );
-                          if (!res.success) {
-                            toast.error('No se pudo aplicar la propuesta Blue Express AM 00', {
-                              description: res.error || 'Error desconocido',
-                            });
-                            return;
-                          }
-                          toast.success('Dotación Blue Express AM 00 aplicada', {
-                            description: `${res.upsertedCount} cupos ordinarios nocturnos guardados según pauta aprobada (${blueProposal.target_start_date} al ${blueProposal.target_end_date}).`,
-                          });
-                          if (res.proposal) setBlueProposal(res.proposal);
-                          router.refresh();
-                        });
-                      }}
-                    >
-                      {isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
-                      Aplicar Propuesta (AM 00)
-                    </Button>
-                  )}
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setBlueProposal(null)}>
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={isPending}
+                  onClick={() => loadBlueProposalForRange(blueStart, blueEnd)}
+                >
+                  Recalcular
+                </Button>
               </div>
 
               {blueProposal.estimate_notice && (

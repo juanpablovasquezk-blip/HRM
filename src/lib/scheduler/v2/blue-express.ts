@@ -93,6 +93,36 @@ export interface BlueExpressApplyUpsertRow {
   is_extra: false;
 }
 
+export function getInitialApprovedTrucksByWeekday(
+  proposal: BlueExpressNightProposal
+): Record<number, number> {
+  const map: Record<number, number> = {};
+  for (const w of proposal.weekdays) {
+    map[w.isoWeekday] = w.recommended_trucks;
+  }
+  // Pauta acordada para el rango 2026-12-07..2027-01-03: ajuste visible en Martes (3 -> 2)
+  if (
+    proposal.target_start_date === '2026-12-07' &&
+    proposal.target_end_date === '2027-01-03' &&
+    map[2] === 3
+  ) {
+    map[2] = 2;
+  }
+  return map;
+}
+
+export function isBlueExpressAm00Slot(
+  row: { area_id: string; position_id: string; shift_id: string },
+  identifiers: BlueExpressIdentifiers
+): boolean {
+  return (
+    row.area_id === identifiers.areaId &&
+    row.shift_id === identifiers.shiftId &&
+    (row.position_id === identifiers.conductorPositionId ||
+      row.position_id === identifiers.ayudantePositionId)
+  );
+}
+
 export function validateApprovedTrucksByWeekday(
   approvedByWeekday?: Record<number, number> | null
 ): { ok: true; normalized: Record<number, number> } | { ok: false; error: string } {

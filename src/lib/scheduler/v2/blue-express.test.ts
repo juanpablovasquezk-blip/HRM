@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   buildBlueExpressApplyPlan,
   calculateBlueExpressNightStaffingProposal,
+  getInitialApprovedTrucksByWeekday,
   getTwoMonthHistoryWindow,
+  isBlueExpressAm00Slot,
   validateApprovedTrucksByWeekday,
   type BlueExpressHistoryAssignment,
   type BlueExpressHistoryRequirement,
@@ -343,4 +345,84 @@ test('ROSTER-09: historial recomienda 3 los martes y usuario aprueba 2 -> 48 con
   // Diurnos y extras conservados
   assert.equal(store.filter((r) => r.date === '2026-12-10' && r.shift_id !== IDS.shiftId && !r.is_extra).length, 4);
   assert.equal(store.filter((r) => r.date === '2026-12-10' && r.shift_id === IDS.shiftId && r.is_extra).length, 1);
+});
+
+test('ROSTER-09 (Generar Mes integrado): 2026-12-07..2027-01-03 usa 3,2,2,1,2,1,1 (48/48) y un mes futuro recalcula pauta nueva al aceptar o editar', () => {
+  // 1. Rango 2026-12-07..2027-01-03 con Martes recomendando 3 -> pauta inicial aprobada aplica 3,2,2,1,2,1,1
+  const decProposal = calculateBlueExpressNightStaffingProposal({
+    identifiers: IDS,
+    targetStartDate: '2026-12-07',
+    targetEndDate: '2027-01-03',
+    referenceDate: '2026-11-20',
+    historyAssignments: [
+      ...makeDupla('2026-11-02', 1), ...makeDupla('2026-11-02', 2), ...makeDupla('2026-11-02', 3),
+      ...makeDupla('2026-11-09', 1), ...makeDupla('2026-11-09', 2), ...makeDupla('2026-11-09', 3),
+      ...makeDupla('2026-11-16', 1), ...makeDupla('2026-11-16', 2), ...makeDupla('2026-11-16', 3),
+      ...makeDupla('2026-11-03', 1), ...makeDupla('2026-11-03', 2), ...makeDupla('2026-11-03', 3),
+      ...makeDupla('2026-11-10', 1), ...makeDupla('2026-11-10', 2), ...makeDupla('2026-11-10', 3),
+      ...makeDupla('2026-11-17', 1), ...makeDupla('2026-11-17', 2), ...makeDupla('2026-11-17', 3),
+      ...makeDupla('2026-11-04', 1), ...makeDupla('2026-11-04', 2),
+      ...makeDupla('2026-11-11', 1), ...makeDupla('2026-11-11', 2),
+      ...makeDupla('2026-11-18', 1), ...makeDupla('2026-11-18', 2),
+      ...makeDupla('2026-11-06', 1), ...makeDupla('2026-11-06', 2),
+      ...makeDupla('2026-11-13', 1), ...makeDupla('2026-11-13', 2),
+      ...makeDupla('2026-11-20', 1),
+    ],
+    historyRequirements: [],
+    targetExistingRequirements: [],
+  });
+
+  const decInitial = getInitialApprovedTrucksByWeekday(decProposal);
+  assert.deepEqual(decInitial, { 1: 3, 2: 2, 3: 2, 4: 1, 5: 2, 6: 1, 7: 1 });
+  const decPlan = buildBlueExpressApplyPlan(decProposal, decInitial);
+  assert.equal(
+    decPlan.filter((r) => r.position_id === IDS.conductorPositionId).reduce((s, r) => s + r.required_count, 0),
+    48
+  );
+  assert.equal(
+    decPlan.filter((r) => r.position_id === IDS.ayudantePositionId).reduce((s, r) => s + r.required_count, 0),
+    48
+  );
+  // Verifica que Blue Express AM 00 se excluye de las reglas genéricas mientras otras áreas/turnos se conservan
+  assert.equal(isBlueExpressAm00Slot({ area_id: IDS.areaId, position_id: IDS.conductorPositionId, shift_id: IDS.shiftId }, IDS), true);
+  assert.equal(isBlueExpressAm00Slot({ area_id: IDS.areaId, position_id: IDS.conductorPositionId, shift_id: 'sh-am08' }, IDS), false);
+
+  // 2. Mes futuro (febrero 2027) con historial distinto (dic 2026 + ene 2027) -> recalcula pauta nueva
+  const febProposal = calculateBlueExpressNightStaffingProposal({
+    identifiers: IDS,
+    targetStartDate: '2027-02-01',
+    targetEndDate: '2027-02-28',
+    referenceDate: '2027-02-01',
+    historyAssignments: [
+      // Lunes (últimas 3: 2, 2, 2)
+      ...makeDupla('2027-01-11', 1), ...makeDupla('2027-01-11', 2),
+      ...makeDupla('2027-01-18', 1), ...makeDupla('2027-01-18', 2),
+      ...makeDupla('2027-01-25', 1), ...makeDupla('2027-01-25', 2),
+      // Martes (últimas 3: 1, 1, 1) -> no aplica el ajuste de dic 2026
+      ...makeDupla('2027-01-12', 1),
+      ...makeDupla('2027-01-19', 1),
+      ...makeDupla('2027-01-26', 1),
+    ],
+    historyRequirements: [],
+    targetExistingRequirements: [],
+  });
+
+  const febAuto = getInitialApprovedTrucksByWeekday(febProposal);
+  assert.equal(febAuto[1], 2);
+  assert.equal(febAuto[2], 1);
+
+  // Caso A: aceptar propuesta automática sin editar -> Lunes 2
+  const febAutoPlan = buildBlueExpressApplyPlan(febProposal, febAuto);
+  assert.equal(
+    febAutoPlan.find((r) => r.date === '2027-02-01' && r.position_id === IDS.conductorPositionId)?.required_count,
+    2
+  );
+
+  // Caso B: editar un día en pantalla (Lunes 2 -> 3) y confirmar -> guarda 3
+  const febEdited = { ...febAuto, 1: 3 };
+  const febEditedPlan = buildBlueExpressApplyPlan(febProposal, febEdited);
+  assert.equal(
+    febEditedPlan.find((r) => r.date === '2027-02-01' && r.position_id === IDS.conductorPositionId)?.required_count,
+    3
+  );
 });
