@@ -157,6 +157,56 @@ function getPositionMatch(
   return null;
 }
 
+function getShiftTimeTag(shiftStart?: string | null, shiftName?: string | null): 'AM11' | 'AM08' | null {
+  const start = (shiftStart || '').trim();
+  const name = normalizeCatalogText(shiftName);
+  if (start.startsWith('11:') || name === 'AM 11' || name === 'AM11') return 'AM11';
+  if (start.startsWith('08:00') || name === 'AM 08' || name === 'AM08') return 'AM08';
+  return null;
+}
+
+function computeSoftPreferenceCost(
+  shifts: ScheduledShiftInterval[],
+  shiftNameById?: Map<string, string>
+): number {
+  let cost = 0;
+  const tagByDate = new Map<string, 'AM11' | 'AM08'>();
+  const occupied = new Set<string>();
+  const weeks = new Set<string>();
+
+  for (const s of shifts) {
+    const dNorm = normalizeIsoDate(s.date);
+    const tag = getShiftTimeTag(s.shift_start, s.shift_id ? shiftNameById?.get(s.shift_id) : undefined);
+    if (tag) tagByDate.set(dNorm, tag);
+    for (const occ of getShiftOccupiedDates(s)) {
+      occupied.add(occ);
+      weeks.add(format(startOfWeek(parseISO(occ), { weekStartsOn: 1 }), 'yyyy-MM-dd'));
+    }
+  }
+
+  for (const [dStr, tag] of tagByDate.entries()) {
+    const nextStr = format(addDays(parseISO(dStr), 1), 'yyyy-MM-dd');
+    const nextTag = tagByDate.get(nextStr);
+    if (tag === 'AM11' && nextTag === 'AM11') cost -= 2;
+    if (tag === 'AM11' && nextTag === 'AM08') cost += 3;
+  }
+
+  for (const weekKey of weeks) {
+    const weekStart = parseISO(weekKey);
+    const weekDays = eachDayOfInterval({ start: weekStart, end: addDays(weekStart, 6) });
+    const freeIdx: number[] = [];
+    weekDays.forEach((d, idx) => {
+      if (!occupied.has(format(d, 'yyyy-MM-dd'))) freeIdx.push(idx);
+    });
+    if (freeIdx.length >= 2) {
+      const hasConsecutivePair = freeIdx.some((dayIdx, i) => i > 0 && dayIdx - freeIdx[i - 1] === 1);
+      if (!hasConsecutivePair) cost += 4;
+    }
+  }
+
+  return cost;
+}
+
 function getTotalHours(shifts: ScheduledShiftInterval[]): number {
   return shifts.reduce((sum, s) => sum + (Number(s.duration_hours) || 0), 0);
 }
@@ -336,6 +386,7 @@ export interface ScheduleCrossAreaParams {
     shiftDef: Ns22ShiftDefinition;
   } | null;
   excludeUnconfiguredNs22?: boolean;
+  disableSoftPreferences?: boolean;
   reinforcementConfig?: Record<
     string,
     ReinforcementShiftConfig | ReinforcementShiftConfig[]
@@ -368,6 +419,7 @@ function* scheduleCrossAreaGen(
     positionFilter,
     ns22Config,
     excludeUnconfiguredNs22 = false,
+    disableSoftPreferences = false,
     reinforcementConfig,
     baseCalendarByPerson,
     referenceDate = new Date(),
@@ -697,9 +749,14 @@ function* scheduleCrossAreaGen(
       pLeaves
     );
     if (hasMandatoryJornadaViolation(violations)) return null;
+    const softPenalty = disableSoftPreferences
+      ? 0
+      : computeSoftPreferenceCost([...pShifts, slotToInterval(slot)]) -
+        computeSoftPreferenceCost(pShifts);
     return {
       person: p,
       matchType,
+      softPenalty,
       warningCount: violations.filter((v) => v.severity === 'warning').length,
       totalHours: getTotalHours(pShifts),
     };
@@ -711,6 +768,7 @@ function* scheduleCrossAreaGen(
   ): Array<{
     person: PersonnelScheduleProfile;
     matchType: 'primary' | 'secondary';
+    softPenalty: number;
     warningCount: number;
     totalHours: number;
   }> => {
@@ -718,6 +776,7 @@ function* scheduleCrossAreaGen(
     const result: Array<{
       person: PersonnelScheduleProfile;
       matchType: 'primary' | 'secondary';
+      softPenalty: number;
       warningCount: number;
       totalHours: number;
     }> = [];
@@ -1068,6 +1127,9 @@ function* scheduleCrossAreaGen(
         const prefA = getGruaAreaPreferenceScore(a.person, chosenUnit!.slot, areaNameById, positionNameById);
         const prefB = getGruaAreaPreferenceScore(b.person, chosenUnit!.slot, areaNameById, positionNameById);
         if (prefA !== prefB) return prefB - prefA;
+        if (a.softPenalty !== b.softPenalty) {
+          return a.softPenalty - b.softPenalty;
+        }
         if (a.warningCount !== b.warningCount) {
           return a.warningCount - b.warningCount;
         }
@@ -1165,6 +1227,9 @@ function* scheduleCrossAreaGen(
         const prefA = getGruaAreaPreferenceScore(a.person, unit.slot, areaNameById, positionNameById);
         const prefB = getGruaAreaPreferenceScore(b.person, unit.slot, areaNameById, positionNameById);
         if (prefA !== prefB) return prefB - prefA;
+        if (a.softPenalty !== b.softPenalty) {
+          return a.softPenalty - b.softPenalty;
+        }
         return a.warningCount - b.warningCount;
       });
       const winner = directCands[0];
@@ -1197,6 +1262,119 @@ function* scheduleCrossAreaGen(
     }
   }
   relocationsMs += performance.now() - tStage4RelocStart;
+
+  // Stage 4B: Flexible soft-preference swap pass (AM 11 continuity & 2 consecutive free days)
+  // Strictly preserves all ordinary coverage, priorities, protected shifts, and 4x4 cycles.
+  const canSwapOrdinaryPair = (idxA: number, idxB: number): boolean => {
+    const a = ordinaryAssignments[idxA];
+    const b = ordinaryAssignments[idxB];
+    if (
+      a.is_locked ||
+      b.is_locked ||
+      a.frozen_by_rule ||
+      b.frozen_by_rule ||
+      a.assignment_kind !== 'ordinary' ||
+      b.assignment_kind !== 'ordinary' ||
+      a.personnel_id === b.personnel_id
+    ) {
+      return false;
+    }
+    const pA = nonTitularById.get(a.personnel_id);
+    const pB = nonTitularById.get(b.personnel_id);
+    if (!pA || !pB) return false;
+    const matchAForB = getPositionMatch(pA, b.position_id, equivalentPositionIds);
+    const matchBForA = getPositionMatch(pB, a.position_id, equivalentPositionIds);
+    if (!matchAForB || !matchBForA) return false;
+    if (
+      !canPersonTakeShiftInterval(pA, { shift_id: b.shift_id, shift_start: b.shift_start }) ||
+      !canPersonTakeShiftInterval(pB, { shift_id: a.shift_id, shift_start: a.shift_start })
+    ) {
+      return false;
+    }
+
+    const shiftsA = shiftsByPerson.get(pA.personnel_id) || [];
+    const shiftsB = shiftsByPerson.get(pB.personnel_id) || [];
+    const aWithout = removeShiftInstance(shiftsA, a);
+    const bWithout = removeShiftInstance(shiftsB, b);
+    const intForA: ScheduledShiftInterval = {
+      date: b.date,
+      shift_start: b.shift_start,
+      shift_end: b.shift_end,
+      duration_hours: b.duration_hours,
+      shift_id: b.shift_id,
+      area_id: b.area_id,
+      position_id: b.position_id,
+      slot_key: b.slot_key,
+    };
+    const intForB: ScheduledShiftInterval = {
+      date: a.date,
+      shift_start: a.shift_start,
+      shift_end: a.shift_end,
+      duration_hours: a.duration_hours,
+      shift_id: a.shift_id,
+      area_id: a.area_id,
+      position_id: a.position_id,
+      slot_key: a.slot_key,
+    };
+
+    if (
+      hasMandatoryJornadaViolation(
+        validateJornadaConstraints(pA, intForA, aWithout, leavesByPerson.get(pA.personnel_id) || [])
+      ) ||
+      hasMandatoryJornadaViolation(
+        validateJornadaConstraints(pB, intForB, bWithout, leavesByPerson.get(pB.personnel_id) || [])
+      )
+    ) {
+      return false;
+    }
+
+    const aNew = [...aWithout, intForA];
+    const bNew = [...bWithout, intForB];
+    const beforeCost = computeSoftPreferenceCost(shiftsA) + computeSoftPreferenceCost(shiftsB);
+    const afterCost = computeSoftPreferenceCost(aNew) + computeSoftPreferenceCost(bNew);
+    if (afterCost >= beforeCost) return false;
+
+    shiftsByPerson.set(pA.personnel_id, aNew);
+    shiftsByPerson.set(pB.personnel_id, bNew);
+    ordinaryAssignments[idxA] = {
+      ...a,
+      personnel_id: pB.personnel_id,
+      match_type: matchBForA,
+    };
+    ordinaryAssignments[idxB] = {
+      ...b,
+      personnel_id: pA.personnel_id,
+      match_type: matchAForB,
+    };
+    return true;
+  };
+
+  for (let pass = 0; pass < (disableSoftPreferences ? 0 : 2); pass++) {
+    let improved = false;
+    for (let i = 0; i < ordinaryAssignments.length; i++) {
+      const a = ordinaryAssignments[i];
+      if (a.is_locked || a.frozen_by_rule || a.assignment_kind !== 'ordinary') continue;
+      for (let j = i + 1; j < ordinaryAssignments.length; j++) {
+        const b = ordinaryAssignments[j];
+        if (b.is_locked || b.frozen_by_rule || b.assignment_kind !== 'ordinary') continue;
+        const sameDateCompatible =
+          a.date === b.date && a.area_id === b.area_id && a.position_id === b.position_id;
+        const sameSlotInWeek =
+          a.date !== b.date &&
+          a.slot_key &&
+          a.slot_key.slice(10) === b.slot_key.slice(10) &&
+          a.priority_rank === b.priority_rank &&
+          format(startOfWeek(parseISO(a.date), { weekStartsOn: 1 }), 'yyyy-MM-dd') ===
+            format(startOfWeek(parseISO(b.date), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+        if (!sameDateCompatible && !sameSlotInWeek) continue;
+        if (canSwapOrdinaryPair(i, j)) {
+          improved = true;
+          break;
+        }
+      }
+    }
+    if (!improved) break;
+  }
 
   // Full-roster post-audit: verify hours, 12h rest, days off, Sundays, and approved leaves
   const tAuditStart = performance.now();

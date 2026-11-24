@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import { deriveNs22AnchorFromHistory, isNs22TitularWorkNight } from './aeropuerto-ns22';
 import { scheduleCrossArea, scheduleCrossAreaAsync } from './cobertura';
 import { fetchAllPaginated } from './pagination';
-import { compareEnginesPreview, compareEnginesPreviewStaged } from './preview-compare';
+import {
+  buildV2DailyPlanningRows,
+  compareEnginesPreview,
+  compareEnginesPreviewStaged,
+} from './preview-compare';
 import {
   fetchPriorityQuotasInBatches,
   loadPreviewCompareInputs,
@@ -1239,4 +1243,181 @@ test('Prioridades por lote en vista previa: consulta 407 IDs en lotes acotados y
     assert.match(failLoaded.error, /lote \(3\)/i);
     assert.match(failLoaded.error, /fetch failed on batch 3/i);
   }
+});
+
+test('Preferencias flexibles v2: continuidad AM 11 y 2 libres consecutivos cuando hay alternativa, cediendo si hace falta para cobertura, y Vista Diaria con 0/N', () => {
+  const shifts = [
+    { id: 'sh-am08', name: 'AM 08', start_time: '08:00', end_time: '17:00', duration_hours: 8 },
+    { id: 'sh-am11', name: 'AM 11', start_time: '11:00', end_time: '20:00', duration_hours: 8 },
+  ];
+  const areaNameById = new Map([['area-blue', 'Blue Express']]);
+  const positionNameById = new Map([['pos-cond', 'Conductor Camion']]);
+
+  // 1) Caso donde aplican ambas preferencias:
+  // Trabajador A tuvo AM 11 el domingo previo (2026-12-06); Trabajador B tuvo AM 08 el domingo previo.
+  // El lunes 2026-12-07 hay 1 cupo AM 08 y 1 cupo AM 11 -> A debe mantener AM 11 y B ir a AM 08 (0 transiciones AM11->AM08).
+  const pA: PersonnelScheduleProfile = {
+    personnel_id: 'p-a',
+    full_name: 'TRABAJADOR A',
+    main_position: 'pos-cond',
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+  const pB: PersonnelScheduleProfile = {
+    personnel_id: 'p-b',
+    full_name: 'TRABAJADOR B',
+    main_position: 'pos-cond',
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+
+  const prevAssignments: RawExistingAssignment[] = [
+    {
+      id: 'prev-a',
+      date: '2026-12-06',
+      personnel_id: 'p-a',
+      area_id: 'area-blue',
+      position_id: 'pos-cond',
+      shift_id: 'sh-am11',
+      shift_start: '11:00',
+      shift_end: '20:00',
+      duration_hours: 8,
+      status: 'scheduled',
+      is_published: true,
+    },
+    {
+      id: 'prev-b',
+      date: '2026-12-06',
+      personnel_id: 'p-b',
+      area_id: 'area-blue',
+      position_id: 'pos-cond',
+      shift_id: 'sh-am08',
+      shift_start: '08:00',
+      shift_end: '17:00',
+      duration_hours: 8,
+      status: 'scheduled',
+      is_published: true,
+    },
+  ];
+
+  const reqsApply: RawShiftRequirement[] = [
+    {
+      id: 'r-am08-7',
+      date: '2026-12-07',
+      area_id: 'area-blue',
+      position_id: 'pos-cond',
+      shift_id: 'sh-am08',
+      required_count: 1,
+      priority: 'CRITICAL',
+      is_extra: false,
+      area: { name: 'Blue Express' },
+      position: { name: 'Conductor Camion' },
+      shift: shifts[0],
+    },
+    {
+      id: 'r-am11-7',
+      date: '2026-12-07',
+      area_id: 'area-blue',
+      position_id: 'pos-cond',
+      shift_id: 'sh-am11',
+      required_count: 1,
+      priority: 'CRITICAL',
+      is_extra: false,
+      area: { name: 'Blue Express' },
+      position: { name: 'Conductor Camion' },
+      shift: shifts[1],
+    },
+  ];
+
+  const resPref = scheduleCrossArea({
+    startDate: '2026-12-07',
+    endDate: '2026-12-07',
+    rawRequirements: reqsApply,
+    existingAssignments: prevAssignments,
+    personnel: [pB, pA],
+    areaNameById,
+    positionNameById,
+    referenceDate: REF_DATE,
+  });
+
+  const aDec7 = resPref.ordinary_assignments.find((a) => a.personnel_id === 'p-a');
+  const bDec7 = resPref.ordinary_assignments.find((a) => a.personnel_id === 'p-b');
+  assert.equal(aDec7?.shift_id, 'sh-am11');
+  assert.equal(bDec7?.shift_id, 'sh-am08');
+
+  // 2) Caso donde debe ceder para mantener cobertura:
+  // Trabajador A tuvo AM 11 el 2026-12-06, y el 2026-12-07 solo existe cupo AM 08 (con otro cupo 0/1 vacante sin candidatos).
+  // Debe asignar AM 08 a A para no perder cobertura, y buildV2DailyPlanningRows debe listar primero el 0/1.
+  const reqsYield: RawShiftRequirement[] = [
+    {
+      id: 'r-yield-am08',
+      date: '2026-12-07',
+      area_id: 'area-blue',
+      position_id: 'pos-cond',
+      shift_id: 'sh-am08',
+      required_count: 1,
+      priority: 'CRITICAL',
+      is_extra: false,
+      area: { name: 'Blue Express' },
+      position: { name: 'Conductor Camion' },
+      shift: shifts[0],
+    },
+    {
+      id: 'r-vac-0n',
+      date: '2026-12-07',
+      area_id: 'area-blue',
+      position_id: 'pos-sin-personal',
+      shift_id: 'sh-am11',
+      required_count: 1,
+      priority: 'HIGH',
+      is_extra: false,
+      area: { name: 'Blue Express' },
+      position: { name: 'Ayudante' },
+      shift: shifts[1],
+    },
+  ];
+  const previewYield = compareEnginesPreview({
+    startDate: '2026-12-07',
+    endDate: '2026-12-07',
+    rawRequirements: reqsYield,
+    existingAssignments: [prevAssignments[0]],
+    personnel: [pA],
+    allShifts: shifts,
+    areaNameById,
+    positionNameById: new Map([
+      ['pos-cond', 'Conductor Camion'],
+      ['pos-sin-personal', 'Ayudante'],
+    ]),
+    reinforcementConfig: {
+      'pos-cond': {
+        shift_id: 'sh-am08',
+        shift_start: '08:00',
+        shift_end: '17:00',
+        duration_hours: 8,
+        area_id: 'area-blue',
+        position_id: 'pos-cond',
+      },
+    },
+    referenceDate: REF_DATE,
+  });
+
+  // Cobertura: AM 08 cubierto por A (1/1) pese a venir de AM 11; Ayudante queda 0/1
+  assert.equal(previewYield.v2.total_covered, 1);
+  assert.equal(previewYield.v2.total_vacancies, 1);
+
+  const dailyRows = buildV2DailyPlanningRows(
+    '2026-12-07',
+    previewYield.v2,
+    new Map([['p-a', 'TRABAJADOR A']])
+  );
+  assert.equal(dailyRows.length, 2);
+  // Primero el requerimiento con faltantes (0/1) y su prioridad HIGH
+  assert.equal(dailyRows[0].position_name, 'Ayudante');
+  assert.equal(dailyRows[0].ordinary_covered_count, 0);
+  assert.equal(dailyRows[0].required_count, 1);
+  assert.deepEqual(dailyRows[0].vacancy_priorities, ['HIGH']);
+  // Luego el cubierto (1/1)
+  assert.equal(dailyRows[1].position_name, 'Conductor Camion');
+  assert.equal(dailyRows[1].ordinary_covered_count, 1);
+  assert.equal(dailyRows[1].ordinary_workers[0].name, 'TRABAJADOR A');
 });

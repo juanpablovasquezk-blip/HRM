@@ -74,7 +74,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { compareEnginesPreview } from '@/lib/scheduler/v2/preview-compare';
+import { buildV2DailyPlanningRows, compareEnginesPreview } from '@/lib/scheduler/v2/preview-compare';
 import type { PreviewComparisonResult } from '@/lib/scheduler/v2/types';
 import { 
   createManualAssignment, 
@@ -229,6 +229,7 @@ export function RosterGridClient({
   const [previewComparison, setPreviewComparison] = useState<PreviewComparisonResult | null>(null);
   const [isV2GridPreviewActive, setIsV2GridPreviewActive] = useState(false);
   const [showV2VacanciesPanel, setShowV2VacanciesPanel] = useState(false);
+  const [v2DailyPlanDate, setV2DailyPlanDate] = useState<string | null>(null);
 
   const guardPreviewMutation = useCallback(() => {
     if (!isV2GridPreviewActive) return false;
@@ -2018,6 +2019,19 @@ export function RosterGridClient({
                 size="sm"
                 variant="outline"
                 className="h-8 bg-white dark:bg-slate-900 border-indigo-300 text-indigo-800 hover:bg-indigo-100"
+                onClick={() =>
+                  setV2DailyPlanDate(
+                    previewComparison.v2.start_date || format(days[0], 'yyyy-MM-dd')
+                  )
+                }
+              >
+                Ver planificación del día
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 bg-white dark:bg-slate-900 border-indigo-300 text-indigo-800 hover:bg-indigo-100"
                 onClick={() => setIsPreviewCompareOpen(true)}
               >
                 Volver al resumen
@@ -3637,17 +3651,264 @@ export function RosterGridClient({
               </div>
 
               {/* Footer */}
-              <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+              <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                   {dateReqs.reduce((s: number, r: any) => s + r.required_count, 0)} requeridos en total
                 </span>
-                <Button
-                  variant="outline"
-                  className="h-8 text-xs font-bold"
-                  onClick={() => setCoverageDialog(null)}
-                >
-                  Cerrar
-                </Button>
+                <div className="flex items-center gap-2">
+                  {isV2GridPreviewActive && previewComparison && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs font-bold border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                      onClick={() => {
+                        setCoverageDialog(null);
+                        setV2DailyPlanDate(dateStr);
+                      }}
+                    >
+                      Ver planificación del día
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    className="h-8 text-xs font-bold"
+                    onClick={() => setCoverageDialog(null)}
+                  >
+                    Cerrar
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
+
+      {v2DailyPlanDate && previewComparison && (() => {
+        const simStart = previewComparison.v2.start_date || format(days[0], 'yyyy-MM-dd');
+        const simEnd = previewComparison.v2.end_date || format(days[days.length - 1], 'yyyy-MM-dd');
+        const simDays = eachDayOfInterval({
+          start: parseISO(simStart),
+          end: parseISO(simEnd),
+        }).map((d) => format(d, 'yyyy-MM-dd'));
+        const activeIdx = Math.max(0, simDays.indexOf(v2DailyPlanDate));
+        const activeDate = simDays[activeIdx] || v2DailyPlanDate;
+
+        const personNameById = new Map<string, string>(
+          personnel.map((p: Personnel) => [
+            p.id,
+            `${p.first_name} ${p.last_name_father}`.trim(),
+          ])
+        );
+        const rows = buildV2DailyPlanningRows(activeDate, previewComparison.v2, personNameById);
+        const rowsWithShortage = rows.filter((r) => r.missing_count > 0);
+        const rowsCovered = rows.filter((r) => r.missing_count === 0);
+
+        const priorityBadgeLabel = (p: string) => {
+          switch (p) {
+            case 'CRITICAL': return 'Crítica';
+            case 'HIGH': return 'Alta';
+            case 'NORMAL': return 'Normal';
+            default: return p;
+          }
+        };
+
+        const renderDailyCard = (row: ReturnType<typeof buildV2DailyPlanningRows>[number]) => {
+          const isShortage = row.missing_count > 0;
+          return (
+            <div
+              key={`${row.date}-${row.area_id}-${row.position_id}-${row.shift_id}`}
+              className={cn(
+                "rounded-xl border p-4 space-y-2.5 bg-white",
+                isShortage ? "border-red-300 bg-red-50/30" : "border-slate-200"
+              )}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-black text-slate-900">
+                      {row.shift_name}
+                    </span>
+                    <span className="text-xs font-semibold text-slate-500">
+                      {row.shift_start.substring(0, 5)}–{row.shift_end.substring(0, 5)}
+                    </span>
+                    <Badge variant="outline" className="text-[10px] font-bold text-indigo-700 border-indigo-200 bg-indigo-50">
+                      {row.area_name}
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px] font-bold text-orange-700 border-orange-200 bg-orange-50">
+                      {row.position_name}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {row.vacancy_priorities.map((vp) => (
+                    <Badge
+                      key={vp}
+                      variant="outline"
+                      className={cn(
+                        "text-[10px] font-black",
+                        vp === 'CRITICAL'
+                          ? "border-red-300 text-red-700 bg-red-100"
+                          : vp === 'HIGH'
+                          ? "border-amber-300 text-amber-800 bg-amber-100"
+                          : "border-slate-300 text-slate-700 bg-slate-100"
+                      )}
+                    >
+                      Vacante {priorityBadgeLabel(vp)}
+                    </Badge>
+                  ))}
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-xs font-black px-2.5 py-0.5",
+                      isShortage
+                        ? "border-red-300 text-red-700 bg-red-50"
+                        : "border-emerald-300 text-emerald-700 bg-emerald-50"
+                    )}
+                  >
+                    {row.ordinary_covered_count}/{row.required_count} ordinario
+                    {row.reinforcement_workers.length > 0
+                      ? ` · ${row.reinforcement_workers.length} refuerzo${row.reinforcement_workers.length > 1 ? 's' : ''}`
+                      : ''}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                {row.ordinary_workers.length === 0 ? (
+                  <p className="text-xs italic text-red-600 font-semibold">
+                    0/{row.required_count} cubierto — sin asignaciones ordinarias
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {row.ordinary_workers.map((w) => (
+                      <span
+                        key={`${w.personnel_id}-${w.assignment_kind}`}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold",
+                          w.is_protected
+                            ? "border-amber-300 bg-amber-50 text-amber-900"
+                            : "border-slate-200 bg-slate-50 text-slate-800"
+                        )}
+                      >
+                        {w.name}
+                        <span className="text-[10px] font-bold opacity-75">
+                          ({w.is_protected ? 'Protegido' : 'Ordinario'})
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {row.reinforcement_workers.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">
+                      Refuerzos:
+                    </span>
+                    {row.reinforcement_workers.map((w) => (
+                      <span
+                        key={`reinf-${w.personnel_id}`}
+                        className="inline-flex items-center rounded-md border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-900"
+                      >
+                        {w.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        };
+
+        return (
+          <Dialog open onOpenChange={() => setV2DailyPlanDate(null)}>
+            <DialogContent className="max-w-3xl p-0 overflow-hidden rounded-2xl gap-0">
+              <div className="px-6 pt-5 pb-4 bg-slate-900 text-white space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <Badge className="bg-indigo-500/30 text-indigo-200 border-indigo-400/40 text-[10px] font-black uppercase tracking-widest mb-1">
+                      Vista previa v2 · Sin guardar
+                    </Badge>
+                    <DialogTitle className="text-lg font-black tracking-tight capitalize text-white">
+                      {format(parseISO(activeDate), "EEEE d 'de' MMMM yyyy", { locale: es })}
+                    </DialogTitle>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 text-xs font-bold"
+                    onClick={() => setV2DailyPlanDate(null)}
+                  >
+                    Volver al roster
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={activeIdx <= 0}
+                    className="h-7 text-xs bg-slate-800 border-slate-700 text-white hover:bg-slate-700"
+                    onClick={() => setV2DailyPlanDate(simDays[activeIdx - 1])}
+                  >
+                    Día anterior
+                  </Button>
+                  <select
+                    aria-label="Seleccionar día de vista previa"
+                    value={activeDate}
+                    onChange={(e) => setV2DailyPlanDate(e.target.value)}
+                    className="h-7 rounded-md border border-slate-700 bg-slate-800 px-2 text-xs text-white"
+                  >
+                    {simDays.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={activeIdx >= simDays.length - 1}
+                    className="h-7 text-xs bg-slate-800 border-slate-700 text-white hover:bg-slate-700"
+                    onClick={() => setV2DailyPlanDate(simDays[activeIdx + 1])}
+                  >
+                    Día siguiente
+                  </Button>
+                </div>
+              </div>
+
+              <div className="overflow-y-auto max-h-[65vh] p-5 space-y-5 bg-slate-50">
+                {rows.length === 0 ? (
+                  <p className="text-sm text-slate-500 text-center py-8">
+                    Sin requerimientos ordinarios en la simulación para esta fecha.
+                  </p>
+                ) : (
+                  <>
+                    <div className="space-y-2.5">
+                      <h4 className="text-xs font-black uppercase tracking-widest text-red-700">
+                        Con faltantes ({rowsWithShortage.length})
+                      </h4>
+                      {rowsWithShortage.length === 0 ? (
+                        <p className="text-xs text-slate-500">Sin faltantes este día.</p>
+                      ) : (
+                        rowsWithShortage.map(renderDailyCard)
+                      )}
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <h4 className="text-xs font-black uppercase tracking-widest text-emerald-700">
+                        Cubiertos ({rowsCovered.length})
+                      </h4>
+                      {rowsCovered.length === 0 ? (
+                        <p className="text-xs text-slate-500">Sin turnos cubiertos este día.</p>
+                      ) : (
+                        rowsCovered.map(renderDailyCard)
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </DialogContent>
           </Dialog>

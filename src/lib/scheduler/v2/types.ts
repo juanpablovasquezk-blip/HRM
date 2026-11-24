@@ -502,6 +502,21 @@ export interface V2PreviewAssignment {
   is_extra: boolean;
 }
 
+export interface V2PreviewRequirementRow {
+  date: string;
+  area_id: string;
+  area_name: string;
+  position_id: string;
+  position_name: string;
+  shift_id: string;
+  shift_name: string;
+  shift_start: string;
+  shift_end: string;
+  required_count: number;
+  priority: OperationalPriority;
+  priority_quotas?: Array<{ priority: OperationalPriority; required_count: number }> | null;
+}
+
 export interface EnginePreviewMetrics {
   engine: 'v1' | 'v2';
   label: string;
@@ -521,6 +536,7 @@ export interface EnginePreviewMetrics {
   holiday_warnings: string[];
   execution_time_ms: number;
   assignments?: V2PreviewAssignment[];
+  daily_requirements?: V2PreviewRequirementRow[];
 }
 
 export interface PreviewComparisonResult {

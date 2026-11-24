@@ -17,6 +17,7 @@ import type {
   JornadaViolation,
   Ns22ShiftDefinition,
   Ns22TitularConfig,
+  OperationalPriority,
   PersonnelScheduleProfile,
   PreviewComparisonResult,
   RawExistingAssignment,
@@ -553,6 +554,55 @@ function buildV2MetricsFromResult(
     shift_name: v.shift_name || shiftMap.get(v.shift_id)?.name || '',
   }));
 
+  const reqBySlotKey = new Map<
+    string,
+    {
+      date: string;
+      area_id: string;
+      area_name: string;
+      position_id: string;
+      position_name: string;
+      shift_id: string;
+      shift_name: string;
+      shift_start: string;
+      shift_end: string;
+      required_count: number;
+      priority: OperationalPriority;
+      priority_quotas: Array<{ priority: OperationalPriority; required_count: number }>;
+    }
+  >();
+  for (const sc of v2Res.coverage.ordinary.slots) {
+    const sh = shiftMap.get(sc.shift_id);
+    const existing = reqBySlotKey.get(sc.slot_key);
+    if (!existing) {
+      reqBySlotKey.set(sc.slot_key, {
+        date: sc.date,
+        area_id: sc.area_id,
+        area_name: sc.area_name || params.areaNameById?.get(sc.area_id) || '',
+        position_id: sc.position_id,
+        position_name: sc.position_name || params.positionNameById?.get(sc.position_id) || '',
+        shift_id: sc.shift_id,
+        shift_name: sc.shift_name || sh?.name || '',
+        shift_start: sh?.start_time || '',
+        shift_end: sh?.end_time || '',
+        required_count: sc.required_count,
+        priority: sc.priority,
+        priority_quotas: [{ priority: sc.priority, required_count: sc.required_count }],
+      });
+    } else {
+      existing.required_count += sc.required_count;
+      const qMatch = existing.priority_quotas.find((q) => q.priority === sc.priority);
+      if (qMatch) {
+        qMatch.required_count += sc.required_count;
+      } else {
+        existing.priority_quotas.push({ priority: sc.priority, required_count: sc.required_count });
+      }
+      if (PRIORITY_ORDER[sc.priority] > PRIORITY_ORDER[existing.priority]) {
+        existing.priority = sc.priority;
+      }
+    }
+  }
+
   return {
     engine: 'v2',
     label: 'Motor Nuevo (v2 · Paralelo)',
@@ -572,7 +622,127 @@ function buildV2MetricsFromResult(
     holiday_warnings: v2Res.holiday_warnings,
     execution_time_ms: Math.round(t2Ms * 100) / 100,
     assignments: previewAssignments,
+    daily_requirements: Array.from(reqBySlotKey.values()),
   };
+}
+
+export interface V2DailyPlanningRow {
+  date: string;
+  area_id: string;
+  area_name: string;
+  position_id: string;
+  position_name: string;
+  shift_id: string;
+  shift_name: string;
+  shift_start: string;
+  shift_end: string;
+  required_count: number;
+  ordinary_covered_count: number;
+  missing_count: number;
+  vacancy_priorities: OperationalPriority[];
+  ordinary_workers: Array<{
+    personnel_id: string;
+    name: string;
+    is_protected: boolean;
+    assignment_kind: string;
+    match_type: string;
+  }>;
+  reinforcement_workers: Array<{ personnel_id: string; name: string }>;
+  extra_workers: Array<{ personnel_id: string; name: string }>;
+}
+
+const PRIORITY_ORDER: Record<OperationalPriority, number> = {
+  CRITICAL: 4,
+  HIGH: 3,
+  NORMAL: 2,
+  LOW: 1,
+};
+
+export function buildV2DailyPlanningRows(
+  dateStr: string,
+  v2Metrics: EnginePreviewMetrics,
+  personNameById: Map<string, string>
+): V2DailyPlanningRow[] {
+  const reqs = (v2Metrics.daily_requirements || []).filter((r) => r.date === dateStr);
+  const asgns = (v2Metrics.assignments || []).filter((a) => a.date === dateStr);
+  const vacs = (v2Metrics.vacancies || []).filter((v) => v.date === dateStr);
+
+  const rows: V2DailyPlanningRow[] = reqs.map((req) => {
+    const slotAsgns = asgns.filter(
+      (a) =>
+        a.area_id === req.area_id &&
+        a.position_id === req.position_id &&
+        a.shift_id === req.shift_id
+    );
+    const ordinary_workers = slotAsgns
+      .filter((a) => a.assignment_kind !== 'reinforcement' && !a.is_extra)
+      .map((a) => ({
+        personnel_id: a.personnel_id,
+        name: personNameById.get(a.personnel_id) || a.personnel_id,
+        is_protected: Boolean(a.is_protected),
+        assignment_kind: a.assignment_kind,
+        match_type: a.match_type,
+      }));
+    const reinforcement_workers = slotAsgns
+      .filter((a) => a.assignment_kind === 'reinforcement')
+      .map((a) => ({
+        personnel_id: a.personnel_id,
+        name: personNameById.get(a.personnel_id) || a.personnel_id,
+      }));
+    const extra_workers = slotAsgns
+      .filter((a) => a.is_extra && a.assignment_kind !== 'reinforcement')
+      .map((a) => ({
+        personnel_id: a.personnel_id,
+        name: personNameById.get(a.personnel_id) || a.personnel_id,
+      }));
+
+    const missing_count = Math.max(0, req.required_count - ordinary_workers.length);
+    const slotVacPriorities = vacs
+      .filter(
+        (v) =>
+          v.area_id === req.area_id &&
+          v.position_id === req.position_id &&
+          v.shift_id === req.shift_id
+      )
+      .map((v) => v.priority);
+    const vacancy_priorities =
+      missing_count > 0
+        ? Array.from(new Set(slotVacPriorities.length > 0 ? slotVacPriorities : [req.priority]))
+        : [];
+
+    return {
+      date: req.date,
+      area_id: req.area_id,
+      area_name: req.area_name,
+      position_id: req.position_id,
+      position_name: req.position_name,
+      shift_id: req.shift_id,
+      shift_name: req.shift_name,
+      shift_start: req.shift_start,
+      shift_end: req.shift_end,
+      required_count: req.required_count,
+      ordinary_covered_count: ordinary_workers.length,
+      missing_count,
+      vacancy_priorities,
+      ordinary_workers,
+      reinforcement_workers,
+      extra_workers,
+    };
+  });
+
+  // Sort: missing > 0 (including 0/N) first, then covered; within group by shift_start, area, position
+  rows.sort((a, b) => {
+    const aMissing = a.missing_count > 0 ? 0 : 1;
+    const bMissing = b.missing_count > 0 ? 0 : 1;
+    if (aMissing !== bMissing) return aMissing - bMissing;
+    const timeCmp = (a.shift_start || '').localeCompare(b.shift_start || '');
+    if (timeCmp !== 0) return timeCmp;
+    const areaCmp = (a.area_name || '').localeCompare(b.area_name || '');
+    if (areaCmp !== 0) return areaCmp;
+    return (a.position_name || '').localeCompare(b.position_name || '');
+  });
+
+  return rows;
 }
 
 function computeV2PreviewMetrics(params: CompareEnginesPreviewParams) {
