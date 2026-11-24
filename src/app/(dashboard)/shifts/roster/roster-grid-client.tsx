@@ -74,7 +74,11 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { buildV2DailyPlanningRows, compareEnginesPreview } from '@/lib/scheduler/v2/preview-compare';
+import {
+  buildV2DailyPlanningRows,
+  compareEnginesPreview,
+  groupV2DailyPlanningSections,
+} from '@/lib/scheduler/v2/preview-compare';
 import type { PreviewComparisonResult } from '@/lib/scheduler/v2/types';
 import { 
   createManualAssignment, 
@@ -3700,8 +3704,7 @@ export function RosterGridClient({
           ])
         );
         const rows = buildV2DailyPlanningRows(activeDate, previewComparison.v2, personNameById);
-        const rowsWithShortage = rows.filter((r) => r.missing_count > 0);
-        const rowsCovered = rows.filter((r) => r.missing_count === 0);
+        const sheet = groupV2DailyPlanningSections(rows);
 
         const priorityBadgeLabel = (p: string) => {
           switch (p) {
@@ -3712,122 +3715,91 @@ export function RosterGridClient({
           }
         };
 
-        const renderDailyCard = (row: ReturnType<typeof buildV2DailyPlanningRows>[number]) => {
-          const isShortage = row.missing_count > 0;
+        const renderSectionRows = (
+          title: string,
+          accentClass: string,
+          sectionRows: ReturnType<typeof buildV2DailyPlanningRows>
+        ) => {
+          if (sectionRows.length === 0) return null;
           return (
-            <div
-              key={`${row.date}-${row.area_id}-${row.position_id}-${row.shift_id}`}
-              className={cn(
-                "rounded-xl border p-4 space-y-2.5 bg-white",
-                isShortage ? "border-red-300 bg-red-50/30" : "border-slate-200"
-              )}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-black text-slate-900">
-                      {row.shift_name}
-                    </span>
-                    <span className="text-xs font-semibold text-slate-500">
-                      {row.shift_start.substring(0, 5)}–{row.shift_end.substring(0, 5)}
-                    </span>
-                    <Badge variant="outline" className="text-[10px] font-bold text-indigo-700 border-indigo-200 bg-indigo-50">
-                      {row.area_name}
-                    </Badge>
-                    <Badge variant="outline" className="text-[10px] font-bold text-orange-700 border-orange-200 bg-orange-50">
-                      {row.position_name}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {row.vacancy_priorities.map((vp) => (
-                    <Badge
-                      key={vp}
-                      variant="outline"
+            <section className="space-y-1.5">
+              <h4 className={cn("text-[11px] font-black uppercase tracking-wider border-b border-slate-300 pb-1", accentClass)}>
+                {title}
+              </h4>
+              <div className="space-y-1">
+                {sectionRows.map((row) => {
+                  const timeRange = `${row.shift_start.substring(0, 5)}–${row.shift_end.substring(0, 5)}`;
+                  const prioText = row.vacancy_priorities.map(priorityBadgeLabel).join(' / ');
+                  return (
+                    <div
+                      key={`${row.date}-${row.area_id}-${row.position_id}-${row.shift_id}`}
                       className={cn(
-                        "text-[10px] font-black",
-                        vp === 'CRITICAL'
-                          ? "border-red-300 text-red-700 bg-red-100"
-                          : vp === 'HIGH'
-                          ? "border-amber-300 text-amber-800 bg-amber-100"
-                          : "border-slate-300 text-slate-700 bg-slate-100"
+                        "flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 rounded px-2 py-1 text-[11.5px]",
+                        row.missing_count > 0 ? "bg-red-50/80 border border-red-200" : "bg-white border border-slate-100"
                       )}
                     >
-                      Vacante {priorityBadgeLabel(vp)}
-                    </Badge>
-                  ))}
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "text-xs font-black px-2.5 py-0.5",
-                      isShortage
-                        ? "border-red-300 text-red-700 bg-red-50"
-                        : "border-emerald-300 text-emerald-700 bg-emerald-50"
-                    )}
-                  >
-                    {row.ordinary_covered_count}/{row.required_count} ordinario
-                    {row.reinforcement_workers.length > 0
-                      ? ` · ${row.reinforcement_workers.length} refuerzo${row.reinforcement_workers.length > 1 ? 's' : ''}`
-                      : ''}
-                  </Badge>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                {row.ordinary_workers.length === 0 ? (
-                  <p className="text-xs italic text-red-600 font-semibold">
-                    0/{row.required_count} cubierto — sin asignaciones ordinarias
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {row.ordinary_workers.map((w) => (
-                      <span
-                        key={`${w.personnel_id}-${w.assignment_kind}`}
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold",
-                          w.is_protected
-                            ? "border-amber-300 bg-amber-50 text-amber-900"
-                            : "border-slate-200 bg-slate-50 text-slate-800"
+                      <span className="font-mono text-[11px] text-slate-600 shrink-0 w-[92px]">
+                        {timeRange}
+                      </span>
+                      <span className="text-[11px] font-semibold text-slate-500 shrink-0">
+                        {row.area_name} · {row.position_name}
+                      </span>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 flex-1 min-w-[180px]">
+                        {row.ordinary_workers.length === 0 ? (
+                          <span className="font-bold text-red-700">
+                            Sin cubrir · {prioText || priorityBadgeLabel('NORMAL')}
+                            {row.required_count > 1 ? ` (faltan ${row.missing_count})` : ''}
+                          </span>
+                        ) : (
+                          <>
+                            {row.ordinary_workers.map((w, idx) => (
+                              <span
+                                key={`${w.personnel_id}-${w.assignment_kind}-${idx}`}
+                                className={cn(
+                                  "font-bold uppercase",
+                                  w.is_protected ? "text-amber-800" : "text-slate-900"
+                                )}
+                              >
+                                {w.name}
+                                {w.is_protected ? ' (Prot.)' : ''}
+                                {idx < row.ordinary_workers.length - 1 ? ',' : ''}
+                              </span>
+                            ))}
+                            {row.missing_count > 0 && (
+                              <span className="font-bold text-red-700 text-[11px]">
+                                · Faltan {row.missing_count} · {prioText}
+                              </span>
+                            )}
+                          </>
                         )}
-                      >
-                        {w.name}
-                        <span className="text-[10px] font-bold opacity-75">
-                          ({w.is_protected ? 'Protegido' : 'Ordinario'})
-                        </span>
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {row.reinforcement_workers.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">
-                      Refuerzos:
-                    </span>
-                    {row.reinforcement_workers.map((w) => (
-                      <span
-                        key={`reinf-${w.personnel_id}`}
-                        className="inline-flex items-center rounded-md border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-900"
-                      >
-                        {w.name}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                        {row.reinforcement_workers.length > 0 && (
+                          <span className="text-[11px] font-bold text-emerald-700">
+                            · + Refuerzo: {row.reinforcement_workers.map((w) => w.name).join(', ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+            </section>
           );
         };
 
         return (
           <Dialog open onOpenChange={() => setV2DailyPlanDate(null)}>
-            <DialogContent className="max-w-3xl p-0 overflow-hidden rounded-2xl gap-0">
-              <div className="px-6 pt-5 pb-4 bg-slate-900 text-white space-y-3">
+            <DialogContent className="max-w-5xl w-[95vw] p-0 overflow-hidden rounded-2xl gap-0">
+              <div className="px-6 pt-4 pb-3 bg-slate-900 text-white space-y-2.5">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
-                    <Badge className="bg-indigo-500/30 text-indigo-200 border-indigo-400/40 text-[10px] font-black uppercase tracking-widest mb-1">
-                      Vista previa v2 · Sin guardar
-                    </Badge>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge className="bg-indigo-500/30 text-indigo-200 border-indigo-400/40 text-[10px] font-black uppercase tracking-widest">
+                        Vista previa v2 · Sin guardar
+                      </Badge>
+                      <span className="text-[11px] font-semibold text-slate-300">
+                        Programación Operativa
+                      </span>
+                    </div>
                     <DialogTitle className="text-lg font-black tracking-tight capitalize text-white">
                       {format(parseISO(activeDate), "EEEE d 'de' MMMM yyyy", { locale: es })}
                     </DialogTitle>
@@ -3879,35 +3851,90 @@ export function RosterGridClient({
                 </div>
               </div>
 
-              <div className="overflow-y-auto max-h-[65vh] p-5 space-y-5 bg-slate-50">
+              <div className="overflow-y-auto max-h-[75vh] p-5 bg-slate-50">
                 {rows.length === 0 ? (
                   <p className="text-sm text-slate-500 text-center py-8">
                     Sin requerimientos ordinarios en la simulación para esta fecha.
                   </p>
                 ) : (
-                  <>
-                    <div className="space-y-2.5">
-                      <h4 className="text-xs font-black uppercase tracking-widest text-red-700">
-                        Con faltantes ({rowsWithShortage.length})
-                      </h4>
-                      {rowsWithShortage.length === 0 ? (
-                        <p className="text-xs text-slate-500">Sin faltantes este día.</p>
-                      ) : (
-                        rowsWithShortage.map(renderDailyCard)
-                      )}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                    <div className="space-y-3.5">
+                      {renderSectionRows('Supervisor', 'text-indigo-700', sheet.supervisor)}
+                      {renderSectionRows('Canes', 'text-amber-700', sheet.canes)}
+                      {renderSectionRows('Grúas / Atrex / Base', 'text-orange-700', sheet.gruas)}
+                      {renderSectionRows('Aeropuerto', 'text-sky-700', sheet.aeropuerto)}
+                      {renderSectionRows('Bodegas (DHL y FedEx)', 'text-violet-700', sheet.bodegas)}
                     </div>
 
-                    <div className="space-y-2.5">
-                      <h4 className="text-xs font-black uppercase tracking-widest text-emerald-700">
-                        Cubiertos ({rowsCovered.length})
-                      </h4>
-                      {rowsCovered.length === 0 ? (
-                        <p className="text-xs text-slate-500">Sin turnos cubiertos este día.</p>
-                      ) : (
-                        rowsCovered.map(renderDailyCard)
-                      )}
+                    <div className="space-y-3.5">
+                      <section className="space-y-1.5">
+                        <h4 className="text-[11px] font-black uppercase tracking-wider border-b border-slate-300 pb-1 text-indigo-800">
+                          Transporte Blue Express
+                        </h4>
+                        {sheet.blue_express.length === 0 ? (
+                          <p className="text-xs text-slate-400">Sin salidas programadas.</p>
+                        ) : (
+                          <table className="w-full text-left border-collapse bg-white rounded border border-slate-200">
+                            <thead>
+                              <tr className="text-[10px] uppercase text-slate-500 border-b border-slate-200 bg-slate-100/70">
+                                <th className="py-1.5 px-2 w-[96px]">Horario</th>
+                                <th className="py-1.5 px-2">Conductor</th>
+                                <th className="py-1.5 px-2">Ayudante</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 text-[11px]">
+                              {sheet.blue_express.map((pair) => {
+                                const rowCount = Math.max(
+                                  pair.conductors.length + (pair.missing_conductors > 0 ? 1 : 0),
+                                  pair.ayudantes.length + (pair.missing_ayudantes > 0 ? 1 : 0),
+                                  1
+                                );
+                                return Array.from({ length: rowCount }).map((_, idx) => {
+                                  const cond = pair.conductors[idx];
+                                  const ayu = pair.ayudantes[idx];
+                                  const showMissingCond = !cond && idx === pair.conductors.length && pair.missing_conductors > 0;
+                                  const showMissingAyu = !ayu && idx === pair.ayudantes.length && pair.missing_ayudantes > 0;
+                                  return (
+                                    <tr key={`${pair.shift_id}-${idx}`}>
+                                      <td className="py-1 px-2 font-mono text-[10.5px] text-slate-500 align-top">
+                                        {idx === 0 ? pair.time_label : ''}
+                                      </td>
+                                      <td className="py-1 px-2 font-bold uppercase align-top">
+                                        {cond ? (
+                                          <span className={cond.is_protected ? 'text-amber-800' : 'text-slate-900'}>
+                                            {cond.name}{cond.is_protected ? ' (Prot.)' : ''}
+                                          </span>
+                                        ) : showMissingCond ? (
+                                          <span className="text-red-700 normal-case">
+                                            Sin cubrir ({pair.missing_conductors})
+                                          </span>
+                                        ) : (
+                                          <span className="text-slate-300 font-normal">-</span>
+                                        )}
+                                      </td>
+                                      <td className="py-1 px-2 font-bold uppercase align-top">
+                                        {ayu ? (
+                                          <span className={ayu.is_protected ? 'text-amber-800' : 'text-slate-900'}>
+                                            {ayu.name}{ayu.is_protected ? ' (Prot.)' : ''}
+                                          </span>
+                                        ) : showMissingAyu ? (
+                                          <span className="text-red-700 normal-case">
+                                            Sin cubrir ({pair.missing_ayudantes})
+                                          </span>
+                                        ) : (
+                                          <span className="text-slate-300 font-normal">-</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                });
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+                      </section>
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
             </DialogContent>

@@ -745,6 +745,127 @@ export function buildV2DailyPlanningRows(
   return rows;
 }
 
+export type OperationalSectionKey =
+  | 'supervisor'
+  | 'canes'
+  | 'gruas'
+  | 'aeropuerto'
+  | 'bodegas'
+  | 'blue_express';
+
+export interface BlueExpressPairRow {
+  shift_id: string;
+  shift_name: string;
+  time_label: string;
+  conductors: Array<{ name: string; is_protected: boolean }>;
+  ayudantes: Array<{ name: string; is_protected: boolean }>;
+  missing_conductors: number;
+  missing_ayudantes: number;
+  vacancy_priorities: OperationalPriority[];
+  reinforcements: string[];
+}
+
+export interface V2OperationalSheet {
+  supervisor: V2DailyPlanningRow[];
+  canes: V2DailyPlanningRow[];
+  gruas: V2DailyPlanningRow[];
+  aeropuerto: V2DailyPlanningRow[];
+  bodegas: V2DailyPlanningRow[];
+  blue_express: BlueExpressPairRow[];
+}
+
+function normLabel(v?: string | null): string {
+  return (v || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+}
+
+export function classifyOperationalSection(row: Pick<V2DailyPlanningRow, 'area_name' | 'position_name'>): OperationalSectionKey {
+  const area = normLabel(row.area_name);
+  const pos = normLabel(row.position_name);
+  if (pos.includes('SUPERVISOR')) return 'supervisor';
+  if (pos.includes('CANES') || area.includes('CANES')) return 'canes';
+  if (area.includes('BLUE')) return 'blue_express';
+  if (pos.includes('GRUA') || area.includes('ATREX') || area.includes('BASE')) return 'gruas';
+  if (area.includes('AEROPUERTO') || pos.includes('AEROPUERTO') || pos.includes('CAZADOR')) return 'aeropuerto';
+  return 'bodegas';
+}
+
+export function groupV2DailyPlanningSections(rows: V2DailyPlanningRow[]): V2OperationalSheet {
+  const sheet: V2OperationalSheet = {
+    supervisor: [],
+    canes: [],
+    gruas: [],
+    aeropuerto: [],
+    bodegas: [],
+    blue_express: [],
+  };
+
+  const blueRows: V2DailyPlanningRow[] = [];
+  for (const r of rows) {
+    const sec = classifyOperationalSection(r);
+    if (sec === 'blue_express') {
+      blueRows.push(r);
+    } else {
+      sheet[sec].push(r);
+    }
+  }
+
+  // Sort non-Blue sections chronologically by shift_start, then area/position
+  const byTime = (a: V2DailyPlanningRow, b: V2DailyPlanningRow) =>
+    (a.shift_start || '').localeCompare(b.shift_start || '') ||
+    (a.area_name || '').localeCompare(b.area_name || '') ||
+    (a.position_name || '').localeCompare(b.position_name || '');
+  sheet.supervisor.sort(byTime);
+  sheet.canes.sort(byTime);
+  sheet.gruas.sort(byTime);
+  sheet.aeropuerto.sort(byTime);
+  sheet.bodegas.sort(byTime);
+
+  // Pair Blue Express rows by shift_id / time
+  const blueByShift = new Map<string, BlueExpressPairRow>();
+  for (const r of blueRows) {
+    const key = `${r.shift_start}|${r.shift_id}`;
+    let pair = blueByShift.get(key);
+    if (!pair) {
+      pair = {
+        shift_id: r.shift_id,
+        shift_name: r.shift_name,
+        time_label: `${r.shift_start.substring(0, 5)} - ${r.shift_end.substring(0, 5)}`,
+        conductors: [],
+        ayudantes: [],
+        missing_conductors: 0,
+        missing_ayudantes: 0,
+        vacancy_priorities: [],
+        reinforcements: [],
+      };
+      blueByShift.set(key, pair);
+    }
+    const isConductor = normLabel(r.position_name).includes('CONDUCTOR');
+    const workers = r.ordinary_workers.map((w) => ({ name: w.name, is_protected: w.is_protected }));
+    if (isConductor) {
+      pair.conductors.push(...workers);
+      pair.missing_conductors += r.missing_count;
+    } else {
+      pair.ayudantes.push(...workers);
+      pair.missing_ayudantes += r.missing_count;
+    }
+    for (const vp of r.vacancy_priorities) {
+      if (!pair.vacancy_priorities.includes(vp)) pair.vacancy_priorities.push(vp);
+    }
+    for (const rw of r.reinforcement_workers) {
+      pair.reinforcements.push(rw.name);
+    }
+  }
+  sheet.blue_express = Array.from(blueByShift.values()).sort((a, b) =>
+    a.time_label.localeCompare(b.time_label)
+  );
+
+  return sheet;
+}
+
 function computeV2PreviewMetrics(params: CompareEnginesPreviewParams) {
   const t2Start = performance.now();
   const v2Res = scheduleCrossArea({

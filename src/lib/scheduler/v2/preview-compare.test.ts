@@ -7,6 +7,7 @@ import {
   buildV2DailyPlanningRows,
   compareEnginesPreview,
   compareEnginesPreviewStaged,
+  groupV2DailyPlanningSections,
 } from './preview-compare';
 import {
   fetchPriorityQuotasInBatches,
@@ -1420,4 +1421,71 @@ test('Preferencias flexibles v2: continuidad AM 11 y 2 libres consecutivos cuand
   assert.equal(dailyRows[1].position_name, 'Conductor Camion');
   assert.equal(dailyRows[1].ordinary_covered_count, 1);
   assert.equal(dailyRows[1].ordinary_workers[0].name, 'TRABAJADOR A');
+
+  const sheet = groupV2DailyPlanningSections([
+    {
+      date: '2026-12-11',
+      area_id: 'a-base',
+      area_name: 'Base Minerquim',
+      position_id: 'p-sup-base',
+      position_name: 'Supervisor Base',
+      shift_id: 's-am07',
+      shift_name: 'AM 07',
+      shift_start: '07:00:00',
+      shift_end: '16:00:00',
+      required_count: 1,
+      ordinary_covered_count: 0,
+      missing_count: 1,
+      vacancy_priorities: ['HIGH'],
+      ordinary_workers: [],
+      reinforcement_workers: [],
+      extra_workers: [],
+    },
+    {
+      date: '2026-12-11',
+      area_id: 'a-blue',
+      area_name: 'Blue Express',
+      position_id: 'p-cond',
+      position_name: 'Conductor Camion',
+      shift_id: 's-am08',
+      shift_name: 'AM 08',
+      shift_start: '08:00:00',
+      shift_end: '17:00:00',
+      required_count: 1,
+      ordinary_covered_count: 1,
+      missing_count: 0,
+      vacancy_priorities: [],
+      ordinary_workers: [
+        { personnel_id: 'c1', name: 'JUAN COLINA', is_protected: false, assignment_kind: 'ordinary', match_type: 'primary' },
+      ],
+      reinforcement_workers: [],
+      extra_workers: [],
+    },
+    {
+      date: '2026-12-11',
+      area_id: 'a-blue',
+      area_name: 'Blue Express',
+      position_id: 'p-ayu',
+      position_name: 'Ayudante',
+      shift_id: 's-am08',
+      shift_name: 'AM 08',
+      shift_start: '08:00:00',
+      shift_end: '17:00:00',
+      required_count: 1,
+      ordinary_covered_count: 1,
+      missing_count: 0,
+      vacancy_priorities: [],
+      ordinary_workers: [
+        { personnel_id: 'a1', name: 'VICTOR SEPULVEDA', is_protected: false, assignment_kind: 'ordinary', match_type: 'primary' },
+      ],
+      reinforcement_workers: [],
+      extra_workers: [],
+    },
+  ]);
+  assert.equal(sheet.supervisor.length, 1);
+  assert.equal(sheet.supervisor[0].ordinary_workers.length, 0);
+  assert.deepEqual(sheet.supervisor[0].vacancy_priorities, ['HIGH']);
+  assert.equal(sheet.blue_express.length, 1);
+  assert.equal(sheet.blue_express[0].conductors[0].name, 'JUAN COLINA');
+  assert.equal(sheet.blue_express[0].ayudantes[0].name, 'VICTOR SEPULVEDA');
 });
