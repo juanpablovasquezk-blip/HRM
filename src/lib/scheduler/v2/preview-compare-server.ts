@@ -228,6 +228,7 @@ export async function loadPreviewCompareInputs(
       area_id: mainPos?.area_id || '',
       prefers_night: Boolean(p.prefers_night),
       avoids_night: Boolean(p.avoids_night),
+      requires_transport: Boolean(p.requires_transport),
     };
   });
 

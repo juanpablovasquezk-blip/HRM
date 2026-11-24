@@ -193,6 +193,7 @@ export interface PersonnelScheduleProfile {
    */
   prefers_night?: boolean;
   avoids_night?: boolean;
+  requires_transport?: boolean;
 }
 
 export interface ScheduledShiftInterval {

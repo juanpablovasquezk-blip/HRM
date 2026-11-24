@@ -411,6 +411,7 @@ export interface ScheduleCrossAreaParams {
   positionNameById?: Map<string, string>;
   holidayCalendarRegistry?: Record<number, VerifiedHolidayYearCalendar>;
   disableWeeklyChainReview?: boolean;
+  disableTransportPreference?: boolean;
   deadlineAt?: number;
   signal?: AbortSignal;
 }
@@ -437,6 +438,7 @@ function* scheduleCrossAreaGen(
     disableSoftPreferences = false,
     disableSupervisorWeekendBalance = false,
     disableWeeklyChainReview = false,
+    disableTransportPreference = false,
     reinforcementConfig,
     baseCalendarByPerson,
     referenceDate = new Date(),
@@ -1150,6 +1152,11 @@ function* scheduleCrossAreaGen(
         if (a.softPenalty !== b.softPenalty) {
           return a.softPenalty - b.softPenalty;
         }
+        if (!disableTransportPreference && chosenUnit!.slot.requires_transport) {
+          const trA = a.person.requires_transport ? 1 : 0;
+          const trB = b.person.requires_transport ? 1 : 0;
+          if (trA !== trB) return trB - trA;
+        }
         const chosenPosName = normalizeCatalogText(
           chosenUnit!.slot.position_name || positionNameById?.get(chosenUnit!.slot.position_id)
         );
@@ -1262,6 +1269,11 @@ function* scheduleCrossAreaGen(
         if (a.softPenalty !== b.softPenalty) {
           return a.softPenalty - b.softPenalty;
         }
+        if (!disableTransportPreference && unit.slot.requires_transport) {
+          const trA = a.person.requires_transport ? 1 : 0;
+          const trB = b.person.requires_transport ? 1 : 0;
+          if (trA !== trB) return trB - trA;
+        }
         const unitPosName = normalizeCatalogText(
           unit.slot.position_name || positionNameById?.get(unit.slot.position_id)
         );
@@ -1307,8 +1319,20 @@ function* scheduleCrossAreaGen(
   }
   relocationsMs += performance.now() - tStage4RelocStart;
 
-  // Stage 4B: Flexible soft-preference swap pass (AM 11 continuity & 2 consecutive free days)
+  // Stage 4B: Flexible soft-preference swap pass (AM 11 continuity, 2 consecutive free days,
+  // supervisor weekend balance & transport requirement match)
   // Strictly preserves all ordinary coverage, priorities, protected shifts, and 4x4 cycles.
+  const slotRequiresTransportByKey = new Map<string, boolean>();
+  for (const u of openUnits) {
+    slotRequiresTransportByKey.set(u.slot.slot_key, Boolean(u.slot.requires_transport));
+  }
+  const getTransportScore = (person: PersonnelScheduleProfile, slotKey?: string): number => {
+    if (disableTransportPreference || !slotKey) return 0;
+    const reqTr = slotRequiresTransportByKey.get(slotKey) ?? false;
+    if (!reqTr) return 0;
+    return person.requires_transport ? 1 : 0;
+  };
+
   const canSwapOrdinaryPair = (idxA: number, idxB: number): boolean => {
     const a = ordinaryAssignments[idxA];
     const b = ordinaryAssignments[idxB];
@@ -1382,13 +1406,21 @@ function* scheduleCrossAreaGen(
       (isWeekendDate(a.date) || isWeekendDate(b.date));
     const wkImbBefore = Math.abs(countWeekendShifts(shiftsA) - countWeekendShifts(shiftsB));
     const wkImbAfter = Math.abs(countWeekendShifts(aNew) - countWeekendShifts(bNew));
+    const transportBefore =
+      getTransportScore(pA, a.slot_key) + getTransportScore(pB, b.slot_key);
+    const transportAfter =
+      getTransportScore(pB, a.slot_key) + getTransportScore(pA, b.slot_key);
     const improvedCost = afterCost < beforeCost;
     const improvedSupervisorWeekend =
       !disableSupervisorWeekendBalance &&
       isSupWeekend &&
       afterCost <= beforeCost &&
       wkImbAfter < wkImbBefore;
-    if (!improvedCost && !improvedSupervisorWeekend) return false;
+    const improvedTransport =
+      !disableTransportPreference &&
+      afterCost <= beforeCost &&
+      transportAfter > transportBefore;
+    if (!improvedCost && !improvedSupervisorWeekend && !improvedTransport) return false;
 
     shiftsByPerson.set(pA.personnel_id, aNew);
     shiftsByPerson.set(pB.personnel_id, bNew);

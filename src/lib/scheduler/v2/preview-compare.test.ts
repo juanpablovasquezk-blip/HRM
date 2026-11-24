@@ -1676,3 +1676,112 @@ test('Stage 4C nunca degrada un cupo CRITICAL compartido en el mismo slot_key al
   assert.equal(res.coverage.ordinary.total_covered, 3);
   assert.equal(res.coverage.ordinary.total_vacancies, 0);
 });
+
+test('Preferencia flexible Requiere Transporte: favorece ON en turnos con transporte, no bloquea OFF si es único y no altera turnos sin transporte', () => {
+  const jaimeOn: PersonnelScheduleProfile = {
+    personnel_id: 'jaime-on',
+    full_name: 'Jaime Espinosa',
+    birth_date: '1985-05-10',
+    main_position: 'pos-aero',
+    area_id: 'area-aero',
+    rotation_pattern: '5X2',
+    requires_transport: true,
+  };
+  const juanOff: PersonnelScheduleProfile = {
+    personnel_id: 'juan-off',
+    full_name: 'Juan Colina',
+    birth_date: '1988-05-10',
+    main_position: 'pos-aero',
+    area_id: 'area-aero',
+    rotation_pattern: '5X2',
+    requires_transport: false,
+  };
+
+  // 1. Jueves 2026-12-10: AM 04 (requires_transport: true) y AM 07 (requires_transport: false)
+  // Aunque Juan esté antes en el arreglo, debe preferir a Jaime (ON) en AM 04 y dejar a Juan (OFF) en AM 07.
+  const swapRes = scheduleCrossArea({
+    startDate: '2026-12-10',
+    endDate: '2026-12-10',
+    rawRequirements: [
+      {
+        id: 'req-am04',
+        date: '2026-12-10',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_id: 'sh-am04',
+        required_count: 1,
+        priority: 'CRITICAL',
+        shift: { name: 'AM 04', start_time: '04:00', end_time: '13:00', duration_hours: 8, requires_transport: true },
+      },
+      {
+        id: 'req-am07',
+        date: '2026-12-10',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_id: 'sh-am07',
+        required_count: 1,
+        priority: 'HIGH',
+        shift: { name: 'AM 07', start_time: '07:00', end_time: '16:00', duration_hours: 8, requires_transport: false },
+      },
+    ],
+    existingAssignments: [],
+    personnel: [juanOff, jaimeOn],
+    areaNameById: new Map([['area-aero', 'Aeropuerto']]),
+    positionNameById: new Map([['pos-aero', 'Operador Aeropuerto']]),
+    referenceDate: REF_DATE,
+  });
+  const am04 = swapRes.ordinary_assignments.find((a) => a.shift_id === 'sh-am04');
+  const am07 = swapRes.ordinary_assignments.find((a) => a.shift_id === 'sh-am07');
+  assert.equal(am04?.personnel_id, 'jaime-on');
+  assert.equal(am07?.personnel_id, 'juan-off');
+  assert.equal(swapRes.coverage.ordinary.total_vacancies, 0);
+
+  // 2. Turno que NO requiere transporte: respeta orden/asignación normal sin forzar cambio por requires_transport
+  const noTrRes = scheduleCrossArea({
+    startDate: '2026-12-10',
+    endDate: '2026-12-10',
+    rawRequirements: [
+      {
+        id: 'req-am08',
+        date: '2026-12-10',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_id: 'sh-am08',
+        required_count: 1,
+        priority: 'NORMAL',
+        shift: { name: 'AM 08', start_time: '08:00', end_time: '17:00', duration_hours: 8, requires_transport: false },
+      },
+    ],
+    existingAssignments: [],
+    personnel: [juanOff, jaimeOn],
+    areaNameById: new Map([['area-aero', 'Aeropuerto']]),
+    positionNameById: new Map([['pos-aero', 'Operador Aeropuerto']]),
+    referenceDate: REF_DATE,
+  });
+  assert.equal(noTrRes.ordinary_assignments[0]?.personnel_id, 'juan-off');
+
+  // 3. Turno con transporte donde el único disponible tiene OFF -> sí se le asigna sin dejar vacante
+  const onlyOffRes = scheduleCrossArea({
+    startDate: '2026-12-10',
+    endDate: '2026-12-10',
+    rawRequirements: [
+      {
+        id: 'req-am04-only',
+        date: '2026-12-10',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_id: 'sh-am04',
+        required_count: 1,
+        priority: 'CRITICAL',
+        shift: { name: 'AM 04', start_time: '04:00', end_time: '13:00', duration_hours: 8, requires_transport: true },
+      },
+    ],
+    existingAssignments: [],
+    personnel: [juanOff],
+    areaNameById: new Map([['area-aero', 'Aeropuerto']]),
+    positionNameById: new Map([['pos-aero', 'Operador Aeropuerto']]),
+    referenceDate: REF_DATE,
+  });
+  assert.equal(onlyOffRes.coverage.ordinary.total_covered, 1);
+  assert.equal(onlyOffRes.ordinary_assignments[0]?.personnel_id, 'juan-off');
+});
