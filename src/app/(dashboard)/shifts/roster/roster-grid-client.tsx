@@ -273,6 +273,7 @@ export function RosterGridClient({
           startDate: start,
           endDate: end,
           areaId: areaFilter || undefined,
+          personnelIds: personnelFilter.length > 0 ? personnelFilter : undefined,
           positionFilter: positionFilter.length > 0 ? positionFilter : undefined,
         }),
         signal: controller.signal,
@@ -3888,6 +3889,20 @@ const PersonnelRow = memo(({
                     sideOffset={6}
                     className="p-0 overflow-hidden rounded-xl border border-slate-200 shadow-xl bg-white text-slate-900 min-w-[210px] max-w-[260px]"
                   >
+                    {(() => {
+                      const v2p = assignment?.v2_preview as
+                        | {
+                            assignment_kind?: string;
+                            is_protected?: boolean;
+                            shift_name?: string;
+                            shift_start?: string;
+                            shift_end?: string;
+                            area_name?: string;
+                            position_name?: string;
+                          }
+                        | undefined;
+                      return (
+                        <>
                     {/* Header: trabajador */}
                     <div className="px-3 pt-2.5 pb-2 border-b border-slate-100 bg-slate-50">
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-0.5">Trabajador</p>
@@ -3898,21 +3913,32 @@ const PersonnelRow = memo(({
                       <div className="flex items-center gap-2">
                         <Clock className="h-3 w-3 text-slate-400 shrink-0" />
                         <span className="text-[11px] font-bold text-slate-700">
-                          {shift.name} · {shift.start_time.substring(0, 5)}–{shift.end_time.substring(0, 5)}
+                          {v2p?.shift_name || shift.name} · {(v2p?.shift_start || shift.start_time).substring(0, 5)}–{(v2p?.shift_end || shift.end_time).substring(0, 5)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
                         <MapPin className="h-3 w-3 text-indigo-400 shrink-0" />
-                        <span className="text-[11px] font-bold text-indigo-700">{area?.name || 'Sin área'}</span>
+                        <span className="text-[11px] font-bold text-indigo-700">{v2p?.area_name || area?.name || 'Sin área'}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Briefcase className="h-3 w-3 text-orange-400 shrink-0" />
-                        <span className="text-[11px] font-bold text-orange-700">{positionName || 'Sin cargo'}</span>
+                        <span className="text-[11px] font-bold text-orange-700">{v2p?.position_name || positionName || 'Sin cargo'}</span>
                       </div>
                     </div>
                     {/* Footer: estado */}
                     <div className="px-3 pb-2.5 pt-0 flex items-center gap-1.5 border-t border-slate-50">
-                      {assignment?.is_published ? (
+                      {v2p ? (
+                        v2p.is_protected ? (
+                          <span className="flex items-center gap-1 text-[9px] font-black text-amber-700 uppercase tracking-wide">
+                            <CheckCircle2 className="h-2.5 w-2.5" />Existente · Protegido
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-[9px] font-black text-indigo-700 uppercase tracking-wide">
+                            <Sparkles className="h-2.5 w-2.5" />
+                            {v2p.assignment_kind === 'reinforcement' ? 'Refuerzo v2' : 'Propuesta v2'}
+                          </span>
+                        )
+                      ) : assignment?.is_published ? (
                         <span className="flex items-center gap-1 text-[9px] font-black text-emerald-600 uppercase tracking-wide">
                           <Sparkles className="h-2.5 w-2.5" />Publicado
                         </span>
@@ -3926,6 +3952,9 @@ const PersonnelRow = memo(({
                         </span>
                       )}
                     </div>
+                        </>
+                      );
+                    })()}
                   </TooltipContent>
                 </Tooltip>
               ) : (

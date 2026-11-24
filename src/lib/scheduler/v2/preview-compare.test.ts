@@ -898,3 +898,134 @@ test('NS22 catálogo: identifica Operador Aeropuerto inequívocamente aunque Sup
     previewMissingConfig.unconfirmed_rules.some((r) => r.includes('sin evaluar completamente'))
   );
 });
+
+test('Filtro de Personas en vista previa: excluir a Carlos Tobar impide proponerle Supervisor Aeropuerto AM04, conserva protegidos aparte e incluye a todos con Todos', () => {
+  const shifts = [
+    { id: 'sh-am04', name: 'AM 04', start_time: '04:00', end_time: '13:00', duration_hours: 8 },
+  ];
+  const carlos: PersonnelScheduleProfile = {
+    personnel_id: 'carlos-tobar',
+    full_name: 'CARLOS TOBAR',
+    main_position: 'pos-sup-aero',
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+  const otroSupervisor: PersonnelScheduleProfile = {
+    personnel_id: 'otro-sup',
+    full_name: 'OTRO SUPERVISOR',
+    main_position: 'pos-sup-aero',
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+  const reqs: RawShiftRequirement[] = [
+    {
+      id: 'req-sup-am04-07',
+      date: '2026-12-07',
+      area_id: 'area-aero',
+      position_id: 'pos-sup-aero',
+      shift_id: 'sh-am04',
+      required_count: 1,
+      is_extra: false,
+      area: { name: 'Aeropuerto' },
+      position: { name: 'Supervisor Aeropuerto' },
+      shift: { name: 'AM 04', start_time: '04:00', end_time: '13:00', duration_hours: 8 },
+    },
+    {
+      id: 'req-sup-am04-08',
+      date: '2026-12-08',
+      area_id: 'area-aero',
+      position_id: 'pos-sup-aero',
+      shift_id: 'sh-am04',
+      required_count: 1,
+      is_extra: false,
+      area: { name: 'Aeropuerto' },
+      position: { name: 'Supervisor Aeropuerto' },
+      shift: { name: 'AM 04', start_time: '04:00', end_time: '13:00', duration_hours: 8 },
+    },
+  ];
+  // Carlos ya tiene un turno protegido el 2026-12-08 (publicado), y queda una vacante el 2026-12-07
+  const existingProtected: RawExistingAssignment[] = [
+    {
+      id: 'ex-carlos-08',
+      date: '2026-12-08',
+      personnel_id: 'carlos-tobar',
+      area_id: 'area-aero',
+      position_id: 'pos-sup-aero',
+      shift_id: 'sh-am04',
+      shift_start: '04:00',
+      shift_end: '13:00',
+      duration_hours: 8,
+      status: 'scheduled',
+      is_published: true,
+    },
+  ];
+
+  // 1) Selección explícita que deja fuera a Carlos Tobar (solo [otro-sup] o vacío sin Carlos)
+  const previewExcludingCarlos = compareEnginesPreview({
+    startDate: '2026-12-07',
+    endDate: '2026-12-08',
+    rawRequirements: reqs,
+    existingAssignments: existingProtected,
+    personnel: [otroSupervisor],
+    approvedLeaves: [
+      {
+        personnel_id: 'otro-sup',
+        start_date: '2026-12-07',
+        end_date: '2026-12-07',
+        status: 'approved',
+        type: 'administrative',
+      },
+    ],
+    allShifts: shifts,
+    areaNameById: new Map([['area-aero', 'Aeropuerto']]),
+    positionNameById: new Map([['pos-sup-aero', 'Supervisor Aeropuerto']]),
+    referenceDate: REF_DATE,
+  });
+
+  // Carlos NO recibe propuesta nueva el 2026-12-07 (queda vacante en v2 y v1)
+  const carlosNewProposalsV2 = (previewExcludingCarlos.v2.assignments || []).filter(
+    (a) => a.personnel_id === 'carlos-tobar' && !a.is_protected
+  );
+  assert.equal(carlosNewProposalsV2.length, 0);
+  assert.equal(previewExcludingCarlos.v2.total_vacancies, 1);
+
+  // Su turno protegido existente del 2026-12-08 se identifica por separado como existente/protegido con área/cargo/turno correctos
+  const carlosProtectedV2 = (previewExcludingCarlos.v2.assignments || []).find(
+    (a) => a.personnel_id === 'carlos-tobar' && a.date === '2026-12-08'
+  );
+  assert.ok(carlosProtectedV2);
+  assert.equal(carlosProtectedV2.is_protected, true);
+  assert.equal(carlosProtectedV2.assignment_kind, 'protected');
+  assert.equal(carlosProtectedV2.area_name, 'Aeropuerto');
+  assert.equal(carlosProtectedV2.position_name, 'Supervisor Aeropuerto');
+  assert.equal(carlosProtectedV2.shift_name, 'AM 04');
+
+  // 2) Con "Todos" (Carlos incluido), sí se le propone cubrir la vacante del 2026-12-07
+  const previewWithAll = compareEnginesPreview({
+    startDate: '2026-12-07',
+    endDate: '2026-12-08',
+    rawRequirements: reqs,
+    existingAssignments: existingProtected,
+    personnel: [carlos, otroSupervisor],
+    approvedLeaves: [
+      {
+        personnel_id: 'otro-sup',
+        start_date: '2026-12-07',
+        end_date: '2026-12-07',
+        status: 'approved',
+        type: 'administrative',
+      },
+    ],
+    allShifts: shifts,
+    areaNameById: new Map([['area-aero', 'Aeropuerto']]),
+    positionNameById: new Map([['pos-sup-aero', 'Supervisor Aeropuerto']]),
+    referenceDate: REF_DATE,
+  });
+  const carlosProposalDec7 = (previewWithAll.v2.assignments || []).find(
+    (a) => a.personnel_id === 'carlos-tobar' && a.date === '2026-12-07'
+  );
+  assert.ok(carlosProposalDec7);
+  assert.equal(carlosProposalDec7.is_protected, false);
+  assert.equal(carlosProposalDec7.position_name, 'Supervisor Aeropuerto');
+  assert.equal(carlosProposalDec7.shift_name, 'AM 04');
+});
