@@ -24,6 +24,7 @@ import type {
   RawShiftRequirement,
   ReinforcementShiftConfig,
   ScheduledShiftInterval,
+  V2PreviewAssignment,
 } from './types';
 
 function buildV1PersonnelPool(params: {
@@ -464,11 +465,98 @@ function finalizeV1PreviewMetrics(
 
 function buildV2MetricsFromResult(
   v2Res: ReturnType<typeof scheduleCrossArea>,
-  t2Ms: number
+  t2Ms: number,
+  params: CompareEnginesPreviewParams
 ): EnginePreviewMetrics {
+  const normStart = normalizeIsoDate(params.startDate);
+  const normEnd = normalizeIsoDate(params.endDate);
+  const refDate = params.referenceDate ?? new Date();
+  const shiftMap = new Map((params.allShifts || []).map((s) => [s.id, s]));
+  const personMap = new Map(params.personnel.map((p) => [p.personnel_id, p]));
+
+  const previewAssignments: V2PreviewAssignment[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const a of v2Res.assignments) {
+    const k = `${a.date}|${a.personnel_id}|${a.shift_id}|${a.area_id}|${a.position_id}`;
+    seenKeys.add(k);
+    const sh = shiftMap.get(a.shift_id);
+    previewAssignments.push({
+      date: a.date,
+      personnel_id: a.personnel_id,
+      shift_id: a.shift_id,
+      shift_name: sh?.name || `${a.shift_start.slice(0, 5)}`,
+      shift_start: a.shift_start,
+      shift_end: a.shift_end,
+      area_id: a.area_id,
+      area_name: params.areaNameById?.get(a.area_id) || '',
+      position_id: a.position_id,
+      position_name: params.positionNameById?.get(a.position_id) || '',
+      assignment_kind: a.assignment_kind,
+      match_type: a.match_type,
+      is_protected: Boolean(a.is_locked || a.frozen_by_rule),
+      is_extra: false,
+    });
+  }
+
+  for (const ex of params.existingAssignments) {
+    if (ex.status === 'cancelled') continue;
+    const dStr = normalizeIsoDate(ex.date);
+    if (dStr < normStart || dStr > normEnd) continue;
+    if (params.areaFilter && ex.area_id !== params.areaFilter) continue;
+    if (
+      params.positionFilter &&
+      params.positionFilter.length > 0 &&
+      !params.positionFilter.includes(ex.position_id)
+    ) {
+      continue;
+    }
+    if (!isAssignmentProtected(ex, refDate) && !ex.is_extra) continue;
+
+    const k = `${dStr}|${ex.personnel_id}|${ex.shift_id}|${ex.area_id}|${ex.position_id}`;
+    if (seenKeys.has(k)) {
+      const existingItem = previewAssignments.find(
+        (x) =>
+          `${x.date}|${x.personnel_id}|${x.shift_id}|${x.area_id}|${x.position_id}` === k
+      );
+      if (existingItem) existingItem.is_protected = true;
+      continue;
+    }
+    seenKeys.add(k);
+    const sh = shiftMap.get(ex.shift_id);
+    const per = personMap.get(ex.personnel_id);
+    const matchType =
+      per?.main_position === ex.position_id ? 'primary' : 'secondary';
+    previewAssignments.push({
+      date: dStr,
+      personnel_id: ex.personnel_id,
+      shift_id: ex.shift_id,
+      shift_name: sh?.name || (ex.shift_start || '08:00').slice(0, 5),
+      shift_start: ex.shift_start || sh?.start_time || '08:00',
+      shift_end: ex.shift_end || sh?.end_time || '16:00',
+      area_id: ex.area_id,
+      area_name: params.areaNameById?.get(ex.area_id) || '',
+      position_id: ex.position_id,
+      position_name: params.positionNameById?.get(ex.position_id) || '',
+      assignment_kind: 'protected',
+      match_type: matchType,
+      is_protected: true,
+      is_extra: Boolean(ex.is_extra),
+    });
+  }
+
+  const enrichedVacancies = v2Res.remaining_vacancies.map((v) => ({
+    ...v,
+    area_name: v.area_name || params.areaNameById?.get(v.area_id) || '',
+    position_name: v.position_name || params.positionNameById?.get(v.position_id) || '',
+    shift_name: v.shift_name || shiftMap.get(v.shift_id)?.name || '',
+  }));
+
   return {
     engine: 'v2',
     label: 'Motor Nuevo (v2 · Paralelo)',
+    start_date: normStart,
+    end_date: normEnd,
     total_required: v2Res.stats.total_required,
     total_covered: v2Res.stats.total_covered,
     total_vacancies: v2Res.stats.total_vacancies,
@@ -477,10 +565,11 @@ function buildV2MetricsFromResult(
     covered_secondary_count: v2Res.stats.covered_secondary_count,
     reinforcement_count: v2Res.stats.reinforcement_count,
     jornada_conflicts_count: v2Res.audit_violations.length,
-    vacancies: v2Res.remaining_vacancies,
+    vacancies: enrichedVacancies,
     conflicts: v2Res.audit_violations,
     holiday_warnings: v2Res.holiday_warnings,
     execution_time_ms: Math.round(t2Ms * 100) / 100,
+    assignments: previewAssignments,
   };
 }
 
@@ -505,7 +594,7 @@ function computeV2PreviewMetrics(params: CompareEnginesPreviewParams) {
     signal: params.signal,
   });
   const t2Ms = performance.now() - t2Start;
-  return { v2Res, v2Metrics: buildV2MetricsFromResult(v2Res, t2Ms) };
+  return { v2Res, v2Metrics: buildV2MetricsFromResult(v2Res, t2Ms, params) };
 }
 
 async function computeV2PreviewMetricsAsync(params: CompareEnginesPreviewParams) {
@@ -529,7 +618,7 @@ async function computeV2PreviewMetricsAsync(params: CompareEnginesPreviewParams)
     signal: params.signal,
   });
   const t2Ms = performance.now() - t2Start;
-  return { v2Res, v2Metrics: buildV2MetricsFromResult(v2Res, t2Ms) };
+  return { v2Res, v2Metrics: buildV2MetricsFromResult(v2Res, t2Ms, params) };
 }
 
 function buildComparisonResult(

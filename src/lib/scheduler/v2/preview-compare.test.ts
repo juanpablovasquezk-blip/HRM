@@ -480,6 +480,10 @@ test('ROSTER-06: compareEnginesPreviewStaged informa etapas reales en orden sin 
   assert.equal(res.called_v1_save_route, false);
   assert.equal(res.v1.total_covered, 1);
   assert.equal(res.v2.total_covered, 1);
+  assert.equal(res.v2.start_date, '2026-11-09');
+  assert.equal(res.v2.end_date, '2026-11-09');
+  assert.equal(res.v2.assignments?.length, 1);
+  assert.equal(res.v2.assignments?.[0].shift_name, 'AM 08');
 });
 
 test('ROSTER-06: cancelación vía AbortSignal detiene scheduleCrossAreaAsync en curso sin esperar al final', async () => {

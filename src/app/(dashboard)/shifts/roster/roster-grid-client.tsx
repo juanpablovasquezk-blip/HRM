@@ -227,6 +227,14 @@ export function RosterGridClient({
   const compareAbortRef = useRef<AbortController | null>(null);
   const [isPreviewCompareOpen, setIsPreviewCompareOpen] = useState(false);
   const [previewComparison, setPreviewComparison] = useState<PreviewComparisonResult | null>(null);
+  const [isV2GridPreviewActive, setIsV2GridPreviewActive] = useState(false);
+  const [showV2VacanciesPanel, setShowV2VacanciesPanel] = useState(false);
+
+  const guardPreviewMutation = useCallback(() => {
+    if (!isV2GridPreviewActive) return false;
+    toast.info('Vista previa · Sin guardar activa. Cierra la vista previa para modificar o notificar el roster.');
+    return true;
+  }, [isV2GridPreviewActive]);
 
   useEffect(() => {
     if (!isPreviewComparing) return;
@@ -427,10 +435,47 @@ export function RosterGridClient({
   const [coverageDialog, setCoverageDialog] = useState<{ dateStr: string; day: Date } | null>(null);
 
   const monthDate = new Date(currentMonth + 'T00:00:00');
-  const days = eachDayOfInterval({
+  const monthDays = eachDayOfInterval({
     start: startOfWeek(startOfMonth(monthDate), { weekStartsOn: 1 }),
     end: endOfWeek(endOfMonth(monthDate), { weekStartsOn: 1 }),
   });
+  const days = useMemo(() => {
+    if (
+      isV2GridPreviewActive &&
+      previewComparison?.v2.start_date &&
+      previewComparison?.v2.end_date
+    ) {
+      try {
+        return eachDayOfInterval({
+          start: parseISO(previewComparison.v2.start_date),
+          end: parseISO(previewComparison.v2.end_date),
+        });
+      } catch {
+        return monthDays;
+      }
+    }
+    return monthDays;
+  }, [isV2GridPreviewActive, previewComparison, monthDays]);
+
+  const displayAssignments = useMemo(() => {
+    if (isV2GridPreviewActive && previewComparison?.v2.assignments) {
+      return previewComparison.v2.assignments.map((a, idx) => ({
+        id: `v2prev-${idx}-${a.personnel_id}-${a.date}`,
+        personnel_id: a.personnel_id,
+        date: a.date,
+        shift_id: a.shift_id,
+        area_id: a.area_id,
+        position_id: a.position_id,
+        status: 'scheduled',
+        is_extra: a.is_extra,
+        is_locked: a.is_protected,
+        is_published: false,
+        is_validated: false,
+        v2_preview: a,
+      })) as any[];
+    }
+    return assignments;
+  }, [isV2GridPreviewActive, previewComparison, assignments]);
 
   const goToMonth = (date: Date) => {
     const formatted = format(date, 'yyyy-MM');
@@ -452,12 +497,12 @@ export function RosterGridClient({
       console.log(`[CLIENT-DEBUG] Matias sample dates: ${matiasAsgns.slice(0, 5).map(a => a.date).join(', ')}`);
     }
 
-    assignments.forEach(a => {
+    displayAssignments.forEach(a => {
       if (!map[a.personnel_id]) map[a.personnel_id] = {};
       map[a.personnel_id][a.date] = a;
     });
     return map;
-  }, [assignments]);
+  }, [displayAssignments]);
 
   const leavesMap = useMemo(() => {
     const map: Record<string, Leave[]> = {};
@@ -497,12 +542,12 @@ export function RosterGridClient({
 
   const assignmentsByDate = useMemo(() => {
     const map: Record<string, Assignment[]> = {};
-    assignments.forEach(a => {
+    displayAssignments.forEach(a => {
       if (!map[a.date]) map[a.date] = [];
       map[a.date].push(a);
     });
     return map;
-  }, [assignments]);
+  }, [displayAssignments]);
 
   const filteredPersonnel = useMemo(() => {
     const monthStartStr = format(startOfMonth(monthDate), 'yyyy-MM-dd');
@@ -580,6 +625,10 @@ export function RosterGridClient({
 
   const handleCellClick = useCallback((person: Personnel, date: Date) => {
     if (readOnly) return;
+    if (isV2GridPreviewActive) {
+      toast.info('Vista previa · Sin guardar activa. Cierra la vista previa para editar.');
+      return;
+    }
     const dateStr = format(date, 'yyyy-MM-dd');
     
     setSelectedCells(prev => {
@@ -606,6 +655,7 @@ export function RosterGridClient({
   }, [readOnly, positions]);
 
   const handleToggleRow = useCallback((personId: string) => {
+    if (isV2GridPreviewActive) return;
     const personDates = days.map(d => format(d, 'yyyy-MM-dd'));
     const isTerminated = (p: Personnel, d: string) => p.termination_date && d > p.termination_date;
     const isPreHire = (p: Personnel, d: string) => p.hire_date && d < p.hire_date;
@@ -627,6 +677,7 @@ export function RosterGridClient({
   }, [days, personnel, selectedCells]);
 
   const handleToggleColumn = (dateStr: string) => {
+    if (isV2GridPreviewActive) return;
     const isTerminated = (p: Personnel, d: string) => p.termination_date && d > p.termination_date;
     const isPreHire = (p: Personnel, d: string) => p.hire_date && d < p.hire_date;
     
@@ -645,6 +696,7 @@ export function RosterGridClient({
   };
 
   const handleToggleAll = () => {
+    if (isV2GridPreviewActive) return;
     const isTerminated = (p: Personnel, d: string) => p.termination_date && d > p.termination_date;
     const isPreHire = (p: Personnel, d: string) => p.hire_date && d < p.hire_date;
     
@@ -668,6 +720,7 @@ export function RosterGridClient({
   };
 
   const handleRunAI = (from?: string, to?: string) => {
+    if (guardPreviewMutation()) return;
     const start = from || planningRange.from;
     const end = to || planningRange.to;
     
@@ -782,6 +835,7 @@ export function RosterGridClient({
   };
 
   const handleClearAI = () => {
+    if (guardPreviewMutation()) return;
     const isCurrentMonth = format(new Date(), 'yyyy-MM') === format(monthDate, 'yyyy-MM');
     setPlanningRange({
       from: isCurrentMonth ? format(new Date(), 'yyyy-MM-dd') : format(days[0], 'yyyy-MM-dd'),
@@ -1058,6 +1112,7 @@ export function RosterGridClient({
   };
 
   const handleSaveAssignment = (formData: FormData) => {
+    if (guardPreviewMutation()) return;
     if (selectedCells.length === 0) return;
     
     const shiftId = formData.get('shift_id') as string;
@@ -1113,6 +1168,7 @@ export function RosterGridClient({
   };
 
   const handleBulkDelete = () => {
+    if (guardPreviewMutation()) return;
     if (selectedCells.length === 0) return;
     
     if (!confirm(`¿Eliminar las ${selectedCells.length} asignaciones seleccionadas?`)) return;
@@ -1143,6 +1199,7 @@ export function RosterGridClient({
   // ─── Administration & DND Handlers ──────────────────────────────────────────
 
   const handleDragStart = (e: React.DragEvent, assignment: Assignment) => {
+    if (isV2GridPreviewActive) return;
     setDraggingAssignment(assignment);
     e.dataTransfer.setData('assignmentId', assignment.id);
     e.dataTransfer.effectAllowed = 'move';
@@ -1155,6 +1212,10 @@ export function RosterGridClient({
 
   const handleDrop = useCallback(async (e: React.DragEvent, personId: string, targetDate: string) => {
     e.preventDefault();
+    if (isV2GridPreviewActive) {
+      setDraggingAssignment(null);
+      return;
+    }
     if (!draggingAssignment || draggingAssignment.personnel_id !== personId) {
       if (draggingAssignment && draggingAssignment.personnel_id !== personId) {
         toast.error('Solo puedes mover turnos dentro de la misma persona');
@@ -1209,6 +1270,7 @@ export function RosterGridClient({
   };
 
   const handleValidateSelection = () => {
+    if (guardPreviewMutation()) return;
     if (selectedCells.length === 0) {
        toast.error('Selecciona turnos primero (clic en las celdas)');
        return;
@@ -1236,6 +1298,7 @@ export function RosterGridClient({
   };
 
   const handleUnpublishSelection = () => {
+    if (guardPreviewMutation()) return;
     if (selectedCells.length === 0) {
        toast.error('Selecciona turnos primero (clic en las celdas)');
        return;
@@ -1264,6 +1327,7 @@ export function RosterGridClient({
   };
 
   const handlePublishSelection = (skipWhatsApp = false) => {
+    if (guardPreviewMutation()) return;
     if (selectedCells.length === 0) {
        toast.error('Selecciona turnos primero (clic en las celdas)');
        return;
@@ -1329,6 +1393,7 @@ export function RosterGridClient({
   };
 
   const handlePublishRange = (skipWhatsApp = false) => {
+    if (guardPreviewMutation()) return;
     const start = format(days[0], 'yyyy-MM-dd');
     const end = format(days[days.length - 1], 'yyyy-MM-dd');
     
@@ -1390,6 +1455,7 @@ export function RosterGridClient({
   };
 
   const handleValidateVisible = () => {
+    if (guardPreviewMutation()) return;
     const personnelIds = new Set(filteredPersonnel.map(p => p.id));
     const dateStrings = new Set(days.map(d => format(d, 'yyyy-MM-dd')));
 
@@ -1430,6 +1496,7 @@ export function RosterGridClient({
   };
 
   const handleSendTodayNotifications = async () => {
+    if (guardPreviewMutation()) return;
     if (isTodayNotifSent || isSendingTodayNotif) return;
     setIsSendingTodayNotif(true);
     try {
@@ -1741,7 +1808,7 @@ export function RosterGridClient({
                 setAiActionMode('scheduling');
                 setIsAiConfigOpen(true);
               }}
-              disabled={isPending || aiStep === 'scheduling'}
+              disabled={isPending || aiStep === 'scheduling' || isV2GridPreviewActive}
             >
               {isPending && aiStep !== 'completed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4 mr-2" />}
               Asistente IA
@@ -1789,7 +1856,7 @@ export function RosterGridClient({
                   size="sm" 
                   className="h-8 border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-xs px-2"
                   onClick={handleValidateVisible}
-                  disabled={isPending}
+                  disabled={isPending || isV2GridPreviewActive}
                   title="Validar todos los turnos visibles en la grilla"
                 >
                   <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-indigo-600" />
@@ -1798,7 +1865,7 @@ export function RosterGridClient({
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     className="inline-flex items-center justify-center rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-50 h-8 px-3 ml-1"
-                    disabled={isPending}
+                    disabled={isPending || isV2GridPreviewActive}
                   >
                     <Sparkles className="h-3.5 w-3.5 mr-1 text-emerald-600" />
                     Publicar
@@ -1829,7 +1896,7 @@ export function RosterGridClient({
                     size="sm"
                     className="h-8 border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs ml-1 font-semibold shadow-sm animate-pulse"
                     onClick={handleSendTodayNotifications}
-                    disabled={isSendingTodayNotif}
+                    disabled={isSendingTodayNotif || isV2GridPreviewActive}
                     title="Reenviar notificaciones WhatsApp de cambios realizados hoy (uso único)"
                   >
                     {isSendingTodayNotif
@@ -1846,7 +1913,7 @@ export function RosterGridClient({
               size="sm" 
               className="h-8 text-red-500 border-red-200 hover:bg-red-50 text-xs ml-2"
               onClick={handleClearAI}
-              disabled={isPending}
+              disabled={isPending || isV2GridPreviewActive}
             >
               <Trash2 className="h-3.5 w-3.5 mr-1" />
               Limpiar
@@ -1919,6 +1986,114 @@ export function RosterGridClient({
           <span className="flex items-center gap-1.5 font-bold text-rose-950 bg-rose-100/90 border border-rose-400 px-2 py-0.5 rounded-lg text-[10px] shadow-xs">
             <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 shadow-xs" /> AM 05 (DHL)
           </span>
+        </div>
+      )}
+
+      {isV2GridPreviewActive && previewComparison && (
+        <div className="mb-3 rounded-xl border-2 border-indigo-300 bg-indigo-50/90 dark:bg-indigo-950/40 dark:border-indigo-700 p-3 shadow-sm space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className="bg-indigo-600 text-white font-bold px-2.5 py-0.5 text-xs">
+                Vista previa · Sin guardar
+              </Badge>
+              <span className="text-xs font-semibold text-indigo-950 dark:text-indigo-100">
+                Propuesta v2 ({previewComparison.v2.start_date} al {previewComparison.v2.end_date}) · Cobertura: {previewComparison.v2.total_covered}/{previewComparison.v2.total_required} ({previewComparison.v2.coverage_percent}%) · Refuerzos: {previewComparison.v2.reinforcement_count} · Vacantes: {previewComparison.v2.total_vacancies}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 bg-white dark:bg-slate-900 border-indigo-300 text-indigo-800 hover:bg-indigo-100"
+                onClick={() => setShowV2VacanciesPanel((v) => !v)}
+              >
+                {showV2VacanciesPanel
+                  ? `Ocultar vacantes (${previewComparison.v2.total_vacancies})`
+                  : `Ver vacantes (${previewComparison.v2.total_vacancies})`}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 bg-white dark:bg-slate-900 border-indigo-300 text-indigo-800 hover:bg-indigo-100"
+                onClick={() => setIsPreviewCompareOpen(true)}
+              >
+                Volver al resumen
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="h-8"
+                onClick={() => {
+                  setIsV2GridPreviewActive(false);
+                  setShowV2VacanciesPanel(false);
+                }}
+              >
+                Cerrar vista previa
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 text-[11px] font-medium text-slate-700 dark:text-slate-200">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-indigo-500 inline-block" /> Propuesta nueva (principal)
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-purple-500 inline-block" /> Cobertura 2° cargo
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-amber-500 inline-block" /> Turno protegido
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500 inline-block" /> Refuerzo
+            </span>
+          </div>
+
+          {previewComparison.unconfirmed_rules.length > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50/90 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+              <span className="font-semibold">Avisos / anclas NS22 provisionales: </span>
+              {previewComparison.unconfirmed_rules.join(' · ')}
+            </div>
+          )}
+
+          {showV2VacanciesPanel && (
+            <div className="rounded-lg border border-indigo-200 bg-white dark:bg-slate-900 p-2.5 max-h-56 overflow-y-auto">
+              {previewComparison.v2.vacancies.length === 0 ? (
+                <p className="text-xs text-emerald-700 font-medium">No hay vacantes pendientes en la propuesta v2 para este rango.</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="text-[11px] uppercase text-slate-500 border-b">
+                    <tr>
+                      <th className="py-1.5 px-2 text-left">Fecha</th>
+                      <th className="py-1.5 px-2 text-left">Área</th>
+                      <th className="py-1.5 px-2 text-left">Cargo</th>
+                      <th className="py-1.5 px-2 text-left">Turno</th>
+                      <th className="py-1.5 px-2 text-right">Cubierto / Req.</th>
+                      <th className="py-1.5 px-2 text-right">Vacantes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {previewComparison.v2.vacancies.map((v) => (
+                      <tr key={v.slot_key}>
+                        <td className="py-1.5 px-2 font-mono">{v.date}</td>
+                        <td className="py-1.5 px-2">{v.area_name || v.area_id}</td>
+                        <td className="py-1.5 px-2">{v.position_name || v.position_id}</td>
+                        <td className="py-1.5 px-2">{v.shift_name || v.shift_id}</td>
+                        <td className="py-1.5 px-2 text-right">
+                          {v.covered_count}/{v.required_count}
+                        </td>
+                        <td className="py-1.5 px-2 text-right font-bold text-red-600">
+                          {v.vacancy_count}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -2325,6 +2500,7 @@ export function RosterGridClient({
                   size="sm"
                   className="h-8 text-xs text-slate-300 hover:text-white hover:bg-slate-800 px-2.5"
                   onClick={() => setSelectedCells([])}
+                  disabled={isV2GridPreviewActive}
                 >
                   Limpiar
                 </Button>
@@ -2334,6 +2510,7 @@ export function RosterGridClient({
                   size="sm"
                   className="h-8 text-xs text-red-400 border-red-500/40 hover:bg-red-500/10 hover:text-red-300 gap-1.5 px-2.5"
                   onClick={handleBulkDelete}
+                  disabled={isV2GridPreviewActive}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">Eliminar</span>
@@ -2344,6 +2521,7 @@ export function RosterGridClient({
                   size="sm"
                   className="h-8 text-xs text-indigo-400 border-indigo-500/40 hover:bg-indigo-500/10 hover:text-indigo-300 gap-1.5 px-2.5"
                   onClick={handleValidateSelection}
+                  disabled={isV2GridPreviewActive}
                 >
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">Validar</span>
@@ -2352,6 +2530,7 @@ export function RosterGridClient({
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     className="inline-flex items-center justify-center rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 h-8 px-2.5 gap-1.5"
+                    disabled={isV2GridPreviewActive}
                   >
                     <Sparkles className="h-3.5 w-3.5" />
                     <span>Publicar</span>
@@ -2381,6 +2560,7 @@ export function RosterGridClient({
                   size="sm"
                   className="h-8 text-xs text-slate-400 border-slate-600/50 hover:bg-slate-800 hover:text-slate-300 gap-1.5 px-2.5"
                   onClick={handleUnpublishSelection}
+                  disabled={isV2GridPreviewActive}
                 >
                   <EyeOff className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">Despublicar</span>
@@ -2389,7 +2569,9 @@ export function RosterGridClient({
                 <Button 
                   size="sm"
                   className="h-8 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 shadow-[0_0_12px_rgba(249,115,22,0.35)]"
+                  disabled={isV2GridPreviewActive}
                   onClick={() => {
+                    if (guardPreviewMutation()) return;
                     if (selectedCells.length > 0) {
                       const last = selectedCells[selectedCells.length - 1];
                       const person = personnel.find(p => p.id === last.personId);
@@ -2777,6 +2959,21 @@ export function RosterGridClient({
               }}
             >
               Probar Semana Sintética (NS22 + Ausencia + Protegido + Refuerzo)
+            </Button>
+            <Button
+              type="button"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              disabled={!previewComparison?.v2.assignments}
+              onClick={() => {
+                setSelectedCells([]);
+                setIsAssignmentDialogOpen(false);
+                setIsAiConfigOpen(false);
+                setIsV2GridPreviewActive(true);
+                setShowV2VacanciesPanel(false);
+                setIsPreviewCompareOpen(false);
+              }}
+            >
+              Ver asignaciones de v2
             </Button>
             <Button variant="outline" onClick={() => setIsPreviewCompareOpen(false)}>Cerrar</Button>
           </DialogFooter>
@@ -3566,14 +3763,45 @@ const PersonnelRow = memo(({
                 <Tooltip>
                   <TooltipTrigger>
                     {(() => {
+                      const v2p = assignment?.v2_preview as
+                        | {
+                            assignment_kind?: string;
+                            match_type?: string;
+                            is_protected?: boolean;
+                            shift_name?: string;
+                            area_name?: string;
+                            position_name?: string;
+                          }
+                        | undefined;
                       const isDraft = !assignment?.is_published && !assignment?.is_validated;
+                      const v2BadgeLabel = v2p
+                        ? v2p.is_protected
+                          ? 'Protegido'
+                          : v2p.assignment_kind === 'reinforcement'
+                          ? 'Refuerzo'
+                          : v2p.match_type === 'secondary'
+                          ? '2° Cargo'
+                          : 'v2'
+                        : null;
+                      const v2CardClass = v2p
+                        ? v2p.is_protected
+                          ? 'bg-amber-50/95 border-amber-400 text-amber-950 font-semibold'
+                          : v2p.assignment_kind === 'reinforcement'
+                          ? 'bg-emerald-50/95 border-emerald-400 text-emerald-950 font-semibold'
+                          : v2p.match_type === 'secondary'
+                          ? 'bg-purple-50/95 border-purple-400 text-purple-950 font-semibold'
+                          : 'bg-indigo-50/95 border-indigo-400 text-indigo-950 font-semibold'
+                        : null;
                       return (
                         <div 
-                          draggable={!isBlocked && assignment?.status !== 'cancelled'}
+                          draggable={!v2p && !isBlocked && assignment?.status !== 'cancelled'}
                           onDragStart={(e) => handleDragStart(e, assignment)}
                           className={cn(
-                            "flex flex-col items-center justify-center rounded-lg p-1 border shadow-sm transition-all cursor-grab active:cursor-grabbing",
-                            assignment?.status === 'confirmed' || assignment?.is_confirmed
+                            "flex flex-col items-center justify-center rounded-lg p-1 border shadow-sm transition-all",
+                            v2p ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+                            v2CardClass
+                              ? v2CardClass
+                              : assignment?.status === 'confirmed' || assignment?.is_confirmed
                               ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 font-bold" 
                               : assignment?.is_published
                               ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 font-bold"
@@ -3584,12 +3812,16 @@ const PersonnelRow = memo(({
                               : "bg-blue-500/10 border-blue-500/30 text-blue-700",
                             assignment?.is_extra && "ring-2 ring-amber-400 ring-offset-1 ring-offset-white ring-inset",
                             assignment?.status === 'cancelled' && "opacity-40 grayscale",
-                            isAirport && !isDraft && "border-indigo-400 border-dashed"
+                            !v2p && isAirport && !isDraft && "border-indigo-400 border-dashed"
                           )}
                         >
                           <span className="text-[10px] font-black leading-tight uppercase">{shift.name}</span>
                           <div className="flex items-center gap-0.5 mt-0.5">
-                            {assignment?.is_published ? (
+                            {v2BadgeLabel ? (
+                              <span className="text-[8px] font-black uppercase px-1 rounded bg-white/80 border border-current/20">
+                                {v2BadgeLabel}
+                              </span>
+                            ) : assignment?.is_published ? (
                               <Sparkles className="h-2 w-2 text-emerald-500" />
                             ) : (
                               <div className={cn(
@@ -3601,6 +3833,11 @@ const PersonnelRow = memo(({
                               {shift.start_time.substring(0, 5)}
                             </span>
                           </div>
+                          {v2p && (
+                            <span className="text-[7px] leading-tight opacity-85 truncate max-w-[78px]">
+                              {v2p.area_name || area?.name || ''} · {v2p.position_name || positionName || ''}
+                            </span>
+                          )}
                         </div>
                       );
                     })()}

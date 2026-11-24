@@ -461,9 +461,33 @@ export interface DailyPlanningVacancySummary {
 // ROSTER-06: Comparación en vista previa (v1 vs v2 sin guardado)
 // ---------------------------------------------------------------------------
 
+export interface V2PreviewAssignment {
+  date: string;
+  personnel_id: string;
+  shift_id: string;
+  shift_name?: string;
+  shift_start: string;
+  shift_end: string;
+  area_id: string;
+  area_name?: string;
+  position_id: string;
+  position_name?: string;
+  assignment_kind:
+    | 'ordinary'
+    | 'ns22_titular'
+    | 'ns22_replacement'
+    | 'reinforcement'
+    | 'protected';
+  match_type: 'primary' | 'secondary' | 'reinforcement';
+  is_protected: boolean;
+  is_extra: boolean;
+}
+
 export interface EnginePreviewMetrics {
   engine: 'v1' | 'v2';
   label: string;
+  start_date?: string;
+  end_date?: string;
   total_required: number;
   total_covered: number;
   total_vacancies: number;
@@ -476,6 +500,7 @@ export interface EnginePreviewMetrics {
   conflicts: JornadaViolation[];
   holiday_warnings: string[];
   execution_time_ms: number;
+  assignments?: V2PreviewAssignment[];
 }
 
 export interface PreviewComparisonResult {
