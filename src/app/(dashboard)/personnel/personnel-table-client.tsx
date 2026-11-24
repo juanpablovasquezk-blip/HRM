@@ -50,7 +50,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { createOnboardingToken, approveOnboarding, rejectOnboarding, deletePersonnel } from './actions';
+import { createOnboardingToken, approveOnboarding, rejectOnboarding, deletePersonnel, updatePersonnelRequiresTransport } from './actions';
 import { createPersonnelUpdateToken, sendFichaUpdateWhatsApp } from './update-actions';
 import { generateDismissalActa } from './generate-dismissal-acta';
 import { addDays, parseISO, format } from 'date-fns';
@@ -196,6 +196,30 @@ export default function PersonnelTableClient({
   const [dismissReason, setDismissReason] = useState('');
   const [refusedTica, setRefusedTica] = useState(false);
   const [refusedPcp, setRefusedPcp] = useState(false);
+  const [transportOverrides, setTransportOverrides] = useState<Record<string, boolean>>({});
+  const [savingTransportIds, setSavingTransportIds] = useState<Record<string, boolean>>({});
+
+  const getEffectiveRequiresTransport = (person: Personnel) =>
+    transportOverrides[person.id] ?? !!person.requires_transport;
+
+  const handleToggleRequiresTransport = async (person: Personnel, nextValue: boolean) => {
+    const previousValue = getEffectiveRequiresTransport(person);
+    setTransportOverrides((prev) => ({ ...prev, [person.id]: nextValue }));
+    setSavingTransportIds((prev) => ({ ...prev, [person.id]: true }));
+
+    const result = await updatePersonnelRequiresTransport(person.id, nextValue);
+    setSavingTransportIds((prev) => ({ ...prev, [person.id]: false }));
+
+    if (!result.success) {
+      setTransportOverrides((prev) => ({ ...prev, [person.id]: previousValue }));
+      toast.error(result.error || 'No se pudo actualizar Requiere Transporte');
+      return;
+    }
+
+    toast.success(
+      `${person.first_name} ${person.last_name_father}: ${nextValue ? 'Requiere transporte' : 'Sin transporte'}`
+    );
+  };
 
   // Invite handler
   const handleGenerateInvite = async () => {
@@ -368,7 +392,7 @@ export default function PersonnelTableClient({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showColumnPanel]);
 
-  const COLUMNS_STORAGE_KEY = 'hrm_personnel_visible_columns';
+  const COLUMNS_STORAGE_KEY = 'hrm_personnel_visible_columns_v2';
 
   // Define available columns
   const columns: ColumnConfig[] = [
@@ -387,7 +411,7 @@ export default function PersonnelTableClient({
     { id: 'birth_date', label: 'Fecha Nacimiento', defaultVisible: false },
     { id: 'hire_date', label: 'Fecha Contratación', defaultVisible: false },
     { id: 'termination_date', label: 'Fecha Término', defaultVisible: false },
-    { id: 'requires_transport', label: 'Requiere Transporte', defaultVisible: false },
+    { id: 'requires_transport', label: 'Requiere Transporte', defaultVisible: true },
     { id: 'is_active', label: 'Estado', defaultVisible: false },
   ];
 
@@ -572,8 +596,8 @@ export default function PersonnelTableClient({
           bVal = b.termination_date || '';
           break;
         case 'requires_transport':
-          aVal = a.requires_transport ? 1 : 0;
-          bVal = b.requires_transport ? 1 : 0;
+          aVal = getEffectiveRequiresTransport(a) ? 1 : 0;
+          bVal = getEffectiveRequiresTransport(b) ? 1 : 0;
           break;
         case 'is_active':
           aVal = a.is_active ? 1 : 0;
@@ -714,7 +738,7 @@ export default function PersonnelTableClient({
           row['Fecha de Término'] = p.termination_date || '';
         }
         if (visibleColumns.requires_transport) {
-          row['Requiere Transporte'] = p.requires_transport ? 'Sí' : 'No';
+          row['Requiere Transporte'] = getEffectiveRequiresTransport(p) ? 'Sí' : 'No';
         }
         if (visibleColumns.is_active) {
           row['Estado'] = p.is_active ? 'Activo' : 'De baja';
@@ -1176,9 +1200,27 @@ export default function PersonnelTableClient({
                     {/* Requires Transport Cell */}
                     {visibleColumns.requires_transport && (
                       <TableCell>
-                        <Badge variant="outline" className={person.requires_transport ? 'bg-blue-50 text-blue-700 border-blue-200 text-[10px]' : 'bg-slate-50 text-slate-500 border-slate-200 text-[10px]'}>
-                          {person.requires_transport ? 'Sí' : 'No'}
-                        </Badge>
+                        {(() => {
+                          const requiresTransport = getEffectiveRequiresTransport(person);
+                          const isSaving = !!savingTransportIds[person.id];
+                          return (
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                checked={requiresTransport}
+                                disabled={isSaving}
+                                onCheckedChange={(checked) => handleToggleRequiresTransport(person, checked)}
+                                aria-label={`Requiere transporte para ${person.first_name} ${person.last_name_father}`}
+                              />
+                              <span
+                                className={`text-xs font-medium ${
+                                  requiresTransport ? 'text-blue-700' : 'text-slate-500'
+                                }`}
+                              >
+                                {requiresTransport ? 'Sí' : 'No'}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                     )}
 

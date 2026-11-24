@@ -477,6 +477,31 @@ export async function updatePersonnel(
   return { success: true, error: null };
 }
 
+export async function updatePersonnelRequiresTransport(
+  id: string,
+  requiresTransport: boolean
+): Promise<{ success: boolean; error: string | null }> {
+  const auth = await requireActionAuth({ permission: 'managePersonnel' });
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from('personnel')
+    .update({ requires_transport: requiresTransport })
+    .eq('id', id);
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  safeRevalidatePath('/personnel');
+  safeRevalidatePath(`/personnel/${id}`);
+  safeRevalidatePath('/transport');
+  return { success: true, error: null };
+}
+
 export async function deletePersonnel(
   id: string,
   reason?: string,
