@@ -1,5 +1,10 @@
-import { addDays, eachDayOfInterval, endOfMonth, format, getISODay, parseISO, startOfMonth, subDays, subMonths } from 'date-fns';
+import { addDays, eachDayOfInterval, endOfMonth, format, getDay, getISODay, parseISO, startOfMonth, subDays, subMonths } from 'date-fns';
 import { normalizeIsoDate } from './dotacion';
+import {
+  normalizePriorityQuotaItems,
+  type OperationalPriority,
+  type PriorityQuotaItem,
+} from '../../../app/(dashboard)/shifts/dotacion/matrix-utils';
 
 export interface BlueExpressIdentifiers {
   areaId: string;
@@ -90,6 +95,8 @@ export interface BlueExpressApplyUpsertRow {
   position_id: string;
   shift_id: string;
   required_count: number;
+  priority?: OperationalPriority;
+  priority_quotas?: PriorityQuotaItem[];
   is_extra: false;
 }
 
@@ -150,7 +157,8 @@ export function validateApprovedTrucksByWeekday(
  */
 export function buildBlueExpressApplyPlan(
   proposal: BlueExpressNightProposal,
-  approvedByWeekday?: Record<number, number> | null
+  approvedByWeekday?: Record<number, number> | null,
+  priorityByPositionAndDbDay?: Map<string, PriorityQuotaItem[]> | null
 ): BlueExpressApplyUpsertRow[] {
   const recByWeekday = new Map<number, number>(
     proposal.weekdays.map((w) => [w.isoWeekday, w.recommended_trucks])
@@ -166,10 +174,54 @@ export function buildBlueExpressApplyPlan(
     start: parseISO(proposal.target_start_date),
     end: parseISO(proposal.target_end_date),
   });
+
+  const resolvePriorityForPosDay = (
+    positionId: string,
+    positionName: string,
+    d: Date,
+    trucks: number
+  ): { priority?: OperationalPriority; priority_quotas?: PriorityQuotaItem[] } => {
+    if (!priorityByPositionAndDbDay) return {};
+    const dbDay = getDay(d); // 0=Dom..6=Sáb
+    const raw = normalizePriorityQuotaItems(
+      priorityByPositionAndDbDay.get(`${positionId}|${dbDay}`)
+    );
+    if (raw.length === 0) return {};
+    if (raw.length === 1) {
+      return {
+        priority: raw[0].priority,
+        priority_quotas: [{ priority: raw[0].priority, required_count: trucks }],
+      };
+    }
+    const sum = raw.reduce((s, q) => s + q.required_count, 0);
+    if (sum !== trucks) {
+      const isoW = getISODay(d);
+      throw new Error(
+        `El desglose por prioridad para ${positionName} el ${WEEKDAY_LABELS[isoW]} suma ${sum}, pero la cantidad aprobada es ${trucks}.`
+      );
+    }
+    return {
+      priority: raw[0].priority,
+      priority_quotas: raw,
+    };
+  };
+
   const rows: BlueExpressApplyUpsertRow[] = [];
   for (const d of days) {
     const dateStr = format(d, 'yyyy-MM-dd');
     const trucks = recByWeekday.get(getISODay(d)) ?? 1;
+    const condPrio = resolvePriorityForPosDay(
+      proposal.identifiers.conductorPositionId,
+      proposal.identifiers.conductorPositionName,
+      d,
+      trucks
+    );
+    const ayudPrio = resolvePriorityForPosDay(
+      proposal.identifiers.ayudantePositionId,
+      proposal.identifiers.ayudantePositionName,
+      d,
+      trucks
+    );
     rows.push(
       {
         date: dateStr,
@@ -177,6 +229,7 @@ export function buildBlueExpressApplyPlan(
         position_id: proposal.identifiers.conductorPositionId,
         shift_id: proposal.identifiers.shiftId,
         required_count: trucks,
+        ...condPrio,
         is_extra: false,
       },
       {
@@ -185,6 +238,7 @@ export function buildBlueExpressApplyPlan(
         position_id: proposal.identifiers.ayudantePositionId,
         shift_id: proposal.identifiers.shiftId,
         required_count: trucks,
+        ...ayudPrio,
         is_extra: false,
       }
     );

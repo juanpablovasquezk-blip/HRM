@@ -732,6 +732,62 @@ export interface AffectedGeneratedRequirementItem {
   next_count: number;
   next_priority: OperationalPriority;
   next_quotas: PriorityQuotaItem[];
+  is_blue_am00?: boolean;
+  validation_error?: string | null;
+}
+
+function isBlueExpressAm00Names(areaName?: string | null, posName?: string | null, shiftName?: string | null, shiftStart?: string | null): boolean {
+  const norm = (s?: string | null) =>
+    (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  const a = norm(areaName);
+  const p = norm(posName);
+  const s = norm(shiftName);
+  const st = (shiftStart || '').trim();
+  return (
+    a.includes('BLUE') &&
+    (p === 'CONDUCTOR CAMION' || p === 'AYUDANTE') &&
+    (st.startsWith('00:00') || s.includes('AM 00') || s.includes('AM00'))
+  );
+}
+
+function buildBlueExpressPriorityMap(
+  templates: any[] | null | undefined,
+  templateQuotas: TemplatePriorityQuotaRow[],
+  identifiers: { areaId: string; shiftId: string; conductorPositionId: string; ayudantePositionId: string }
+): Map<string, PriorityQuotaItem[]> {
+  const map = new Map<string, PriorityQuotaItem[]>();
+  const targetPos = new Set([identifiers.conductorPositionId, identifiers.ayudantePositionId]);
+
+  for (const q of templateQuotas || []) {
+    if (q.area_id !== identifiers.areaId || q.shift_id !== identifiers.shiftId || !targetPos.has(q.position_id)) {
+      continue;
+    }
+    const key = `${q.position_id}|${q.day_of_week}`;
+    const list = map.get(key) || [];
+    list.push({ priority: normalizePriority(q.priority), required_count: Number(q.required_count) || 0 });
+    map.set(key, list);
+  }
+  for (const [k, list] of map.entries()) {
+    map.set(k, normalizePriorityQuotaItems(list));
+  }
+
+  for (const t of templates || []) {
+    if (t.is_active === false) continue;
+    if (t.area_id !== identifiers.areaId || t.shift_id !== identifiers.shiftId || !targetPos.has(t.position_id)) {
+      continue;
+    }
+    const basePrio = normalizePriority(t.priority);
+    const overrides = normalizePriorityOverrides(t.priority_overrides, basePrio);
+    const days = Array.isArray(t.days_of_week) ? t.days_of_week : [];
+    for (const dow of days) {
+      const key = `${t.position_id}|${dow}`;
+      if (map.has(key)) continue;
+      const effPrio = resolveDayPriority(basePrio, overrides, dow);
+      map.set(key, [{ priority: effPrio, required_count: Number(t.required_count) || 1 }]);
+    }
+  }
+
+  return map;
 }
 
 function quotasEqual(a: PriorityQuotaItem[], b: PriorityQuotaItem[]): boolean {
@@ -825,7 +881,7 @@ export async function previewAffectedGeneratedRequirements(
     computeRuleExpectationMap(supabase, rowKeys),
     supabase
       .from('shift_requirements')
-      .select('id, date, area_id, position_id, shift_id, required_count, priority, area:areas(name), position:positions(name), shift:shifts(name)')
+      .select('id, date, area_id, position_id, shift_id, required_count, priority, area:areas(name), position:positions(name), shift:shifts(name, start_time)')
       .eq('is_extra', false)
       .gte('date', minDate)
       .in('area_id', areaIds)
@@ -865,20 +921,16 @@ export async function previewAffectedGeneratedRequirements(
   for (const req of matchingReqs) {
     const areaName = Array.isArray(req.area) ? req.area[0]?.name : (req.area as { name?: string } | null)?.name;
     const posName = Array.isArray(req.position) ? req.position[0]?.name : (req.position as { name?: string } | null)?.name;
-    const shiftName = Array.isArray(req.shift) ? req.shift[0]?.name : (req.shift as { name?: string } | null)?.name;
+    const shiftObj = Array.isArray(req.shift) ? req.shift[0] : (req.shift as { name?: string; start_time?: string } | null);
+    const shiftName = shiftObj?.name;
+    const shiftStart = shiftObj?.start_time;
 
+    const isBlueAm00 = isBlueExpressAm00Names(areaName, posName, shiftName, shiftStart);
     const isHolidayZero =
       holidayCheck.holidaysByDate.has(String(req.date).split('T')[0]) &&
       isHolidayZeroStaffingPair(areaName, posName);
 
     const dow = getDay(parseISO(req.date));
-    const rule = isHolidayZero
-      ? { count: 0, priority: 'NORMAL' as OperationalPriority, quotas: [] }
-      : ruleByRowDay.get(`${req.area_id}|${req.position_id}|${req.shift_id}|${dow}`) || {
-          count: 0,
-          priority: 'NORMAL' as OperationalPriority,
-          quotas: [],
-        };
     const curCount = Number(req.required_count) || 0;
     const curPrio = normalizePriority(req.priority);
     const curQuotasRaw = normalizePriorityQuotaItems(currentQuotasById.get(req.id));
@@ -889,10 +941,40 @@ export async function previewAffectedGeneratedRequirements(
           ? [{ priority: curPrio, required_count: curCount }]
           : [];
 
+    const rawRule = isHolidayZero
+      ? { count: 0, priority: 'NORMAL' as OperationalPriority, quotas: [] as PriorityQuotaItem[] }
+      : ruleByRowDay.get(`${req.area_id}|${req.position_id}|${req.shift_id}|${dow}`) || {
+          count: 0,
+          priority: 'NORMAL' as OperationalPriority,
+          quotas: [] as PriorityQuotaItem[],
+        };
+
+    let nextCount = rawRule.count;
+    let nextPrio = rawRule.priority;
+    let nextQuotas = rawRule.quotas;
+    let validationError: string | null = null;
+
+    if (isBlueAm00) {
+      nextCount = curCount;
+      if (rawRule.quotas.length > 1) {
+        const splitSum = rawRule.quotas.reduce((s, q) => s + q.required_count, 0);
+        if (splitSum !== curCount) {
+          validationError = `El desglose (${splitSum}) no coincide con la cantidad aprobada (${curCount}).`;
+        }
+        nextQuotas = rawRule.quotas;
+      } else if (rawRule.quotas.length === 1 || ruleByRowDay.has(`${req.area_id}|${req.position_id}|${req.shift_id}|${dow}`)) {
+        nextQuotas = curCount > 0 ? [{ priority: nextPrio, required_count: curCount }] : [];
+      } else {
+        nextPrio = curPrio;
+        nextQuotas = curQuotas;
+      }
+    }
+
     if (
-      curCount !== rule.count ||
-      curPrio !== rule.priority ||
-      !quotasEqual(curQuotas, rule.quotas)
+      curCount !== nextCount ||
+      curPrio !== nextPrio ||
+      !quotasEqual(curQuotas, nextQuotas) ||
+      validationError
     ) {
       affected.push({
         id: req.id,
@@ -906,9 +988,11 @@ export async function previewAffectedGeneratedRequirements(
         current_count: curCount,
         current_priority: curPrio,
         current_quotas: curQuotas,
-        next_count: rule.count,
-        next_priority: rule.priority,
-        next_quotas: rule.quotas,
+        next_count: nextCount,
+        next_priority: nextPrio,
+        next_quotas: nextQuotas,
+        is_blue_am00: isBlueAm00,
+        validation_error: validationError,
       });
     }
   }
@@ -995,8 +1079,25 @@ export async function materializeTemplates(
   const blueApprovedMap = blueProposal
     ? validatedBlueApproved ?? getInitialApprovedTrucksByWeekday(blueProposal)
     : null;
-  const blueUpserts =
-    blueProposal && blueApprovedMap ? buildBlueExpressApplyPlan(blueProposal, blueApprovedMap) : [];
+  let blueUpserts: ReturnType<typeof buildBlueExpressApplyPlan> = [];
+  if (blueProposal && blueApprovedMap) {
+    try {
+      const bluePriorityMap = buildBlueExpressPriorityMap(
+        templates,
+        safeTemplateQuotas,
+        blueProposal.identifiers
+      );
+      blueUpserts = buildBlueExpressApplyPlan(blueProposal, blueApprovedMap, bluePriorityMap);
+    } catch (bluePrioErr: any) {
+      return {
+        success: false,
+        error: bluePrioErr?.message || 'Error en el desglose por prioridad de Blue Express AM 00.',
+        count: 0,
+        createdCount: 0,
+        skippedCount: 0,
+      };
+    }
+  }
 
   if ((!templates || templates.length === 0) && blueUpserts.length === 0) {
     return { success: true, error: null, count: 0, createdCount: 0, skippedCount: 0 };
@@ -1391,30 +1492,71 @@ export async function applyBlueExpressNightStaffingProposal(
       };
     }
 
-    const rows = buildBlueExpressApplyPlan(preview.proposal, validatedApproved);
     const supabase = createAdminClient();
+    let bluePriorityMap: Map<string, PriorityQuotaItem[]> | null = null;
+    if (process.env.ROSTER_ISOLATED_TEST !== 'true') {
+      const [{ data: tpls }, { data: tqRows, error: tqErr }] = await Promise.all([
+        supabase
+          .from('requirement_templates')
+          .select('*')
+          .eq('area_id', preview.proposal.identifiers.areaId)
+          .eq('shift_id', preview.proposal.identifiers.shiftId),
+        supabase
+          .from('requirement_template_priority_quotas')
+          .select('area_id, position_id, shift_id, day_of_week, priority, required_count')
+          .eq('area_id', preview.proposal.identifiers.areaId)
+          .eq('shift_id', preview.proposal.identifiers.shiftId),
+      ]);
+      const safeTq = (!tqErr && Array.isArray(tqRows) ? tqRows : []) as TemplatePriorityQuotaRow[];
+      bluePriorityMap = buildBlueExpressPriorityMap(tpls, safeTq, preview.proposal.identifiers);
+    }
+
+    const rows = buildBlueExpressApplyPlan(preview.proposal, validatedApproved, bluePriorityMap);
     let upsertedCount = 0;
-    const CHUNK_SIZE = 200;
 
-    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-      const chunk = rows.slice(i, i + CHUNK_SIZE);
-      const { data, error } = await supabase
-        .from('shift_requirements')
-        .upsert(chunk, {
-          onConflict: 'area_id,position_id,shift_id,date,is_extra',
-          ignoreDuplicates: false,
-        })
-        .select('id');
-
-      if (error) {
+    if (process.env.ROSTER_ISOLATED_TEST !== 'true') {
+      const userClient = await createClient();
+      const { data: rpcData, error: rpcError } = await userClient.rpc(
+        'materialize_requirements_with_quotas',
+        {
+          p_items: [],
+          p_holiday_delete_ids: [],
+          p_blue_upserts: rows,
+          p_start_date: startDate,
+          p_end_date: endDate,
+        }
+      );
+      if (rpcError) {
         return {
           success: false,
-          upsertedCount,
+          upsertedCount: 0,
           proposal: preview.proposal,
-          error: error.message,
+          error: rpcError.message,
         };
       }
-      upsertedCount += data?.length || chunk.length;
+      upsertedCount = (rpcData as { blue_upserted_count?: number } | null)?.blue_upserted_count ?? rows.length;
+    } else {
+      const CHUNK_SIZE = 200;
+      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+        const chunk = rows.slice(i, i + CHUNK_SIZE).map(({ priority_quotas: _pq, ...dbRow }) => dbRow);
+        const { data, error } = await supabase
+          .from('shift_requirements')
+          .upsert(chunk, {
+            onConflict: 'area_id,position_id,shift_id,date,is_extra',
+            ignoreDuplicates: false,
+          })
+          .select('id');
+
+        if (error) {
+          return {
+            success: false,
+            upsertedCount,
+            proposal: preview.proposal,
+            error: error.message,
+          };
+        }
+        upsertedCount += data?.length || chunk.length;
+      }
     }
 
     if (process.env.ROSTER_ISOLATED_TEST !== 'true') {

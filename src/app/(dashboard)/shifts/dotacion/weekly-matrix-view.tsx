@@ -1077,18 +1077,32 @@ export function WeeklyMatrixView({
                             className="hover:bg-slate-50/60 dark:hover:bg-slate-900/30 transition-colors"
                           >
                             <td className="py-1.5 px-2.5 font-medium text-slate-800 dark:text-slate-200">
-                              <div className="flex items-center gap-1.5">
-                                <Badge variant="secondary" className="font-semibold text-[11px] px-1.5 py-0">
-                                  {shift.shiftName}
-                                </Badge>
-                                {shift.templateCount > 1 && (
-                                  <span
-                                    className="text-[10px] text-muted-foreground"
-                                    title="Consolidado desde múltiples reglas"
-                                  >
-                                    ({shift.templateCount})
-                                  </span>
-                                )}
+                              <div className="flex flex-col gap-0.5">
+                                <div className="flex items-center gap-1.5">
+                                  <Badge variant="secondary" className="font-semibold text-[11px] px-1.5 py-0">
+                                    {shift.shiftName}
+                                  </Badge>
+                                  {shift.templateCount > 1 && (
+                                    <span
+                                      className="text-[10px] text-muted-foreground"
+                                      title="Consolidado desde múltiples reglas"
+                                    >
+                                      ({shift.templateCount})
+                                    </span>
+                                  )}
+                                </div>
+                                {group.areaName.toLowerCase().includes('blue') &&
+                                  (group.positionName.toLowerCase().includes('conductor') ||
+                                    group.positionName.toLowerCase().includes('ayudante')) &&
+                                  (shift.startTime.startsWith('00:00') ||
+                                    shift.shiftName.toUpperCase().includes('00')) && (
+                                    <span
+                                      className="text-[9px] text-indigo-700 dark:text-indigo-300 font-medium leading-tight"
+                                      title="La cantidad nocturna se calcula en Generar Mes; aquí editas la prioridad."
+                                    >
+                                      Prioridad editable · Cant. vía Blue Express
+                                    </span>
+                                  )}
                               </div>
                             </td>
                             <td className="py-1 px-1.5">

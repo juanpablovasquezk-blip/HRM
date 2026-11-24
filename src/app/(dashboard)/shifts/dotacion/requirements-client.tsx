@@ -1146,13 +1146,28 @@ export function RequirementsClient({ initialReqs, templates, templateQuotas = []
                         {formatQuotasSummary(item.current_quotas, item.current_count)}
                       </td>
                       <td className="py-2 px-2 font-semibold text-orange-700 dark:text-orange-300">
-                        {formatQuotasSummary(item.next_quotas, item.next_count)}
+                        <div>{formatQuotasSummary(item.next_quotas, item.next_count)}</div>
+                        {item.validation_error && (
+                          <p className="text-[10px] text-red-600 font-medium mt-0.5">{item.validation_error}</p>
+                        )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            {affectedReqs.some((a) => a.is_blue_am00) && (
+              <div className="px-5 py-2 border-t border-indigo-100 bg-indigo-50/70 dark:bg-indigo-950/30 text-xs text-indigo-800 dark:text-indigo-200">
+                Blue Express AM 00 (solo prioridad, cantidades intactas):{' '}
+                <strong>
+                  Conductor = {affectedReqs.filter((a) => a.is_blue_am00 && a.position_name.toLowerCase().includes('conductor')).reduce((s, a) => s + a.next_count, 0)}
+                </strong>
+                {' · '}
+                <strong>
+                  Ayudante = {affectedReqs.filter((a) => a.is_blue_am00 && a.position_name.toLowerCase().includes('ayudante')).reduce((s, a) => s + a.next_count, 0)}
+                </strong>
+              </div>
+            )}
             <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
               <Button variant="outline" size="sm" onClick={() => setAffectedReqs([])} disabled={isSyncingAffected}>
                 Solo guardar regla semanal
@@ -1160,7 +1175,11 @@ export function RequirementsClient({ initialReqs, templates, templateQuotas = []
               <Button
                 size="sm"
                 onClick={handleApplyAffectedSync}
-                disabled={isSyncingAffected || selectedAffectedIds.size === 0}
+                disabled={
+                  isSyncingAffected ||
+                  selectedAffectedIds.size === 0 ||
+                  affectedReqs.some((a) => selectedAffectedIds.has(a.id) && Boolean(a.validation_error))
+                }
                 className="bg-orange-600 hover:bg-orange-700 text-white"
               >
                 {isSyncingAffected && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
