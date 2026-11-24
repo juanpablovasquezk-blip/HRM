@@ -23,14 +23,25 @@ export interface OptimizationResult {
   violations_after: number;
 }
 
-/**
- * Attempt to optimize assignments by swapping to reduce violations.
- */
-export function optimizeAssignments(
+export interface OptimizerExecutionOptions {
+  deadlineAt?: number;
+  signal?: AbortSignal;
+}
+
+function* optimizeAssignmentsGen(
   assignments: AssignmentCandidate[],
   personnelPool: PersonnelAvailability[],
-  slots: ShiftSlot[]
-): OptimizationResult {
+  slots: ShiftSlot[],
+  options?: OptimizerExecutionOptions
+): Generator<void, OptimizationResult, void> {
+  const checkDeadline = () => {
+    if (options?.signal?.aborted) {
+      throw new Error('Optimización de v1 cancelada por el usuario o por desconexión.');
+    }
+    if (options?.deadlineAt !== undefined && Date.now() > options.deadlineAt) {
+      throw new Error('Límite de ejecución excedido durante la optimización de v1.');
+    }
+  };
   let currentAssignments = [...assignments];
   let swapsMade = 0;
   
@@ -125,6 +136,8 @@ export function optimizeAssignments(
         }
         if (swapsMade >= MAX_TOTAL_SWAPS) break;
         if (performance.now() - startTime > MAX_OPTIMIZATION_TIME_MS) break;
+        checkDeadline();
+        yield;
       }
       if (swapsMade >= MAX_TOTAL_SWAPS) break;
       if (performance.now() - startTime > MAX_OPTIMIZATION_TIME_MS) break;
@@ -143,6 +156,40 @@ export function optimizeAssignments(
     violations_before: initialViolations,
     violations_after: finalViolations,
   };
+}
+
+/**
+ * Attempt to optimize assignments by swapping to reduce violations.
+ */
+export function optimizeAssignments(
+  assignments: AssignmentCandidate[],
+  personnelPool: PersonnelAvailability[],
+  slots: ShiftSlot[],
+  options?: OptimizerExecutionOptions
+): OptimizationResult {
+  const gen = optimizeAssignmentsGen(assignments, personnelPool, slots, options);
+  let step = gen.next();
+  while (!step.done) step = gen.next();
+  return step.value;
+}
+
+export async function optimizeAssignmentsAsync(
+  assignments: AssignmentCandidate[],
+  personnelPool: PersonnelAvailability[],
+  slots: ShiftSlot[],
+  options?: OptimizerExecutionOptions
+): Promise<OptimizationResult> {
+  const gen = optimizeAssignmentsGen(assignments, personnelPool, slots, options);
+  let lastYieldAt = Date.now();
+  let step = gen.next();
+  while (!step.done) {
+    if (Date.now() - lastYieldAt >= 20) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      lastYieldAt = Date.now();
+    }
+    step = gen.next();
+  }
+  return step.value;
 }
 
 /**

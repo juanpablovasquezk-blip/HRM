@@ -1,8 +1,8 @@
 import { eachDayOfInterval, format, parseISO } from 'date-fns';
-import { greedyAssign } from '../greedy-assign';
-import { optimizeAssignments } from '../optimizer';
+import { greedyAssign, greedyAssignAsync } from '../greedy-assign';
+import { optimizeAssignments, optimizeAssignmentsAsync } from '../optimizer';
 import type { PersonnelAvailability, ShiftSlot } from '../types';
-import { scheduleCrossArea } from './cobertura';
+import { scheduleCrossArea, scheduleCrossAreaAsync } from './cobertura';
 import {
   buildDotacionSlotKey,
   isAssignmentProtected,
@@ -173,12 +173,13 @@ function buildV1ShiftSlots(params: {
     .filter((s) => s.filled_count < s.required_count);
 }
 
-/**
- * Compares v1 (current engine in dry-run mode) vs v2 (parallel engine)
- * with the exact same dotación, availability, absences, and protected shifts.
- * Never writes to the database and never calls `generateSchedule`.
- */
-export function compareEnginesPreview(params: {
+export type PreviewCompareStage =
+  | 'loading_data'
+  | 'calculating_v1'
+  | 'calculating_v2'
+  | 'preparing_comparison';
+
+export interface CompareEnginesPreviewParams {
   startDate: string;
   endDate: string;
   rawRequirements: RawShiftRequirement[];
@@ -209,7 +210,15 @@ export function compareEnginesPreview(params: {
   baseCalendarByPerson?: Map<string, Set<string>> | null;
   unconfirmedRules?: string[];
   referenceDate?: Date;
-}): PreviewComparisonResult {
+  deadlineAt?: number;
+  signal?: AbortSignal;
+}
+
+function computeV1PreviewMetrics(
+  params: CompareEnginesPreviewParams,
+  scopedPrepared: ReturnType<typeof prepareDotacionSlots>,
+  scopedSlotKeys: Set<string>
+): EnginePreviewMetrics {
   const {
     startDate,
     endDate,
@@ -221,46 +230,13 @@ export function compareEnginesPreview(params: {
     blueAreaId = '',
     areaFilter,
     positionFilter,
-    ns22Config,
-    reinforcementConfig,
     areaNameById,
     positionNameById,
-    baseCalendarByPerson,
-    unconfirmedRules = [],
     referenceDate = new Date(),
   } = params;
-
   const normStart = normalizeIsoDate(startDate);
   const normEnd = normalizeIsoDate(endDate);
 
-  // Scoped ordinary dotación for apples-to-apples coverage measurement
-  const preparedAll = prepareDotacionSlots(rawRequirements, existingAssignments, {
-    referenceDate,
-    areaNameById,
-    positionNameById,
-  });
-  const scopedPrepared = {
-    ...preparedAll,
-    ordinarySlots: preparedAll.ordinarySlots.filter(
-      (s) =>
-        s.date >= normStart &&
-        s.date <= normEnd &&
-        (!areaFilter || s.area_id === areaFilter) &&
-        (!positionFilter || positionFilter.length === 0 || positionFilter.includes(s.position_id))
-    ),
-    extraSlots: preparedAll.extraSlots.filter(
-      (s) =>
-        s.date >= normStart &&
-        s.date <= normEnd &&
-        (!areaFilter || s.area_id === areaFilter) &&
-        (!positionFilter || positionFilter.length === 0 || positionFilter.includes(s.position_id))
-    ),
-  };
-  const scopedSlotKeys = new Set(scopedPrepared.ordinarySlots.map((s) => s.slot_key));
-
-  // -------------------------------------------------------------------------
-  // 1. Run v1 in memory (greedyAssign + optimizeAssignments, NEVER generateSchedule)
-  // -------------------------------------------------------------------------
   const t1Start = performance.now();
   const v1Pool = buildV1PersonnelPool({
     personnel,
@@ -298,17 +274,111 @@ export function compareEnginesPreview(params: {
     normStart,
     normEnd,
     allShifts,
-    blueAreaId
+    blueAreaId,
+    { deadlineAt: params.deadlineAt, signal: params.signal }
   );
-  const v1Opt = optimizeAssignments(greedyRes.assignments, v1Pool, v1Slots);
+  const v1Opt = optimizeAssignments(greedyRes.assignments, v1Pool, v1Slots, {
+    deadlineAt: params.deadlineAt,
+    signal: params.signal,
+  });
   const t1Ms = performance.now() - t1Start;
+  return finalizeV1PreviewMetrics(params, scopedPrepared, scopedSlotKeys, v1Opt.assignments, t1Ms);
+}
+
+async function computeV1PreviewMetricsAsync(
+  params: CompareEnginesPreviewParams,
+  scopedPrepared: ReturnType<typeof prepareDotacionSlots>,
+  scopedSlotKeys: Set<string>
+): Promise<EnginePreviewMetrics> {
+  const {
+    startDate,
+    endDate,
+    rawRequirements,
+    existingAssignments,
+    personnel,
+    approvedLeaves = [],
+    allShifts = [],
+    blueAreaId = '',
+    areaFilter,
+    positionFilter,
+    areaNameById,
+    positionNameById,
+    referenceDate = new Date(),
+  } = params;
+  const normStart = normalizeIsoDate(startDate);
+  const normEnd = normalizeIsoDate(endDate);
+
+  const t1Start = performance.now();
+  const v1Pool = buildV1PersonnelPool({
+    personnel,
+    existingAssignments,
+    approvedLeaves,
+    startDate,
+    endDate,
+    positionFilter,
+  });
+  const v1Slots = buildV1ShiftSlots({
+    rawRequirements,
+    existingAssignments,
+    startDate,
+    endDate,
+    areaFilter,
+    positionFilter,
+    areaNameById,
+    positionNameById,
+    referenceDate,
+  });
+  const existingForV1Constraints = existingAssignments
+    .filter((a) => a.status !== 'cancelled')
+    .map((a) => ({
+      personnel_id: a.personnel_id,
+      date: normalizeIsoDate(a.date),
+      duration_hours: Number(a.duration_hours) || 8,
+      shift_start: a.shift_start || '08:00',
+      shift_end: a.shift_end || '16:00',
+    }));
+
+  const execOpts = { deadlineAt: params.deadlineAt, signal: params.signal };
+  const greedyRes = await greedyAssignAsync(
+    v1Slots,
+    v1Pool,
+    existingForV1Constraints,
+    normStart,
+    normEnd,
+    allShifts,
+    blueAreaId,
+    execOpts
+  );
+  const v1Opt = await optimizeAssignmentsAsync(greedyRes.assignments, v1Pool, v1Slots, execOpts);
+  const t1Ms = performance.now() - t1Start;
+  return finalizeV1PreviewMetrics(params, scopedPrepared, scopedSlotKeys, v1Opt.assignments, t1Ms);
+}
+
+function finalizeV1PreviewMetrics(
+  params: CompareEnginesPreviewParams,
+  scopedPrepared: ReturnType<typeof prepareDotacionSlots>,
+  scopedSlotKeys: Set<string>,
+  optAssignments: ReturnType<typeof optimizeAssignments>['assignments'],
+  t1Ms: number
+): EnginePreviewMetrics {
+  const {
+    startDate,
+    endDate,
+    existingAssignments,
+    personnel,
+    approvedLeaves = [],
+    allShifts = [],
+    referenceDate = new Date(),
+  } = params;
+  const normStart = normalizeIsoDate(startDate);
+  const normEnd = normalizeIsoDate(endDate);
 
   const v1Refs: GeneratedAssignmentRef[] = [];
   let v1PrimaryCount = 0;
   let v1SecondaryCount = 0;
   let v1ReinforcementCount = 0;
 
-  for (const a of v1Opt.assignments) {
+  for (const a of optAssignments) {
     const key = buildDotacionSlotKey({
       date: a.date,
       area_id: a.area_id,
@@ -339,7 +409,6 @@ export function compareEnginesPreview(params: {
   const v1Conflicts: JornadaViolation[] = [];
   const shiftMap = new Map(allShifts.map((s) => [s.id, s]));
 
-  // Audit v1 assignments under the same ROSTER-03 jornada rules
   const v1ShiftsByPerson = new Map<string, ScheduledShiftInterval[]>();
   for (const a of existingAssignments) {
     if (a.status === 'cancelled') continue;
@@ -354,7 +423,7 @@ export function compareEnginesPreview(params: {
       duration_hours: Number(a.duration_hours) || 8,
     });
   }
-  for (const a of v1Opt.assignments) {
+  for (const a of optAssignments) {
     const person = personnel.find((p) => p.personnel_id === a.personnel_id);
     if (!person) continue;
     const sh = shiftMap.get(a.shift_id);
@@ -375,7 +444,7 @@ export function compareEnginesPreview(params: {
     v1ShiftsByPerson.set(a.personnel_id, [...prev, interval]);
   }
 
-  const v1Metrics: EnginePreviewMetrics = {
+  return {
     engine: 'v1',
     label: 'Motor Actual (v1 · Predeterminado)',
     total_required: v1Coverage.ordinary.total_required,
@@ -391,30 +460,13 @@ export function compareEnginesPreview(params: {
     holiday_warnings: [],
     execution_time_ms: Math.round(t1Ms * 100) / 100,
   };
+}
 
-  // -------------------------------------------------------------------------
-  // 2. Run v2 in memory (scheduleCrossArea, zero DB writes)
-  // -------------------------------------------------------------------------
-  const t2Start = performance.now();
-  const v2Res = scheduleCrossArea({
-    startDate,
-    endDate,
-    rawRequirements,
-    existingAssignments,
-    personnel,
-    approvedLeaves,
-    areaFilter,
-    positionFilter,
-    ns22Config,
-    reinforcementConfig,
-    areaNameById,
-    positionNameById,
-    baseCalendarByPerson,
-    referenceDate,
-  });
-  const t2Ms = performance.now() - t2Start;
-
-  const v2Metrics: EnginePreviewMetrics = {
+function buildV2MetricsFromResult(
+  v2Res: ReturnType<typeof scheduleCrossArea>,
+  t2Ms: number
+): EnginePreviewMetrics {
+  return {
     engine: 'v2',
     label: 'Motor Nuevo (v2 · Paralelo)',
     total_required: v2Res.stats.total_required,
@@ -430,7 +482,62 @@ export function compareEnginesPreview(params: {
     holiday_warnings: v2Res.holiday_warnings,
     execution_time_ms: Math.round(t2Ms * 100) / 100,
   };
+}
 
+function computeV2PreviewMetrics(params: CompareEnginesPreviewParams) {
+  const t2Start = performance.now();
+  const v2Res = scheduleCrossArea({
+    startDate: params.startDate,
+    endDate: params.endDate,
+    rawRequirements: params.rawRequirements,
+    existingAssignments: params.existingAssignments,
+    personnel: params.personnel,
+    approvedLeaves: params.approvedLeaves ?? [],
+    areaFilter: params.areaFilter,
+    positionFilter: params.positionFilter,
+    ns22Config: params.ns22Config,
+    reinforcementConfig: params.reinforcementConfig,
+    areaNameById: params.areaNameById,
+    positionNameById: params.positionNameById,
+    baseCalendarByPerson: params.baseCalendarByPerson,
+    referenceDate: params.referenceDate ?? new Date(),
+    deadlineAt: params.deadlineAt,
+    signal: params.signal,
+  });
+  const t2Ms = performance.now() - t2Start;
+  return { v2Res, v2Metrics: buildV2MetricsFromResult(v2Res, t2Ms) };
+}
+
+async function computeV2PreviewMetricsAsync(params: CompareEnginesPreviewParams) {
+  const t2Start = performance.now();
+  const v2Res = await scheduleCrossAreaAsync({
+    startDate: params.startDate,
+    endDate: params.endDate,
+    rawRequirements: params.rawRequirements,
+    existingAssignments: params.existingAssignments,
+    personnel: params.personnel,
+    approvedLeaves: params.approvedLeaves ?? [],
+    areaFilter: params.areaFilter,
+    positionFilter: params.positionFilter,
+    ns22Config: params.ns22Config,
+    reinforcementConfig: params.reinforcementConfig,
+    areaNameById: params.areaNameById,
+    positionNameById: params.positionNameById,
+    baseCalendarByPerson: params.baseCalendarByPerson,
+    referenceDate: params.referenceDate ?? new Date(),
+    deadlineAt: params.deadlineAt,
+    signal: params.signal,
+  });
+  const t2Ms = performance.now() - t2Start;
+  return { v2Res, v2Metrics: buildV2MetricsFromResult(v2Res, t2Ms) };
+}
+
+function buildComparisonResult(
+  v1Metrics: EnginePreviewMetrics,
+  v2Res: ReturnType<typeof scheduleCrossArea>,
+  v2Metrics: EnginePreviewMetrics,
+  unconfirmedRules: string[] = []
+): PreviewComparisonResult {
   const collectedUnconfirmed = Array.from(
     new Set([
       ...unconfirmedRules,
@@ -457,4 +564,72 @@ export function compareEnginesPreview(params: {
       conflicts_diff: v2Metrics.jornada_conflicts_count - v1Metrics.jornada_conflicts_count,
     },
   };
+}
+
+function prepareScopedDotacion(params: CompareEnginesPreviewParams) {
+  const normStart = normalizeIsoDate(params.startDate);
+  const normEnd = normalizeIsoDate(params.endDate);
+  const preparedAll = prepareDotacionSlots(params.rawRequirements, params.existingAssignments, {
+    referenceDate: params.referenceDate ?? new Date(),
+    areaNameById: params.areaNameById,
+    positionNameById: params.positionNameById,
+  });
+  const scopedPrepared = {
+    ...preparedAll,
+    ordinarySlots: preparedAll.ordinarySlots.filter(
+      (s) =>
+        s.date >= normStart &&
+        s.date <= normEnd &&
+        (!params.areaFilter || s.area_id === params.areaFilter) &&
+        (!params.positionFilter || params.positionFilter.length === 0 || params.positionFilter.includes(s.position_id))
+    ),
+    extraSlots: preparedAll.extraSlots.filter(
+      (s) =>
+        s.date >= normStart &&
+        s.date <= normEnd &&
+        (!params.areaFilter || s.area_id === params.areaFilter) &&
+        (!params.positionFilter || params.positionFilter.length === 0 || params.positionFilter.includes(s.position_id))
+    ),
+  };
+  const scopedSlotKeys = new Set(scopedPrepared.ordinarySlots.map((s) => s.slot_key));
+  return { scopedPrepared, scopedSlotKeys };
+}
+
+/**
+ * Compares v1 (current engine in dry-run mode) vs v2 (parallel engine)
+ * with the exact same dotación, availability, absences, and protected shifts.
+ * Never writes to the database and never calls `generateSchedule`.
+ */
+export function compareEnginesPreview(
+  params: CompareEnginesPreviewParams
+): PreviewComparisonResult {
+  const { scopedPrepared, scopedSlotKeys } = prepareScopedDotacion(params);
+  const v1Metrics = computeV1PreviewMetrics(params, scopedPrepared, scopedSlotKeys);
+  const { v2Res, v2Metrics } = computeV2PreviewMetrics(params);
+  return buildComparisonResult(v1Metrics, v2Res, v2Metrics, params.unconfirmedRules);
+}
+
+/**
+ * Async staged version of `compareEnginesPreview` for streaming real server stages
+ * (`calculating_v1` -> `calculating_v2` -> `preparing_comparison`).
+ */
+export async function compareEnginesPreviewStaged(
+  params: CompareEnginesPreviewParams,
+  onStage?: (stage: Exclude<PreviewCompareStage, 'loading_data'>) => void | Promise<void>
+): Promise<PreviewComparisonResult> {
+  const yieldTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  const { scopedPrepared, scopedSlotKeys } = prepareScopedDotacion(params);
+
+  await onStage?.('calculating_v1');
+  await yieldTick();
+  const v1Metrics = await computeV1PreviewMetricsAsync(params, scopedPrepared, scopedSlotKeys);
+
+  await onStage?.('calculating_v2');
+  await yieldTick();
+  const { v2Res, v2Metrics } = await computeV2PreviewMetricsAsync(params);
+
+  await onStage?.('preparing_comparison');
+  await yieldTick();
+  return buildComparisonResult(v1Metrics, v2Res, v2Metrics, params.unconfirmedRules);
 }

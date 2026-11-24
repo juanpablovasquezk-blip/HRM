@@ -889,3 +889,245 @@ test('Exclusividades de horario en v2: solo titulares 4x4 (NS22) e Ítalo Guerra
   // El cupo AM 08 queda vacante porque ni Ítalo ni Titular 2 pueden salir de su exclusividad y opLegacy ya tomó NS22
   assert.ok(res.remaining_vacancies.some((v) => v.shift_id === 'shift-am08'));
 });
+
+test('Caché de candidatos y reasignaciones respeta 2 domingos libres en el mes incluso con NS22 iniciado el sábado a >8 días', () => {
+  // Noviembre 2026 tiene 5 domingos (1, 8, 15, 22, 29): máximo 3 domingos trabajados (2 libres).
+  // El operador ya tiene turnos protegidos los domingos 1 y 8 -> solo puede tocar 1 domingo más.
+  const op: PersonnelScheduleProfile = {
+    personnel_id: 'op-sun',
+    first_name: 'Operador Domingos',
+    main_position: 'pos-aero',
+    area_id: 'area-aero',
+  };
+
+  const res = scheduleCrossArea({
+    startDate: '2026-11-14',
+    endDate: '2026-11-29',
+    rawRequirements: [
+      {
+        id: 'req-sat-ns22',
+        date: '2026-11-14', // sábado 22:00 -> domingo 15 07:00
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_id: 'shift-ns22',
+        required_count: 1,
+        priority: 'Crítico',
+        shift: { name: 'NS 22', start_time: '22:00', end_time: '07:00', duration_hours: 8 },
+      },
+      {
+        id: 'req-sun-29',
+        date: '2026-11-29', // domingo a 15 días (>8 días) del sábado 14
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_id: 'shift-am08',
+        required_count: 1,
+        priority: 'Crítico',
+        shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+      },
+    ],
+    existingAssignments: [
+      {
+        id: 'prot-sun-1',
+        personnel_id: 'op-sun',
+        date: '2026-11-01',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_id: 'shift-am08',
+        status: 'scheduled',
+        is_locked: true,
+        shift_start: '08:00',
+        shift_end: '16:00',
+        duration_hours: 8,
+      },
+      {
+        id: 'prot-sun-8',
+        personnel_id: 'op-sun',
+        date: '2026-11-08',
+        area_id: 'area-aero',
+        position_id: 'pos-aero',
+        shift_id: 'shift-am08',
+        status: 'scheduled',
+        is_locked: true,
+        shift_start: '08:00',
+        shift_end: '16:00',
+        duration_hours: 8,
+      },
+    ],
+    personnel: [op],
+    referenceDate: new Date('2026-10-25T12:00:00Z'),
+  });
+
+  // Debe tomar el NS22 del sábado 14 (ocupa domingo 15) y NO tomar el domingo 29 (preserva 22 y 29 libres)
+  assert.deepEqual(
+    res.ordinary_assignments.map((a) => a.date),
+    ['2026-11-14']
+  );
+  assert.equal(res.audit_violations.length, 0);
+  assert.equal(res.remaining_vacancies.length, 1);
+  assert.equal(res.remaining_vacancies[0].date, '2026-11-29');
+});
+
+test('Dotación ajustada semanal: prioriza cupos críticos de fin de semana sobre normales de lunes/martes y refuerzos', () => {
+  const op: PersonnelScheduleProfile = {
+    personnel_id: 'op-tight',
+    first_name: 'Operador Ajustado',
+    main_position: 'pos-1',
+    area_id: 'area-1',
+  };
+
+  // Semana 2026-12-07..2026-12-13 (1 operador con tope 42h / 5 turnos de 8h = máximo 5 días):
+  // Lunes 7 y martes 8 tienen cupos Normal; miércoles 9 a domingo 13 tienen cupos Crítico.
+  const reqs: RawShiftRequirement[] = [
+    {
+      id: 'mon-norm',
+      date: '2026-12-07',
+      area_id: 'area-1',
+      position_id: 'pos-1',
+      shift_id: 'sh-am08',
+      required_count: 1,
+      priority: 'NORMAL',
+      shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+    },
+    {
+      id: 'tue-norm',
+      date: '2026-12-08',
+      area_id: 'area-1',
+      position_id: 'pos-1',
+      shift_id: 'sh-am08',
+      required_count: 1,
+      priority: 'NORMAL',
+      shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+    },
+    ...['2026-12-09', '2026-12-10', '2026-12-11', '2026-12-12', '2026-12-13'].map((d, i) => ({
+      id: `crit-${i}`,
+      date: d,
+      area_id: 'area-1',
+      position_id: 'pos-1',
+      shift_id: 'sh-am08',
+      required_count: 1,
+      priority: 'CRITICAL',
+      shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+    })),
+  ];
+
+  const res = scheduleCrossArea({
+    startDate: '2026-12-07',
+    endDate: '2026-12-13',
+    rawRequirements: reqs,
+    existingAssignments: [],
+    personnel: [op],
+    reinforcementConfig: {
+      'pos-1': {
+        shift_id: 'sh-am07',
+        shift_start: '07:00',
+        shift_end: '15:00',
+        duration_hours: 8,
+        area_id: 'area-1',
+        position_id: 'pos-1',
+        days_of_week: [1, 2, 3, 4, 5],
+      },
+    },
+    referenceDate: new Date('2026-11-24T12:00:00Z'),
+  });
+
+  // Cubre los 5 cupos Crítico (miércoles a domingo) y deja libres lunes/martes sin refuerzos
+  assert.deepEqual(
+    res.ordinary_assignments.map((a) => a.date).sort(),
+    ['2026-12-09', '2026-12-10', '2026-12-11', '2026-12-12', '2026-12-13']
+  );
+  assert.equal(res.reinforcements.length, 0);
+  assert.equal(res.audit_violations.length, 0);
+  assert.deepEqual(
+    res.remaining_vacancies.map((v) => v.date).sort(),
+    ['2026-12-07', '2026-12-08']
+  );
+});
+
+test('Lunes a domingo igual prioridad con capacidad ajustada y polivalente: usa no-polivalente al inicio para cubrir sábado/domingo', () => {
+  // 2 operadores (máximo 5 días/semana cada uno):
+  // - op-base: solo pos-general
+  // - op-poly: polivalente (pos-general y pos-special), único habilitado para pos-special en sábado y domingo
+  const opBase: PersonnelScheduleProfile = {
+    personnel_id: 'op-base',
+    first_name: 'Operador Base',
+    main_position: 'pos-general',
+    area_id: 'area-1',
+  };
+  const opPoly: PersonnelScheduleProfile = {
+    personnel_id: 'op-poly',
+    first_name: 'Operador Polivalente',
+    main_position: 'pos-general',
+    secondary_positions: ['pos-special'],
+    area_id: 'area-1',
+  };
+
+  // Lunes a viernes: 1 cupo pos-general/día (NORMAL)
+  // Sábado y domingo: 1 cupo pos-special/día (NORMAL) -> igual prioridad en toda la semana
+  const reqs: RawShiftRequirement[] = [
+    ...['2026-12-07', '2026-12-08', '2026-12-09', '2026-12-10', '2026-12-11'].map((d, i) => ({
+      id: `gen-${i}`,
+      date: d,
+      area_id: 'area-1',
+      position_id: 'pos-general',
+      shift_id: 'sh-am08',
+      required_count: 1,
+      priority: 'NORMAL',
+      shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+    })),
+    ...['2026-12-12', '2026-12-13'].map((d, i) => ({
+      id: `spec-${i}`,
+      date: d,
+      area_id: 'area-1',
+      position_id: 'pos-special',
+      shift_id: 'sh-am08',
+      required_count: 1,
+      priority: 'NORMAL',
+      shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+    })),
+  ];
+
+  const res = scheduleCrossArea({
+    startDate: '2026-12-07',
+    endDate: '2026-12-13',
+    rawRequirements: reqs,
+    existingAssignments: [],
+    personnel: [opPoly, opBase], // opPoly primero en el array para confirmar que la flexibilidad decide, no el orden
+    reinforcementConfig: {
+      'pos-general': {
+        shift_id: 'sh-am07',
+        shift_start: '07:00',
+        shift_end: '15:00',
+        duration_hours: 8,
+        area_id: 'area-1',
+        position_id: 'pos-general',
+        days_of_week: [1, 2, 3, 4, 5],
+      },
+    },
+    referenceDate: new Date('2026-11-24T12:00:00Z'),
+  });
+
+  // op-base toma los turnos iniciales (Lun 7 y Mar 8) y op-poly cubre S-D pos-special -> 7/7 cubiertos, 0 vacantes, 3 refuerzos (Lun/Mié/Vie)
+  assert.equal(res.stats.total_required, 7);
+  assert.equal(res.stats.total_covered, 7);
+  assert.equal(res.stats.total_vacancies, 0);
+  assert.equal(res.reinforcements.length, 3);
+  assert.deepEqual(
+    res.reinforcements.map((r) => r.date).sort(),
+    ['2026-12-07', '2026-12-09', '2026-12-11']
+  );
+  assert.equal(res.audit_violations.length, 0);
+  assert.deepEqual(
+    res.ordinary_assignments
+      .filter((a) => a.position_id === 'pos-special')
+      .map((a) => ({ date: a.date, pid: a.personnel_id }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    [
+      { date: '2026-12-12', pid: 'op-poly' },
+      { date: '2026-12-13', pid: 'op-poly' },
+    ]
+  );
+  assert.ok(
+    res.ordinary_assignments.some((a) => a.date === '2026-12-07' && a.personnel_id === 'op-base') &&
+      res.ordinary_assignments.some((a) => a.date === '2026-12-08' && a.personnel_id === 'op-base')
+  );
+});

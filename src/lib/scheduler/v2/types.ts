@@ -379,6 +379,12 @@ export interface CrossAreaScheduleResult {
     covered_secondary_count: number;
     reinforcement_count: number;
   };
+  timings?: {
+    candidate_selection_ms: number;
+    relocations_ms: number;
+    final_audit_ms: number;
+    total_ms: number;
+  };
 }
 
 // ---------------------------------------------------------------------------

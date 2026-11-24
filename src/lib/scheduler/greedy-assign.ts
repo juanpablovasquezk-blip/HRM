@@ -24,10 +24,15 @@ export interface GreedyResult {
   diagnosticLogs?: string[];
 }
 
+export interface GreedyAssignExecutionOptions {
+  deadlineAt?: number;
+  signal?: AbortSignal;
+}
+
 /**
- * Run greedy assignment across all shift slots
+ * Run greedy assignment across all shift slots (generator for sync & async drivers)
  */
-export function greedyAssign(
+function* greedyAssignGen(
   slots: ShiftSlot[],
   personnelPool: PersonnelAvailability[],
   existingAssignments: Array<{
@@ -40,8 +45,17 @@ export function greedyAssign(
   startDateStr?: string,
   endDateStr?: string,
   allShifts?: any[],
-  blueAreaIdParam?: string
-): GreedyResult {
+  blueAreaIdParam?: string,
+  options?: GreedyAssignExecutionOptions
+): Generator<void, GreedyResult, void> {
+  const checkDeadline = () => {
+    if (options?.signal?.aborted) {
+      throw new Error('Cálculo de v1 cancelado por el usuario o por desconexión.');
+    }
+    if (options?.deadlineAt !== undefined && Date.now() > options.deadlineAt) {
+      throw new Error('Límite de ejecución excedido durante el cálculo de v1.');
+    }
+  };
   const assignments: AssignmentCandidate[] = [];
   const allViolations: ConstraintViolation[] = [];
   const unfilled: ShiftSlot[] = [];
@@ -604,11 +618,15 @@ export function greedyAssign(
     return a.date.localeCompare(b.date);
   });
 
-  function runTiers(tiers: Array<{name: string, minPriority: number, passes: number[]}>) {
+  function* runTiers(
+    tiers: Array<{ name: string; minPriority: number; passes: number[] }>
+  ): Generator<void, void, void> {
     for (const tier of tiers) {
       const tierSlots = sortedSlots.filter(s => getSlotPriority(s, s.position_name || '', s.area_name || '', s.shift_name || '') >= tier.minPriority);
       for (const pass of tier.passes) {
         for (const slot of tierSlots) {
+          checkDeadline();
+          yield;
           const alreadyAssigned = assignments.filter(a => a.date === slot.date && a.shift_id === slot.shift_id && a.area_id === slot.area_id && a.position_id === slot.position_id).length;
           const needed = slot.required_count - (slot.filled_count + alreadyAssigned);
           if (needed <= 0) continue;
@@ -687,7 +705,7 @@ export function greedyAssign(
   }
 
   // EXECUTION
-  runTiers([
+  yield* runTiers([
     { name: 'Critical', minPriority: 95, passes: [0, 1] },
     { name: 'Standard', minPriority: 0, passes: [0, 1] }
   ]);
@@ -695,6 +713,8 @@ export function greedyAssign(
   // WEEKLY REINFORCEMENT (40h guarantee)
   if (startDateStr && endDateStr && allShifts) {
     for (const p of personnelPool) {
+      checkDeadline();
+      yield;
       const pPosName = normStr(p.main_position_name);
       const pRot = normStr(p.rotation_pattern);
       
@@ -1042,4 +1062,73 @@ export function greedyAssign(
   }
 
   return { assignments, violations: allViolations, unfilled, diagnosticLogs };
+}
+
+export function greedyAssign(
+  slots: ShiftSlot[],
+  personnelPool: PersonnelAvailability[],
+  existingAssignments: Array<{
+    personnel_id: string;
+    date: string;
+    duration_hours: number;
+    shift_start: string;
+    shift_end: string;
+  }>,
+  startDateStr?: string,
+  endDateStr?: string,
+  allShifts?: any[],
+  blueAreaIdParam?: string,
+  options?: GreedyAssignExecutionOptions
+): GreedyResult {
+  const gen = greedyAssignGen(
+    slots,
+    personnelPool,
+    existingAssignments,
+    startDateStr,
+    endDateStr,
+    allShifts,
+    blueAreaIdParam,
+    options
+  );
+  let step = gen.next();
+  while (!step.done) step = gen.next();
+  return step.value;
+}
+
+export async function greedyAssignAsync(
+  slots: ShiftSlot[],
+  personnelPool: PersonnelAvailability[],
+  existingAssignments: Array<{
+    personnel_id: string;
+    date: string;
+    duration_hours: number;
+    shift_start: string;
+    shift_end: string;
+  }>,
+  startDateStr?: string,
+  endDateStr?: string,
+  allShifts?: any[],
+  blueAreaIdParam?: string,
+  options?: GreedyAssignExecutionOptions
+): Promise<GreedyResult> {
+  const gen = greedyAssignGen(
+    slots,
+    personnelPool,
+    existingAssignments,
+    startDateStr,
+    endDateStr,
+    allShifts,
+    blueAreaIdParam,
+    options
+  );
+  let lastYieldAt = Date.now();
+  let step = gen.next();
+  while (!step.done) {
+    if (Date.now() - lastYieldAt >= 20) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      lastYieldAt = Date.now();
+    }
+    step = gen.next();
+  }
+  return step.value;
 }

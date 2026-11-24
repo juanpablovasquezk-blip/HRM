@@ -127,6 +127,10 @@ export function getApplicableWeeklyHoursLimit(
   return GENERAL_ORDINARY_WEEKLY_HOURS;
 }
 
+const shiftRangeCache = new Map<string, { startMs: number; endMs: number }>();
+const shiftOccupiedCache = new Map<string, string[]>();
+const shiftWeekSplitCache = new Map<string, Map<string, number>>();
+
 /**
  * Parses a date (YYYY-MM-DD) + time (HH:MM or HH:MM:SS) into local Date timestamps,
  * adding 1 day to end when endTime <= startTime (overnight / crossing midnight).
@@ -139,12 +143,22 @@ export function buildShiftDateTimeRange(
   const normalizedDate = normalizeIsoDate(dateStr);
   const startTime = (shiftStart || '00:00').slice(0, 5);
   const endTime = (shiftEnd || '00:00').slice(0, 5);
+  const key = `${normalizedDate}|${startTime}|${endTime}`;
+  const cached = shiftRangeCache.get(key);
+  if (cached) {
+    return { start: new Date(cached.startMs), end: new Date(cached.endMs) };
+  }
 
   const start = parseISO(`${normalizedDate}T${startTime}:00`);
   let end = parseISO(`${normalizedDate}T${endTime}:00`);
 
   if (endTime <= startTime) {
     end = addDays(end, 1);
+  }
+
+  if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+    if (shiftRangeCache.size > 5000) shiftRangeCache.clear();
+    shiftRangeCache.set(key, { startMs: start.getTime(), endMs: end.getTime() });
   }
 
   return { start, end };
@@ -157,6 +171,10 @@ export function buildShiftDateTimeRange(
  * does not occupy the following day.
  */
 export function getShiftOccupiedDates(shift: ScheduledShiftInterval): string[] {
+  const key = `${normalizeIsoDate(shift.date)}|${(shift.shift_start || '00:00').slice(0, 5)}|${(shift.shift_end || '00:00').slice(0, 5)}`;
+  const cached = shiftOccupiedCache.get(key);
+  if (cached) return cached;
+
   const { start, end } = buildShiftDateTimeRange(
     shift.date,
     shift.shift_start,
@@ -177,6 +195,8 @@ export function getShiftOccupiedDates(shift: ScheduledShiftInterval): string[] {
     cursor = addDays(cursor, 1);
   }
 
+  if (shiftOccupiedCache.size > 5000) shiftOccupiedCache.clear();
+  shiftOccupiedCache.set(key, dates);
   return dates;
 }
 
@@ -191,6 +211,11 @@ export function getShiftOccupiedDates(shift: ScheduledShiftInterval): string[] {
 export function splitShiftHoursByWeek(
   shift: ScheduledShiftInterval
 ): Map<string, number> {
+  const totalDuration = Number(shift.duration_hours) || 0;
+  const cacheKey = `${normalizeIsoDate(shift.date)}|${(shift.shift_start || '00:00').slice(0, 5)}|${(shift.shift_end || '00:00').slice(0, 5)}|${totalDuration}`;
+  const cached = shiftWeekSplitCache.get(cacheKey);
+  if (cached) return cached;
+
   const { start, end } = buildShiftDateTimeRange(
     shift.date,
     shift.shift_start,
@@ -198,7 +223,6 @@ export function splitShiftHoursByWeek(
   );
   const byWeek = new Map<string, number>();
   const totalSpanMinutes = differenceInMinutes(end, start);
-  const totalDuration = Number(shift.duration_hours) || 0;
 
   if (totalSpanMinutes <= 0 || totalDuration <= 0) {
     return byWeek;
@@ -222,6 +246,8 @@ export function splitShiftHoursByWeek(
     weekCursor = nextWeek;
   }
 
+  if (shiftWeekSplitCache.size > 5000) shiftWeekSplitCache.clear();
+  shiftWeekSplitCache.set(cacheKey, byWeek);
   return byWeek;
 }
 
@@ -305,17 +331,32 @@ export function classifyLeave(leave: RawLeaveRecord): LeaveCategory {
   return 'other_absence';
 }
 
-export function expandApprovedLeaves(
-  leaves: RawLeaveRecord[],
-  personnelId: string
-): {
+type ExpandedLeavesResult = {
   allLeaveDates: Set<string>;
   monthlyFreeChoiceDates: Set<string>;
   birthdayDates: Set<string>;
   genericPersonalDates: Set<string>;
   medicalOrVacationDates: Set<string>;
   leaveByDate: Map<string, RawLeaveRecord>;
-} {
+};
+
+const expandedLeavesCache = new WeakMap<
+  RawLeaveRecord[],
+  { length: number; byPerson: Map<string, ExpandedLeavesResult> }
+>();
+
+export function expandApprovedLeaves(
+  leaves: RawLeaveRecord[],
+  personnelId: string
+): ExpandedLeavesResult {
+  let cachedEntry = expandedLeavesCache.get(leaves);
+  if (!cachedEntry || cachedEntry.length !== leaves.length) {
+    cachedEntry = { length: leaves.length, byPerson: new Map() };
+    expandedLeavesCache.set(leaves, cachedEntry);
+  }
+  const hit = cachedEntry.byPerson.get(personnelId);
+  if (hit) return hit;
+
   const allLeaveDates = new Set<string>();
   const monthlyFreeChoiceDates = new Set<string>();
   const birthdayDates = new Set<string>();
@@ -350,7 +391,7 @@ export function expandApprovedLeaves(
     }
   }
 
-  return {
+  const result: ExpandedLeavesResult = {
     allLeaveDates,
     monthlyFreeChoiceDates,
     birthdayDates,
@@ -358,6 +399,8 @@ export function expandApprovedLeaves(
     medicalOrVacationDates,
     leaveByDate,
   };
+  cachedEntry.byPerson.set(personnelId, result);
+  return result;
 }
 
 /**

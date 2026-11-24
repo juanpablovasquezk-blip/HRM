@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deriveNs22AnchorFromHistory, isNs22TitularWorkNight } from './aeropuerto-ns22';
+import { scheduleCrossAreaAsync } from './cobertura';
 import { fetchAllPaginated } from './pagination';
-import { compareEnginesPreview } from './preview-compare';
+import { compareEnginesPreview, compareEnginesPreviewStaged } from './preview-compare';
 import type {
   PersonnelScheduleProfile,
   RawExistingAssignment,
@@ -435,4 +436,252 @@ test('ROSTER-06: paginación completa más allá de una página y fallo en pági
   }, 2);
   assert.equal(failRes.data, null);
   assert.equal(failRes.error, 'DB timeout on page 2');
+});
+
+test('ROSTER-06: compareEnginesPreviewStaged informa etapas reales en orden sin guardar en DB', async () => {
+  const stages: string[] = [];
+  const res = await compareEnginesPreviewStaged(
+    {
+      startDate: '2026-11-09',
+      endDate: '2026-11-09',
+      rawRequirements: [
+        {
+          id: 'st-req-1',
+          date: '2026-11-09',
+          area_id: 'area-1',
+          position_id: 'pos-1',
+          shift_id: 'sh-1',
+          required_count: 1,
+          priority: 'Normal',
+          is_extra: false,
+          shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+        },
+      ],
+      existingAssignments: [],
+      personnel: [
+        {
+          personnel_id: 'op-1',
+          first_name: 'Operador Uno',
+          main_position: 'pos-1',
+          area_id: 'area-1',
+        },
+      ],
+      allShifts: [
+        { id: 'sh-1', name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+      ],
+    },
+    (stage) => {
+      stages.push(stage);
+    }
+  );
+
+  assert.deepEqual(stages, ['calculating_v1', 'calculating_v2', 'preparing_comparison']);
+  assert.equal(res.dry_run, true);
+  assert.equal(res.called_v1_save_route, false);
+  assert.equal(res.v1.total_covered, 1);
+  assert.equal(res.v2.total_covered, 1);
+});
+
+test('ROSTER-06: cancelación vía AbortSignal detiene scheduleCrossAreaAsync en curso sin esperar al final', async () => {
+  const controller = new AbortController();
+  const days = Array.from({ length: 28 }, (_, idx) => {
+    const d = new Date(Date.UTC(2026, 11, 7 + idx));
+    return d.toISOString().slice(0, 10);
+  });
+  const personnel: PersonnelScheduleProfile[] = Array.from({ length: 48 }, (_, i) => ({
+    personnel_id: `cancel-p-${i}`,
+    first_name: `Operador ${i}`,
+    main_position: `pos-${i % 3}`,
+    secondary_positions: [`pos-${(i + 1) % 3}`],
+    area_id: `area-${i % 4}`,
+  }));
+  const rawRequirements: RawShiftRequirement[] = [];
+  let seq = 1;
+  for (const d of days) {
+    for (let k = 0; k < 24; k++) {
+      rawRequirements.push({
+        id: `cancel-req-${seq++}`,
+        date: d,
+        area_id: `area-${k % 8}`,
+        position_id: `pos-${k % 3}`,
+        shift_id: `sh-${k % 3}`,
+        required_count: 1,
+        priority: k < 8 ? 'Crítico' : 'Normal',
+        is_extra: false,
+        shift: {
+          name: `SH ${k % 3}`,
+          start_time: k % 3 === 0 ? '08:00' : k % 3 === 1 ? '14:00' : '22:00',
+          end_time: k % 3 === 0 ? '16:00' : k % 3 === 1 ? '22:00' : '07:00',
+          duration_hours: 8,
+        },
+      });
+    }
+  }
+
+  const timer = setTimeout(() => controller.abort(), 50);
+  const t0 = performance.now();
+  let caughtErr: Error | null = null;
+  try {
+    await scheduleCrossAreaAsync({
+      startDate: '2026-12-07',
+      endDate: '2027-01-03',
+      rawRequirements,
+      existingAssignments: [],
+      personnel,
+      signal: controller.signal,
+      deadlineAt: Date.now() + 30_000,
+    });
+  } catch (err: any) {
+    caughtErr = err;
+  } finally {
+    clearTimeout(timer);
+  }
+  const elapsedMs = performance.now() - t0;
+
+  assert.ok(caughtErr, 'Debe abortar cuando llega la señal de cancelación');
+  assert.match(caughtErr!.message, /cancelado/i);
+  assert.ok(elapsedMs < 2000, `Debe detenerse rápido tras cancelar (tardó ${elapsedMs}ms)`);
+});
+
+test('ROSTER-06: cancelación o límite vencido detiene la comparación también durante v1 (calculating_v1)', async () => {
+  const days = Array.from({ length: 28 }, (_, idx) => {
+    const d = new Date(Date.UTC(2026, 11, 7 + idx));
+    return d.toISOString().slice(0, 10);
+  });
+  const personnel: PersonnelScheduleProfile[] = Array.from({ length: 30 }, (_, i) => ({
+    personnel_id: `v1c-p-${i}`,
+    first_name: `Op ${i}`,
+    main_position: 'pos-1',
+    area_id: 'area-1',
+  }));
+  const rawRequirements: RawShiftRequirement[] = [];
+  let seq = 1;
+  for (const d of days) {
+    for (let k = 0; k < 12; k++) {
+      rawRequirements.push({
+        id: `v1c-req-${seq++}`,
+        date: d,
+        area_id: 'area-1',
+        position_id: 'pos-1',
+        shift_id: 'sh-1',
+        required_count: 1,
+        priority: 'NORMAL',
+        is_extra: false,
+        shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+      });
+    }
+  }
+
+  const controller = new AbortController();
+  const stagesSeen: string[] = [];
+  const timer = setTimeout(() => controller.abort(), 35);
+  const t0 = performance.now();
+  let caught: Error | null = null;
+  try {
+    await compareEnginesPreviewStaged(
+      {
+        startDate: '2026-12-07',
+        endDate: '2027-01-03',
+        rawRequirements,
+        existingAssignments: [],
+        personnel,
+        allShifts: [{ id: 'sh-1', name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 }],
+        signal: controller.signal,
+        deadlineAt: Date.now() + 30_000,
+      },
+      (s) => {
+        stagesSeen.push(s);
+      }
+    );
+  } catch (err: any) {
+    caught = err;
+  } finally {
+    clearTimeout(timer);
+  }
+  const elapsedMs = performance.now() - t0;
+
+  assert.ok(caught, 'Debe abortar durante v1 cuando llega la cancelación');
+  assert.match(caught!.message, /v1|cancelad/i);
+  assert.deepEqual(stagesSeen, ['calculating_v1']);
+  assert.ok(elapsedMs < 2000, `Debe detenerse rápido durante v1 (tardó ${elapsedMs}ms)`);
+});
+
+test('ROSTER-06: ReadableStream.cancel() (cierre desde navegador) aborta el trabajo en curso en el servidor', async () => {
+  const days = Array.from({ length: 28 }, (_, idx) => {
+    const d = new Date(Date.UTC(2026, 11, 7 + idx));
+    return d.toISOString().slice(0, 10);
+  });
+  const personnel: PersonnelScheduleProfile[] = Array.from({ length: 30 }, (_, i) => ({
+    personnel_id: `httpc-p-${i}`,
+    first_name: `Op ${i}`,
+    main_position: 'pos-1',
+    area_id: 'area-1',
+  }));
+  const rawRequirements: RawShiftRequirement[] = [];
+  let seq = 1;
+  for (const d of days) {
+    for (let k = 0; k < 12; k++) {
+      rawRequirements.push({
+        id: `httpc-req-${seq++}`,
+        date: d,
+        area_id: 'area-1',
+        position_id: 'pos-1',
+        shift_id: 'sh-1',
+        required_count: 1,
+        priority: 'NORMAL',
+        is_extra: false,
+        shift: { name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+      });
+    }
+  }
+
+  const workController = new AbortController();
+  let stoppedBySignal = false;
+  let serverDonePromise: Promise<void> | null = null;
+
+  const stream = new ReadableStream<Uint8Array>({
+    cancel() {
+      workController.abort();
+    },
+    start(controller) {
+      const enc = new TextEncoder();
+      serverDonePromise = (async () => {
+        try {
+          controller.enqueue(enc.encode('{"type":"stage","stage":"calculating_v1"}\n'));
+          await compareEnginesPreviewStaged(
+            {
+              startDate: '2026-12-07',
+              endDate: '2027-01-03',
+              rawRequirements,
+              existingAssignments: [],
+              personnel,
+              allShifts: [{ id: 'sh-1', name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 }],
+              signal: workController.signal,
+              deadlineAt: Date.now() + 30_000,
+            },
+            (stage) => {
+              if (!workController.signal.aborted) {
+                controller.enqueue(enc.encode(`${JSON.stringify({ type: 'stage', stage })}\n`));
+              }
+            }
+          );
+        } catch {
+          stoppedBySignal = workController.signal.aborted;
+        }
+      })();
+    },
+  });
+
+  const reader = stream.getReader();
+  const firstChunk = await reader.read();
+  assert.equal(firstChunk.done, false);
+
+  const t0 = performance.now();
+  await reader.cancel('user_clicked_cancel');
+  await serverDonePromise;
+  const elapsedMs = performance.now() - t0;
+
+  assert.equal(workController.signal.aborted, true);
+  assert.equal(stoppedBySignal, true);
+  assert.ok(elapsedMs < 2000, `El stream cancelado debe detener el cálculo rápido (tardó ${elapsedMs}ms)`);
 });

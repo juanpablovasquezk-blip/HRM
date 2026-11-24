@@ -92,6 +92,41 @@ function removeShiftInstance(
   return [...list.slice(0, idx), ...list.slice(idx + 1)];
 }
 
+function getTouchedSundayMonths(
+  shift: Pick<
+    ScheduledShiftInterval,
+    'date' | 'shift_start' | 'shift_end' | 'duration_hours'
+  >
+): Set<string> {
+  const occupied = getShiftOccupiedDates(shift);
+  const months = new Set<string>();
+  for (const d of occupied) {
+    if (new Date(`${d}T00:00:00Z`).getUTCDay() === 0) {
+      months.add(d.slice(0, 7));
+    }
+  }
+  return months;
+}
+
+function shiftsShareSundayMonth(
+  a: Pick<
+    ScheduledShiftInterval,
+    'date' | 'shift_start' | 'shift_end' | 'duration_hours'
+  >,
+  b: Pick<
+    ScheduledShiftInterval,
+    'date' | 'shift_start' | 'shift_end' | 'duration_hours'
+  >
+): boolean {
+  const monthsA = getTouchedSundayMonths(a);
+  if (monthsA.size === 0) return false;
+  const monthsB = getTouchedSundayMonths(b);
+  for (const m of monthsA) {
+    if (monthsB.has(m)) return true;
+  }
+  return false;
+}
+
 /**
  * Determines whether an existing assignment must be preserved as a fixed commitment
  * vs. treated as a replaceable draft within the current generation range and filter.
@@ -198,7 +233,7 @@ function isSlotInScope(
  * 5. Assign reinforcements at the end (e.g. AM07 Mon-Fri in Airport, AM04 in enabled
  *    Bodegas), respecting scope, jornada, and rests, kept separate from ordinary coverage.
  */
-export function scheduleCrossArea(params: {
+export interface ScheduleCrossAreaParams {
   startDate: string;
   endDate: string;
   rawRequirements: RawShiftRequirement[];
@@ -220,7 +255,18 @@ export function scheduleCrossArea(params: {
   areaNameById?: Map<string, string>;
   positionNameById?: Map<string, string>;
   holidayCalendarRegistry?: Record<number, VerifiedHolidayYearCalendar>;
-}): CrossAreaScheduleResult {
+  deadlineAt?: number;
+  signal?: AbortSignal;
+}
+
+function* scheduleCrossAreaGen(
+  params: ScheduleCrossAreaParams
+): Generator<void, CrossAreaScheduleResult, void> {
+  const v2TotalStart = performance.now();
+  let candidateSelectionMs = 0;
+  let relocationsMs = 0;
+  let finalAuditMs = 0;
+
   const {
     startDate,
     endDate,
@@ -237,7 +283,18 @@ export function scheduleCrossArea(params: {
     areaNameById,
     positionNameById,
     holidayCalendarRegistry,
+    deadlineAt,
+    signal,
   } = params;
+
+  const checkDeadline = () => {
+    if (signal?.aborted) {
+      throw new Error('Cálculo de v2 cancelado por el usuario o por desconexión.');
+    }
+    if (deadlineAt !== undefined && Date.now() > deadlineAt) {
+      throw new Error('Límite de ejecución excedido durante el cálculo de v2.');
+    }
+  };
 
   const normStart = normalizeIsoDate(startDate);
   const normEnd = normalizeIsoDate(endDate);
@@ -453,6 +510,66 @@ export function scheduleCrossArea(params: {
     }
   }
 
+  const leavesByPerson = new Map<string, RawLeaveRecord[]>();
+  for (const l of approvedLeaves) {
+    if (l.status !== 'approved') continue;
+    if (!leavesByPerson.has(l.personnel_id)) {
+      leavesByPerson.set(l.personnel_id, []);
+    }
+    leavesByPerson.get(l.personnel_id)!.push(l);
+  }
+
+  const personnelByPosition = new Map<
+    string,
+    Array<{ person: PersonnelScheduleProfile; matchType: 'primary' | 'secondary' }>
+  >();
+  for (const p of nonTitularPersonnel) {
+    if (p.main_position) {
+      if (!personnelByPosition.has(p.main_position)) {
+        personnelByPosition.set(p.main_position, []);
+      }
+      personnelByPosition.get(p.main_position)!.push({ person: p, matchType: 'primary' });
+    }
+    for (const sec of p.secondary_positions || []) {
+      if (sec === p.main_position) continue;
+      if (!personnelByPosition.has(sec)) {
+        personnelByPosition.set(sec, []);
+      }
+      personnelByPosition.get(sec)!.push({ person: p, matchType: 'secondary' });
+    }
+  }
+
+  const validateSingleCandidateForSlot = (
+    p: PersonnelScheduleProfile,
+    matchType: 'primary' | 'secondary',
+    slot: DotacionSlot
+  ) => {
+    if (
+      !canPersonTakeShiftInterval(p, {
+        shift_id: slot.shift_id,
+        shift_start: slot.shift_start,
+        shift_name: slot.shift_name,
+      })
+    ) {
+      return null;
+    }
+    const pShifts = shiftsByPerson.get(p.personnel_id) || [];
+    const pLeaves = leavesByPerson.get(p.personnel_id) || [];
+    const violations = validateJornadaConstraints(
+      p,
+      slotToInterval(slot),
+      pShifts,
+      pLeaves
+    );
+    if (hasMandatoryJornadaViolation(violations)) return null;
+    return {
+      person: p,
+      matchType,
+      warningCount: violations.filter((v) => v.severity === 'warning').length,
+      totalHours: getTotalHours(pShifts),
+    };
+  };
+
   const getValidCandidatesForSlot = (
     slot: DotacionSlot,
     excludePersonId?: string
@@ -462,7 +579,7 @@ export function scheduleCrossArea(params: {
     warningCount: number;
     totalHours: number;
   }> => {
-    const interval = slotToInterval(slot);
+    const posCands = personnelByPosition.get(slot.position_id) || [];
     const result: Array<{
       person: PersonnelScheduleProfile;
       matchType: 'primary' | 'secondary';
@@ -470,35 +587,10 @@ export function scheduleCrossArea(params: {
       totalHours: number;
     }> = [];
 
-    for (const p of nonTitularPersonnel) {
+    for (const { person: p, matchType } of posCands) {
       if (p.personnel_id === excludePersonId) continue;
-      const matchType = getPositionMatch(p, slot.position_id);
-      if (!matchType) continue;
-      if (
-        !canPersonTakeShiftInterval(p, {
-          shift_id: slot.shift_id,
-          shift_start: slot.shift_start,
-          shift_name: slot.shift_name,
-        })
-      ) {
-        continue;
-      }
-
-      const pShifts = shiftsByPerson.get(p.personnel_id) || [];
-      const violations = validateJornadaConstraints(
-        p,
-        interval,
-        pShifts,
-        approvedLeaves
-      );
-      if (hasMandatoryJornadaViolation(violations)) continue;
-
-      result.push({
-        person: p,
-        matchType,
-        warningCount: violations.filter((v) => v.severity === 'warning').length,
-        totalHours: getTotalHours(pShifts),
-      });
+      const valid = validateSingleCandidateForSlot(p, matchType, slot);
+      if (valid) result.push(valid);
     }
 
     return result;
@@ -529,11 +621,34 @@ export function scheduleCrossArea(params: {
     return true;
   };
 
-  const tryAugmentOrDisplaceUnit = (unit: OpenSlotUnit): boolean => {
+  const nonTitularById = new Map(
+    nonTitularPersonnel.map((p) => [p.personnel_id, p])
+  );
+  const scopedSlotByKey = new Map(
+    scopedOrdinarySlots.map((s) => [s.slot_key, s])
+  );
+  const emptyReplacementSlots = new Set<string>();
+  const cachedReplacementsBySlotKey = new Map<
+    string,
+    ReturnType<typeof getValidCandidatesForSlot>
+  >();
+  let rosterMutationVersion = 0;
+  const lastFailedRelocVersion = new Map<string, number>();
+
+  function* tryAugmentOrDisplaceUnit(
+    unit: OpenSlotUnit
+  ): Generator<void, boolean, void> {
+    if (lastFailedRelocVersion.get(unit.unitId) === rosterMutationVersion) {
+      return false;
+    }
     const slot = unit.slot;
     const slotInterval = slotToInterval(slot);
 
     for (let i = 0; i < ordinaryAssignments.length; i++) {
+      if ((i & 15) === 0) {
+        checkDeadline();
+        yield;
+      }
       const existingAss = ordinaryAssignments[i];
       if (
         existingAss.is_locked ||
@@ -542,9 +657,38 @@ export function scheduleCrossArea(params: {
         continue;
       }
 
-      const person = nonTitularPersonnel.find(
-        (p) => p.personnel_id === existingAss.personnel_id
+      const existingSlot = scopedSlotByKey.get(existingAss.slot_key);
+      if (!existingSlot) continue;
+
+      const existingIsNs22 = existingAss.assignment_kind === 'ns22_replacement';
+      const existingEffPrio = existingIsNs22
+        ? Math.max(4, existingAss.priority_rank)
+        : existingAss.priority_rank;
+
+      // Case A: Strictly higher priority (or NS22 over non-NS22 critical) displaces lower priority
+      const targetStrictlyOutranks =
+        unit.effectivePriorityRank > existingEffPrio ||
+        (unit.isNs22Replacement && !existingIsNs22 && unit.effectivePriorityRank === existingEffPrio);
+      const canAugmentEqual = unit.effectivePriorityRank === existingEffPrio;
+
+      if (!targetStrictlyOutranks && !canAugmentEqual) {
+        continue;
+      }
+      if (!targetStrictlyOutranks && emptyReplacementSlots.has(existingSlot.slot_key)) {
+        continue;
+      }
+
+      // Removing a shift >8 days away (unless both touch a Sunday in the same month via occupied dates, e.g. Saturday NS22 -> Sunday 07:00) cannot resolve local rest/week/streak constraints on `slot`
+      const dayDiffMs = Math.abs(
+        Date.parse(`${existingAss.date}T00:00:00Z`) - Date.parse(`${slot.date}T00:00:00Z`)
       );
+      if (dayDiffMs > 8 * 86_400_000) {
+        if (!shiftsShareSundayMonth(slotToInterval(existingSlot), slotInterval)) {
+          continue;
+        }
+      }
+
+      const person = nonTitularById.get(existingAss.personnel_id);
       if (!person) continue;
 
       const matchForTarget = getPositionMatch(person, slot.position_id);
@@ -567,24 +711,9 @@ export function scheduleCrossArea(params: {
         person,
         slotInterval,
         shiftsWithoutExisting,
-        approvedLeaves
+        leavesByPerson.get(person.personnel_id) || []
       );
       if (hasMandatoryJornadaViolation(targetViolations)) continue;
-
-      const existingSlot = scopedOrdinarySlots.find(
-        (s) => s.slot_key === existingAss.slot_key
-      );
-      if (!existingSlot) continue;
-
-      const existingIsNs22 = existingAss.assignment_kind === 'ns22_replacement';
-      const existingEffPrio = existingIsNs22
-        ? Math.max(4, existingAss.priority_rank)
-        : existingAss.priority_rank;
-
-      // Case A: Strictly higher priority (or NS22 over non-NS22 critical) displaces lower priority
-      const targetStrictlyOutranks =
-        unit.effectivePriorityRank > existingEffPrio ||
-        (unit.isNs22Replacement && !existingIsNs22 && unit.effectivePriorityRank === existingEffPrio);
 
       if (targetStrictlyOutranks) {
         shiftsByPerson.set(person.personnel_id, [
@@ -616,16 +745,30 @@ export function scheduleCrossArea(params: {
           (u) => u.filled && u.slot.slot_key === existingAss.slot_key
         );
         if (displacedUnit) displacedUnit.filled = false;
+        emptyReplacementSlots.clear();
+        cachedReplacementsBySlotKey.clear();
+        rosterMutationVersion++;
         return true;
       }
 
       // Case B: Equal priority augmenting swap — move `person` to `slot` and fill `existingSlot` with another free candidate
       if (unit.effectivePriorityRank === existingEffPrio) {
-        const replacementsForExisting = getValidCandidatesForSlot(
-          existingSlot,
-          person.personnel_id
+        if (emptyReplacementSlots.has(existingSlot.slot_key)) continue;
+        let baseReplacements = cachedReplacementsBySlotKey.get(existingSlot.slot_key);
+        if (!baseReplacements) {
+          baseReplacements = getValidCandidatesForSlot(existingSlot);
+          cachedReplacementsBySlotKey.set(existingSlot.slot_key, baseReplacements);
+        }
+        const replacementsForExisting = baseReplacements.filter(
+          (c) => c.person.personnel_id !== person.personnel_id
         );
+        if (baseReplacements.length === 0) {
+          emptyReplacementSlots.add(existingSlot.slot_key);
+        }
         if (replacementsForExisting.length > 0) {
+          emptyReplacementSlots.clear();
+          cachedReplacementsBySlotKey.clear();
+          rosterMutationVersion++;
           replacementsForExisting.sort((a, b) => {
             if (a.matchType !== b.matchType) {
               return a.matchType === 'primary' ? -1 : 1;
@@ -685,6 +828,7 @@ export function scheduleCrossArea(params: {
       }
     }
 
+    lastFailedRelocVersion.set(unit.unitId, rosterMutationVersion);
     return false;
   };
 
@@ -695,7 +839,15 @@ export function scheduleCrossArea(params: {
       (u) => !u.filled && u.effectivePriorityRank === prio
     );
 
+    const candidatesBySlotKey = new Map<
+      string,
+      ReturnType<typeof getValidCandidatesForSlot>
+    >();
+
+    const tCandStart = performance.now();
     while (true) {
+      checkDeadline();
+      yield;
       const remainingTier = tierUnits.filter((u) => !u.filled);
       if (remainingTier.length === 0) break;
 
@@ -706,8 +858,17 @@ export function scheduleCrossArea(params: {
       let chosenUnit: OpenSlotUnit | null = null;
       let chosenCandidates: ReturnType<typeof getValidCandidatesForSlot> = [];
 
-      for (const unit of poolToPick) {
-        const cands = getValidCandidatesForSlot(unit.slot);
+      for (let uIdx = 0; uIdx < poolToPick.length; uIdx++) {
+        if ((uIdx & 7) === 0) {
+          checkDeadline();
+          yield;
+        }
+        const unit = poolToPick[uIdx];
+        let cands = candidatesBySlotKey.get(unit.slot.slot_key);
+        if (!cands) {
+          cands = getValidCandidatesForSlot(unit.slot);
+          candidatesBySlotKey.set(unit.slot.slot_key, cands);
+        }
         if (cands.length === 0) continue;
         if (
           !chosenUnit ||
@@ -784,20 +945,61 @@ export function scheduleCrossArea(params: {
 
       shiftsByPerson.get(winner.person.personnel_id)!.push(slotToInterval(slot));
       chosenUnit.filled = true;
+      rosterMutationVersion++;
+      emptyReplacementSlots.clear();
+      cachedReplacementsBySlotKey.clear();
       if (chosenUnit.isNs22Replacement && runId && !existingRunOwner) {
         ns22RunOwner.set(runId, winner.person.personnel_id);
       }
-    }
 
+      // Incrementally refresh only winner.person in cached slot candidates within ±8d (or sharing a Sunday month via occupied dates)
+      const winnerId = winner.person.personnel_id;
+      const winnerInterval = slotToInterval(slot);
+      const slotUtcMs = Date.parse(`${slot.date}T00:00:00Z`);
+      const seenRefreshKeys = new Set<string>();
+      for (const remUnit of remainingTier) {
+        if (remUnit.filled) continue;
+        const sk = remUnit.slot.slot_key;
+        if (seenRefreshKeys.has(sk)) continue;
+        seenRefreshKeys.add(sk);
+        const remUtcMs = Date.parse(`${remUnit.slot.date}T00:00:00Z`);
+        if (Math.abs(remUtcMs - slotUtcMs) > 8 * 86_400_000) {
+          if (!shiftsShareSundayMonth(winnerInterval, slotToInterval(remUnit.slot))) {
+            continue;
+          }
+        }
+        const cached = candidatesBySlotKey.get(sk);
+        if (!cached) continue;
+        const matchForRem = getPositionMatch(winner.person, remUnit.slot.position_id);
+        if (!matchForRem) continue;
+        const updatedWinnerEntry = validateSingleCandidateForSlot(
+          winner.person,
+          matchForRem,
+          remUnit.slot
+        );
+        const filtered = cached.filter((c) => c.person.personnel_id !== winnerId);
+        if (updatedWinnerEntry) filtered.push(updatedWinnerEntry);
+        candidatesBySlotKey.set(sk, filtered);
+      }
+    }
+    candidateSelectionMs += performance.now() - tCandStart;
+
+    const tRelocStart = performance.now();
     const unfilledInTier = tierUnits.filter((u) => !u.filled);
     for (const unit of unfilledInTier) {
-      tryAugmentOrDisplaceUnit(unit);
+      checkDeadline();
+      yield;
+      yield* tryAugmentOrDisplaceUnit(unit);
     }
+    relocationsMs += performance.now() - tRelocStart;
   }
 
   // Stage 4: Review and adjust complete ordinary roster
   // Retry any remaining open units via augmenting swaps after all tiers settled
+  const tStage4RelocStart = performance.now();
   for (const unit of openUnits.filter((u) => !u.filled)) {
+    checkDeadline();
+    yield;
     const directCands = getValidCandidatesForSlot(unit.slot);
     if (directCands.length > 0) {
       directCands.sort((a, b) =>
@@ -827,14 +1029,21 @@ export function scheduleCrossArea(params: {
       });
       shiftsByPerson.get(winner.person.personnel_id)!.push(slotToInterval(unit.slot));
       unit.filled = true;
+      rosterMutationVersion++;
+      emptyReplacementSlots.clear();
+      cachedReplacementsBySlotKey.clear();
     } else {
-      tryAugmentOrDisplaceUnit(unit);
+      yield* tryAugmentOrDisplaceUnit(unit);
     }
   }
+  relocationsMs += performance.now() - tStage4RelocStart;
 
   // Full-roster post-audit: verify hours, 12h rest, days off, Sundays, and approved leaves
+  const tAuditStart = performance.now();
   const auditViolations: JornadaViolation[] = [];
   for (const ass of ordinaryAssignments) {
+    checkDeadline();
+    yield;
     if (ass.assignment_kind === 'ns22_titular') continue;
     const person = personnel.find((p) => p.personnel_id === ass.personnel_id);
     if (!person) continue;
@@ -894,6 +1103,7 @@ export function scheduleCrossArea(params: {
       });
     }
   }
+  finalAuditMs = performance.now() - tAuditStart;
 
   // Sync NS22 result summary
   if (ns22Result) {
@@ -1185,6 +1395,7 @@ export function scheduleCrossArea(params: {
     (s) => s.vacancy_count > 0
   );
   const allAssignments = [...ordinaryAssignments, ...reinforcements];
+  const v2TotalMs = performance.now() - v2TotalStart;
 
   return {
     assignments: allAssignments,
@@ -1209,5 +1420,38 @@ export function scheduleCrossArea(params: {
       ).length,
       reinforcement_count: reinforcements.length,
     },
+    timings: {
+      candidate_selection_ms: Math.round(candidateSelectionMs * 100) / 100,
+      relocations_ms: Math.round(relocationsMs * 100) / 100,
+      final_audit_ms: Math.round(finalAuditMs * 100) / 100,
+      total_ms: Math.round(v2TotalMs * 100) / 100,
+    },
   };
+}
+
+export function scheduleCrossArea(
+  params: ScheduleCrossAreaParams
+): CrossAreaScheduleResult {
+  const gen = scheduleCrossAreaGen(params);
+  let step = gen.next();
+  while (!step.done) {
+    step = gen.next();
+  }
+  return step.value;
+}
+
+export async function scheduleCrossAreaAsync(
+  params: ScheduleCrossAreaParams
+): Promise<CrossAreaScheduleResult> {
+  const gen = scheduleCrossAreaGen(params);
+  let lastYieldAt = Date.now();
+  let step = gen.next();
+  while (!step.done) {
+    if (Date.now() - lastYieldAt >= 20) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      lastYieldAt = Date.now();
+    }
+    step = gen.next();
+  }
+  return step.value;
 }

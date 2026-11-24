@@ -79,8 +79,7 @@ import type { PreviewComparisonResult } from '@/lib/scheduler/v2/types';
 import { 
   createManualAssignment, 
   deleteAssignment, 
-  runScheduler, 
-  previewCompareSchedulers,
+  runScheduler,
   clearAutoAssignments,
   bulkDeleteManualAssignments,
   validateAssignments,
@@ -221,8 +220,134 @@ export function RosterGridClient({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
   const [isPreviewComparing, setIsPreviewComparing] = useState(false);
+  const [compareElapsedMs, setCompareElapsedMs] = useState(0);
+  const [compareTotalMs, setCompareTotalMs] = useState<number | null>(null);
+  const [compareStageLabel, setCompareStageLabel] = useState<string | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
+  const compareAbortRef = useRef<AbortController | null>(null);
   const [isPreviewCompareOpen, setIsPreviewCompareOpen] = useState(false);
   const [previewComparison, setPreviewComparison] = useState<PreviewComparisonResult | null>(null);
+
+  useEffect(() => {
+    if (!isPreviewComparing) return;
+    const startedAt = performance.now();
+    setCompareElapsedMs(0);
+    const timer = setInterval(() => {
+      setCompareElapsedMs(performance.now() - startedAt);
+    }, 100);
+    return () => clearInterval(timer);
+  }, [isPreviewComparing]);
+
+  const handleRunPreviewCompare = async () => {
+    if (isPreviewComparing) return;
+    const start = planningRange.from || format(days[0], 'yyyy-MM-dd');
+    const end = planningRange.to || format(days[days.length - 1], 'yyyy-MM-dd');
+    const startedAt = performance.now();
+    const controller = new AbortController();
+    compareAbortRef.current = controller;
+
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 120_000);
+
+    setIsPreviewComparing(true);
+    setCompareError(null);
+    setCompareTotalMs(null);
+    setCompareStageLabel('Cargando datos');
+
+    try {
+      const response = await fetch('/api/shifts/preview-compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startDate: start,
+          endDate: end,
+          areaId: areaFilter || undefined,
+          positionFilter: positionFilter.length > 0 ? positionFilter : undefined,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        let errMsg = `Error al comparar motores (HTTP ${response.status})`;
+        try {
+          const json = await response.json();
+          if (json?.error) errMsg = json.error;
+        } catch {
+          // ignore JSON parse errors on error response
+        }
+        setCompareError(errMsg);
+        toast.error(errMsg);
+        return;
+      }
+
+      if (!response.body) {
+        const msg = 'El servidor no devolvió flujo de respuesta al comparar motores.';
+        setCompareError(msg);
+        toast.error(msg);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let receivedResult = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          const evt = JSON.parse(trimmed);
+          if (evt.type === 'stage') {
+            setCompareStageLabel(evt.label || null);
+          } else if (evt.type === 'error') {
+            const msg = evt.error || 'Error al comparar motores en vista previa';
+            setCompareError(msg);
+            toast.error(msg);
+            return;
+          } else if (evt.type === 'result' && evt.comparison) {
+            receivedResult = true;
+            const total =
+              typeof evt.totalMs === 'number' ? evt.totalMs : performance.now() - startedAt;
+            setCompareTotalMs(total);
+            setPreviewComparison(evt.comparison);
+            setIsPreviewCompareOpen(true);
+          }
+        }
+      }
+
+      if (!receivedResult) {
+        const msg = 'La comparación finalizó sin entregar resultados.';
+        setCompareError(msg);
+        toast.error(msg);
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        if (timedOut) {
+          const stageTxt = compareStageLabel ? ` en la etapa «${compareStageLabel}»` : '';
+          const msg = `La comparación superó el tiempo de espera (120 s)${stageTxt}. Puedes reintentar.`;
+          setCompareError(msg);
+          toast.error(msg);
+        }
+      } else {
+        const msg = err?.message || 'Error de conexión al comparar motores en vista previa.';
+        setCompareError(msg);
+        toast.error(msg);
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      compareAbortRef.current = null;
+      setIsPreviewComparing(false);
+    }
+  };
   const [draggingAssignment, setDraggingAssignment] = useState<Assignment | null>(null);
   const [reasonDialogOpen, setReasonDialogOpen] = useState<{ open: boolean, assignment: Assignment | null, newDate: string }>({ 
     open: false, assignment: null, newDate: '' 
@@ -2297,8 +2422,16 @@ export function RosterGridClient({
       )}
 
       {/* AI Assistant Range Config Dialog */}
-      <Dialog open={isAiConfigOpen} onOpenChange={setIsAiConfigOpen}>
-        <DialogContent className="sm:max-w-[400px]">
+      <Dialog
+        open={isAiConfigOpen}
+        onOpenChange={(open) => {
+          if (!open && isPreviewComparing) {
+            compareAbortRef.current?.abort();
+          }
+          setIsAiConfigOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-slate-800 dark:text-slate-100">
               {aiActionMode === 'scheduling' && <Sparkles className="h-5 w-5 text-emerald-600" />}
@@ -2389,43 +2522,69 @@ export function RosterGridClient({
                 </div>
               </div>
             )}
+
+            {aiActionMode === 'scheduling' && isPreviewComparing && (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 p-3 space-y-2">
+                <div className="flex items-center justify-between text-xs font-medium text-indigo-900">
+                  <span>{compareStageLabel ? `Etapa actual: ${compareStageLabel}...` : 'Comparando motores en vista previa...'}</span>
+                  <span className="font-mono tabular-nums">
+                    {(compareElapsedMs / 1000).toFixed(1)} s
+                  </span>
+                </div>
+                <div className="relative h-2 w-full overflow-hidden rounded-full bg-indigo-200">
+                  <style>{`@keyframes hrmCompareSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }`}</style>
+                  <div
+                    className="h-full w-1/3 rounded-full bg-indigo-600"
+                    style={{ animation: 'hrmCompareSlide 1.3s ease-in-out infinite' }}
+                  />
+                </div>
+                <p className="text-[11px] text-indigo-700">
+                  Vista previa sin guardado en base de datos. Los botones quedan bloqueados hasta terminar.
+                </p>
+              </div>
+            )}
+
+            {aiActionMode === 'scheduling' && !isPreviewComparing && compareError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800 flex items-center justify-between gap-2">
+                <span>{compareError}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 border-red-300 text-red-800 hover:bg-red-100"
+                  onClick={handleRunPreviewCompare}
+                >
+                  Reintentar
+                </Button>
+              </div>
+            )}
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsAiConfigOpen(false)}>Cancelar</Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (isPreviewComparing) {
+                  compareAbortRef.current?.abort();
+                }
+                setIsAiConfigOpen(false);
+              }}
+            >
+              Cancelar
+            </Button>
             {aiActionMode === 'scheduling' && (
               <Button
                 type="button"
                 variant="outline"
                 disabled={isPreviewComparing}
                 className="gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                onClick={async () => {
-                  const start = planningRange.from || format(days[0], 'yyyy-MM-dd');
-                  const end = planningRange.to || format(days[days.length - 1], 'yyyy-MM-dd');
-                  setIsPreviewComparing(true);
-                  try {
-                    const res = await previewCompareSchedulers(
-                      start,
-                      end,
-                      areaFilter || undefined,
-                      undefined,
-                      positionFilter.length > 0 ? positionFilter : undefined
-                    );
-                    if (!res.success || !res.comparison) {
-                      toast.error(res.error || 'Error al comparar motores en vista previa');
-                    } else {
-                      setPreviewComparison(res.comparison);
-                      setIsPreviewCompareOpen(true);
-                    }
-                  } finally {
-                    setIsPreviewComparing(false);
-                  }
-                }}
+                onClick={handleRunPreviewCompare}
               >
                 <Sparkles className="h-4 w-4" />
                 {isPreviewComparing ? 'Comparando...' : 'Comparar v1 vs v2 (Vista Previa)'}
               </Button>
             )}
-            <Button 
+            <Button
+              disabled={isPreviewComparing}
               className={cn(
                 "font-bold gap-2 shadow-lg dark:shadow-none",
                 aiActionMode === 'scheduling' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200" :
@@ -2445,7 +2604,7 @@ export function RosterGridClient({
 
       {/* ROSTER-06: Side-by-side Preview Comparison Modal (zero DB writes) */}
       <Dialog open={isPreviewCompareOpen} onOpenChange={setIsPreviewCompareOpen}>
-        <DialogContent className="sm:max-w-[720px]">
+        <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-indigo-600" />
@@ -2453,6 +2612,11 @@ export function RosterGridClient({
             </DialogTitle>
             <p className="text-sm text-muted-foreground">
               Misma dotación, disponibilidad, ausencias y turnos protegidos. El motor actual (v1) sigue siendo el predeterminado para guardar.
+              {compareTotalMs !== null && (
+                <span className="ml-2 font-medium text-indigo-700">
+                  · Tiempo total: {(compareTotalMs / 1000).toFixed(2)} s ({Math.round(compareTotalMs)} ms)
+                </span>
+              )}
             </p>
           </DialogHeader>
           {previewComparison && (
