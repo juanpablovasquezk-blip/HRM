@@ -63,6 +63,7 @@ interface Personnel {
   last_name_mother: string;
   rut: string;
   main_position: string;
+  secondary_positions?: string[] | null;
   phone: string | null;
   email: string | null;
   birth_date: string | null;
@@ -374,6 +375,7 @@ export default function PersonnelTableClient({
     { id: 'fullName', label: 'Nombre Completo', defaultVisible: true },
     { id: 'rut', label: 'RUT', defaultVisible: true },
     { id: 'main_position', label: 'Cargo', defaultVisible: true },
+    { id: 'secondary_positions', label: 'Cargos Secundarios', defaultVisible: false },
     { id: 'company', label: 'Empresa', defaultVisible: true },
     { id: 'contract_type', label: 'Tipo Contrato', defaultVisible: true },
     { id: 'epp_sizes', label: 'Tallas EPP', defaultVisible: true },
@@ -460,6 +462,7 @@ export default function PersonnelTableClient({
     | 'fullName'
     | 'rut'
     | 'main_position'
+    | 'secondary_positions'
     | 'company'
     | 'contract_type'
     | 'epp_sizes'
@@ -519,6 +522,10 @@ export default function PersonnelTableClient({
         case 'main_position':
           aVal = (positionMap[a.main_position] || a.main_position || '').toLowerCase();
           bVal = (positionMap[b.main_position] || b.main_position || '').toLowerCase();
+          break;
+        case 'secondary_positions':
+          aVal = (a.secondary_positions || []).map(id => positionMap[id] || id).join(', ').toLowerCase();
+          bVal = (b.secondary_positions || []).map(id => positionMap[id] || id).join(', ').toLowerCase();
           break;
         case 'company':
           aVal = (a.company?.name || '').toLowerCase();
@@ -670,6 +677,9 @@ export default function PersonnelTableClient({
         }
         if (visibleColumns.main_position) {
           row['Cargo'] = positionMap[p.main_position] || p.main_position || '';
+        }
+        if (visibleColumns.secondary_positions) {
+          row['Cargos Secundarios'] = (p.secondary_positions || []).map(id => positionMap[id] || id).join(', ');
         }
         if (visibleColumns.company) {
           row['Empresa'] = (p.company as { name: string } | null)?.name || '';
@@ -836,6 +846,7 @@ export default function PersonnelTableClient({
                 {visibleColumns.fullName && renderSortableHeader('fullName', 'Nombre')}
                 {visibleColumns.rut && renderSortableHeader('rut', 'RUT')}
                 {visibleColumns.main_position && renderSortableHeader('main_position', 'Cargo')}
+                {visibleColumns.secondary_positions && renderSortableHeader('secondary_positions', 'Cargos Secundarios')}
                 {visibleColumns.company && renderSortableHeader('company', 'Empresa')}
                 {visibleColumns.contract_type && renderSortableHeader('contract_type', 'Contrato')}
                 {visibleColumns.epp_sizes && renderSortableHeader('epp_sizes', 'Tallas EPP')}
@@ -998,6 +1009,23 @@ export default function PersonnelTableClient({
                         <Badge variant="secondary" className="font-normal">
                           {positionMap[person.main_position] || person.main_position}
                         </Badge>
+                      </TableCell>
+                    )}
+
+                    {/* Cargos Secundarios Cell */}
+                    {visibleColumns.secondary_positions && (
+                      <TableCell>
+                        {person.secondary_positions && person.secondary_positions.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {person.secondary_positions.map(posId => (
+                              <Badge key={posId} variant="outline" className="font-normal text-xs">
+                                {positionMap[posId] || posId}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
                       </TableCell>
                     )}
 
