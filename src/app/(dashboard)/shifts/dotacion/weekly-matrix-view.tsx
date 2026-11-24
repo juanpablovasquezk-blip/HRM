@@ -59,6 +59,7 @@ interface WeeklyMatrixViewProps {
   areas?: MatrixAreaOption[];
   shifts?: MatrixShiftOption[];
   onSaveChanges?: (changes: WeeklyMatrixRowChange[]) => Promise<{ success: boolean; error?: string | null }>;
+  onReviewGenerated?: (rowKeys: Array<{ area_id: string; position_id: string; shift_id: string }>) => void;
 }
 
 interface NewRuleDraft {
@@ -108,6 +109,7 @@ export function WeeklyMatrixView({
   areas = [],
   shifts = [],
   onSaveChanges,
+  onReviewGenerated,
 }: WeeklyMatrixViewProps) {
   const baseGroups = useMemo(
     () => buildWeeklyMatrix(templates, templateQuotas),
@@ -406,6 +408,7 @@ export function WeeklyMatrixView({
 
   const handlePriorityChange = (key: string, priority: OperationalPriority) => {
     const basePrio = basePriorityMap.get(key) || 'NORMAL';
+    const prevGeneralPrio = draftPriorities[key] ?? basePrio;
     setDraftPriorities((prev) => {
       if (priority === basePrio) {
         const next = { ...prev };
@@ -421,6 +424,22 @@ export function WeeklyMatrixView({
       if (!current) return prev;
       const cleaned = normalizePriorityOverrides(current, priority);
       return { ...prev, [key]: cleaned };
+    });
+
+    // Sync single-group days in draftPriorityQuotas that inherited the previous general priority
+    setDraftPriorityQuotas((prev) => {
+      const currentQuotas = { ...(prev[key] ?? baseQuotasMap.get(key) ?? {}) };
+      const currentOv = draftOverrides[key] ?? baseOverridesMap.get(key) ?? {};
+      let changed = false;
+      for (const { dbDay } of MATRIX_DAYS_ORDER) {
+        const dKey = String(dbDay);
+        const dayItems = normalizePriorityQuotaItems(currentQuotas[dKey]);
+        if (dayItems.length === 1 && !currentOv[dKey] && dayItems[0].priority === prevGeneralPrio) {
+          currentQuotas[dKey] = [{ priority, required_count: dayItems[0].required_count }];
+          changed = true;
+        }
+      }
+      return changed ? { ...prev, [key]: currentQuotas } : prev;
     });
   };
 
@@ -672,6 +691,26 @@ export function WeeklyMatrixView({
           <div className="flex flex-wrap items-center gap-2">
             {!isEditing ? (
               <>
+                {onReviewGenerated && baseGroups.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const keys = baseGroups.flatMap((g) =>
+                        g.shifts.map((s) => ({
+                          area_id: g.areaId,
+                          position_id: g.positionId,
+                          shift_id: s.shiftId,
+                        }))
+                      );
+                      onReviewGenerated(keys);
+                    }}
+                    className="h-8 text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                  >
+                    Revisar fechas generadas
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="outline"

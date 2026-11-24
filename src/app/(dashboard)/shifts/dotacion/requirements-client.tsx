@@ -299,6 +299,24 @@ export function RequirementsClient({ initialReqs, templates, templateQuotas = []
     return { success: true, error: null };
   };
 
+  const handleReviewGenerated = async (
+    rowKeys: Array<{ area_id: string; position_id: string; shift_id: string }>
+  ) => {
+    const preview = await previewAffectedGeneratedRequirements(rowKeys);
+    if (!preview.success) {
+      toast.error('Error al revisar requerimientos', { description: preview.error || 'No se pudo consultar.' });
+      return;
+    }
+    if (preview.affected.length === 0) {
+      toast.info('Sin diferencias pendientes', {
+        description: 'Los requerimientos ya generados coinciden con la Matriz Semanal actual.',
+      });
+      return;
+    }
+    setAffectedReqs(preview.affected);
+    setSelectedAffectedIds(new Set(preview.affected.map((a) => a.id)));
+  };
+
   const handleApplyAffectedSync = async () => {
     const ids = Array.from(selectedAffectedIds);
     if (ids.length === 0) {
@@ -500,6 +518,7 @@ export function RequirementsClient({ initialReqs, templates, templateQuotas = []
             areas={areas}
             shifts={shifts}
             onSaveChanges={canEdit ? handleSaveMatrixChanges : undefined}
+            onReviewGenerated={canEdit ? handleReviewGenerated : undefined}
           />
         ) : filteredTemplates.length === 0 ? (
           <Card className="border-dashed">
@@ -1097,6 +1116,52 @@ export function RequirementsClient({ initialReqs, templates, templateQuotas = []
               <Button variant="ghost" size="icon" onClick={() => setAffectedReqs([])} disabled={isSyncingAffected}>
                 <X className="h-4 w-4" />
               </Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 px-5 py-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40 text-xs">
+              <span className="text-slate-500 font-medium">Selección rápida:</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setSelectedAffectedIds(new Set(affectedReqs.map((a) => a.id)))}
+              >
+                Todos ({affectedReqs.length})
+              </Button>
+              {affectedReqs.some((a) => a.is_blue_am00) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[11px] border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                  onClick={() =>
+                    setSelectedAffectedIds(
+                      new Set(affectedReqs.filter((a) => a.is_blue_am00).map((a) => a.id))
+                    )
+                  }
+                >
+                  Solo Blue Express AM 00 ({affectedReqs.filter((a) => a.is_blue_am00).length})
+                </Button>
+              )}
+              {affectedReqs.some((a) => a.position_name.toLowerCase().includes('dhl')) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[11px] border-orange-200 text-orange-700 hover:bg-orange-50"
+                  onClick={() =>
+                    setSelectedAffectedIds(
+                      new Set(
+                        affectedReqs
+                          .filter((a) => a.position_name.toLowerCase().includes('dhl'))
+                          .map((a) => a.id)
+                      )
+                    )
+                  }
+                >
+                  Solo DHL ({affectedReqs.filter((a) => a.position_name.toLowerCase().includes('dhl')).length})
+                </Button>
+              )}
             </div>
             <div className="max-h-96 overflow-y-auto p-4">
               <table className="w-full text-xs">

@@ -2654,9 +2654,9 @@ export function RosterGridClient({
           setIsAiConfigOpen(open);
         }}
       >
-        <DialogContent className="sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-[680px] max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-slate-800 dark:text-slate-100">
+            <DialogTitle className="flex items-center gap-2 pr-8 text-slate-800 dark:text-slate-100">
               {aiActionMode === 'scheduling' && <Sparkles className="h-5 w-5 text-emerald-600" />}
               {aiActionMode === 'needs' && <Calendar className="h-5 w-5 text-blue-600" />}
               {aiActionMode === 'clear' && <Trash2 className="h-5 w-5 text-red-600" />}
@@ -2683,8 +2683,8 @@ export function RosterGridClient({
               </p>
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="min-w-0 space-y-2">
                 <Label className="text-[10px] uppercase font-black text-slate-400 tracking-widest">Desde</Label>
                 <Input 
                   type="date" 
@@ -2692,7 +2692,7 @@ export function RosterGridClient({
                   onChange={(e) => setPlanningRange(prev => ({ ...prev, from: e.target.value }))}
                 />
               </div>
-              <div className="space-y-2">
+              <div className="min-w-0 space-y-2">
                 <Label className="text-[10px] uppercase font-black text-slate-400 tracking-widest">Hasta</Label>
                 <Input 
                   type="date"
@@ -2705,7 +2705,7 @@ export function RosterGridClient({
             {aiActionMode === 'clear' && (
               <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <Label className="text-[10px] uppercase font-black text-slate-400 tracking-widest">Opciones de Limpieza</Label>
-                <div className="space-y-2">
+                <div className="min-w-0 space-y-2">
                   <div className="flex items-center space-x-2">
                     <input 
                       type="checkbox" 
@@ -2768,8 +2768,8 @@ export function RosterGridClient({
             )}
 
             {aiActionMode === 'scheduling' && !isPreviewComparing && compareError && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800 flex items-center justify-between gap-2">
-                <span>{compareError}</span>
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800 flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0 [overflow-wrap:anywhere]">{compareError}</span>
                 <Button
                   type="button"
                   size="sm"
@@ -2782,7 +2782,7 @@ export function RosterGridClient({
               </div>
             )}
           </div>
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 sm:flex-wrap">
             <Button
               variant="outline"
               onClick={() => {
@@ -2799,10 +2799,10 @@ export function RosterGridClient({
                 type="button"
                 variant="outline"
                 disabled={isPreviewComparing}
-                className="gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                className="h-auto min-h-9 whitespace-normal gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
                 onClick={handleRunPreviewCompare}
               >
-                <Sparkles className="h-4 w-4" />
+                <Sparkles className="h-4 w-4 shrink-0" />
                 {isPreviewComparing ? 'Comparando...' : 'Comparar v1 vs v2 (Vista Previa)'}
               </Button>
             )}
