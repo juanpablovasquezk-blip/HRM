@@ -2,6 +2,11 @@ import type { OperationalPriority } from '../../../app/(dashboard)/shifts/dotaci
 
 export type { OperationalPriority };
 
+export interface PriorityQuotaBreakdown {
+  priority: OperationalPriority | string;
+  required_count: number;
+}
+
 export interface RawShiftRequirement {
   id: string;
   date: string;
@@ -10,6 +15,7 @@ export interface RawShiftRequirement {
   shift_id: string;
   required_count: number;
   priority?: string | null;
+  priority_quotas?: PriorityQuotaBreakdown[] | null;
   is_extra?: boolean | null;
   shift?: {
     name?: string | null;
@@ -50,6 +56,7 @@ export interface RawExistingAssignment {
 
 export interface DotacionSlot {
   slot_key: string;
+  priority_slot_key?: string;
   requirement_ids: string[];
   date: string;
   area_id: string;
@@ -77,10 +84,13 @@ export interface GeneratedAssignmentRef {
   position_id: string;
   shift_id: string;
   is_extra?: boolean;
+  priority?: OperationalPriority;
+  priority_slot_key?: string;
 }
 
 export interface SlotCoverageDetail {
   slot_key: string;
+  priority_slot_key?: string;
   date: string;
   area_id: string;
   position_id: string;
@@ -99,11 +109,18 @@ export interface SlotCoverageDetail {
   shift_name?: string;
 }
 
+export interface PriorityCoverageSummary {
+  required: number;
+  covered: number;
+  vacancies: number;
+}
+
 export interface DotacionGroupCoverage {
   total_required: number;
   total_covered: number;
   total_vacancies: number;
   coverage_percent: number;
+  by_priority?: Partial<Record<OperationalPriority, PriorityCoverageSummary>>;
   slots: SlotCoverageDetail[];
 }
 
@@ -339,6 +356,8 @@ export interface CrossAreaAssignment {
   shift_end: string;
   duration_hours: number;
   slot_key: string;
+  priority_slot_key?: string;
+  priority?: OperationalPriority;
   assignment_kind: 'ordinary' | 'ns22_titular' | 'ns22_replacement' | 'reinforcement';
   match_type: 'primary' | 'secondary' | 'reinforcement';
   priority_rank: number;
@@ -492,6 +511,7 @@ export interface EnginePreviewMetrics {
   total_covered: number;
   total_vacancies: number;
   coverage_percent: number;
+  coverage_by_priority?: DotacionGroupCoverage['by_priority'];
   covered_primary_count: number;
   covered_secondary_count: number;
   reinforcement_count: number;

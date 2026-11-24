@@ -1,6 +1,22 @@
 export type OperationalPriority = 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW';
 export type PriorityOverridesMap = Partial<Record<string, OperationalPriority>>;
 
+export interface PriorityQuotaItem {
+  priority: OperationalPriority;
+  required_count: number;
+}
+
+export type DailyPriorityQuotasMap = Partial<Record<string, PriorityQuotaItem[]>>;
+
+export interface TemplatePriorityQuotaRow {
+  area_id: string;
+  position_id: string;
+  shift_id: string;
+  day_of_week: number;
+  priority: OperationalPriority | string;
+  required_count: number;
+}
+
 export const PRIORITY_OPTIONS: Array<{
   value: OperationalPriority;
   label: string;
@@ -92,12 +108,84 @@ export function arePriorityOverridesEqual(
   return keysA.every((k, i) => k === keysB[i] && a?.[k] === b?.[k]);
 }
 
+export function sumPriorityQuotas(items: PriorityQuotaItem[] | null | undefined): number {
+  if (!Array.isArray(items)) return 0;
+  return items.reduce((acc, q) => acc + (Number(q.required_count) || 0), 0);
+}
+
+export function getHighestPriorityFromQuotas(
+  items: PriorityQuotaItem[] | null | undefined,
+  fallback: OperationalPriority = 'NORMAL'
+): OperationalPriority {
+  if (!Array.isArray(items) || items.length === 0) return fallback;
+  let best: OperationalPriority = items[0].priority;
+  for (const item of items) {
+    if (PRIORITY_RANK[item.priority] > PRIORITY_RANK[best]) {
+      best = item.priority;
+    }
+  }
+  return best;
+}
+
+export function normalizePriorityQuotaItems(
+  rawItems: Array<{ priority?: string | null; required_count?: number }> | null | undefined
+): PriorityQuotaItem[] {
+  if (!Array.isArray(rawItems)) return [];
+  const merged = new Map<OperationalPriority, number>();
+  for (const item of rawItems) {
+    const count = Number(item?.required_count) || 0;
+    if (count <= 0) continue;
+    const prio = normalizePriority(item?.priority);
+    merged.set(prio, (merged.get(prio) || 0) + count);
+  }
+  return Array.from(merged.entries())
+    .map(([priority, required_count]) => ({ priority, required_count }))
+    .sort((a, b) => PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority]);
+}
+
+export function arePriorityQuotasEqual(
+  a: DailyPriorityQuotasMap | null | undefined,
+  b: DailyPriorityQuotasMap | null | undefined
+): boolean {
+  for (const { dbDay } of MATRIX_DAYS_ORDER) {
+    const key = String(dbDay);
+    const listA = normalizePriorityQuotaItems(a?.[key]);
+    const listB = normalizePriorityQuotaItems(b?.[key]);
+    if (listA.length !== listB.length) return false;
+    for (let i = 0; i < listA.length; i++) {
+      if (listA[i].priority !== listB[i].priority || listA[i].required_count !== listB[i].required_count) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+export function flattenPriorityQuotasMap(
+  quotasMap: DailyPriorityQuotasMap | null | undefined
+): Array<{ day_of_week: number; priority: OperationalPriority; required_count: number }> {
+  const out: Array<{ day_of_week: number; priority: OperationalPriority; required_count: number }> = [];
+  if (!quotasMap) return out;
+  for (const { dbDay } of MATRIX_DAYS_ORDER) {
+    const items = normalizePriorityQuotaItems(quotasMap[String(dbDay)]);
+    for (const item of items) {
+      out.push({
+        day_of_week: dbDay,
+        priority: item.priority,
+        required_count: item.required_count,
+      });
+    }
+  }
+  return out;
+}
+
 export interface MatrixShiftRow {
   shiftId: string;
   shiftName: string;
   startTime: string;
   priority: OperationalPriority;
   priorityOverrides: PriorityOverridesMap;
+  priorityQuotas: DailyPriorityQuotasMap;
   /** Counts ordered Monday (index 0) to Sunday (index 6) */
   counts: [number, number, number, number, number, number, number];
   weeklyTotal: number;
@@ -157,7 +245,22 @@ export interface TemplateLike {
  * Sums required_count when multiple templates overlap on the same (area, position, shift, day),
  * matching materializeTemplates behavior.
  */
-export function buildWeeklyMatrix(templates: TemplateLike[]): MatrixPositionGroup[] {
+export function buildWeeklyMatrix(
+  templates: TemplateLike[],
+  templateQuotas?: TemplatePriorityQuotaRow[]
+): MatrixPositionGroup[] {
+  const quotasByRowDay = new Map<string, PriorityQuotaItem[]>();
+  if (Array.isArray(templateQuotas)) {
+    for (const q of templateQuotas) {
+      const count = Number(q.required_count) || 0;
+      if (count <= 0) continue;
+      const key = `${q.area_id}||${q.position_id}||${q.shift_id}||${q.day_of_week}`;
+      const list = quotasByRowDay.get(key) || [];
+      list.push({ priority: normalizePriority(q.priority), required_count: count });
+      quotasByRowDay.set(key, list);
+    }
+  }
+
   const groupMap = new Map<string, {
     areaId: string;
     areaName: string;
@@ -196,6 +299,7 @@ export function buildWeeklyMatrix(templates: TemplateLike[]): MatrixPositionGrou
         startTime: tmpl.shift?.start_time || '99:99:99',
         priority: tmplPriority,
         priorityOverrides: {},
+        priorityQuotas: {},
         counts: [0, 0, 0, 0, 0, 0, 0],
         weeklyTotal: 0,
         templateCount: 0,
@@ -246,6 +350,28 @@ export function buildWeeklyMatrix(templates: TemplateLike[]): MatrixPositionGrou
         row.priority,
         row.counts
       );
+      const nextQuotas: DailyPriorityQuotasMap = {};
+      for (const { dbDay } of MATRIX_DAYS_ORDER) {
+        const idx = DB_DAY_TO_INDEX[dbDay];
+        const rowDayKey = `${group.areaId}||${group.positionId}||${row.shiftId}||${dbDay}`;
+        const explicit = normalizePriorityQuotaItems(quotasByRowDay.get(rowDayKey));
+        if (explicit.length > 0) {
+          nextQuotas[String(dbDay)] = explicit;
+          const explicitSum = sumPriorityQuotas(explicit);
+          if (explicitSum !== row.counts[idx]) {
+            row.weeklyTotal += explicitSum - row.counts[idx];
+            row.counts[idx] = explicitSum;
+          }
+        } else if (row.counts[idx] > 0) {
+          nextQuotas[String(dbDay)] = [
+            {
+              priority: resolveDayPriority(row.priority, row.priorityOverrides, dbDay),
+              required_count: row.counts[idx],
+            },
+          ];
+        }
+      }
+      row.priorityQuotas = nextQuotas;
       for (let i = 0; i < 7; i++) {
         dailyTotals[i] += row.counts[i];
       }

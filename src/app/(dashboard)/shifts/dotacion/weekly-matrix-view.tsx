@@ -20,16 +20,23 @@ import {
 } from 'lucide-react';
 import {
   arePriorityOverridesEqual,
+  arePriorityQuotasEqual,
   buildWeeklyMatrix,
+  getHighestPriorityFromQuotas,
   MATRIX_DAYS_ORDER,
   PRIORITY_OPTIONS,
   isValidQuantity,
   normalizePriority,
   normalizePriorityOverrides,
+  normalizePriorityQuotaItems,
   resolveDayPriority,
+  sumPriorityQuotas,
+  type DailyPriorityQuotasMap,
   type OperationalPriority,
   type PriorityOverridesMap,
+  type PriorityQuotaItem,
   type TemplateLike,
+  type TemplatePriorityQuotaRow,
 } from './matrix-utils';
 import type { WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
 
@@ -48,6 +55,7 @@ export interface MatrixShiftOption {
 interface WeeklyMatrixViewProps {
   templates: TemplateLike[];
   allTemplates?: TemplateLike[];
+  templateQuotas?: TemplatePriorityQuotaRow[];
   areas?: MatrixAreaOption[];
   shifts?: MatrixShiftOption[];
   onSaveChanges?: (changes: WeeklyMatrixRowChange[]) => Promise<{ success: boolean; error?: string | null }>;
@@ -60,12 +68,14 @@ interface NewRuleDraft {
   shiftId: string;
   priority: OperationalPriority;
   priorityOverrides: PriorityOverridesMap;
+  priorityQuotas: DailyPriorityQuotasMap;
   counts: string[];
 }
 
 interface ActivePopoverState {
   rowId: string;
   dbDay: number;
+  dayIdx: number;
   dayLabel: string;
   isNewRow: boolean;
   generalPriority: OperationalPriority;
@@ -94,17 +104,22 @@ function parseCell(raw: string): { valid: boolean; num: number } {
 export function WeeklyMatrixView({
   templates,
   allTemplates,
+  templateQuotas = [],
   areas = [],
   shifts = [],
   onSaveChanges,
 }: WeeklyMatrixViewProps) {
-  const baseGroups = useMemo(() => buildWeeklyMatrix(templates), [templates]);
+  const baseGroups = useMemo(
+    () => buildWeeklyMatrix(templates, templateQuotas),
+    [templates, templateQuotas]
+  );
   const canEdit = Boolean(onSaveChanges);
 
   const [isEditing, setIsEditing] = useState(false);
   const [draftValues, setDraftValues] = useState<Record<string, string[]>>({});
   const [draftPriorities, setDraftPriorities] = useState<Record<string, OperationalPriority>>({});
   const [draftOverrides, setDraftOverrides] = useState<Record<string, PriorityOverridesMap>>({});
+  const [draftPriorityQuotas, setDraftPriorityQuotas] = useState<Record<string, DailyPriorityQuotasMap>>({});
   const [newRows, setNewRows] = useState<NewRuleDraft[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [activePopover, setActivePopover] = useState<ActivePopoverState | null>(null);
@@ -115,9 +130,10 @@ export function WeeklyMatrixView({
     setDraftValues({});
     setDraftPriorities({});
     setDraftOverrides({});
+    setDraftPriorityQuotas({});
     setNewRows([]);
     setActivePopover(null);
-  }, [templates]);
+  }, [templates, templateQuotas]);
 
   // Close popover on outside click or Escape
   useEffect(() => {
@@ -138,10 +154,11 @@ export function WeeklyMatrixView({
     };
   }, [activePopover]);
 
-  const { baseCountsMap, basePriorityMap, baseOverridesMap, allExistingKeys } = useMemo(() => {
+  const { baseCountsMap, basePriorityMap, baseOverridesMap, baseQuotasMap, allExistingKeys } = useMemo(() => {
     const counts = new Map<string, number[]>();
     const priorities = new Map<string, OperationalPriority>();
     const overrides = new Map<string, PriorityOverridesMap>();
+    const quotas = new Map<string, DailyPriorityQuotasMap>();
     const allKeys = new Set<string>();
 
     for (const g of baseGroups) {
@@ -150,6 +167,7 @@ export function WeeklyMatrixView({
         counts.set(key, [...s.counts]);
         priorities.set(key, s.priority);
         overrides.set(key, { ...s.priorityOverrides });
+        quotas.set(key, { ...s.priorityQuotas });
         allKeys.add(key);
       }
     }
@@ -163,6 +181,7 @@ export function WeeklyMatrixView({
       baseCountsMap: counts,
       basePriorityMap: priorities,
       baseOverridesMap: overrides,
+      baseQuotasMap: quotas,
       allExistingKeys: allKeys,
     };
   }, [baseGroups, allTemplates]);
@@ -217,13 +236,38 @@ export function WeeklyMatrixView({
         const ovChanged = !arePriorityOverridesEqual(normalizedOverrides, s.priorityOverrides);
         if (ovChanged) dirtyOvs++;
 
-        if ((rowHasCellDiff || prioChanged || ovChanged) && rowValid) {
+        const rawQuotas = draftPriorityQuotas[key] ?? s.priorityQuotas;
+        const effectiveQuotas: DailyPriorityQuotasMap = {};
+        if (rowValid) {
+          for (let i = 0; i < 7; i++) {
+            const dbDay = MATRIX_DAYS_ORDER[i].dbDay;
+            const dKey = String(dbDay);
+            const num = parsedNums[i];
+            if (num <= 0) continue;
+            const existingDayQuotas = normalizePriorityQuotaItems(rawQuotas?.[dKey]);
+            if (existingDayQuotas.length > 0 && sumPriorityQuotas(existingDayQuotas) === num) {
+              effectiveQuotas[dKey] = existingDayQuotas;
+            } else {
+              effectiveQuotas[dKey] = [
+                {
+                  priority: resolveDayPriority(effectivePrio, normalizedOverrides, dbDay),
+                  required_count: num,
+                },
+              ];
+            }
+          }
+        }
+        const quotasChanged = rowValid && !arePriorityQuotasEqual(effectiveQuotas, s.priorityQuotas);
+        if (quotasChanged && !ovChanged) dirtyOvs++;
+
+        if ((rowHasCellDiff || prioChanged || ovChanged || quotasChanged) && rowValid) {
           changes.push({
             area_id: g.areaId,
             position_id: g.positionId,
             shift_id: s.shiftId,
             priority: effectivePrio,
             priority_overrides: normalizedOverrides,
+            priority_quotas: effectiveQuotas,
             counts: parsedNums,
             expected_counts: [...s.counts],
             expected_priority: s.priority,
@@ -279,6 +323,24 @@ export function WeeklyMatrixView({
 
       const generalPrio = normalizePriority(nr.priority);
       const cleanOverrides = normalizePriorityOverrides(nr.priorityOverrides, generalPrio, nums);
+      const newEffectiveQuotas: DailyPriorityQuotasMap = {};
+      for (let i = 0; i < 7; i++) {
+        const dbDay = MATRIX_DAYS_ORDER[i].dbDay;
+        const dKey = String(dbDay);
+        const num = nums[i];
+        if (num <= 0) continue;
+        const dq = normalizePriorityQuotaItems(nr.priorityQuotas?.[dKey]);
+        if (dq.length > 0 && sumPriorityQuotas(dq) === num) {
+          newEffectiveQuotas[dKey] = dq;
+        } else {
+          newEffectiveQuotas[dKey] = [
+            {
+              priority: resolveDayPriority(generalPrio, cleanOverrides, dbDay),
+              required_count: num,
+            },
+          ];
+        }
+      }
 
       newChanges.push({
         area_id: nr.areaId,
@@ -286,6 +348,7 @@ export function WeeklyMatrixView({
         shift_id: nr.shiftId,
         priority: generalPrio,
         priority_overrides: cleanOverrides,
+        priority_quotas: newEffectiveQuotas,
         counts: nums,
         is_new: true,
       });
@@ -395,11 +458,62 @@ export function WeeklyMatrixView({
     setActivePopover(null);
   };
 
+  const handleSetDayPriorityQuotas = (
+    rowId: string,
+    isNewRow: boolean,
+    dbDay: number,
+    dayIdx: number,
+    generalPriority: OperationalPriority,
+    items: PriorityQuotaItem[]
+  ) => {
+    const clean = normalizePriorityQuotaItems(items);
+    const total = sumPriorityQuotas(clean);
+    const highestPrio = getHighestPriorityFromQuotas(clean, generalPriority);
+    const dKey = String(dbDay);
+
+    if (isNewRow) {
+      setNewRows((prev) =>
+        prev.map((row) => {
+          if (row.tempId !== rowId) return row;
+          const nextCounts = [...row.counts];
+          nextCounts[dayIdx] = String(total);
+          const nextQuotas = { ...row.priorityQuotas };
+          if (clean.length > 0) nextQuotas[dKey] = clean;
+          else delete nextQuotas[dKey];
+          const nextOverrides = { ...row.priorityOverrides };
+          if (total <= 0 || highestPrio === generalPriority) delete nextOverrides[dKey];
+          else nextOverrides[dKey] = highestPrio;
+          return { ...row, counts: nextCounts, priorityQuotas: nextQuotas, priorityOverrides: nextOverrides };
+        })
+      );
+    } else {
+      const baseCounts = baseCountsMap.get(rowId) || [0, 0, 0, 0, 0, 0, 0];
+      setDraftValues((prev) => {
+        const current = prev[rowId] ? [...prev[rowId]] : baseCounts.map(String);
+        current[dayIdx] = String(total);
+        return { ...prev, [rowId]: current };
+      });
+      setDraftPriorityQuotas((prev) => {
+        const current = { ...(prev[rowId] ?? baseQuotasMap.get(rowId) ?? {}) };
+        if (clean.length > 0) current[dKey] = clean;
+        else delete current[dKey];
+        return { ...prev, [rowId]: current };
+      });
+      setDraftOverrides((prev) => {
+        const current = { ...(prev[rowId] ?? baseOverridesMap.get(rowId) ?? {}) };
+        if (total <= 0 || highestPrio === generalPriority) delete current[dKey];
+        else current[dKey] = highestPrio;
+        return { ...prev, [rowId]: current };
+      });
+    }
+  };
+
   const openCellPopover = (
     e: React.MouseEvent<HTMLButtonElement>,
     params: {
       rowId: string;
       dbDay: number;
+      dayIdx: number;
       dayLabel: string;
       isNewRow: boolean;
       generalPriority: OperationalPriority;
@@ -408,9 +522,9 @@ export function WeeklyMatrixView({
   ) => {
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
-    const popoverWidth = 200;
+    const popoverWidth = 280;
     const left = Math.min(Math.max(8, rect.left - popoverWidth + 24), window.innerWidth - popoverWidth - 8);
-    const top = Math.min(rect.bottom + 6, window.innerHeight - 220);
+    const top = Math.min(rect.bottom + 6, window.innerHeight - 300);
 
     setActivePopover((prev) =>
       prev && prev.rowId === params.rowId && prev.dbDay === params.dbDay && prev.isNewRow === params.isNewRow
@@ -430,6 +544,7 @@ export function WeeklyMatrixView({
         shiftId: '',
         priority: 'NORMAL',
         priorityOverrides: {},
+        priorityQuotas: {},
         counts: ['0', '0', '0', '0', '0', '0', '0'],
       },
     ]);
@@ -792,6 +907,7 @@ export function WeeklyMatrixView({
                                     openCellPopover(e, {
                                       rowId: nr.tempId,
                                       dbDay: dayMeta.dbDay,
+                                      dayIdx: idx,
                                       dayLabel: dayMeta.fullName,
                                       isNewRow: true,
                                       generalPriority: nr.priority,
@@ -858,6 +974,7 @@ export function WeeklyMatrixView({
               const effectivePrio = draftPriorities[key] ?? shift.priority;
               const prioChanged = effectivePrio !== shift.priority;
               const rawOverrides = draftOverrides[key] ?? shift.priorityOverrides;
+              const rawQuotasMap = draftPriorityQuotas[key] ?? shift.priorityQuotas;
               let rowTotal = 0;
 
               const cells = MATRIX_DAYS_ORDER.map((dayMeta, idx) => {
@@ -876,6 +993,18 @@ export function WeeklyMatrixView({
                 const hasOverride = Boolean(effectiveNum > 0 && curOv && curOv !== effectivePrio);
                 const ovDirty = (curOv ?? null) !== (baseOv ?? null);
 
+                const explicitDayQuotas = normalizePriorityQuotaItems(rawQuotasMap?.[dayKey]);
+                const dayQuotas: PriorityQuotaItem[] =
+                  effectiveNum <= 0
+                    ? []
+                    : explicitDayQuotas.length > 0 && sumPriorityQuotas(explicitDayQuotas) === effectiveNum
+                      ? explicitDayQuotas
+                      : [{ priority: effectiveDayPrio, required_count: effectiveNum }];
+                const baseDayQuotas = normalizePriorityQuotaItems(shift.priorityQuotas?.[dayKey]);
+                const quotasDirty =
+                  dayQuotas.length !== baseDayQuotas.length ||
+                  dayQuotas.some((q, qIdx) => q.priority !== baseDayQuotas[qIdx]?.priority || q.required_count !== baseDayQuotas[qIdx]?.required_count);
+
                 liveDailyTotals[idx] += effectiveNum;
                 rowTotal += effectiveNum;
                 return {
@@ -888,6 +1017,8 @@ export function WeeklyMatrixView({
                   effectiveDayPrio,
                   hasOverride,
                   ovDirty,
+                  dayQuotas,
+                  quotasDirty,
                 };
               });
 
@@ -997,69 +1128,98 @@ export function WeeklyMatrixView({
                               return (
                                 <td key={idx} className="py-1 px-0.5 text-center tabular-nums">
                                   {activeEdit ? (
-                                    <div className="relative inline-flex items-center justify-center">
-                                      <input
-                                        type="number"
-                                        min={0}
-                                        step={1}
-                                        aria-label={`${group.areaName} ${group.positionName} ${shift.shiftName} ${cell.dayMeta.fullName}`}
-                                        value={cell.raw}
-                                        disabled={isSaving}
-                                        onChange={(e) => handleCellChange(key, idx, e.target.value)}
-                                        className={`w-9 h-6 text-center rounded text-xs font-bold tabular-nums border outline-none transition-all ${
-                                          !cell.valid
-                                            ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400 dark:bg-red-950/40 dark:text-red-300'
-                                            : cell.isDirty || cell.ovDirty
-                                            ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-400 dark:bg-blue-950/40 dark:text-blue-200'
-                                            : cell.num > 0
-                                            ? 'border-orange-200 bg-orange-50/80 text-orange-700 focus:border-orange-500 dark:border-orange-900/60 dark:bg-orange-950/40 dark:text-orange-300'
-                                            : 'border-slate-200 bg-white text-slate-400 focus:border-orange-400 focus:text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-600'
-                                        }`}
-                                      />
-                                      {cell.valid && cell.num > 0 && (
-                                        <button
-                                          type="button"
+                                    <>
+                                      <div className="relative inline-flex items-center justify-center">
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          step={1}
+                                          aria-label={`${group.areaName} ${group.positionName} ${shift.shiftName} ${cell.dayMeta.fullName}`}
+                                          value={cell.raw}
                                           disabled={isSaving}
-                                          onClick={(e) =>
-                                            openCellPopover(e, {
-                                              rowId: key,
-                                              dbDay: cell.dayMeta.dbDay,
-                                              dayLabel: cell.dayMeta.fullName,
-                                              isNewRow: false,
-                                              generalPriority: effectivePrio,
-                                              currentOverride: cell.curOv,
-                                            })
-                                          }
-                                          title={
-                                            ovMeta
-                                              ? `${cell.dayMeta.fullName}: Prioridad especial ${ovMeta.label} (General: ${prioMeta.label})`
-                                              : `${cell.dayMeta.fullName}: Hereda prioridad general (${prioMeta.label}). Clic para excepción.`
-                                          }
-                                          aria-label={`Prioridad ${cell.dayMeta.fullName} ${shift.shiftName}`}
-                                          className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-slate-950 transition-transform hover:scale-125 ${
-                                            ovMeta
-                                              ? ovMeta.dotClass
-                                              : 'bg-slate-300 hover:bg-orange-400 dark:bg-slate-700'
+                                          onChange={(e) => handleCellChange(key, idx, e.target.value)}
+                                          className={`w-9 h-6 text-center rounded text-xs font-bold tabular-nums border outline-none transition-all ${
+                                            !cell.valid
+                                              ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400 dark:bg-red-950/40 dark:text-red-300'
+                                              : cell.isDirty || cell.ovDirty || cell.quotasDirty
+                                              ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-400 dark:bg-blue-950/40 dark:text-blue-200'
+                                              : cell.num > 0
+                                              ? 'border-orange-200 bg-orange-50/80 text-orange-700 focus:border-orange-500 dark:border-orange-900/60 dark:bg-orange-950/40 dark:text-orange-300'
+                                              : 'border-slate-200 bg-white text-slate-400 focus:border-orange-400 focus:text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-600'
                                           }`}
                                         />
+                                        {cell.valid && cell.num > 0 && (
+                                          <button
+                                            type="button"
+                                            disabled={isSaving}
+                                            onClick={(e) =>
+                                              openCellPopover(e, {
+                                                rowId: key,
+                                                dbDay: cell.dayMeta.dbDay,
+                                                dayIdx: idx,
+                                                dayLabel: cell.dayMeta.fullName,
+                                                isNewRow: false,
+                                                generalPriority: effectivePrio,
+                                                currentOverride: cell.curOv,
+                                              })
+                                            }
+                                            title={
+                                              cell.dayQuotas.length > 1
+                                                ? `${cell.dayMeta.fullName}: ${cell.dayQuotas.map((q) => `${q.required_count} ${getPriorityMeta(q.priority).label}`).join(' + ')}. Clic para editar desglose.`
+                                                : ovMeta
+                                                  ? `${cell.dayMeta.fullName}: Prioridad especial ${ovMeta.label} (General: ${prioMeta.label}). Clic para editar desglose.`
+                                                  : `${cell.dayMeta.fullName}: Hereda prioridad general (${prioMeta.label}). Clic para desglose por prioridad.`
+                                            }
+                                            aria-label={`Prioridad ${cell.dayMeta.fullName} ${shift.shiftName}`}
+                                            className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-slate-950 transition-transform hover:scale-125 ${
+                                              cell.dayQuotas.length > 1
+                                                ? 'bg-indigo-600'
+                                                : ovMeta
+                                                  ? ovMeta.dotClass
+                                                  : 'bg-slate-300 hover:bg-orange-400 dark:bg-slate-700'
+                                            }`}
+                                          />
+                                        )}
+                                      </div>
+                                      {cell.dayQuotas.length > 1 && (
+                                        <div className="mt-0.5 flex flex-wrap justify-center gap-0.5 leading-none">
+                                          {cell.dayQuotas.map((q) => (
+                                            <span key={q.priority} className={`text-[9px] font-semibold px-1 rounded ${getPriorityMeta(q.priority).badgeClass}`}>
+                                              {q.required_count}{q.priority === 'CRITICAL' ? 'C' : q.priority === 'HIGH' ? 'A' : q.priority === 'NORMAL' ? 'N' : 'B'}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : cell.num > 0 ? (
+                                    <div className="inline-flex flex-col items-center">
+                                      <span
+                                        title={
+                                          cell.dayQuotas.length > 1
+                                            ? `${cell.dayMeta.fullName}: ${cell.dayQuotas.map((q) => `${q.required_count} ${getPriorityMeta(q.priority).label}`).join(' + ')}`
+                                            : ovMeta
+                                              ? `${cell.dayMeta.fullName}: Prioridad especial ${ovMeta.label} (General: ${prioMeta.label})`
+                                              : undefined
+                                        }
+                                        className="relative inline-flex items-center justify-center min-w-[22px] h-5 px-1 rounded bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 font-bold text-[11px]"
+                                      >
+                                        {cell.num}
+                                        {(ovMeta || cell.dayQuotas.length > 1) && (
+                                          <span
+                                            className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full ring-1 ring-white dark:ring-slate-950 ${cell.dayQuotas.length > 1 ? 'bg-indigo-600' : ovMeta!.dotClass}`}
+                                          />
+                                        )}
+                                      </span>
+                                      {cell.dayQuotas.length > 1 && (
+                                        <div className="mt-0.5 flex flex-wrap justify-center gap-0.5 leading-none">
+                                          {cell.dayQuotas.map((q) => (
+                                            <span key={q.priority} className={`text-[9px] font-semibold px-1 rounded ${getPriorityMeta(q.priority).badgeClass}`}>
+                                              {q.required_count}{q.priority === 'CRITICAL' ? 'C' : q.priority === 'HIGH' ? 'A' : q.priority === 'NORMAL' ? 'N' : 'B'}
+                                            </span>
+                                          ))}
+                                        </div>
                                       )}
                                     </div>
-                                  ) : cell.num > 0 ? (
-                                    <span
-                                      title={
-                                        ovMeta
-                                          ? `${cell.dayMeta.fullName}: Prioridad especial ${ovMeta.label} (General: ${prioMeta.label})`
-                                          : undefined
-                                      }
-                                      className="relative inline-flex items-center justify-center min-w-[22px] h-5 px-1 rounded bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 font-bold text-[11px]"
-                                    >
-                                      {cell.num}
-                                      {ovMeta && (
-                                        <span
-                                          className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full ring-1 ring-white dark:ring-slate-950 ${ovMeta.dotClass}`}
-                                        />
-                                      )}
-                                    </span>
                                   ) : (
                                     <span className="text-slate-300 dark:text-slate-700 text-[11px]">0</span>
                                   )}
@@ -1096,70 +1256,165 @@ export function WeeklyMatrixView({
         </div>
       )}
 
-      {/* Floating compact daily priority popover */}
-      {activeEdit && activePopover && (
-        <div
-          ref={popoverRef}
-          style={{ top: activePopover.top, left: activePopover.left }}
-          className="fixed z-50 w-52 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg dark:border-slate-800 dark:bg-slate-950"
-        >
-          <div className="px-2 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 border-b border-slate-100 dark:border-slate-800 mb-1">
-            {activePopover.dayLabel} — Excepción
-          </div>
-          <button
-            type="button"
-            onClick={() =>
-              handleSetDayOverride(
-                activePopover.rowId,
-                activePopover.isNewRow,
-                activePopover.dbDay,
-                activePopover.generalPriority,
-                null
-              )
-            }
-            className={`w-full flex items-center justify-between rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-slate-100 dark:hover:bg-slate-900 ${
-              !activePopover.currentOverride ? 'font-semibold text-blue-700 dark:text-blue-300 bg-blue-50/60 dark:bg-blue-950/30' : 'text-slate-700 dark:text-slate-200'
-            }`}
+      {/* Floating compact daily priority-groups popover */}
+      {activeEdit && activePopover && (() => {
+        const dKey = String(activePopover.dbDay);
+        const targetRow = activePopover.isNewRow
+          ? newRows.find((r) => r.tempId === activePopover.rowId)
+          : null;
+        const rowCounts = activePopover.isNewRow
+          ? (targetRow?.counts || []).map((c) => parseCell(c).num)
+          : (draftValues[activePopover.rowId]
+              ? draftValues[activePopover.rowId].map((c) => parseCell(c).num)
+              : baseCountsMap.get(activePopover.rowId) || [0, 0, 0, 0, 0, 0, 0]);
+        const currentDayTotal = rowCounts[activePopover.dayIdx] ?? 0;
+        const rawMap = activePopover.isNewRow
+          ? targetRow?.priorityQuotas
+          : (draftPriorityQuotas[activePopover.rowId] ?? baseQuotasMap.get(activePopover.rowId));
+        const rawOvMap = activePopover.isNewRow
+          ? targetRow?.priorityOverrides
+          : (draftOverrides[activePopover.rowId] ?? baseOverridesMap.get(activePopover.rowId));
+        const explicitItems = normalizePriorityQuotaItems(rawMap?.[dKey]);
+        const currentItems: PriorityQuotaItem[] =
+          explicitItems.length > 0 && sumPriorityQuotas(explicitItems) === currentDayTotal
+            ? explicitItems
+            : currentDayTotal > 0
+              ? [{ priority: resolveDayPriority(activePopover.generalPriority, rawOvMap, activePopover.dbDay), required_count: currentDayTotal }]
+              : [];
+
+        const usedPrios = new Set(currentItems.map((i) => i.priority));
+        const nextUnusedPrio = PRIORITY_OPTIONS.find((o) => !usedPrios.has(o.value))?.value;
+
+        return (
+          <div
+            ref={popoverRef}
+            style={{ top: activePopover.top, left: activePopover.left }}
+            className="fixed z-50 w-72 rounded-lg border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-800 dark:bg-slate-950 space-y-2"
           >
-            <span>Usar prioridad general ({getPriorityMeta(activePopover.generalPriority).label})</span>
-            {!activePopover.currentOverride && <Check className="h-3.5 w-3.5 shrink-0" />}
-          </button>
-          <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
-          {PRIORITY_OPTIONS.map((opt) => {
-            const isSelected = activePopover.currentOverride === opt.value;
-            const isSameAsGeneral = opt.value === activePopover.generalPriority;
-            return (
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-1.5">
+              <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                {activePopover.dayLabel} — Cupos por prioridad
+              </span>
               <button
-                key={opt.value}
                 type="button"
-                disabled={isSameAsGeneral}
-                onClick={() =>
-                  handleSetDayOverride(
+                onClick={() => setActivePopover(null)}
+                className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              {currentItems.map((item, qIdx) => (
+                <div key={`${item.priority}-${qIdx}`} className="flex items-center gap-1.5">
+                  <select
+                    value={item.priority}
+                    onChange={(e) => {
+                      const nextPrio = normalizePriority(e.target.value);
+                      const updated = currentItems.map((it, idx) =>
+                        idx === qIdx ? { ...it, priority: nextPrio } : it
+                      );
+                      handleSetDayPriorityQuotas(
+                        activePopover.rowId,
+                        activePopover.isNewRow,
+                        activePopover.dbDay,
+                        activePopover.dayIdx,
+                        activePopover.generalPriority,
+                        updated
+                      );
+                    }}
+                    className="flex-1 h-7 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 text-xs"
+                  >
+                    {PRIORITY_OPTIONS.map((opt) => (
+                      <option
+                        key={opt.value}
+                        value={opt.value}
+                        disabled={opt.value !== item.priority && usedPrios.has(opt.value)}
+                      >
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    max={9999}
+                    value={item.required_count}
+                    onChange={(e) => {
+                      const val = Math.max(1, parseInt(e.target.value || '1', 10) || 1);
+                      const updated = currentItems.map((it, idx) =>
+                        idx === qIdx ? { ...it, required_count: val } : it
+                      );
+                      handleSetDayPriorityQuotas(
+                        activePopover.rowId,
+                        activePopover.isNewRow,
+                        activePopover.dbDay,
+                        activePopover.dayIdx,
+                        activePopover.generalPriority,
+                        updated
+                      );
+                    }}
+                    className="w-14 h-7 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-center text-xs font-bold tabular-nums"
+                  />
+                  <button
+                    type="button"
+                    title="Eliminar grupo"
+                    onClick={() => {
+                      const updated = currentItems.filter((_, idx) => idx !== qIdx);
+                      handleSetDayPriorityQuotas(
+                        activePopover.rowId,
+                        activePopover.isNewRow,
+                        activePopover.dbDay,
+                        activePopover.dayIdx,
+                        activePopover.generalPriority,
+                        updated
+                      );
+                      if (updated.length === 0) setActivePopover(null);
+                    }}
+                    className="p-1 text-slate-400 hover:text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {nextUnusedPrio && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const updated = [...currentItems, { priority: nextUnusedPrio, required_count: 1 }];
+                  handleSetDayPriorityQuotas(
                     activePopover.rowId,
                     activePopover.isNewRow,
                     activePopover.dbDay,
+                    activePopover.dayIdx,
                     activePopover.generalPriority,
-                    opt.value
-                  )
-                }
-                className={`w-full flex items-center justify-between rounded px-2 py-1 text-left text-xs transition-colors ${
-                  isSameAsGeneral
-                    ? 'opacity-40 cursor-not-allowed'
-                    : isSelected
-                    ? 'font-semibold bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100'
-                    : 'hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200'
-                }`}
+                    updated
+                  );
+                }}
+                className="w-full h-7 text-xs"
               >
-                <span className="inline-flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${opt.dotClass}`} />
-                  {opt.label}
-                </span>
-                {isSelected && <Check className="h-3.5 w-3.5 shrink-0" />}
+                <Plus className="h-3 w-3 mr-1" />
+                Agregar prioridad
+              </Button>
+            )}
+
+            <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500">
+              <span>Total del día: <strong className="text-slate-800 dark:text-slate-200">{currentDayTotal}</strong></span>
+              <button
+                type="button"
+                onClick={() => setActivePopover(null)}
+                className="text-blue-600 hover:underline font-medium"
+              >
+                Listo
               </button>
-            );
-          })}
-        </div>
-      )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

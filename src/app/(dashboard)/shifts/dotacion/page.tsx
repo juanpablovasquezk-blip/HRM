@@ -21,7 +21,7 @@ export default async function RequirementsPage() {
     const { data: reqs } = await listRequirements(start, end);
     const { data: areas } = await listAreas();
     const { data: shifts } = await listShifts();
-    const { data: templates } = await listTemplates();
+    const { data: templates, quotas: templateQuotas } = await listTemplates();
     const { data: positions } = await supabase.from('positions').select('id, name').order('name');
     const role = await getUserRole();
     const canEdit = Boolean(role && hasPermission(role as Role, 'manageShifts'));
@@ -30,6 +30,7 @@ export default async function RequirementsPage() {
       <RequirementsClient
         initialReqs={reqs || []}
         templates={templates || []}
+        templateQuotas={templateQuotas || []}
         areas={areas || []}
         shifts={shifts || []}
         positions={positions || []}

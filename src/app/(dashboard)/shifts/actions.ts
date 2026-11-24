@@ -19,6 +19,7 @@ import {
   buildGenerateMonthHolidayPreview,
   findHolidayZeroStaffingRequirementIds,
   getChileNationalHolidaysForRange,
+  isHolidayZeroStaffingPair,
   type GenerateMonthHolidayPreview,
 } from '@/lib/scheduler/v2/chile-holidays';
 import { deriveNs22AnchorFromHistory } from '@/lib/scheduler/v2/aeropuerto-ns22';
@@ -49,11 +50,18 @@ import {
   type OrdinaryRequirementRangeFilter,
 } from './dotacion/range-delete-utils';
 import {
+  flattenPriorityQuotasMap,
   groupDailyCountsToTemplates,
   normalizePriority,
   normalizePriorityOverrides,
+  normalizePriorityQuotaItems,
+  PRIORITY_RANK,
+  resolveDayPriority,
+  type DailyPriorityQuotasMap,
   type OperationalPriority,
   type PriorityOverridesMap,
+  type PriorityQuotaItem,
+  type TemplatePriorityQuotaRow,
 } from './dotacion/matrix-utils';
 import { calcEffectiveShiftDuration, resolveShiftDurationHours } from './shift-duration';
 import { getUserRole } from '@/app/role-actions';
@@ -521,6 +529,28 @@ export async function listRequirements(startDate?: string, endDate?: string) {
     from += PAGE_SIZE;
   }
 
+  if (allRows.length > 0) {
+    const reqIds = allRows.map((r) => r.id).filter(Boolean);
+    const { data: quotaRows, error: quotaErr } = await supabase
+      .from('shift_requirement_priority_quotas')
+      .select('shift_requirement_id, priority, required_count')
+      .in('shift_requirement_id', reqIds);
+    if (!quotaErr && Array.isArray(quotaRows) && quotaRows.length > 0) {
+      const byReqId = new Map<string, PriorityQuotaItem[]>();
+      for (const q of quotaRows) {
+        const list = byReqId.get(q.shift_requirement_id) || [];
+        list.push({
+          priority: normalizePriority(q.priority),
+          required_count: Number(q.required_count) || 0,
+        });
+        byReqId.set(q.shift_requirement_id, list);
+      }
+      for (const row of allRows) {
+        row.priority_quotas = normalizePriorityQuotaItems(byReqId.get(row.id));
+      }
+    }
+  }
+
   return { data: allRows, error: null };
 }
 
@@ -547,8 +577,17 @@ export async function listTemplates() {
   const { data, error } = await supabase
     .from('requirement_templates')
     .select('*, area:areas(name), position:positions(name), shift:shifts(name)');
-  if (error) return { data: [], error: error.message };
-  return { data, error: null };
+  if (error) return { data: [], quotas: [] as TemplatePriorityQuotaRow[], error: error.message };
+
+  const { data: quotaRows, error: quotaErr } = await supabase
+    .from('requirement_template_priority_quotas')
+    .select('area_id, position_id, shift_id, day_of_week, priority, required_count');
+
+  return {
+    data,
+    quotas: (!quotaErr && Array.isArray(quotaRows) ? quotaRows : []) as TemplatePriorityQuotaRow[],
+    error: null,
+  };
 }
 
 export async function deleteTemplate(id: string) {
@@ -581,6 +620,7 @@ export interface WeeklyMatrixRowChange {
   shift_id: string;
   priority?: OperationalPriority;
   priority_overrides?: PriorityOverridesMap;
+  priority_quotas?: DailyPriorityQuotasMap;
   /** 7 integer counts >= 0 ordered Monday..Sunday */
   counts: number[];
   /** Optimistic concurrency fields */
@@ -612,6 +652,7 @@ export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) 
     shift_id: string;
     priority: OperationalPriority;
     priority_overrides: PriorityOverridesMap;
+    priority_quotas?: Array<{ day_of_week: number; priority: OperationalPriority; required_count: number }>;
     specs: Array<{ required_count: number; days_of_week: number[] }>;
     is_new?: boolean;
     expected_counts?: number[];
@@ -631,12 +672,16 @@ export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) 
         priority,
         item.counts
       );
+      const flatQuotas = item.priority_quotas
+        ? flattenPriorityQuotasMap(item.priority_quotas)
+        : undefined;
       prepared.push({
         area_id: item.area_id,
         position_id: item.position_id,
         shift_id: item.shift_id,
         priority,
         priority_overrides,
+        ...(flatQuotas ? { priority_quotas: flatQuotas } : {}),
         specs,
         ...(item.is_new ? { is_new: true } : {}),
         ...(Array.isArray(item.expected_counts) && item.expected_counts.length === 7
@@ -669,6 +714,235 @@ export async function saveWeeklyMatrixChanges(changes: WeeklyMatrixRowChange[]) 
     success: true,
     error: null,
     updatedRows: (rpcData as { updated_rows?: number } | null)?.updated_rows ?? prepared.length,
+  };
+}
+
+export interface AffectedGeneratedRequirementItem {
+  id: string;
+  date: string;
+  area_id: string;
+  area_name: string;
+  position_id: string;
+  position_name: string;
+  shift_id: string;
+  shift_name: string;
+  current_count: number;
+  current_priority: OperationalPriority;
+  current_quotas: PriorityQuotaItem[];
+  next_count: number;
+  next_priority: OperationalPriority;
+  next_quotas: PriorityQuotaItem[];
+}
+
+function quotasEqual(a: PriorityQuotaItem[], b: PriorityQuotaItem[]): boolean {
+  const normA = normalizePriorityQuotaItems(a);
+  const normB = normalizePriorityQuotaItems(b);
+  if (normA.length !== normB.length) return false;
+  return normA.every((item, idx) => item.priority === normB[idx].priority && item.required_count === normB[idx].required_count);
+}
+
+async function computeRuleExpectationMap(
+  supabase: any,
+  rowKeys: Array<{ area_id: string; position_id: string; shift_id: string }>
+) {
+  const areaIds = Array.from(new Set(rowKeys.map((r) => r.area_id)));
+  const posIds = Array.from(new Set(rowKeys.map((r) => r.position_id)));
+  const shiftIds = Array.from(new Set(rowKeys.map((r) => r.shift_id)));
+
+  const [{ data: tmpls }, { data: tmplQuotas }] = await Promise.all([
+    supabase
+      .from('requirement_templates')
+      .select('area_id, position_id, shift_id, required_count, days_of_week, priority, priority_overrides, is_active')
+      .in('area_id', areaIds)
+      .in('position_id', posIds)
+      .in('shift_id', shiftIds),
+    supabase
+      .from('requirement_template_priority_quotas')
+      .select('area_id, position_id, shift_id, day_of_week, priority, required_count')
+      .in('area_id', areaIds)
+      .in('position_id', posIds)
+      .in('shift_id', shiftIds),
+  ]);
+
+  const quotasByRowDay = new Map<string, PriorityQuotaItem[]>();
+  for (const q of tmplQuotas || []) {
+    const k = `${q.area_id}|${q.position_id}|${q.shift_id}|${q.day_of_week}`;
+    const list = quotasByRowDay.get(k) || [];
+    list.push({ priority: normalizePriority(q.priority), required_count: Number(q.required_count) || 0 });
+    quotasByRowDay.set(k, list);
+  }
+
+  const ruleByRowDay = new Map<string, { count: number; priority: OperationalPriority; quotas: PriorityQuotaItem[] }>();
+  for (const t of tmpls || []) {
+    if (t.is_active === false) continue;
+    const basePrio = normalizePriority(t.priority);
+    const overrides = normalizePriorityOverrides(t.priority_overrides, basePrio);
+    const days = Array.isArray(t.days_of_week) ? t.days_of_week : [];
+    for (const dow of days) {
+      const k = `${t.area_id}|${t.position_id}|${t.shift_id}|${dow}`;
+      const explicit = normalizePriorityQuotaItems(quotasByRowDay.get(k));
+      if (explicit.length > 0) {
+        const sum = explicit.reduce((s, x) => s + x.required_count, 0);
+        ruleByRowDay.set(k, { count: sum, priority: explicit[0].priority, quotas: explicit });
+      } else {
+        const effPrio = resolveDayPriority(basePrio, overrides, dow);
+        const prev = ruleByRowDay.get(k);
+        const nextCount = (prev?.count || 0) + (Number(t.required_count) || 0);
+        const nextPrio = prev && PRIORITY_RANK[prev.priority] > PRIORITY_RANK[effPrio] ? prev.priority : effPrio;
+        ruleByRowDay.set(k, {
+          count: nextCount,
+          priority: nextPrio,
+          quotas: nextCount > 0 ? [{ priority: nextPrio, required_count: nextCount }] : [],
+        });
+      }
+    }
+  }
+
+  return ruleByRowDay;
+}
+
+export async function previewAffectedGeneratedRequirements(
+  rowKeys: Array<{ area_id: string; position_id: string; shift_id: string }>,
+  fromDate?: string
+): Promise<{ success: boolean; affected: AffectedGeneratedRequirementItem[]; error?: string | null }> {
+  if (!Array.isArray(rowKeys) || rowKeys.length === 0) {
+    return { success: true, affected: [], error: null };
+  }
+
+  const supabase = await createClient();
+  const role = await getUserRole();
+  if (!role || !hasPermission(role as Role, 'manageShifts')) {
+    return { success: false, affected: [], error: 'No autorizado.' };
+  }
+
+  const minDate = fromDate || format(new Date(), 'yyyy-MM-dd');
+  const keySet = new Set(rowKeys.map((r) => `${r.area_id}|${r.position_id}|${r.shift_id}`));
+  const areaIds = Array.from(new Set(rowKeys.map((r) => r.area_id)));
+  const posIds = Array.from(new Set(rowKeys.map((r) => r.position_id)));
+  const shiftIds = Array.from(new Set(rowKeys.map((r) => r.shift_id)));
+
+  const [ruleByRowDay, { data: existingReqs, error: reqErr }] = await Promise.all([
+    computeRuleExpectationMap(supabase, rowKeys),
+    supabase
+      .from('shift_requirements')
+      .select('id, date, area_id, position_id, shift_id, required_count, priority, area:areas(name), position:positions(name), shift:shifts(name)')
+      .eq('is_extra', false)
+      .gte('date', minDate)
+      .in('area_id', areaIds)
+      .in('position_id', posIds)
+      .in('shift_id', shiftIds)
+      .order('date', { ascending: true }),
+  ]);
+
+  if (reqErr) return { success: false, affected: [], error: reqErr.message };
+
+  const matchingReqs = (existingReqs || []).filter((r: any) =>
+    keySet.has(`${r.area_id}|${r.position_id}|${r.shift_id}`)
+  );
+  if (matchingReqs.length === 0) {
+    return { success: true, affected: [], error: null };
+  }
+
+  const { data: existingQuotas } = await supabase
+    .from('shift_requirement_priority_quotas')
+    .select('shift_requirement_id, priority, required_count')
+    .in('shift_requirement_id', matchingReqs.map((r: any) => r.id));
+
+  const currentQuotasById = new Map<string, PriorityQuotaItem[]>();
+  for (const q of existingQuotas || []) {
+    const list = currentQuotasById.get(q.shift_requirement_id) || [];
+    list.push({ priority: normalizePriority(q.priority), required_count: Number(q.required_count) || 0 });
+    currentQuotasById.set(q.shift_requirement_id, list);
+  }
+
+  const maxDate = matchingReqs.reduce(
+    (max, r: any) => (r.date > max ? r.date : max),
+    minDate
+  );
+  const holidayCheck = getChileNationalHolidaysForRange(minDate, maxDate);
+
+  const affected: AffectedGeneratedRequirementItem[] = [];
+  for (const req of matchingReqs) {
+    const areaName = Array.isArray(req.area) ? req.area[0]?.name : (req.area as { name?: string } | null)?.name;
+    const posName = Array.isArray(req.position) ? req.position[0]?.name : (req.position as { name?: string } | null)?.name;
+    const shiftName = Array.isArray(req.shift) ? req.shift[0]?.name : (req.shift as { name?: string } | null)?.name;
+
+    const isHolidayZero =
+      holidayCheck.holidaysByDate.has(String(req.date).split('T')[0]) &&
+      isHolidayZeroStaffingPair(areaName, posName);
+
+    const dow = getDay(parseISO(req.date));
+    const rule = isHolidayZero
+      ? { count: 0, priority: 'NORMAL' as OperationalPriority, quotas: [] }
+      : ruleByRowDay.get(`${req.area_id}|${req.position_id}|${req.shift_id}|${dow}`) || {
+          count: 0,
+          priority: 'NORMAL' as OperationalPriority,
+          quotas: [],
+        };
+    const curCount = Number(req.required_count) || 0;
+    const curPrio = normalizePriority(req.priority);
+    const curQuotasRaw = normalizePriorityQuotaItems(currentQuotasById.get(req.id));
+    const curQuotas =
+      curQuotasRaw.length > 0
+        ? curQuotasRaw
+        : curCount > 0
+          ? [{ priority: curPrio, required_count: curCount }]
+          : [];
+
+    if (
+      curCount !== rule.count ||
+      curPrio !== rule.priority ||
+      !quotasEqual(curQuotas, rule.quotas)
+    ) {
+      affected.push({
+        id: req.id,
+        date: req.date,
+        area_id: req.area_id,
+        area_name: areaName || 'Desconocido',
+        position_id: req.position_id,
+        position_name: posName || 'Desconocido',
+        shift_id: req.shift_id,
+        shift_name: shiftName || 'Desconocido',
+        current_count: curCount,
+        current_priority: curPrio,
+        current_quotas: curQuotas,
+        next_count: rule.count,
+        next_priority: rule.priority,
+        next_quotas: rule.quotas,
+      });
+    }
+  }
+
+  return { success: true, affected, error: null };
+}
+
+export async function applyRuleChangesToGeneratedRequirements(
+  requirementIds: string[]
+): Promise<{ success: boolean; updatedCount: number; error?: string | null }> {
+  if (!Array.isArray(requirementIds) || requirementIds.length === 0) {
+    return { success: true, updatedCount: 0, error: null };
+  }
+
+  const supabase = await createClient();
+  const role = await getUserRole();
+  if (!role || !hasPermission(role as Role, 'manageShifts')) {
+    return { success: false, updatedCount: 0, error: 'No autorizado.' };
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'apply_rule_changes_to_generated_requirements',
+    { p_requirement_ids: requirementIds }
+  );
+
+  if (rpcError) {
+    return { success: false, updatedCount: 0, error: rpcError.message };
+  }
+
+  revalidatePath('/shifts/dotacion');
+  return {
+    success: true,
+    updatedCount: (rpcData as { updated_count?: number } | null)?.updated_count ?? requirementIds.length,
+    error: null,
   };
 }
 
@@ -707,13 +981,15 @@ export async function materializeTemplates(
   const supabase = await createClient();
 
   // 1. Obtener todas las reglas activas, catálogos y cálculo Blue Express AM 00
-  const [{ data: templates, error: tError }, { data: areas }, { data: positions }, bluePreview] = await Promise.all([
+  const [{ data: templates, error: tError }, { data: templateQuotas, error: tqError }, { data: areas }, { data: positions }, bluePreview] = await Promise.all([
     supabase.from('requirement_templates').select('*'),
+    supabase.from('requirement_template_priority_quotas').select('area_id, position_id, shift_id, day_of_week, priority, required_count'),
     supabase.from('areas').select('id, name'),
     supabase.from('positions').select('id, name'),
     previewBlueExpressNightStaffing(startDate, endDate),
   ]);
   if (tError) return { success: false, error: tError.message, count: 0, createdCount: 0, skippedCount: 0 };
+  const safeTemplateQuotas = (!tqError && Array.isArray(templateQuotas) ? templateQuotas : []) as TemplatePriorityQuotaRow[];
 
   const blueProposal = bluePreview.success ? bluePreview.proposal : null;
   const blueApprovedMap = blueProposal
@@ -737,6 +1013,7 @@ export async function materializeTemplates(
           areaNameById,
           positionNameById,
           warningsOut: holidayWarnings,
+          templateQuotas: safeTemplateQuotas,
         })
       : [];
   const inserts = blueProposal
@@ -778,36 +1055,9 @@ export async function materializeTemplates(
   // 4. Filtrar solo los registros faltantes (sin sobrescribir ni sumar sobre existentes)
   const { missingInserts } = filterMissingRequirements(inserts, existingRows);
 
-  // 5. Insertar únicamente faltantes con ON CONFLICT DO NOTHING (ignoreDuplicates: true)
-  let createdCount = 0;
-  const CHUNK_SIZE = 200;
-  for (let i = 0; i < missingInserts.length; i += CHUNK_SIZE) {
-    const chunk = missingInserts.slice(i, i + CHUNK_SIZE);
-    const { data: insertedRows, error: iError } = await supabase
-      .from('shift_requirements')
-      .upsert(chunk, {
-        onConflict: 'area_id,position_id,shift_id,date,is_extra',
-        ignoreDuplicates: true,
-      })
-      .select('id');
-
-    if (iError) {
-      return {
-        success: false,
-        error: iError.message,
-        count: createdCount,
-        createdCount,
-        skippedCount: inserts.length - createdCount,
-      };
-    }
-    createdCount += insertedRows?.length || 0;
-  }
-
-  const skippedCount = inserts.length - createdCount;
-
-  // 5b. Limpiar cupos ordinarios preexistentes de los 3 pares con dotación cero en feriados nacionales del rango
-  let holidayZeroCleanedCount = 0;
+  // 5. Identificar cupos ordinarios preexistentes de los 3 pares con dotación cero en feriados nacionales del rango
   const holidayDatesInRange = Array.from(holidayRangeCheck.holidaysByDate.keys());
+  const holidayIdsToDelete: string[] = [];
   if (holidayDatesInRange.length > 0) {
     const { data: holidayReqRows, error: holidayReqErr } = await supabase
       .from('shift_requirements')
@@ -818,13 +1068,12 @@ export async function materializeTemplates(
       return {
         success: false,
         error: holidayReqErr.message,
-        count: createdCount,
-        createdCount,
-        skippedCount,
+        count: 0,
+        createdCount: 0,
+        skippedCount: inserts.length,
         holidayWarnings,
       };
     }
-    const holidayIdsToDelete: string[] = [];
     for (const holidayDate of holidayDatesInRange) {
       const rowsForDate = ((holidayReqRows || []) as any[]).filter(
         (r) => String(r.date).split('T')[0] === holidayDate
@@ -832,49 +1081,45 @@ export async function materializeTemplates(
       const { matchedIds } = findHolidayZeroStaffingRequirementIds(rowsForDate, holidayDate);
       holidayIdsToDelete.push(...matchedIds);
     }
-    if (holidayIdsToDelete.length > 0) {
-      const { error: delHolidayErr } = await supabase
-        .from('shift_requirements')
-        .delete()
-        .in('id', holidayIdsToDelete);
-      if (delHolidayErr) {
-        return {
-          success: false,
-          error: delHolidayErr.message,
-          count: createdCount,
-          createdCount,
-          skippedCount,
-          holidayWarnings,
-        };
-      }
-      holidayZeroCleanedCount = holidayIdsToDelete.length;
-    }
   }
 
-  // 6. Guardar o actualizar Blue Express AM 00 desde la propuesta aprobada (sin tocar diurnos ni extras)
+  // 6. Ejecutar inserción de faltantes + desglose por prioridad + limpieza de feriados + Blue Express AM 00 en UNA sola transacción atómica
+  let createdCount = 0;
+  let holidayZeroCleanedCount = 0;
   let blueExpressUpsertedCount = 0;
-  for (let i = 0; i < blueUpserts.length; i += CHUNK_SIZE) {
-    const chunk = blueUpserts.slice(i, i + CHUNK_SIZE);
-    const { data: bRows, error: bErr } = await supabase
-      .from('shift_requirements')
-      .upsert(chunk, {
-        onConflict: 'area_id,position_id,shift_id,date,is_extra',
-        ignoreDuplicates: false,
-      })
-      .select('id');
+  if (missingInserts.length > 0 || holidayIdsToDelete.length > 0 || blueUpserts.length > 0) {
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      'materialize_requirements_with_quotas',
+      {
+        p_items: missingInserts,
+        p_holiday_delete_ids: holidayIdsToDelete,
+        p_blue_upserts: blueUpserts,
+        p_start_date: startDate,
+        p_end_date: endDate,
+      }
+    );
 
-    if (bErr) {
+    if (rpcError) {
       return {
         success: false,
-        error: bErr.message,
-        count: createdCount + blueExpressUpsertedCount,
-        createdCount,
-        skippedCount,
-        blueExpressUpsertedCount,
+        error: rpcError.message,
+        count: 0,
+        createdCount: 0,
+        skippedCount: inserts.length,
+        holidayWarnings,
       };
     }
-    blueExpressUpsertedCount += bRows?.length || chunk.length;
+    const resObj = rpcData as {
+      created_count?: number;
+      holiday_cleaned_count?: number;
+      blue_upserted_count?: number;
+    } | null;
+    createdCount = resObj?.created_count ?? 0;
+    holidayZeroCleanedCount = resObj?.holiday_cleaned_count ?? 0;
+    blueExpressUpsertedCount = resObj?.blue_upserted_count ?? 0;
   }
+
+  const skippedCount = inserts.length - createdCount;
 
   revalidatePath('/shifts/dotacion');
   revalidatePath('/shifts/requirements');

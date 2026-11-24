@@ -8,9 +8,13 @@ import {
 import {
   normalizePriority,
   normalizePriorityOverrides,
+  normalizePriorityQuotaItems,
   PRIORITY_RANK,
   resolveDayPriority,
+  sumPriorityQuotas,
   type OperationalPriority,
+  type PriorityQuotaItem,
+  type TemplatePriorityQuotaRow,
 } from './matrix-utils';
 
 export interface RequirementTemplateRow {
@@ -30,6 +34,7 @@ export interface MaterializedRequirementInsert {
   shift_id: string;
   required_count: number;
   priority: OperationalPriority;
+  priority_quotas?: PriorityQuotaItem[];
   date: string;
   is_extra: false;
 }
@@ -56,6 +61,7 @@ export interface MaterializeHolidayOptions {
   positionNameById?: Map<string, string>;
   calendarRegistry?: Record<number, VerifiedHolidayYearCalendar>;
   warningsOut?: string[];
+  templateQuotas?: TemplatePriorityQuotaRow[];
 }
 
 /**
@@ -87,6 +93,18 @@ export function buildConsolidatedRequirements(
 
   const days = eachDayOfInterval({ start, end });
   const groupedInserts = new Map<string, MaterializedRequirementInsert>();
+
+  const quotasByRowDay = new Map<string, PriorityQuotaItem[]>();
+  if (Array.isArray(holidayOptions?.templateQuotas)) {
+    for (const q of holidayOptions.templateQuotas) {
+      const cnt = Number(q.required_count) || 0;
+      if (cnt <= 0) continue;
+      const qKey = `${q.area_id}|${q.position_id}|${q.shift_id}|${q.day_of_week}`;
+      const list = quotasByRowDay.get(qKey) || [];
+      list.push({ priority: normalizePriority(q.priority), required_count: cnt });
+      quotasByRowDay.set(qKey, list);
+    }
+  }
 
   for (const day of days) {
     const dayOfWeek = getDay(day); // 0=Dom, 1=Lun ... 6=Sab
@@ -138,7 +156,20 @@ export function buildConsolidatedRequirements(
     }
   }
 
-  return Array.from(groupedInserts.values());
+  const results = Array.from(groupedInserts.values());
+  if (quotasByRowDay.size > 0) {
+    for (const item of results) {
+      const dow = getDay(parseISO(item.date));
+      const qKey = `${item.area_id}|${item.position_id}|${item.shift_id}|${dow}`;
+      const explicit = normalizePriorityQuotaItems(quotasByRowDay.get(qKey));
+      if (explicit.length > 0) {
+        item.priority_quotas = explicit;
+        item.required_count = sumPriorityQuotas(explicit);
+        item.priority = explicit[0].priority; // sorted by PRIORITY_RANK DESC
+      }
+    }
+  }
+  return results;
 }
 
 /**

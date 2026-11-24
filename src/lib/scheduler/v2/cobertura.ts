@@ -437,6 +437,8 @@ function* scheduleCrossAreaGen(
           shift_end: a.shift_end,
           duration_hours: a.duration_hours,
           slot_key: slotKey,
+          priority_slot_key: slotObj?.priority_slot_key,
+          priority: slotObj?.priority,
           assignment_kind: 'ns22_titular',
           match_type: 'primary',
           priority_rank: slotObj?.priority_rank ?? 4,
@@ -503,7 +505,7 @@ function* scheduleCrossAreaGen(
       openUnits.push({
         slot,
         effectivePriorityRank: slot.priority_rank,
-        unitId: `${slot.slot_key}#${i}`,
+        unitId: `${slot.priority_slot_key || slot.slot_key}#${i}`,
         filled: false,
         isNs22Replacement: false,
       });
@@ -624,8 +626,13 @@ function* scheduleCrossAreaGen(
   const nonTitularById = new Map(
     nonTitularPersonnel.map((p) => [p.personnel_id, p])
   );
+  const getSlotPrioKey = (s: Pick<DotacionSlot, 'slot_key' | 'priority_slot_key'>) =>
+    s.priority_slot_key || s.slot_key;
+  const getAssPrioKey = (a: Pick<CrossAreaAssignment, 'slot_key' | 'priority_slot_key'>) =>
+    a.priority_slot_key || a.slot_key;
+
   const scopedSlotByKey = new Map(
-    scopedOrdinarySlots.map((s) => [s.slot_key, s])
+    scopedOrdinarySlots.map((s) => [getSlotPrioKey(s), s])
   );
   const emptyReplacementSlots = new Set<string>();
   const cachedReplacementsBySlotKey = new Map<
@@ -657,7 +664,7 @@ function* scheduleCrossAreaGen(
         continue;
       }
 
-      const existingSlot = scopedSlotByKey.get(existingAss.slot_key);
+      const existingSlot = scopedSlotByKey.get(getAssPrioKey(existingAss));
       if (!existingSlot) continue;
 
       const existingIsNs22 = existingAss.assignment_kind === 'ns22_replacement';
@@ -674,7 +681,7 @@ function* scheduleCrossAreaGen(
       if (!targetStrictlyOutranks && !canAugmentEqual) {
         continue;
       }
-      if (!targetStrictlyOutranks && emptyReplacementSlots.has(existingSlot.slot_key)) {
+      if (!targetStrictlyOutranks && emptyReplacementSlots.has(getSlotPrioKey(existingSlot))) {
         continue;
       }
 
@@ -730,6 +737,8 @@ function* scheduleCrossAreaGen(
           shift_end: slot.shift_end,
           duration_hours: slot.shift_duration_hours,
           slot_key: slot.slot_key,
+          priority_slot_key: slot.priority_slot_key,
+          priority: slot.priority,
           assignment_kind: unit.isNs22Replacement
             ? 'ns22_replacement'
             : 'ordinary',
@@ -742,7 +751,7 @@ function* scheduleCrossAreaGen(
         unit.filled = true;
 
         const displacedUnit = openUnits.find(
-          (u) => u.filled && u.slot.slot_key === existingAss.slot_key
+          (u) => u.filled && getSlotPrioKey(u.slot) === getAssPrioKey(existingAss)
         );
         if (displacedUnit) displacedUnit.filled = false;
         emptyReplacementSlots.clear();
@@ -753,17 +762,18 @@ function* scheduleCrossAreaGen(
 
       // Case B: Equal priority augmenting swap — move `person` to `slot` and fill `existingSlot` with another free candidate
       if (unit.effectivePriorityRank === existingEffPrio) {
-        if (emptyReplacementSlots.has(existingSlot.slot_key)) continue;
-        let baseReplacements = cachedReplacementsBySlotKey.get(existingSlot.slot_key);
+        const exPrioKey = getSlotPrioKey(existingSlot);
+        if (emptyReplacementSlots.has(exPrioKey)) continue;
+        let baseReplacements = cachedReplacementsBySlotKey.get(exPrioKey);
         if (!baseReplacements) {
           baseReplacements = getValidCandidatesForSlot(existingSlot);
-          cachedReplacementsBySlotKey.set(existingSlot.slot_key, baseReplacements);
+          cachedReplacementsBySlotKey.set(exPrioKey, baseReplacements);
         }
         const replacementsForExisting = baseReplacements.filter(
           (c) => c.person.personnel_id !== person.personnel_id
         );
         if (baseReplacements.length === 0) {
-          emptyReplacementSlots.add(existingSlot.slot_key);
+          emptyReplacementSlots.add(exPrioKey);
         }
         if (replacementsForExisting.length > 0) {
           emptyReplacementSlots.clear();
@@ -795,6 +805,8 @@ function* scheduleCrossAreaGen(
             shift_end: existingSlot.shift_end,
             duration_hours: existingSlot.shift_duration_hours,
             slot_key: existingSlot.slot_key,
+            priority_slot_key: existingSlot.priority_slot_key,
+            priority: existingSlot.priority,
             assignment_kind: existingAss.assignment_kind,
             match_type: rep.matchType,
             priority_rank: existingAss.priority_rank,
@@ -813,6 +825,8 @@ function* scheduleCrossAreaGen(
             shift_end: slot.shift_end,
             duration_hours: slot.shift_duration_hours,
             slot_key: slot.slot_key,
+            priority_slot_key: slot.priority_slot_key,
+            priority: slot.priority,
             assignment_kind: unit.isNs22Replacement
               ? 'ns22_replacement'
               : 'ordinary',
@@ -864,10 +878,11 @@ function* scheduleCrossAreaGen(
           yield;
         }
         const unit = poolToPick[uIdx];
-        let cands = candidatesBySlotKey.get(unit.slot.slot_key);
+        const unitPrioKey = getSlotPrioKey(unit.slot);
+        let cands = candidatesBySlotKey.get(unitPrioKey);
         if (!cands) {
           cands = getValidCandidatesForSlot(unit.slot);
-          candidatesBySlotKey.set(unit.slot.slot_key, cands);
+          candidatesBySlotKey.set(unitPrioKey, cands);
         }
         if (cands.length === 0) continue;
         if (
@@ -933,6 +948,8 @@ function* scheduleCrossAreaGen(
         shift_end: slot.shift_end,
         duration_hours: slot.shift_duration_hours,
         slot_key: slot.slot_key,
+        priority_slot_key: slot.priority_slot_key,
+        priority: slot.priority,
         assignment_kind: chosenUnit.isNs22Replacement
           ? 'ns22_replacement'
           : 'ordinary',
@@ -959,7 +976,7 @@ function* scheduleCrossAreaGen(
       const seenRefreshKeys = new Set<string>();
       for (const remUnit of remainingTier) {
         if (remUnit.filled) continue;
-        const sk = remUnit.slot.slot_key;
+        const sk = getSlotPrioKey(remUnit.slot);
         if (seenRefreshKeys.has(sk)) continue;
         seenRefreshKeys.add(sk);
         const remUtcMs = Date.parse(`${remUnit.slot.date}T00:00:00Z`);
@@ -1020,6 +1037,8 @@ function* scheduleCrossAreaGen(
         shift_end: unit.slot.shift_end,
         duration_hours: unit.slot.shift_duration_hours,
         slot_key: unit.slot.slot_key,
+        priority_slot_key: unit.slot.priority_slot_key,
+        priority: unit.slot.priority,
         assignment_kind: unit.isNs22Replacement ? 'ns22_replacement' : 'ordinary',
         match_type: winner.matchType,
         priority_rank: unit.effectivePriorityRank,
@@ -1383,6 +1402,8 @@ function* scheduleCrossAreaGen(
     position_id: a.position_id,
     shift_id: a.shift_id,
     is_extra: false,
+    priority: a.priority,
+    priority_slot_key: a.priority_slot_key,
   }));
 
   const scopedPrepared = {

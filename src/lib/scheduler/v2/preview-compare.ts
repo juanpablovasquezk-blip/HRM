@@ -561,6 +561,7 @@ function buildV2MetricsFromResult(
     total_covered: v2Res.stats.total_covered,
     total_vacancies: v2Res.stats.total_vacancies,
     coverage_percent: v2Res.stats.coverage_percent,
+    coverage_by_priority: v2Res.coverage.ordinary.by_priority,
     covered_primary_count: v2Res.stats.covered_primary_count,
     covered_secondary_count: v2Res.stats.covered_secondary_count,
     reinforcement_count: v2Res.stats.reinforcement_count,

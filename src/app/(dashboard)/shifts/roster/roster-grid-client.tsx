@@ -2059,7 +2059,31 @@ export function RosterGridClient({
           )}
 
           {showV2VacanciesPanel && (
-            <div className="rounded-lg border border-indigo-200 bg-white dark:bg-slate-900 p-2.5 max-h-56 overflow-y-auto">
+            <div className="rounded-lg border border-indigo-200 bg-white dark:bg-slate-900 p-2.5 max-h-64 overflow-y-auto space-y-2">
+              {previewComparison.v2.coverage_by_priority && (
+                <div className="flex flex-wrap items-center gap-2 text-[11px] pb-1.5 border-b border-slate-100 dark:border-slate-800">
+                  <span className="font-semibold text-slate-600 dark:text-slate-300">Cobertura por prioridad:</span>
+                  {(['CRITICAL', 'HIGH', 'NORMAL', 'LOW'] as const).map((prio) => {
+                    const stat = previewComparison.v2.coverage_by_priority?.[prio];
+                    if (!stat || stat.required <= 0) return null;
+                    const label = prio === 'CRITICAL' ? 'Crítica' : prio === 'HIGH' ? 'Alta' : prio === 'NORMAL' ? 'Normal' : 'Baja';
+                    const cls =
+                      prio === 'CRITICAL'
+                        ? 'bg-red-50 text-red-700 border-red-200'
+                        : prio === 'HIGH'
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : prio === 'NORMAL'
+                            ? 'bg-slate-100 text-slate-700 border-slate-200'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                    return (
+                      <span key={prio} className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-medium ${cls}`}>
+                        {label}: {stat.covered}/{stat.required}
+                        {stat.vacancies > 0 && <span className="text-red-600 font-bold">(-{stat.vacancies})</span>}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
               {previewComparison.v2.vacancies.length === 0 ? (
                 <p className="text-xs text-emerald-700 font-medium">No hay vacantes pendientes en la propuesta v2 para este rango.</p>
               ) : (
@@ -2070,25 +2094,42 @@ export function RosterGridClient({
                       <th className="py-1.5 px-2 text-left">Área</th>
                       <th className="py-1.5 px-2 text-left">Cargo</th>
                       <th className="py-1.5 px-2 text-left">Turno</th>
+                      <th className="py-1.5 px-2 text-left">Prioridad</th>
                       <th className="py-1.5 px-2 text-right">Cubierto / Req.</th>
                       <th className="py-1.5 px-2 text-right">Vacantes</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {previewComparison.v2.vacancies.map((v) => (
-                      <tr key={v.slot_key}>
-                        <td className="py-1.5 px-2 font-mono">{v.date}</td>
-                        <td className="py-1.5 px-2">{v.area_name || v.area_id}</td>
-                        <td className="py-1.5 px-2">{v.position_name || v.position_id}</td>
-                        <td className="py-1.5 px-2">{v.shift_name || v.shift_id}</td>
-                        <td className="py-1.5 px-2 text-right">
-                          {v.covered_count}/{v.required_count}
-                        </td>
-                        <td className="py-1.5 px-2 text-right font-bold text-red-600">
-                          {v.vacancy_count}
-                        </td>
-                      </tr>
-                    ))}
+                    {previewComparison.v2.vacancies.map((v) => {
+                      const prioLabel = v.priority === 'CRITICAL' ? 'Crítica' : v.priority === 'HIGH' ? 'Alta' : v.priority === 'LOW' ? 'Baja' : 'Normal';
+                      const prioCls =
+                        v.priority === 'CRITICAL'
+                          ? 'bg-red-100 text-red-700'
+                          : v.priority === 'HIGH'
+                            ? 'bg-amber-100 text-amber-800'
+                            : v.priority === 'LOW'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-slate-100 text-slate-700';
+                      return (
+                        <tr key={v.priority_slot_key || v.slot_key}>
+                          <td className="py-1.5 px-2 font-mono">{v.date}</td>
+                          <td className="py-1.5 px-2">{v.area_name || v.area_id}</td>
+                          <td className="py-1.5 px-2">{v.position_name || v.position_id}</td>
+                          <td className="py-1.5 px-2">{v.shift_name || v.shift_id}</td>
+                          <td className="py-1.5 px-2">
+                            <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${prioCls}`}>
+                              {prioLabel}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2 text-right">
+                            {v.covered_count}/{v.required_count}
+                          </td>
+                          <td className="py-1.5 px-2 text-right font-bold text-red-600">
+                            {v.vacancy_count}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}

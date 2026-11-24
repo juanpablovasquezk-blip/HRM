@@ -105,7 +105,27 @@ export async function loadPreviewCompareInputs(
     };
   }
 
-  const rawRequirements = reqRes.data || [];
+  const rawRequirementsRaw = reqRes.data || [];
+  let rawRequirements = rawRequirementsRaw;
+  if (rawRequirementsRaw.length > 0) {
+    const reqIds = rawRequirementsRaw.map((r: any) => r.id).filter(Boolean);
+    const { data: quotaRows, error: quotaErr } = await supabase
+      .from('shift_requirement_priority_quotas')
+      .select('shift_requirement_id, priority, required_count')
+      .in('shift_requirement_id', reqIds);
+    if (!quotaErr && Array.isArray(quotaRows) && quotaRows.length > 0) {
+      const quotasByReqId = new Map<string, Array<{ priority: string; required_count: number }>>();
+      for (const q of quotaRows) {
+        const list = quotasByReqId.get(q.shift_requirement_id) || [];
+        list.push({ priority: q.priority, required_count: q.required_count });
+        quotasByReqId.set(q.shift_requirement_id, list);
+      }
+      rawRequirements = rawRequirementsRaw.map((r: any) => ({
+        ...r,
+        priority_quotas: quotasByReqId.get(r.id) || null,
+      }));
+    }
+  }
   const personnelRaw = persRes.data || [];
   const positions = posRes.data || [];
   const allShifts = shiftRes.data || [];

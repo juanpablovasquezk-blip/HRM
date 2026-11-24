@@ -7,10 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, previewGenerateMonth, previewDeleteOrdinaryRequirementsByRange, deleteOrdinaryRequirementsByRange, type WeeklyMatrixRowChange } from '@/app/(dashboard)/shifts/actions';
+import { createTemplate, deleteTemplate, materializeTemplates, deleteRequirement, updateTemplate, saveWeeklyMatrixChanges, previewAffectedGeneratedRequirements, applyRuleChangesToGeneratedRequirements, previewGenerateMonth, previewDeleteOrdinaryRequirementsByRange, deleteOrdinaryRequirementsByRange, type WeeklyMatrixRowChange, type AffectedGeneratedRequirementItem } from '@/app/(dashboard)/shifts/actions';
 import { getInitialApprovedTrucksByWeekday, type BlueExpressNightProposal } from '@/lib/scheduler/v2/blue-express';
 import type { GenerateMonthHolidayPreview } from '@/lib/scheduler/v2/chile-holidays';
 import type { OrdinaryRequirementRangeDeletePreview } from './range-delete-utils';
+import type { PriorityQuotaItem, TemplatePriorityQuotaRow } from './matrix-utils';
 import { Layers, Plus, Trash2, Calendar, MapPin, Briefcase, Clock, Loader2, RefreshCw, Shield, ChevronDown, Edit2, X, TableProperties, LayoutGrid } from 'lucide-react';
 import { toast } from 'sonner';
 import { WeeklyMatrixView } from './weekly-matrix-view';
@@ -18,6 +19,7 @@ import { WeeklyMatrixView } from './weekly-matrix-view';
 interface ReqClientProps {
   initialReqs: any[];
   templates: any[];
+  templateQuotas?: TemplatePriorityQuotaRow[];
   areas: any[];
   shifts: any[];
   positions?: any[];
@@ -28,7 +30,17 @@ interface ReqClientProps {
 const DAY_NAMES: Record<number, string> = { 0: 'Dom', 1: 'Lun', 2: 'Mar', 3: 'Mié', 4: 'Jue', 5: 'Vie', 6: 'Sáb' };
 const DAY_LABELS_SHORT: Record<number, string> = { 0: 'D', 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V', 6: 'S' };
 
-export function RequirementsClient({ initialReqs, templates, areas, shifts, positions = [], companyId, canEdit = false }: ReqClientProps) {
+function formatQuotasSummary(quotas: PriorityQuotaItem[], fallbackCount: number): string {
+  if (!quotas || quotas.length === 0) return `${fallbackCount}`;
+  return quotas
+    .map((q) => {
+      const label = q.priority === 'CRITICAL' ? 'Crít' : q.priority === 'HIGH' ? 'Alt' : q.priority === 'NORMAL' ? 'Norm' : 'Baj';
+      return `${q.required_count} ${label}`;
+    })
+    .join(' + ');
+}
+
+export function RequirementsClient({ initialReqs, templates, templateQuotas = [], areas, shifts, positions = [], companyId, canEdit = false }: ReqClientProps) {
   const [isPending, startTransition] = useTransition();
   const [selectedAreaId, setSelectedAreaId] = useState('');
   const [showGenerate, setShowGenerate] = useState(false);
@@ -69,6 +81,9 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
   const [filterPositionId, setFilterPositionId] = useState('all');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'matrix' | 'cards'>('matrix');
+  const [affectedReqs, setAffectedReqs] = useState<AffectedGeneratedRequirementItem[]>([]);
+  const [selectedAffectedIds, setSelectedAffectedIds] = useState<Set<string>>(new Set());
+  const [isSyncingAffected, setIsSyncingAffected] = useState(false);
   
   // Form states
   const [areaId, setAreaId] = useState('');
@@ -267,8 +282,44 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
     toast.success('Reglas semanales actualizadas', {
       description: `Se guardaron ${res.updatedRows ?? changes.length} fila(s) en las reglas permanentes.`,
     });
+
+    const preview = await previewAffectedGeneratedRequirements(
+      changes.map((c) => ({
+        area_id: c.area_id,
+        position_id: c.position_id,
+        shift_id: c.shift_id,
+      }))
+    );
+    if (preview.success && preview.affected.length > 0) {
+      setAffectedReqs(preview.affected);
+      setSelectedAffectedIds(new Set(preview.affected.map((a) => a.id)));
+    }
+
     router.refresh();
     return { success: true, error: null };
+  };
+
+  const handleApplyAffectedSync = async () => {
+    const ids = Array.from(selectedAffectedIds);
+    if (ids.length === 0) {
+      setAffectedReqs([]);
+      return;
+    }
+    setIsSyncingAffected(true);
+    try {
+      const res = await applyRuleChangesToGeneratedRequirements(ids);
+      if (res.error) {
+        toast.error('Error al actualizar requerimientos generados', { description: res.error });
+      } else {
+        toast.success('Requerimientos fechados actualizados', {
+          description: `Se actualizaron ${res.updatedCount} requerimiento(s) existente(s).`,
+        });
+        setAffectedReqs([]);
+        router.refresh();
+      }
+    } finally {
+      setIsSyncingAffected(false);
+    }
   };
 
   return (
@@ -445,6 +496,7 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
           <WeeklyMatrixView
             templates={filteredTemplates}
             allTemplates={templates}
+            templateQuotas={templateQuotas}
             areas={areas}
             shifts={shifts}
             onSaveChanges={canEdit ? handleSaveMatrixChanges : undefined}
@@ -1030,6 +1082,94 @@ export function RequirementsClient({ initialReqs, templates, areas, shifts, posi
       )}
 
       <GroupedRequirements reqs={initialReqs} onDelete={handleDeleteReq} isPending={isPending} />
+
+      {affectedReqs.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white dark:bg-slate-900 dark:border-slate-800 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <h3 className="text-base font-semibold">Requerimientos ya generados afectados</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Revisa los requerimientos fechados que cambiarían según la regla semanal actualizada antes de aplicar.
+                  Blue Express AM 00, los cupos Extra y las asignaciones existentes se conservan intactos.
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setAffectedReqs([])} disabled={isSyncingAffected}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="max-h-96 overflow-y-auto p-4">
+              <table className="w-full text-xs">
+                <thead className="text-[11px] uppercase text-slate-500 border-b">
+                  <tr>
+                    <th className="py-2 px-2 text-left">
+                      <input
+                        type="checkbox"
+                        checked={selectedAffectedIds.size === affectedReqs.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedAffectedIds(new Set(affectedReqs.map((a) => a.id)));
+                          } else {
+                            setSelectedAffectedIds(new Set());
+                          }
+                        }}
+                      />
+                    </th>
+                    <th className="py-2 px-2 text-left">Fecha</th>
+                    <th className="py-2 px-2 text-left">Área / Cargo</th>
+                    <th className="py-2 px-2 text-left">Turno</th>
+                    <th className="py-2 px-2 text-left">Actual</th>
+                    <th className="py-2 px-2 text-left">Nuevo (según regla)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {affectedReqs.map((item) => (
+                    <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="py-2 px-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedAffectedIds.has(item.id)}
+                          onChange={(e) => {
+                            const next = new Set(selectedAffectedIds);
+                            if (e.target.checked) next.add(item.id);
+                            else next.delete(item.id);
+                            setSelectedAffectedIds(next);
+                          }}
+                        />
+                      </td>
+                      <td className="py-2 px-2 font-mono">{item.date}</td>
+                      <td className="py-2 px-2">
+                        <span className="font-medium">{item.area_name}</span> · {item.position_name}
+                      </td>
+                      <td className="py-2 px-2">{item.shift_name}</td>
+                      <td className="py-2 px-2 text-slate-600">
+                        {formatQuotasSummary(item.current_quotas, item.current_count)}
+                      </td>
+                      <td className="py-2 px-2 font-semibold text-orange-700 dark:text-orange-300">
+                        {formatQuotasSummary(item.next_quotas, item.next_count)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
+              <Button variant="outline" size="sm" onClick={() => setAffectedReqs([])} disabled={isSyncingAffected}>
+                Solo guardar regla semanal
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleApplyAffectedSync}
+                disabled={isSyncingAffected || selectedAffectedIds.size === 0}
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+              >
+                {isSyncingAffected && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                Aplicar cambios a {selectedAffectedIds.size} requerimiento(s)
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

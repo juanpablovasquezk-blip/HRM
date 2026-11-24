@@ -13,6 +13,7 @@ import type {
   ExtraRequirementState,
   RawShiftRequirement,
   ReconcileExtraResult,
+  SlotCoverageDetail,
 } from './types';
 
 function isSlotInReconcileScope(
@@ -129,7 +130,8 @@ export function reconcileVacancyExtraRequirements(params: {
     }
   }
 
-  // Apply current v2 remaining_vacancies (already filtered by ROSTER-02A national holidays)
+  // Aggregate current v2 remaining_vacancies by canonical slot_key (supporting multiple priority groups per slot)
+  const aggregatedVacancies = new Map<string, SlotCoverageDetail>();
   for (const vac of v2Result.remaining_vacancies) {
     if (vac.vacancy_count <= 0) continue;
     if (
@@ -144,6 +146,15 @@ export function reconcileVacancyExtraRequirements(params: {
       continue;
     }
 
+    const prev = aggregatedVacancies.get(vac.slot_key);
+    if (prev) {
+      prev.vacancy_count += vac.vacancy_count;
+    } else {
+      aggregatedVacancies.set(vac.slot_key, { ...vac });
+    }
+  }
+
+  for (const vac of aggregatedVacancies.values()) {
     const existing = stateByKey.get(vac.slot_key);
     if (existing) {
       existing.auto_vacancy_count = vac.vacancy_count;

@@ -15,6 +15,7 @@ import type {
   DotacionGroupCoverage,
   DotacionSlot,
   GeneratedAssignmentRef,
+  OperationalPriority,
   RawExistingAssignment,
   RawShiftRequirement,
   SlotCoverageDetail,
@@ -39,6 +40,10 @@ export function buildDotacionSlotKey(parts: {
   shift_id: string;
 }): string {
   return `${normalizeIsoDate(parts.date)}|${parts.area_id}|${parts.position_id}|${parts.shift_id}`;
+}
+
+export function buildPrioritySlotKey(slotKey: string, priority: OperationalPriority): string {
+  return `${slotKey}|${priority}`;
 }
 
 /**
@@ -128,42 +133,62 @@ function consolidateRequirements(
       shift_id: req.shift_id,
     });
 
-    const priority = normalizePriority(req.priority);
-    const priorityRank = PRIORITY_RANK[priority];
-    const existing = grouped.get(slotKey);
-
-    if (existing) {
-      existing.requirement_ids.push(req.id);
-      existing.required_count += count;
-      if (priorityRank > existing.priority_rank) {
-        existing.priority = priority;
-        existing.priority_rank = priorityRank;
+    const quotaEntries: Array<{ priority: OperationalPriority; required_count: number }> = [];
+    if (Array.isArray(req.priority_quotas) && req.priority_quotas.length > 0) {
+      const byPrio = new Map<OperationalPriority, number>();
+      for (const q of req.priority_quotas) {
+        const qCount = Number(q?.required_count) || 0;
+        if (qCount <= 0) continue;
+        const qPrio = normalizePriority(q?.priority);
+        byPrio.set(qPrio, (byPrio.get(qPrio) || 0) + qCount);
       }
-      continue;
+      for (const [qPrio, qCount] of byPrio.entries()) {
+        quotaEntries.push({ priority: qPrio, required_count: qCount });
+      }
+    }
+    if (quotaEntries.length === 0) {
+      quotaEntries.push({ priority: normalizePriority(req.priority), required_count: count });
     }
 
     const shift = req.shift ?? null;
-    grouped.set(slotKey, {
-      slot_key: slotKey,
-      requirement_ids: [req.id],
-      date,
-      area_id: req.area_id,
-      position_id: req.position_id,
-      shift_id: req.shift_id,
-      is_extra: isExtra,
-      priority,
-      priority_rank: priorityRank,
-      required_count: count,
-      protected_filled_count: 0,
-      remaining_count: count,
-      shift_start: shift?.start_time || '00:00',
-      shift_end: shift?.end_time || '00:00',
-      shift_duration_hours: Number(shift?.duration_hours) || 8,
-      requires_transport: Boolean(shift?.requires_transport),
-      area_name: areaName,
-      position_name: positionName,
-      shift_name: shift?.name ?? undefined,
-    });
+    for (const entry of quotaEntries) {
+      const priority = entry.priority;
+      const priorityRank = PRIORITY_RANK[priority];
+      const prioritySlotKey = buildPrioritySlotKey(slotKey, priority);
+      const existing = grouped.get(prioritySlotKey);
+
+      if (existing) {
+        if (!existing.requirement_ids.includes(req.id)) {
+          existing.requirement_ids.push(req.id);
+        }
+        existing.required_count += entry.required_count;
+        existing.remaining_count += entry.required_count;
+        continue;
+      }
+
+      grouped.set(prioritySlotKey, {
+        slot_key: slotKey,
+        priority_slot_key: prioritySlotKey,
+        requirement_ids: [req.id],
+        date,
+        area_id: req.area_id,
+        position_id: req.position_id,
+        shift_id: req.shift_id,
+        is_extra: isExtra,
+        priority,
+        priority_rank: priorityRank,
+        required_count: entry.required_count,
+        protected_filled_count: 0,
+        remaining_count: entry.required_count,
+        shift_start: shift?.start_time || '00:00',
+        shift_end: shift?.end_time || '00:00',
+        shift_duration_hours: Number(shift?.duration_hours) || 8,
+        requires_transport: Boolean(shift?.requires_transport),
+        area_name: areaName,
+        position_name: positionName,
+        shift_name: shift?.name ?? undefined,
+      });
+    }
   }
 
   return { grouped, excludedHolidayCount };
@@ -176,6 +201,17 @@ function applyProtectedCounts(
 ): number {
   let unmatched = 0;
 
+  // Index all priority slots by canonical slot_key, ordered highest priority first
+  const slotsByCanonicalKey = new Map<string, DotacionSlot[]>();
+  for (const slot of slotMap.values()) {
+    const list = slotsByCanonicalKey.get(slot.slot_key) || [];
+    list.push(slot);
+    slotsByCanonicalKey.set(slot.slot_key, list);
+  }
+  for (const list of slotsByCanonicalKey.values()) {
+    list.sort((a, b) => b.priority_rank - a.priority_rank);
+  }
+
   for (const assignment of protectedAssignments) {
     if (Boolean(assignment.is_extra) !== isExtra) continue;
 
@@ -186,14 +222,15 @@ function applyProtectedCounts(
       shift_id: assignment.shift_id,
     });
 
-    const slot = slotMap.get(key);
-    if (!slot) {
+    const candidates = slotsByCanonicalKey.get(key);
+    if (!candidates || candidates.length === 0) {
       unmatched++;
       continue;
     }
 
-    slot.protected_filled_count += 1;
-    slot.remaining_count = Math.max(0, slot.required_count - slot.protected_filled_count);
+    const target = candidates.find((s) => s.remaining_count > 0) || candidates[0];
+    target.protected_filled_count += 1;
+    target.remaining_count = Math.max(0, target.required_count - target.protected_filled_count);
   }
 
   return unmatched;
@@ -285,7 +322,8 @@ function measureGroupCoverage(
   generatedAssignments: GeneratedAssignmentRef[],
   isExtra: boolean
 ): DotacionGroupCoverage {
-  const generatedByKey = new Map<string, number>();
+  const generatedByPriorityKey = new Map<string, number>();
+  const untaggedByCanonicalKey = new Map<string, number>();
 
   for (const assignment of generatedAssignments) {
     if (Boolean(assignment.is_extra) !== isExtra) continue;
@@ -295,15 +333,53 @@ function measureGroupCoverage(
       position_id: assignment.position_id,
       shift_id: assignment.shift_id,
     });
-    generatedByKey.set(key, (generatedByKey.get(key) || 0) + 1);
+    if (assignment.priority_slot_key) {
+      generatedByPriorityKey.set(
+        assignment.priority_slot_key,
+        (generatedByPriorityKey.get(assignment.priority_slot_key) || 0) + 1
+      );
+    } else if (assignment.priority) {
+      const pKey = buildPrioritySlotKey(key, normalizePriority(assignment.priority));
+      generatedByPriorityKey.set(pKey, (generatedByPriorityKey.get(pKey) || 0) + 1);
+    } else {
+      untaggedByCanonicalKey.set(key, (untaggedByCanonicalKey.get(key) || 0) + 1);
+    }
+  }
+
+  // Distribute untagged assignments across slots sharing the same canonical slot_key (highest priority first)
+  const remainingUntagged = new Map(untaggedByCanonicalKey);
+  const slotsOrderedForDist = [...slots].sort((a, b) => b.priority_rank - a.priority_rank);
+  const untaggedAllocatedByPriorityKey = new Map<string, number>();
+  for (const slot of slotsOrderedForDist) {
+    const pKey = slot.priority_slot_key || buildPrioritySlotKey(slot.slot_key, slot.priority);
+    const avail = remainingUntagged.get(slot.slot_key) || 0;
+    if (avail <= 0) continue;
+    const direct = generatedByPriorityKey.get(pKey) || 0;
+    const cap = Math.max(0, slot.required_count - slot.protected_filled_count - direct);
+    const take = Math.min(avail, cap);
+    if (take > 0) {
+      untaggedAllocatedByPriorityKey.set(pKey, (untaggedAllocatedByPriorityKey.get(pKey) || 0) + take);
+      remainingUntagged.set(slot.slot_key, avail - take);
+    }
+  }
+  // Allocate any over-allocated untagged assignments to the highest-priority slot for that canonical slot_key
+  for (const slot of slotsOrderedForDist) {
+    const avail = remainingUntagged.get(slot.slot_key) || 0;
+    if (avail <= 0) continue;
+    const pKey = slot.priority_slot_key || buildPrioritySlotKey(slot.slot_key, slot.priority);
+    untaggedAllocatedByPriorityKey.set(pKey, (untaggedAllocatedByPriorityKey.get(pKey) || 0) + avail);
+    remainingUntagged.set(slot.slot_key, 0);
   }
 
   let totalRequired = 0;
   let totalCovered = 0;
   let totalVacancies = 0;
+  const byPriority: Partial<Record<OperationalPriority, { required: number; covered: number; vacancies: number }>> = {};
 
   const details: SlotCoverageDetail[] = slots.map((slot) => {
-    const assignedCount = generatedByKey.get(slot.slot_key) || 0;
+    const pKey = slot.priority_slot_key || buildPrioritySlotKey(slot.slot_key, slot.priority);
+    const assignedCount =
+      (generatedByPriorityKey.get(pKey) || 0) + (untaggedAllocatedByPriorityKey.get(pKey) || 0);
     const totalPlaced = slot.protected_filled_count + assignedCount;
     const coveredCount = Math.min(slot.required_count, totalPlaced);
     const vacancyCount = Math.max(0, slot.required_count - coveredCount);
@@ -313,8 +389,15 @@ function measureGroupCoverage(
     totalCovered += coveredCount;
     totalVacancies += vacancyCount;
 
+    const prioAgg = byPriority[slot.priority] || { required: 0, covered: 0, vacancies: 0 };
+    prioAgg.required += slot.required_count;
+    prioAgg.covered += coveredCount;
+    prioAgg.vacancies += vacancyCount;
+    byPriority[slot.priority] = prioAgg;
+
     return {
       slot_key: slot.slot_key,
+      priority_slot_key: pKey,
       date: slot.date,
       area_id: slot.area_id,
       position_id: slot.position_id,
@@ -342,6 +425,7 @@ function measureGroupCoverage(
     total_covered: totalCovered,
     total_vacancies: totalVacancies,
     coverage_percent: coveragePercent,
+    by_priority: byPriority,
     slots: details,
   };
 }
