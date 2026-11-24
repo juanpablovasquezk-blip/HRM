@@ -2229,9 +2229,12 @@ export function RosterGridClient({
 
                   const dailyReqTotal = dailyReqs.reduce((sum, r) => sum + r.required_count, 0);
 
-                  // Filter assignments based on shown positions
+                  // Filter ordinary assignments based on shown positions (excluding reinforcements and extras)
                   const dateAssignments = assignmentsByDate[dateStr] || [];
+                  const isOrdinaryCoverageAssignment = (a: any) =>
+                    !a.is_extra && a.v2_preview?.assignment_kind !== 'reinforcement';
                   const dailyAssignments = dateAssignments.filter(a => {
+                    if (!isOrdinaryCoverageAssignment(a)) return false;
                     if (positionFilter.length > 0) {
                       const assignPosName = positionsMap[a.position_id]?.name?.toUpperCase() || "";
                       return positionFilter.some(pf => pf.toUpperCase() === assignPosName);
@@ -2244,13 +2247,21 @@ export function RosterGridClient({
                   // Detail for tooltip/audit
                   const shiftBreakdown = dailyReqs.map(r => {
                     const shift = shiftsMap[r.shift_id];
-                    const count = dateAssignments.filter(a => {
+                    const matching = dateAssignments.filter(a => {
                       if (a.shift_id !== r.shift_id) return false;
-                      if (positionFilter.length === 0) return true;
-                      const pName = positionsMap[a.position_id]?.name?.toUpperCase() || "";
-                      return positionFilter.some(pf => pf.toUpperCase() === pName);
-                    }).length;
-                    return `${shift?.name || 'Turno'}: ${count}/${r.required_count}`;
+                      if (r.area_id && a.area_id !== r.area_id) return false;
+                      if (r.position_id && a.position_id !== r.position_id) return false;
+                      if (positionFilter.length > 0) {
+                        const pName = positionsMap[a.position_id]?.name?.toUpperCase() || "";
+                        if (!positionFilter.some(pf => pf.toUpperCase() === pName)) return false;
+                      }
+                      return true;
+                    });
+                    const ordCount = matching.filter(isOrdinaryCoverageAssignment).length;
+                    const reinfCount = matching.filter(a => (a as any).v2_preview?.assignment_kind === 'reinforcement').length;
+                    return reinfCount > 0
+                      ? `${shift?.name || 'Turno'}: ${ordCount}/${r.required_count} ord · ${reinfCount} ref`
+                      : `${shift?.name || 'Turno'}: ${ordCount}/${r.required_count}`;
                   }).join(' | ');
 
                   return (
@@ -3504,13 +3515,43 @@ export function RosterGridClient({
                   const area = areasMap[req.area_id];
                   const assigned = dateAsgns.filter((a: any) =>
                     a.shift_id === req.shift_id &&
+                    (!req.area_id || a.area_id === req.area_id) &&
                     (!req.position_id || a.position_id === req.position_id)
                   );
-                  const assignedWorkers = assigned
-                    .map((a: any) => personnel.find((p: Personnel) => p.id === a.personnel_id))
-                    .filter(Boolean) as Personnel[];
-                  const isFull = assigned.length >= req.required_count;
-                  const vacancies = Math.max(0, req.required_count - assigned.length);
+                  const getSlotCategory = (a: any) => {
+                    if (a.v2_preview?.assignment_kind === 'reinforcement') return 'reinforcement' as const;
+                    if (a.is_extra) return 'extra' as const;
+                    if (a.v2_preview?.is_protected || a.is_locked || a.is_published || a.is_validated) {
+                      return 'protected' as const;
+                    }
+                    return 'ordinary' as const;
+                  };
+                  const ordinaryAssigned = assigned.filter((a: any) => {
+                    const cat = getSlotCategory(a);
+                    return cat === 'ordinary' || cat === 'protected';
+                  });
+                  const reinforcementCount = assigned.filter((a: any) => getSlotCategory(a) === 'reinforcement').length;
+                  const extraCount = assigned.filter((a: any) => getSlotCategory(a) === 'extra').length;
+                  const assignedEntries = assigned
+                    .map((a: any) => ({
+                      assignment: a,
+                      category: getSlotCategory(a),
+                      worker: personnel.find((p: Personnel) => p.id === a.personnel_id),
+                    }))
+                    .filter((entry): entry is { assignment: any; category: 'ordinary' | 'protected' | 'reinforcement' | 'extra'; worker: Personnel } => Boolean(entry.worker));
+                  const isFull = ordinaryAssigned.length >= req.required_count;
+                  const vacancies = Math.max(0, req.required_count - ordinaryAssigned.length);
+                  const badgeParts = [`${ordinaryAssigned.length}/${req.required_count} ordinario`];
+                  if (reinforcementCount > 0) {
+                    badgeParts.push(`${reinforcementCount} refuerzo${reinforcementCount > 1 ? 's' : ''}`);
+                  }
+                  if (extraCount > 0) {
+                    badgeParts.push(`${extraCount} extra${extraCount > 1 ? 's' : ''}`);
+                  }
+                  const coverageBadgeLabel =
+                    reinforcementCount > 0 || extraCount > 0
+                      ? badgeParts.join(' · ')
+                      : `${ordinaryAssigned.length} / ${req.required_count}`;
 
                   return (
                     <div key={i} className="px-5 py-4 space-y-3">
@@ -3538,7 +3579,7 @@ export function RosterGridClient({
                             ? "border-emerald-200 text-emerald-700 bg-emerald-50"
                             : "border-red-200 text-red-600 bg-red-50"
                         )}>
-                          {assigned.length} / {req.required_count}
+                          {coverageBadgeLabel}
                         </Badge>
                       </div>
 
@@ -3554,16 +3595,30 @@ export function RosterGridClient({
 
                       {/* Workers list */}
                       <div className="space-y-1.5">
-                        {assignedWorkers.map((worker: Personnel) => (
-                          <div key={worker.id} className="flex items-center gap-2.5 py-1 px-2 rounded-lg bg-slate-50">
+                        {assignedEntries.map(({ worker, category }: { worker: Personnel; category: 'ordinary' | 'protected' | 'reinforcement' | 'extra' }) => (
+                          <div key={`${worker.id}-${category}`} className="flex items-center gap-2.5 py-1 px-2 rounded-lg bg-slate-50">
                             <div className="h-6 w-6 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
                               <UserIcon className="h-3.5 w-3.5 text-orange-600" />
                             </div>
                             <span className="text-xs font-semibold text-slate-700">
                               {worker.first_name} {worker.last_name_father}
                             </span>
-                            <span className="ml-auto text-[9px] font-black text-emerald-600 uppercase tracking-wide flex items-center gap-0.5">
-                              <Check className="h-2.5 w-2.5" />Asignado
+                            <span className={cn(
+                              "ml-auto text-[9px] font-black uppercase tracking-wide flex items-center gap-0.5",
+                              category === 'reinforcement'
+                                ? "text-emerald-700"
+                                : category === 'extra' || category === 'protected'
+                                ? "text-amber-700"
+                                : "text-indigo-700"
+                            )}>
+                              <Check className="h-2.5 w-2.5" />
+                              {category === 'reinforcement'
+                                ? 'Refuerzo'
+                                : category === 'extra'
+                                ? 'Extra'
+                                : category === 'protected'
+                                ? 'Protegido'
+                                : 'Ordinario'}
                             </span>
                           </div>
                         ))}
