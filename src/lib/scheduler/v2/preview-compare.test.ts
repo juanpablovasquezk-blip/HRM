@@ -1029,3 +1029,123 @@ test('Filtro de Personas en vista previa: excluir a Carlos Tobar impide proponer
   assert.equal(carlosProposalDec7.position_name, 'Supervisor Aeropuerto');
   assert.equal(carlosProposalDec7.shift_name, 'AM 04');
 });
+
+test('Equivalencia Grúa Horquilla Atrex <-> Base Minerquim: una sola habilitación cubre ambas áreas y respeta preferencia flexible Eloy->Atrex / Lizardo->Base', () => {
+  const shifts = [
+    { id: 'sh-am0830', name: 'AM 08:30', start_time: '08:30', end_time: '17:30', duration_hours: 8 },
+    { id: 'sh-am07', name: 'AM 07', start_time: '07:00', end_time: '16:00', duration_hours: 8 },
+  ];
+  const areaNameById = new Map([
+    ['area-atrex', 'Atrex'],
+    ['area-base', 'Base Minerquim'],
+  ]);
+  const positionNameById = new Map([
+    ['pos-grua-atrex', 'Operador Grúa Horquilla'],
+    ['pos-grua-base', 'Operador Grúa Horquilla'],
+  ]);
+  const eloy: PersonnelScheduleProfile = {
+    personnel_id: 'eloy-ponce',
+    full_name: 'ELOY AGUSTIN PONCE',
+    main_position: 'pos-grua-atrex',
+    main_position_name: 'Operador Grúa Horquilla',
+    area_id: 'area-atrex',
+    secondary_positions: [],
+    rotation_pattern: 'l-v',
+  };
+  const lizardo: PersonnelScheduleProfile = {
+    personnel_id: 'lizardo-pailapichun',
+    full_name: 'LIZARDO PATRICIO PAILAPICHUN',
+    main_position: 'pos-grua-atrex',
+    main_position_name: 'Operador Grúa Horquilla',
+    area_id: 'area-atrex',
+    secondary_positions: [],
+    rotation_pattern: 'l-v',
+  };
+
+  const reqs: RawShiftRequirement[] = [
+    {
+      id: 'req-atrex-07',
+      date: '2026-12-07',
+      area_id: 'area-atrex',
+      position_id: 'pos-grua-atrex',
+      shift_id: 'sh-am0830',
+      required_count: 1,
+      priority: 'CRITICAL',
+      is_extra: false,
+      area: { name: 'Atrex' },
+      position: { name: 'Operador Grúa Horquilla' },
+      shift: { name: 'AM 08:30', start_time: '08:30', end_time: '17:30', duration_hours: 8 },
+    },
+    {
+      id: 'req-base-07',
+      date: '2026-12-07',
+      area_id: 'area-base',
+      position_id: 'pos-grua-base',
+      shift_id: 'sh-am07',
+      required_count: 1,
+      priority: 'CRITICAL',
+      is_extra: false,
+      area: { name: 'Base Minerquim' },
+      position: { name: 'Operador Grúa Horquilla' },
+      shift: { name: 'AM 07', start_time: '07:00', end_time: '16:00', duration_hours: 8 },
+    },
+  ];
+
+  // 1) Ambos disponibles con una sola habilitación (Atrex): Eloy -> Atrex y Lizardo -> Base Minerquim
+  const resBoth = scheduleCrossArea({
+    startDate: '2026-12-07',
+    endDate: '2026-12-07',
+    rawRequirements: reqs,
+    existingAssignments: [],
+    personnel: [lizardo, eloy],
+    areaNameById,
+    positionNameById,
+    referenceDate: REF_DATE,
+  });
+
+  const atrexAss = resBoth.ordinary_assignments.find((a) => a.area_id === 'area-atrex');
+  const baseAss = resBoth.ordinary_assignments.find((a) => a.area_id === 'area-base');
+  assert.equal(atrexAss?.personnel_id, 'eloy-ponce');
+  assert.equal(baseAss?.personnel_id, 'lizardo-pailapichun');
+  assert.equal(resBoth.remaining_vacancies.length, 0);
+
+  // 2) Eloy y Lizardo de vacaciones + 2 operadores con una sola habilitación secundaria de Grúa Horquilla -> cubre ambos cupos en vista previa
+  const op1: PersonnelScheduleProfile = {
+    personnel_id: 'op-1',
+    full_name: 'JAIME EDUARDO ESPINOSA',
+    main_position: 'pos-otro',
+    secondary_positions: ['pos-grua-atrex'],
+    rotation_pattern: '5X2',
+  };
+  const op2: PersonnelScheduleProfile = {
+    personnel_id: 'op-2',
+    full_name: 'ALVARO FELIPE MORALES',
+    main_position: 'pos-otro',
+    secondary_positions: ['pos-grua-base'],
+    rotation_pattern: '5X2',
+  };
+  const previewVac = compareEnginesPreview({
+    startDate: '2026-12-07',
+    endDate: '2026-12-07',
+    rawRequirements: reqs,
+    existingAssignments: [],
+    personnel: [eloy, lizardo, op1, op2],
+    approvedLeaves: [
+      { personnel_id: 'eloy-ponce', start_date: '2026-12-07', end_date: '2026-12-07', status: 'approved', type: 'vacation' },
+      { personnel_id: 'lizardo-pailapichun', start_date: '2026-12-07', end_date: '2026-12-07', status: 'approved', type: 'vacation' },
+    ],
+    allShifts: shifts,
+    areaNameById,
+    positionNameById,
+    referenceDate: REF_DATE,
+  });
+
+  assert.equal(previewVac.v2.total_required, 2);
+  assert.equal(previewVac.v2.total_covered, 2);
+  assert.equal(previewVac.v2.total_vacancies, 0);
+  const v2AssignedIds = new Set((previewVac.v2.assignments || []).map((a) => a.personnel_id));
+  assert.equal(v2AssignedIds.has('op-1'), true);
+  assert.equal(v2AssignedIds.has('op-2'), true);
+  assert.equal(v2AssignedIds.has('eloy-ponce'), false);
+  assert.equal(v2AssignedIds.has('lizardo-pailapichun'), false);
+});

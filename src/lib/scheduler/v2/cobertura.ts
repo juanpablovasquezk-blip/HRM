@@ -59,12 +59,101 @@ function slotToInterval(slot: DotacionSlot): ScheduledShiftInterval {
   };
 }
 
+function normalizeCatalogText(value?: string | null): string {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function isForkliftOperatorPositionName(posName?: string | null): boolean {
+  const n = normalizeCatalogText(posName);
+  return n === 'OPERADOR GRUA HORQUILLA' || n === 'OPERADOR DE GRUA HORQUILLA';
+}
+
+/**
+ * Limits qualification equivalence strictly to the two catalog entries for
+ * "Operador Grúa Horquilla" in Atrex and Base Minerquim.
+ */
+function buildGruaHorquillaEquivalence(
+  rawRequirements: RawShiftRequirement[],
+  personnel: PersonnelScheduleProfile[],
+  areaNameById?: Map<string, string>,
+  positionNameById?: Map<string, string>
+): Map<string, Set<string>> {
+  const atrexPosIds = new Set<string>();
+  const baseMinerquimPosIds = new Set<string>();
+
+  const registerPair = (areaId?: string | null, posId?: string | null, areaLabel?: string | null, posLabel?: string | null) => {
+    if (!posId) return;
+    const pName = posLabel || positionNameById?.get(posId) || '';
+    if (!isForkliftOperatorPositionName(pName)) return;
+    const aName = normalizeCatalogText(areaLabel || (areaId ? areaNameById?.get(areaId) : ''));
+    if (aName === 'ATREX') atrexPosIds.add(posId);
+    if (aName === 'BASE MINERQUIM') baseMinerquimPosIds.add(posId);
+  };
+
+  for (const r of rawRequirements) {
+    registerPair(r.area_id, r.position_id, r.area?.name, r.position?.name);
+  }
+  for (const p of personnel) {
+    registerPair(p.area_id, p.main_position, undefined, p.main_position_name);
+  }
+
+  const eqMap = new Map<string, Set<string>>();
+  if (atrexPosIds.size === 0 || baseMinerquimPosIds.size === 0) {
+    return eqMap;
+  }
+
+  for (const aId of atrexPosIds) {
+    const set = eqMap.get(aId) || new Set<string>();
+    for (const bId of baseMinerquimPosIds) set.add(bId);
+    eqMap.set(aId, set);
+  }
+  for (const bId of baseMinerquimPosIds) {
+    const set = eqMap.get(bId) || new Set<string>();
+    for (const aId of atrexPosIds) set.add(aId);
+    eqMap.set(bId, set);
+  }
+  return eqMap;
+}
+
+function getGruaAreaPreferenceScore(
+  person: PersonnelScheduleProfile,
+  slot: Pick<DotacionSlot, 'area_id' | 'area_name' | 'position_id' | 'position_name'>,
+  areaNameById?: Map<string, string>,
+  positionNameById?: Map<string, string>
+): number {
+  const posName = slot.position_name || positionNameById?.get(slot.position_id);
+  if (!isForkliftOperatorPositionName(posName)) return 0;
+
+  const areaName = normalizeCatalogText(slot.area_name || areaNameById?.get(slot.area_id));
+  const personName = normalizeCatalogText(person.full_name || person.first_name);
+  if (areaName === 'ATREX' && personName.includes('ELOY') && (personName.includes('PONCE') || !person.full_name)) {
+    return 1;
+  }
+  if (
+    areaName === 'BASE MINERQUIM' &&
+    personName.includes('LIZARDO') &&
+    (personName.includes('PAILAPICHUN') || !person.full_name)
+  ) {
+    return 1;
+  }
+  return 0;
+}
+
 function getPositionMatch(
   person: PersonnelScheduleProfile,
-  positionId: string
+  positionId: string,
+  equivalentPositionIds?: Map<string, Set<string>>
 ): 'primary' | 'secondary' | null {
+  const eqSet = equivalentPositionIds?.get(positionId);
   if (person.main_position === positionId) return 'primary';
+  if (person.main_position && eqSet?.has(person.main_position)) return 'primary';
   if ((person.secondary_positions || []).includes(positionId)) return 'secondary';
+  if ((person.secondary_positions || []).some((sec) => eqSet?.has(sec))) return 'secondary';
   return null;
 }
 
@@ -542,23 +631,46 @@ function* scheduleCrossAreaGen(
     leavesByPerson.get(l.personnel_id)!.push(l);
   }
 
+  const equivalentPositionIds = buildGruaHorquillaEquivalence(
+    rawRequirements,
+    personnel,
+    areaNameById,
+    positionNameById
+  );
+
   const personnelByPosition = new Map<
     string,
     Array<{ person: PersonnelScheduleProfile; matchType: 'primary' | 'secondary' }>
   >();
+  const registerPosCandidate = (
+    posId: string,
+    person: PersonnelScheduleProfile,
+    matchType: 'primary' | 'secondary'
+  ) => {
+    if (!personnelByPosition.has(posId)) {
+      personnelByPosition.set(posId, []);
+    }
+    const list = personnelByPosition.get(posId)!;
+    const existing = list.find((item) => item.person.personnel_id === person.personnel_id);
+    if (existing) {
+      if (matchType === 'primary') existing.matchType = 'primary';
+      return;
+    }
+    list.push({ person, matchType });
+  };
   for (const p of nonTitularPersonnel) {
     if (p.main_position) {
-      if (!personnelByPosition.has(p.main_position)) {
-        personnelByPosition.set(p.main_position, []);
+      registerPosCandidate(p.main_position, p, 'primary');
+      for (const eqPosId of equivalentPositionIds.get(p.main_position) || []) {
+        registerPosCandidate(eqPosId, p, 'primary');
       }
-      personnelByPosition.get(p.main_position)!.push({ person: p, matchType: 'primary' });
     }
     for (const sec of p.secondary_positions || []) {
       if (sec === p.main_position) continue;
-      if (!personnelByPosition.has(sec)) {
-        personnelByPosition.set(sec, []);
+      registerPosCandidate(sec, p, 'secondary');
+      for (const eqPosId of equivalentPositionIds.get(sec) || []) {
+        registerPosCandidate(eqPosId, p, 'secondary');
       }
-      personnelByPosition.get(sec)!.push({ person: p, matchType: 'secondary' });
     }
   }
 
@@ -719,7 +831,7 @@ function* scheduleCrossAreaGen(
       const person = nonTitularById.get(existingAss.personnel_id);
       if (!person) continue;
 
-      const matchForTarget = getPositionMatch(person, slot.position_id);
+      const matchForTarget = getPositionMatch(person, slot.position_id, equivalentPositionIds);
       if (
         !matchForTarget ||
         !canPersonTakeShiftInterval(person, {
@@ -804,6 +916,9 @@ function* scheduleCrossAreaGen(
             if (a.matchType !== b.matchType) {
               return a.matchType === 'primary' ? -1 : 1;
             }
+            const prefA = getGruaAreaPreferenceScore(a.person, existingSlot, areaNameById, positionNameById);
+            const prefB = getGruaAreaPreferenceScore(b.person, existingSlot, areaNameById, positionNameById);
+            if (prefA !== prefB) return prefB - prefA;
             return a.warningCount - b.warningCount;
           });
           const rep = replacementsForExisting[0];
@@ -924,7 +1039,7 @@ function* scheduleCrossAreaGen(
         let flex = 0;
         for (const other of remainingTier) {
           if (other.unitId === chosenUnit.unitId) continue;
-          if (getPositionMatch(c.person, other.slot.position_id)) flex++;
+          if (getPositionMatch(c.person, other.slot.position_id, equivalentPositionIds)) flex++;
         }
         flexibilityMap.set(c.person.personnel_id, flex);
       }
@@ -950,6 +1065,9 @@ function* scheduleCrossAreaGen(
         const flexA = flexibilityMap.get(a.person.personnel_id) || 0;
         const flexB = flexibilityMap.get(b.person.personnel_id) || 0;
         if (flexA !== flexB) return flexA - flexB;
+        const prefA = getGruaAreaPreferenceScore(a.person, chosenUnit!.slot, areaNameById, positionNameById);
+        const prefB = getGruaAreaPreferenceScore(b.person, chosenUnit!.slot, areaNameById, positionNameById);
+        if (prefA !== prefB) return prefB - prefA;
         if (a.warningCount !== b.warningCount) {
           return a.warningCount - b.warningCount;
         }
@@ -1008,7 +1126,7 @@ function* scheduleCrossAreaGen(
         }
         const cached = candidatesBySlotKey.get(sk);
         if (!cached) continue;
-        const matchForRem = getPositionMatch(winner.person, remUnit.slot.position_id);
+        const matchForRem = getPositionMatch(winner.person, remUnit.slot.position_id, equivalentPositionIds);
         if (!matchForRem) continue;
         const updatedWinnerEntry = validateSingleCandidateForSlot(
           winner.person,
@@ -1040,13 +1158,15 @@ function* scheduleCrossAreaGen(
     yield;
     const directCands = getValidCandidatesForSlot(unit.slot);
     if (directCands.length > 0) {
-      directCands.sort((a, b) =>
-        a.matchType !== b.matchType
-          ? a.matchType === 'primary'
-            ? -1
-            : 1
-          : a.warningCount - b.warningCount
-      );
+      directCands.sort((a, b) => {
+        if (a.matchType !== b.matchType) {
+          return a.matchType === 'primary' ? -1 : 1;
+        }
+        const prefA = getGruaAreaPreferenceScore(a.person, unit.slot, areaNameById, positionNameById);
+        const prefB = getGruaAreaPreferenceScore(b.person, unit.slot, areaNameById, positionNameById);
+        if (prefA !== prefB) return prefB - prefA;
+        return a.warningCount - b.warningCount;
+      });
       const winner = directCands[0];
       ordinaryAssignments.push({
         date: unit.slot.date,
