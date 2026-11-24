@@ -1489,3 +1489,190 @@ test('Preferencias flexibles v2: continuidad AM 11 y 2 libres consecutivos cuand
   assert.equal(sheet.blue_express[0].conductors[0].name, 'JUAN COLINA');
   assert.equal(sheet.blue_express[0].ayudantes[0].name, 'VICTOR SEPULVEDA');
 });
+
+test('Revisión semanal Stage 4C: intercambio de 2 personas (Manuel -> DHL AM 04, Juan -> Aeropuerto AM 04) válido y rechazado por descanso/protegido', () => {
+  const juan: PersonnelScheduleProfile = {
+    personnel_id: 'juan-colina',
+    full_name: 'Juan Natividad Colina',
+    birth_date: '1988-05-10',
+    main_position: 'pos-dhl',
+    secondary_positions: ['pos-aero'],
+    area_id: 'area-bodegas',
+    rotation_pattern: '5X2',
+  };
+  const manuel: PersonnelScheduleProfile = {
+    personnel_id: 'manuel-gonz',
+    full_name: 'Manuel Jesus Gonzalez',
+    birth_date: '2000-07-24',
+    main_position: 'pos-blue',
+    secondary_positions: ['pos-dhl'], // NO habilitado en Aeropuerto
+    area_id: 'area-blue',
+    rotation_pattern: '5X2',
+  };
+
+  // Martes 2026-12-15: DHL AM 04 (HIGH) + Aeropuerto AM 04 (CRITICAL)
+  // Juan tiene turno protegido en DHL AM 04? En Caso 1 NO -> Juan puede pasar a Aeropuerto AM 04 y Manuel a DHL AM 04.
+  const reqs: RawShiftRequirement[] = [
+    {
+      id: 'req-dhl-15',
+      date: '2026-12-15',
+      area_id: 'area-bodegas',
+      position_id: 'pos-dhl',
+      shift_id: 'sh-am04',
+      required_count: 1,
+      priority: 'HIGH',
+      shift: { name: 'AM 04', start_time: '04:00', end_time: '13:00', duration_hours: 8 },
+    },
+    {
+      id: 'req-aero-15',
+      date: '2026-12-15',
+      area_id: 'area-aero',
+      position_id: 'pos-aero',
+      shift_id: 'sh-am04',
+      required_count: 1,
+      priority: 'CRITICAL',
+      shift: { name: 'AM 04', start_time: '04:00', end_time: '13:00', duration_hours: 8 },
+    },
+  ];
+
+  // Caso 1 (Válido): Manuel libre el 15-12 y sin conflicto de descanso -> cobertura 2/2
+  const areaNames = new Map([
+    ['area-bodegas', 'Bodegas'],
+    ['area-aero', 'Aeropuerto'],
+    ['area-blue', 'BlueExpress'],
+  ]);
+  const posNames = new Map([
+    ['pos-dhl', 'Operador DHL'],
+    ['pos-aero', 'Operador Aeropuerto'],
+    ['pos-blue', 'Ayudante'],
+  ]);
+
+  const validRes = scheduleCrossArea({
+    startDate: '2026-12-14',
+    endDate: '2026-12-20',
+    rawRequirements: reqs,
+    existingAssignments: [],
+    personnel: [juan, manuel],
+    areaNameById: areaNames,
+    positionNameById: posNames,
+    referenceDate: REF_DATE,
+  });
+  assert.equal(validRes.coverage.ordinary.total_covered, 2);
+  assert.equal(validRes.coverage.ordinary.total_vacancies, 0);
+  const dec15Aero = validRes.ordinary_assignments.find((a) => a.date === '2026-12-15' && a.position_id === 'pos-aero');
+  const dec15Dhl = validRes.ordinary_assignments.find((a) => a.date === '2026-12-15' && a.position_id === 'pos-dhl');
+  assert.equal(dec15Aero?.personnel_id, 'juan-colina');
+  assert.equal(dec15Dhl?.personnel_id, 'manuel-gonz');
+
+  // Caso 2 (Rechazado): Manuel trabajó el 14-12 hasta las 20:00 (AM 11) -> solo 8h de descanso antes de AM 04 (04:00)
+  // y Juan tiene DHL AM 04 protegido -> el intercambio debe rechazarse y Aeropuerto AM 04 queda vacante.
+  const rejectedRes = scheduleCrossArea({
+    startDate: '2026-12-14',
+    endDate: '2026-12-20',
+    rawRequirements: reqs,
+    existingAssignments: [
+      {
+        date: '2026-12-14',
+        personnel_id: 'manuel-gonz',
+        area_id: 'area-blue',
+        position_id: 'pos-blue',
+        shift_id: 'sh-am11',
+        status: 'CONFIRMED',
+        is_locked: true,
+        is_extra: false,
+        shift_start: '11:00',
+        shift_end: '20:00',
+        duration_hours: 8,
+      },
+      {
+        date: '2026-12-15',
+        personnel_id: 'juan-colina',
+        area_id: 'area-bodegas',
+        position_id: 'pos-dhl',
+        shift_id: 'sh-am04',
+        status: 'CONFIRMED',
+        is_locked: true,
+        is_extra: false,
+        shift_start: '04:00',
+        shift_end: '13:00',
+        duration_hours: 8,
+      },
+    ],
+    personnel: [juan, manuel],
+    areaNameById: areaNames,
+    positionNameById: posNames,
+    referenceDate: REF_DATE,
+  });
+  assert.equal(rejectedRes.coverage.ordinary.total_covered, 1);
+  assert.equal(rejectedRes.coverage.ordinary.total_vacancies, 1);
+  assert.equal(rejectedRes.remaining_vacancies[0].position_id, 'pos-aero');
+});
+
+test('Stage 4C nunca degrada un cupo CRITICAL compartido en el mismo slot_key al cubrir una vacante HIGH', () => {
+  const op1: PersonnelScheduleProfile = {
+    personnel_id: 'op-1',
+    full_name: 'Operador Uno',
+    birth_date: '1990-01-10',
+    main_position: 'pos-dhl',
+    area_id: 'area-bodegas',
+    rotation_pattern: '5X2',
+  };
+  const op2: PersonnelScheduleProfile = {
+    personnel_id: 'op-2',
+    full_name: 'Operador Dos',
+    birth_date: '1991-02-15',
+    main_position: 'pos-dhl',
+    area_id: 'area-bodegas',
+    rotation_pattern: '5X2',
+  };
+
+  // Mismo slot_key el 2026-12-14 con 1 CRITICAL + 1 HIGH (requerido total = 2), y 1 HIGH el 2026-12-20
+  const reqs: RawShiftRequirement[] = [
+    {
+      id: 'req-14-crit',
+      date: '2026-12-14',
+      area_id: 'area-bodegas',
+      position_id: 'pos-dhl',
+      shift_id: 'sh-am05',
+      required_count: 1,
+      priority: 'CRITICAL',
+      shift: { name: 'AM 05', start_time: '05:00', end_time: '14:00', duration_hours: 8 },
+    },
+    {
+      id: 'req-14-high',
+      date: '2026-12-14',
+      area_id: 'area-bodegas',
+      position_id: 'pos-dhl',
+      shift_id: 'sh-am05',
+      required_count: 1,
+      priority: 'HIGH',
+      shift: { name: 'AM 05', start_time: '05:00', end_time: '14:00', duration_hours: 8 },
+    },
+    {
+      id: 'req-20-high',
+      date: '2026-12-20',
+      area_id: 'area-bodegas',
+      position_id: 'pos-dhl',
+      shift_id: 'sh-am05',
+      required_count: 1,
+      priority: 'HIGH',
+      shift: { name: 'AM 05', start_time: '05:00', end_time: '14:00', duration_hours: 8 },
+    },
+  ];
+
+  const res = scheduleCrossArea({
+    startDate: '2026-12-14',
+    endDate: '2026-12-20',
+    rawRequirements: reqs,
+    existingAssignments: [],
+    personnel: [op1, op2],
+    areaNameById: new Map([['area-bodegas', 'Bodegas']]),
+    positionNameById: new Map([['pos-dhl', 'Operador DHL']]),
+    referenceDate: REF_DATE,
+  });
+
+  assert.equal(res.coverage.ordinary.by_priority?.CRITICAL?.covered, 1);
+  assert.equal(res.coverage.ordinary.by_priority?.CRITICAL?.vacancies, 0);
+  assert.equal(res.coverage.ordinary.total_covered, 3);
+  assert.equal(res.coverage.ordinary.total_vacancies, 0);
+});

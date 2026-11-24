@@ -157,6 +157,19 @@ function getPositionMatch(
   return null;
 }
 
+function isWeekendDate(dateStr: string): boolean {
+  const day = parseISO(normalizeIsoDate(dateStr)).getDay();
+  return day === 0 || day === 6;
+}
+
+function countWeekendShifts(shifts: ScheduledShiftInterval[]): number {
+  let count = 0;
+  for (const s of shifts) {
+    if (isWeekendDate(s.date)) count++;
+  }
+  return count;
+}
+
 function getShiftTimeTag(shiftStart?: string | null, shiftName?: string | null): 'AM11' | 'AM08' | null {
   const start = (shiftStart || '').trim();
   const name = normalizeCatalogText(shiftName);
@@ -387,6 +400,7 @@ export interface ScheduleCrossAreaParams {
   } | null;
   excludeUnconfiguredNs22?: boolean;
   disableSoftPreferences?: boolean;
+  disableSupervisorWeekendBalance?: boolean;
   reinforcementConfig?: Record<
     string,
     ReinforcementShiftConfig | ReinforcementShiftConfig[]
@@ -396,6 +410,7 @@ export interface ScheduleCrossAreaParams {
   areaNameById?: Map<string, string>;
   positionNameById?: Map<string, string>;
   holidayCalendarRegistry?: Record<number, VerifiedHolidayYearCalendar>;
+  disableWeeklyChainReview?: boolean;
   deadlineAt?: number;
   signal?: AbortSignal;
 }
@@ -420,6 +435,8 @@ function* scheduleCrossAreaGen(
     ns22Config,
     excludeUnconfiguredNs22 = false,
     disableSoftPreferences = false,
+    disableSupervisorWeekendBalance = false,
+    disableWeeklyChainReview = false,
     reinforcementConfig,
     baseCalendarByPerson,
     referenceDate = new Date(),
@@ -757,6 +774,7 @@ function* scheduleCrossAreaGen(
       person: p,
       matchType,
       softPenalty,
+      weekendCount: countWeekendShifts(pShifts),
       warningCount: violations.filter((v) => v.severity === 'warning').length,
       totalHours: getTotalHours(pShifts),
     };
@@ -769,6 +787,7 @@ function* scheduleCrossAreaGen(
     person: PersonnelScheduleProfile;
     matchType: 'primary' | 'secondary';
     softPenalty: number;
+    weekendCount: number;
     warningCount: number;
     totalHours: number;
   }> => {
@@ -777,6 +796,7 @@ function* scheduleCrossAreaGen(
       person: PersonnelScheduleProfile;
       matchType: 'primary' | 'secondary';
       softPenalty: number;
+      weekendCount: number;
       warningCount: number;
       totalHours: number;
     }> = [];
@@ -1130,6 +1150,18 @@ function* scheduleCrossAreaGen(
         if (a.softPenalty !== b.softPenalty) {
           return a.softPenalty - b.softPenalty;
         }
+        const chosenPosName = normalizeCatalogText(
+          chosenUnit!.slot.position_name || positionNameById?.get(chosenUnit!.slot.position_id)
+        );
+        if (
+          !disableSoftPreferences &&
+          !disableSupervisorWeekendBalance &&
+          chosenPosName.includes('SUPERVISOR') &&
+          isWeekendDate(chosenUnit!.slot.date) &&
+          a.weekendCount !== b.weekendCount
+        ) {
+          return a.weekendCount - b.weekendCount;
+        }
         if (a.warningCount !== b.warningCount) {
           return a.warningCount - b.warningCount;
         }
@@ -1229,6 +1261,18 @@ function* scheduleCrossAreaGen(
         if (prefA !== prefB) return prefB - prefA;
         if (a.softPenalty !== b.softPenalty) {
           return a.softPenalty - b.softPenalty;
+        }
+        const unitPosName = normalizeCatalogText(
+          unit.slot.position_name || positionNameById?.get(unit.slot.position_id)
+        );
+        if (
+          !disableSoftPreferences &&
+          !disableSupervisorWeekendBalance &&
+          unitPosName.includes('SUPERVISOR') &&
+          isWeekendDate(unit.slot.date) &&
+          a.weekendCount !== b.weekendCount
+        ) {
+          return a.weekendCount - b.weekendCount;
         }
         return a.warningCount - b.warningCount;
       });
@@ -1332,7 +1376,19 @@ function* scheduleCrossAreaGen(
     const bNew = [...bWithout, intForB];
     const beforeCost = computeSoftPreferenceCost(shiftsA) + computeSoftPreferenceCost(shiftsB);
     const afterCost = computeSoftPreferenceCost(aNew) + computeSoftPreferenceCost(bNew);
-    if (afterCost >= beforeCost) return false;
+    const isSupWeekend =
+      (normalizeCatalogText(positionNameById?.get(a.position_id)).includes('SUPERVISOR') ||
+        normalizeCatalogText(positionNameById?.get(b.position_id)).includes('SUPERVISOR')) &&
+      (isWeekendDate(a.date) || isWeekendDate(b.date));
+    const wkImbBefore = Math.abs(countWeekendShifts(shiftsA) - countWeekendShifts(shiftsB));
+    const wkImbAfter = Math.abs(countWeekendShifts(aNew) - countWeekendShifts(bNew));
+    const improvedCost = afterCost < beforeCost;
+    const improvedSupervisorWeekend =
+      !disableSupervisorWeekendBalance &&
+      isSupWeekend &&
+      afterCost <= beforeCost &&
+      wkImbAfter < wkImbBefore;
+    if (!improvedCost && !improvedSupervisorWeekend) return false;
 
     shiftsByPerson.set(pA.personnel_id, aNew);
     shiftsByPerson.set(pB.personnel_id, bNew);
@@ -1374,6 +1430,240 @@ function* scheduleCrossAreaGen(
       }
     }
     if (!improved) break;
+  }
+
+  // Stage 4C: Weekly (Mon-Sun) review of open vacancies by priority (CRITICAL -> HIGH -> NORMAL)
+  // Evaluates direct fill and 2-person chain reassignments (move B from origin -> vacancy, cover origin with C),
+  // favoring C below expected weekly shifts (5) while preserving priority coverage and all jornada rules.
+  const weekOfDate = (dateStr: string): string =>
+    format(startOfWeek(parseISO(normalizeIsoDate(dateStr)), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+
+  const countPersonWeekShifts = (personId: string, wkStart: string): number =>
+    (shiftsByPerson.get(personId) || []).filter((s) => weekOfDate(s.date) === wkStart).length;
+
+  const getExpectedWeeklyShifts = (person: PersonnelScheduleProfile): number | null => {
+    if (
+      person.confirmed_regime?.exempt_five_day_week ||
+      titularIds.has(person.personnel_id) ||
+      (person.rotation_pattern || '').toLowerCase().includes('4x4')
+    ) {
+      return null;
+    }
+    return 5;
+  };
+
+  const isUnderExpectedWeeklyShifts = (person: PersonnelScheduleProfile, wkStart: string): boolean => {
+    const expected = getExpectedWeeklyShifts(person);
+    if (expected === null) return false;
+    return countPersonWeekShifts(person.personnel_id, wkStart) < expected;
+  };
+
+  const slotByPriorityKey = new Map<string, DotacionSlot>();
+  const slotBySlotKey = new Map<string, DotacionSlot>();
+  for (const u of openUnits) {
+    if (u.slot.priority_slot_key) {
+      slotByPriorityKey.set(u.slot.priority_slot_key, u.slot);
+    }
+    if (!slotBySlotKey.has(u.slot.slot_key)) {
+      slotBySlotKey.set(u.slot.slot_key, u.slot);
+    }
+  }
+
+  const unfilledForWeeklyReview = disableWeeklyChainReview
+    ? []
+    : openUnits
+    .filter((u) => !u.filled)
+    .sort((a, b) => {
+      const wkCmp = weekOfDate(a.slot.date).localeCompare(weekOfDate(b.slot.date));
+      if (wkCmp !== 0) return wkCmp;
+      if (a.effectivePriorityRank !== b.effectivePriorityRank) {
+        return a.effectivePriorityRank - b.effectivePriorityRank;
+      }
+      return a.slot.date.localeCompare(b.slot.date);
+    });
+
+  for (const unit of unfilledForWeeklyReview) {
+    if (unit.filled) continue;
+    checkDeadline();
+    yield;
+
+    const slot = unit.slot;
+    const wkStart = weekOfDate(slot.date);
+    const slotInterval = slotToInterval(slot);
+
+    // 4C.1: Direct available & qualified candidate (favoring < 5 shifts in week)
+    const directCandidates = getValidCandidatesForSlot(slot);
+    if (directCandidates.length > 0) {
+      directCandidates.sort((a, b) => {
+        const aUnder = isUnderExpectedWeeklyShifts(a.person, wkStart) ? 0 : 1;
+        const bUnder = isUnderExpectedWeeklyShifts(b.person, wkStart) ? 0 : 1;
+        if (aUnder !== bUnder) return aUnder - bUnder;
+        if (a.matchType !== b.matchType) return a.matchType === 'primary' ? -1 : 1;
+        const prefA = getGruaAreaPreferenceScore(a.person, slot, areaNameById, positionNameById);
+        const prefB = getGruaAreaPreferenceScore(b.person, slot, areaNameById, positionNameById);
+        if (prefA !== prefB) return prefB - prefA;
+        return a.warningCount - b.warningCount;
+      });
+      const chosen = directCandidates[0];
+      const pShifts = shiftsByPerson.get(chosen.person.personnel_id) || [];
+      pShifts.push(slotInterval);
+      shiftsByPerson.set(chosen.person.personnel_id, pShifts);
+      ordinaryAssignments.push({
+        date: slot.date,
+        personnel_id: chosen.person.personnel_id,
+        shift_id: slot.shift_id,
+        area_id: slot.area_id,
+        position_id: slot.position_id,
+        shift_start: slot.shift_start,
+        shift_end: slot.shift_end,
+        duration_hours: slot.shift_duration_hours,
+        slot_key: slot.slot_key,
+        priority_slot_key: slot.priority_slot_key,
+        priority: slot.priority,
+        assignment_kind: unit.isNs22Replacement ? 'ns22_replacement' : 'ordinary',
+        match_type: chosen.matchType,
+        priority_rank: unit.effectivePriorityRank,
+        is_extra: false,
+        is_locked: false,
+        frozen_by_rule: false,
+      });
+      unit.filled = true;
+      continue;
+    }
+
+    // 4C.2: 2-person chain reassignment within the same week (B: origin -> vacancy, C: -> origin)
+    const eligibleForVacancy = personnelByPosition.get(slot.position_id) || [];
+    const eligibleMatchByPerson = new Map<string, 'primary' | 'secondary'>();
+    for (const e of eligibleForVacancy) {
+      eligibleMatchByPerson.set(e.person.personnel_id, e.matchType);
+    }
+
+    let chainApplied = false;
+    for (let i = 0; i < ordinaryAssignments.length; i++) {
+      if (i % 40 === 0) {
+        checkDeadline();
+        yield;
+      }
+      const existingAss = ordinaryAssignments[i];
+      if (
+        existingAss.is_locked ||
+        existingAss.frozen_by_rule ||
+        existingAss.is_extra ||
+        existingAss.assignment_kind === 'ns22_titular'
+      ) {
+        continue;
+      }
+      if (weekOfDate(existingAss.date) !== wkStart) continue;
+
+      const matchB = eligibleMatchByPerson.get(existingAss.personnel_id);
+      if (!matchB) continue;
+
+      const personB = personnel.find((p) => p.personnel_id === existingAss.personnel_id);
+      if (!personB) continue;
+      if (titularIds.has(personB.personnel_id)) continue;
+
+      if (
+        !canPersonTakeShiftInterval(personB, {
+          shift_id: slot.shift_id,
+          shift_start: slot.shift_start,
+          shift_name: slot.shift_name,
+        })
+      ) {
+        continue;
+      }
+
+      const existingSlot =
+        (existingAss.priority_slot_key ? slotByPriorityKey.get(existingAss.priority_slot_key) : undefined) ||
+        slotBySlotKey.get(existingAss.slot_key);
+      if (!existingSlot) continue;
+
+      // Validate B moving from existingAss -> slot on B's resulting calendar (incl. adjacent weeks)
+      const shiftsBWithout = removeShiftInstance(
+        shiftsByPerson.get(personB.personnel_id) || [],
+        existingAss
+      );
+      const bViolations = validateJornadaConstraints(
+        personB,
+        slotInterval,
+        shiftsBWithout,
+        leavesByPerson.get(personB.personnel_id) || []
+      );
+      if (hasMandatoryJornadaViolation(bViolations)) continue;
+
+      // Find valid replacement C for existingSlot (preserving origin coverage)
+      const replacementsForOrigin = getValidCandidatesForSlot(existingSlot).filter(
+        (c) => c.person.personnel_id !== personB.personnel_id
+      );
+      if (replacementsForOrigin.length === 0) continue;
+
+      replacementsForOrigin.sort((a, b) => {
+        const aUnder = isUnderExpectedWeeklyShifts(a.person, wkStart) ? 0 : 1;
+        const bUnder = isUnderExpectedWeeklyShifts(b.person, wkStart) ? 0 : 1;
+        if (aUnder !== bUnder) return aUnder - bUnder;
+        if (a.matchType !== b.matchType) return a.matchType === 'primary' ? -1 : 1;
+        const prefA = getGruaAreaPreferenceScore(a.person, existingSlot, areaNameById, positionNameById);
+        const prefB = getGruaAreaPreferenceScore(b.person, existingSlot, areaNameById, positionNameById);
+        if (prefA !== prefB) return prefB - prefA;
+        return a.warningCount - b.warningCount;
+      });
+
+      const repC = replacementsForOrigin[0];
+
+      // Apply both moves together
+      shiftsByPerson.set(personB.personnel_id, [...shiftsBWithout, slotInterval]);
+      const shiftsC = shiftsByPerson.get(repC.person.personnel_id) || [];
+      shiftsC.push(slotToInterval(existingSlot));
+      shiftsByPerson.set(repC.person.personnel_id, shiftsC);
+
+      ordinaryAssignments[i] = {
+        date: existingSlot.date,
+        personnel_id: repC.person.personnel_id,
+        shift_id: existingSlot.shift_id,
+        area_id: existingSlot.area_id,
+        position_id: existingSlot.position_id,
+        shift_start: existingSlot.shift_start,
+        shift_end: existingAss.shift_end,
+        duration_hours: existingAss.duration_hours,
+        slot_key: existingAss.slot_key,
+        priority_slot_key: existingAss.priority_slot_key,
+        priority: existingAss.priority,
+        assignment_kind: existingAss.assignment_kind,
+        match_type: repC.matchType,
+        priority_rank: existingAss.priority_rank,
+        is_extra: false,
+        is_locked: false,
+        frozen_by_rule: false,
+      };
+
+      ordinaryAssignments.push({
+        date: slot.date,
+        personnel_id: personB.personnel_id,
+        shift_id: slot.shift_id,
+        area_id: slot.area_id,
+        position_id: slot.position_id,
+        shift_start: slot.shift_start,
+        shift_end: slot.shift_end,
+        duration_hours: slot.shift_duration_hours,
+        slot_key: slot.slot_key,
+        priority_slot_key: slot.priority_slot_key,
+        priority: slot.priority,
+        assignment_kind: unit.isNs22Replacement ? 'ns22_replacement' : 'ordinary',
+        match_type: matchB,
+        priority_rank: unit.effectivePriorityRank,
+        is_extra: false,
+        is_locked: false,
+        frozen_by_rule: false,
+      });
+
+      unit.filled = true;
+      chainApplied = true;
+      break;
+    }
+
+    if (chainApplied) {
+      cachedReplacementsBySlotKey.clear();
+      emptyReplacementSlots.clear();
+    }
   }
 
   // Full-roster post-audit: verify hours, 12h rest, days off, Sundays, and approved leaves
@@ -1527,114 +1817,152 @@ function* scheduleCrossAreaGen(
         }
       }
 
-      return options.filter(({ cfg, positionId }) => {
-        const areaId = cfg.area_id || person.area_id || '';
-        if (!areaId || !positionId) return false;
-        if (areaFilter && areaId !== areaFilter) return false;
-        if (
-          positionFilter &&
-          positionFilter.length > 0 &&
-          !positionFilter.includes(positionId)
-        ) {
-          return false;
-        }
-        return true;
-      });
+      return options
+        .filter(({ cfg, positionId }) => {
+          const areaId = cfg.area_id || person.area_id || '';
+          if (!areaId || !positionId) return false;
+          if (areaFilter && areaId !== areaFilter) return false;
+          if (
+            positionFilter &&
+            positionFilter.length > 0 &&
+            !positionFilter.includes(positionId)
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .sort((a, b) => {
+          const aArea = normalizeCatalogText(areaNameById?.get(a.cfg.area_id || person.area_id || '') || '');
+          const bArea = normalizeCatalogText(areaNameById?.get(b.cfg.area_id || person.area_id || '') || '');
+          const aAero = aArea.includes('AEROPUERTO') ? 0 : 1;
+          const bAero = bArea.includes('AEROPUERTO') ? 0 : 1;
+          return aAero - bAero;
+        });
     };
 
-    for (const p of nonTitularPersonnel) {
-      if (p.confirmed_regime?.exempt_five_day_week) continue;
-      const reinfOptions = resolvePersonReinforcementOptions(p);
-      if (reinfOptions.length === 0) continue;
+    const isBodegaBackupOption = (areaId: string, positionId: string): boolean => {
+      const aName = normalizeCatalogText(areaNameById?.get(areaId) || '');
+      const pName = normalizeCatalogText(positionNameById?.get(positionId) || '');
+      return aName.includes('BODEGA') || pName.includes('DHL') || pName.includes('FEDEX');
+    };
 
-      const weeklyLimit = getApplicableWeeklyHoursLimit(p);
+    const bodegaBackupCountByDate = new Map<string, number>();
+    for (const pa of prepared.protectedExtraAssignments) {
+      const d = normalizeIsoDate(pa.date);
+      if (isBodegaBackupOption(pa.area_id, pa.position_id)) {
+        bodegaBackupCountByDate.set(d, (bodegaBackupCountByDate.get(d) || 0) + 1);
+      }
+    }
 
-      for (const wkStart of weekStarts) {
-        const wkStartDt = parseISO(wkStart);
-        const wkDays = eachDayOfInterval({
-          start: wkStartDt,
-          end: addDays(wkStartDt, 6),
-        })
-          .map((d) => format(d, 'yyyy-MM-dd'))
-          .filter((d) => d >= normStart && d <= normEnd);
+    for (const maxBodegaBackupsPerDate of [1, 2]) {
+      for (const p of nonTitularPersonnel) {
+        const expectedShifts = getExpectedWeeklyShifts(p);
+        if (expectedShifts === null) continue;
+        const reinfOptions = resolvePersonReinforcementOptions(p);
+        if (reinfOptions.length === 0) continue;
 
-        for (const dStr of wkDays) {
-          const currentShifts = shiftsByPerson.get(p.personnel_id) || [];
-          const weekShifts = currentShifts.filter((s) => {
-            const sWk = format(
-              startOfWeek(parseISO(normalizeIsoDate(s.date)), { weekStartsOn: 1 }),
-              'yyyy-MM-dd'
-            );
-            return sWk === wkStart;
-          });
-          if (weekShifts.length >= 5) break;
+        const weeklyLimit = getApplicableWeeklyHoursLimit(p);
 
-          const dayOfWeek = getDay(parseISO(dStr));
-          let assignedToday = false;
+        for (const wkStart of weekStarts) {
+          const wkStartDt = parseISO(wkStart);
+          const wkDays = eachDayOfInterval({
+            start: wkStartDt,
+            end: addDays(wkStartDt, 6),
+          })
+            .map((d) => format(d, 'yyyy-MM-dd'))
+            .filter((d) => d >= normStart && d <= normEnd);
 
-          for (const { cfg, positionId } of reinfOptions) {
-            if (assignedToday) break;
-            if (
-              Array.isArray(cfg.days_of_week) &&
-              !cfg.days_of_week.includes(dayOfWeek)
-            ) {
-              continue;
-            }
-            if (
-              !canPersonTakeShiftInterval(p, {
-                shift_id: cfg.shift_id,
-                shift_start: cfg.shift_start,
-              })
-            ) {
-              continue;
-            }
-            if (getTotalHours(weekShifts) + cfg.duration_hours > weeklyLimit) {
-              continue;
-            }
+          for (const dStr of wkDays) {
+            const currentShifts = shiftsByPerson.get(p.personnel_id) || [];
+            const weekShifts = currentShifts.filter((s) => {
+              const sWk = format(
+                startOfWeek(parseISO(normalizeIsoDate(s.date)), { weekStartsOn: 1 }),
+                'yyyy-MM-dd'
+              );
+              return sWk === wkStart;
+            });
+            if (weekShifts.length >= expectedShifts) break;
 
-            const areaId = cfg.area_id || p.area_id || '';
-            const candidateInterval: ScheduledShiftInterval = {
-              date: dStr,
-              shift_start: cfg.shift_start,
-              shift_end: cfg.shift_end,
-              duration_hours: cfg.duration_hours,
-              shift_id: cfg.shift_id,
-              area_id: areaId,
-              position_id: positionId,
-            };
+            const dayOfWeek = getDay(parseISO(dStr));
+            let assignedToday = false;
 
-            const violations = validateJornadaConstraints(
-              p,
-              candidateInterval,
-              currentShifts,
-              approvedLeaves
-            );
-            if (hasMandatoryJornadaViolation(violations)) continue;
+            for (const { cfg, positionId } of reinfOptions) {
+              if (assignedToday) break;
+              if (
+                Array.isArray(cfg.days_of_week) &&
+                !cfg.days_of_week.includes(dayOfWeek)
+              ) {
+                continue;
+              }
+              const areaId = cfg.area_id || p.area_id || '';
+              const isBodegaBackup = isBodegaBackupOption(areaId, positionId);
+              if (
+                isBodegaBackup &&
+                (bodegaBackupCountByDate.get(dStr) || 0) >= maxBodegaBackupsPerDate
+              ) {
+                continue;
+              }
+              if (
+                !canPersonTakeShiftInterval(p, {
+                  shift_id: cfg.shift_id,
+                  shift_start: cfg.shift_start,
+                })
+              ) {
+                continue;
+              }
+              if (getTotalHours(weekShifts) + cfg.duration_hours > weeklyLimit) {
+                continue;
+              }
 
-            currentShifts.push(candidateInterval);
-            reinforcements.push({
-              date: dStr,
-              personnel_id: p.personnel_id,
-              shift_id: cfg.shift_id,
-              area_id: areaId,
-              position_id: positionId,
-              shift_start: cfg.shift_start,
-              shift_end: cfg.shift_end,
-              duration_hours: cfg.duration_hours,
-              slot_key: buildDotacionSlotKey({
+              const candidateInterval: ScheduledShiftInterval = {
                 date: dStr,
+                shift_start: cfg.shift_start,
+                shift_end: cfg.shift_end,
+                duration_hours: cfg.duration_hours,
+                shift_id: cfg.shift_id,
                 area_id: areaId,
                 position_id: positionId,
+              };
+
+              const violations = validateJornadaConstraints(
+                p,
+                candidateInterval,
+                currentShifts,
+                approvedLeaves
+              );
+              if (hasMandatoryJornadaViolation(violations)) continue;
+
+              currentShifts.push(candidateInterval);
+              if (isBodegaBackup) {
+                bodegaBackupCountByDate.set(
+                  dStr,
+                  (bodegaBackupCountByDate.get(dStr) || 0) + 1
+                );
+              }
+              reinforcements.push({
+                date: dStr,
+                personnel_id: p.personnel_id,
                 shift_id: cfg.shift_id,
-              }),
-              assignment_kind: 'reinforcement',
-              match_type: 'reinforcement',
-              priority_rank: 0,
-              is_extra: false,
-              is_locked: false,
-              frozen_by_rule: false,
-            });
-            assignedToday = true;
+                area_id: areaId,
+                position_id: positionId,
+                shift_start: cfg.shift_start,
+                shift_end: cfg.shift_end,
+                duration_hours: cfg.duration_hours,
+                slot_key: buildDotacionSlotKey({
+                  date: dStr,
+                  area_id: areaId,
+                  position_id: positionId,
+                  shift_id: cfg.shift_id,
+                }),
+                assignment_kind: 'reinforcement',
+                match_type: 'reinforcement',
+                priority_rank: 0,
+                is_extra: false,
+                is_locked: false,
+                frozen_by_rule: false,
+              });
+              assignedToday = true;
+            }
           }
         }
       }
