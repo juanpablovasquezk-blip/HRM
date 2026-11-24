@@ -3738,15 +3738,15 @@ export function RosterGridClient({
                         row.missing_count > 0 ? "bg-red-50/80 border border-red-200" : "bg-white border border-slate-100"
                       )}
                     >
-                      <span className="font-mono text-[11px] text-slate-600 shrink-0 w-[92px]">
+                      <span className="font-mono text-[11px] text-slate-600 shrink-0 w-[86px] sm:w-[92px]">
                         {timeRange}
                       </span>
-                      <span className="text-[11px] font-semibold text-slate-500 shrink-0">
+                      <span className="text-[11px] font-semibold text-slate-500 min-w-0 break-words whitespace-normal">
                         {row.area_name} · {row.position_name}
                       </span>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 flex-1 min-w-[180px]">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 flex-1 min-w-0">
                         {row.ordinary_workers.length === 0 ? (
-                          <span className="font-bold text-red-700">
+                          <span className="font-bold text-red-700 break-words whitespace-normal">
                             Sin cubrir · {prioText || priorityBadgeLabel('NORMAL')}
                             {row.required_count > 1 ? ` (faltan ${row.missing_count})` : ''}
                           </span>
@@ -3756,7 +3756,7 @@ export function RosterGridClient({
                               <span
                                 key={`${w.personnel_id}-${w.assignment_kind}-${idx}`}
                                 className={cn(
-                                  "font-bold uppercase",
+                                  "font-bold uppercase break-words whitespace-normal",
                                   w.is_protected ? "text-amber-800" : "text-slate-900"
                                 )}
                               >
@@ -3766,14 +3766,14 @@ export function RosterGridClient({
                               </span>
                             ))}
                             {row.missing_count > 0 && (
-                              <span className="font-bold text-red-700 text-[11px]">
+                              <span className="font-bold text-red-700 text-[11px] break-words whitespace-normal">
                                 · Faltan {row.missing_count} · {prioText}
                               </span>
                             )}
                           </>
                         )}
                         {row.reinforcement_workers.length > 0 && (
-                          <span className="text-[11px] font-bold text-emerald-700">
+                          <span className="text-[11px] font-bold text-emerald-700 break-words whitespace-normal">
                             · + Refuerzo: {row.reinforcement_workers.map((w) => w.name).join(', ')}
                           </span>
                         )}
@@ -3788,8 +3788,8 @@ export function RosterGridClient({
 
         return (
           <Dialog open onOpenChange={() => setV2DailyPlanDate(null)}>
-            <DialogContent className="max-w-5xl w-[95vw] p-0 overflow-hidden rounded-2xl gap-0">
-              <div className="px-6 pt-4 pb-3 bg-slate-900 text-white space-y-2.5">
+            <DialogContent className="w-[calc(100vw-1rem)] sm:w-[calc(100vw-2rem)] lg:w-[calc(100vw-3rem)] max-w-none sm:max-w-[calc(100vw-2rem)] lg:max-w-[calc(100vw-3rem)] h-[calc(100dvh-1rem)] sm:h-[calc(100dvh-2rem)] max-h-[calc(100dvh-1rem)] flex flex-col p-0 overflow-hidden rounded-2xl gap-0">
+              <div className="shrink-0 px-4 sm:px-6 pt-4 pb-3 bg-slate-900 text-white space-y-2.5">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
@@ -3808,7 +3808,7 @@ export function RosterGridClient({
                     type="button"
                     size="sm"
                     variant="secondary"
-                    className="h-8 text-xs font-bold"
+                    className="h-8 text-xs font-bold mr-8"
                     onClick={() => setV2DailyPlanDate(null)}
                   >
                     Volver al roster
@@ -3851,14 +3851,14 @@ export function RosterGridClient({
                 </div>
               </div>
 
-              <div className="overflow-y-auto max-h-[75vh] p-5 bg-slate-50">
+              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 sm:p-5 bg-slate-50">
                 {rows.length === 0 ? (
                   <p className="text-sm text-slate-500 text-center py-8">
                     Sin requerimientos ordinarios en la simulación para esta fecha.
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-                    <div className="space-y-3.5">
+                    <div className="space-y-3.5 min-w-0">
                       {renderSectionRows('Supervisor', 'text-indigo-700', sheet.supervisor)}
                       {renderSectionRows('Canes', 'text-amber-700', sheet.canes)}
                       {renderSectionRows('Grúas / Atrex / Base', 'text-orange-700', sheet.gruas)}
@@ -3866,7 +3866,7 @@ export function RosterGridClient({
                       {renderSectionRows('Bodegas (DHL y FedEx)', 'text-violet-700', sheet.bodegas)}
                     </div>
 
-                    <div className="space-y-3.5">
+                    <div className="space-y-3.5 min-w-0">
                       <section className="space-y-1.5">
                         <h4 className="text-[11px] font-black uppercase tracking-wider border-b border-slate-300 pb-1 text-indigo-800">
                           Transporte Blue Express
@@ -3874,12 +3874,12 @@ export function RosterGridClient({
                         {sheet.blue_express.length === 0 ? (
                           <p className="text-xs text-slate-400">Sin salidas programadas.</p>
                         ) : (
-                          <table className="w-full text-left border-collapse bg-white rounded border border-slate-200">
+                          <table className="w-full table-fixed text-left border-collapse bg-white rounded border border-slate-200">
                             <thead>
                               <tr className="text-[10px] uppercase text-slate-500 border-b border-slate-200 bg-slate-100/70">
-                                <th className="py-1.5 px-2 w-[96px]">Horario</th>
-                                <th className="py-1.5 px-2">Conductor</th>
-                                <th className="py-1.5 px-2">Ayudante</th>
+                                <th className="py-1.5 px-1.5 sm:px-2 w-[78px] sm:w-[96px]">Horario</th>
+                                <th className="py-1.5 px-1.5 sm:px-2">Conductor</th>
+                                <th className="py-1.5 px-1.5 sm:px-2">Ayudante</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-[11px]">
@@ -3896,10 +3896,10 @@ export function RosterGridClient({
                                   const showMissingAyu = !ayu && idx === pair.ayudantes.length && pair.missing_ayudantes > 0;
                                   return (
                                     <tr key={`${pair.shift_id}-${idx}`}>
-                                      <td className="py-1 px-2 font-mono text-[10.5px] text-slate-500 align-top">
+                                      <td className="py-1 px-1.5 sm:px-2 font-mono text-[10.5px] text-slate-500 align-top">
                                         {idx === 0 ? pair.time_label : ''}
                                       </td>
-                                      <td className="py-1 px-2 font-bold uppercase align-top">
+                                      <td className="py-1 px-1.5 sm:px-2 font-bold uppercase align-top break-words whitespace-normal min-w-0">
                                         {cond ? (
                                           <span className={cond.is_protected ? 'text-amber-800' : 'text-slate-900'}>
                                             {cond.name}{cond.is_protected ? ' (Prot.)' : ''}
@@ -3912,7 +3912,7 @@ export function RosterGridClient({
                                           <span className="text-slate-300 font-normal">-</span>
                                         )}
                                       </td>
-                                      <td className="py-1 px-2 font-bold uppercase align-top">
+                                      <td className="py-1 px-1.5 sm:px-2 font-bold uppercase align-top break-words whitespace-normal min-w-0">
                                         {ayu ? (
                                           <span className={ayu.is_protected ? 'text-amber-800' : 'text-slate-900'}>
                                             {ayu.name}{ayu.is_protected ? ' (Prot.)' : ''}
