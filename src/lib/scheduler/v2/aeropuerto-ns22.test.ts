@@ -574,3 +574,167 @@ test('NS22 titular ausente con reemplazante libre: cubre reemplazante sin despla
   assert.equal(byDate.get('2026-11-05')?.personnel_id, 'titular-javier');
   assert.equal(byDate.get('2026-11-05')?.role, 'titular');
 });
+
+test('NS22 cruce diciembre-enero: Marcelo de vacaciones hasta 05-01, Jaime cubre 30-12..02-01 y Javier retoma domingo 03-01 si está disponible', () => {
+  const marceloId = 'titular-marcelo';
+  const javierId = 'titular-javier';
+  const jaimeId = 'repl-jaime';
+
+  const decJanTitulares: Ns22TitularConfig[] = [
+    {
+      personnel_id: marceloId,
+      first_name: 'Marcelo Jara',
+      birth_date: '1977-11-19',
+      anchor_date: '2026-01-04',
+      cycle_offset: 0,
+      confirmed_4x4_regime: false,
+    },
+    {
+      personnel_id: javierId,
+      first_name: 'Javier Lopez',
+      birth_date: '1989-06-15', // disponible el 2027-01-04 (sin cumpleaños invadiendo 2027-01-03 22:00)
+      anchor_date: '2026-01-08',
+      cycle_offset: 0,
+      confirmed_4x4_regime: false,
+    },
+  ];
+
+  const jaimeProfile: PersonnelScheduleProfile = {
+    personnel_id: jaimeId,
+    full_name: 'Jaime Espinosa',
+    birth_date: '1985-05-10',
+    main_position: 'pos-aero',
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+
+  const leaves: RawLeaveRecord[] = [
+    {
+      personnel_id: marceloId,
+      start_date: '2026-12-26',
+      end_date: '2027-01-05',
+      status: 'approved',
+      type: 'vacation',
+    },
+  ];
+
+  // Protegido existente el 2026-12-26 para Javier: debe respetarse sin mover su fase 4x4
+  const existingProtected: RawExistingAssignment[] = [
+    {
+      date: '2026-12-26',
+      personnel_id: javierId,
+      area_id: 'area-aero',
+      position_id: 'pos-aero',
+      shift_id: 'shift-ns22',
+      status: 'CONFIRMED',
+      is_extra: false,
+      shift_start: '22:00',
+      shift_end: '07:00',
+      duration_hours: 8,
+    },
+  ];
+
+  const result = scheduleAirportNs22({
+    startDate: '2026-12-26',
+    endDate: '2027-01-03',
+    titulares: decJanTitulares,
+    shiftDef: { ...ns22Shift, duration_hours: 8 },
+    protectedAssignments: existingProtected,
+    approvedLeaves: leaves,
+    replacementCandidates: [jaimeProfile],
+  });
+
+  assert.equal(result.preserved_protected.length, 1);
+  assert.equal(result.preserved_protected[0].date, '2026-12-26');
+  assert.equal(result.preserved_protected[0].personnel_id, javierId);
+
+  const byDate = new Map(result.assignments.map((a) => [a.date, a]));
+  assert.equal(byDate.get('2026-12-27')?.personnel_id, javierId);
+  assert.equal(byDate.get('2026-12-28')?.personnel_id, javierId);
+  assert.equal(byDate.get('2026-12-29')?.personnel_id, javierId);
+
+  // Marcelo de vacaciones -> Jaime cubre exactamente 30-12, 31-12, 01-01, 02-01
+  for (const d of ['2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']) {
+    assert.equal(byDate.get(d)?.personnel_id, jaimeId);
+    assert.equal(byDate.get(d)?.role, 'replacement');
+  }
+
+  // Domingo 03-01: Javier disponible retoma su ciclo 4x4 a las 22:00 aunque Marcelo siga de vacaciones
+  assert.equal(byDate.get('2027-01-03')?.personnel_id, javierId);
+  assert.equal(byDate.get('2027-01-03')?.role, 'titular');
+});
+
+test('NS22 cruce diciembre-enero (Caso B): cumpleaños de Javier el 04-01 bloquea 03-01 y 04-01, Jaime cubre 5ta noche con jornada válida y Javier retoma el 05-01', () => {
+  const marceloId = 'titular-marcelo';
+  const javierId = 'titular-javier';
+  const jaimeId = 'repl-jaime';
+
+  const decJanTitulares: Ns22TitularConfig[] = [
+    {
+      personnel_id: marceloId,
+      first_name: 'Marcelo Jara',
+      birth_date: '1977-11-19',
+      anchor_date: '2026-01-04',
+      cycle_offset: 0,
+      confirmed_4x4_regime: false,
+    },
+    {
+      personnel_id: javierId,
+      first_name: 'Javier Lopez',
+      birth_date: '1989-01-04', // cumpleaños el 4 de enero: invade 03-01 22:00-07:00 y 04-01 22:00-07:00
+      anchor_date: '2026-01-08',
+      cycle_offset: 0,
+      confirmed_4x4_regime: false,
+    },
+  ];
+
+  const jaimeProfile: PersonnelScheduleProfile = {
+    personnel_id: jaimeId,
+    full_name: 'Jaime Espinosa',
+    birth_date: '1985-05-10',
+    main_position: 'pos-aero',
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+
+  const leaves: RawLeaveRecord[] = [
+    {
+      personnel_id: marceloId,
+      start_date: '2026-12-26',
+      end_date: '2027-01-05',
+      status: 'approved',
+      type: 'vacation',
+    },
+  ];
+
+  const result = scheduleAirportNs22({
+    startDate: '2026-12-26',
+    endDate: '2027-01-06',
+    titulares: decJanTitulares,
+    shiftDef: { ...ns22Shift, duration_hours: 8 },
+    protectedAssignments: [],
+    approvedLeaves: leaves,
+    replacementCandidates: [jaimeProfile],
+  });
+
+  const byDate = new Map(result.assignments.map((a) => [a.date, a]));
+  // 30-12..02-01: Jaime reemplaza a Marcelo (vacaciones)
+  for (const d of ['2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']) {
+    assert.equal(byDate.get(d)?.personnel_id, jaimeId);
+    assert.equal(byDate.get(d)?.role, 'replacement');
+    assert.equal(byDate.get(d)?.replaces_titular_id, marceloId);
+  }
+  // 03-01: Jaime cubre la 5ta noche consecutiva reemplazando a Javier (cumpleaños 04-01), dentro de 40h/42h y 15h descanso
+  assert.equal(byDate.get('2027-01-03')?.personnel_id, jaimeId);
+  assert.equal(byDate.get('2027-01-03')?.role, 'replacement');
+  assert.equal(byDate.get('2027-01-03')?.replaces_titular_id, javierId);
+
+  // 05-01 y 06-01: Javier retoma su bloque 4x4 a las 22:00 conservando su ancla 2026-01-08
+  assert.equal(byDate.get('2027-01-05')?.personnel_id, javierId);
+  assert.equal(byDate.get('2027-01-05')?.role, 'titular');
+  assert.equal(byDate.get('2027-01-06')?.personnel_id, javierId);
+  assert.equal(byDate.get('2027-01-06')?.role, 'titular');
+
+  const javierCycle = result.titular_cycles.find((c) => c.personnel_id === javierId);
+  assert.equal(javierCycle?.anchor_date, '2026-01-08');
+});
