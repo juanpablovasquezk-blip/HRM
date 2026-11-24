@@ -4,7 +4,11 @@ import { deriveNs22AnchorFromHistory, isNs22TitularWorkNight } from './aeropuert
 import { scheduleCrossArea, scheduleCrossAreaAsync } from './cobertura';
 import { fetchAllPaginated } from './pagination';
 import { compareEnginesPreview, compareEnginesPreviewStaged } from './preview-compare';
-import { resolveOperadorAeropuertoPosition } from './preview-compare-server';
+import {
+  fetchPriorityQuotasInBatches,
+  loadPreviewCompareInputs,
+  resolveOperadorAeropuertoPosition,
+} from './preview-compare-server';
 import type {
   PersonnelScheduleProfile,
   RawExistingAssignment,
@@ -1148,4 +1152,91 @@ test('Equivalencia Grúa Horquilla Atrex <-> Base Minerquim: una sola habilitaci
   assert.equal(v2AssignedIds.has('op-2'), true);
   assert.equal(v2AssignedIds.has('eloy-ponce'), false);
   assert.equal(v2AssignedIds.has('lizardo-pailapichun'), false);
+});
+
+test('Prioridades por lote en vista previa: consulta 407 IDs en lotes acotados y detiene si un lote falla', async () => {
+  const reqIds407 = Array.from({ length: 407 }, (_, i) => `req-${i + 1}`);
+  const batchSizes: number[] = [];
+
+  const mockSupabaseOk = {
+    from: (table: string) => {
+      assert.equal(table, 'shift_requirement_priority_quotas');
+      return {
+        select: () => ({
+          in: async (_col: string, ids: string[]) => {
+            batchSizes.push(ids.length);
+            // req-1 y req-407 tienen desglose; los demás representan requerimientos sin desglose (consulta exitosa)
+            const rows: Array<{ shift_requirement_id: string; priority: string; required_count: number }> = [];
+            if (ids.includes('req-1')) {
+              rows.push({ shift_requirement_id: 'req-1', priority: 'CRITICAL', required_count: 4 });
+              rows.push({ shift_requirement_id: 'req-1', priority: 'HIGH', required_count: 1 });
+            }
+            if (ids.includes('req-407')) {
+              rows.push({ shift_requirement_id: 'req-407', priority: 'CRITICAL', required_count: 3 });
+              rows.push({ shift_requirement_id: 'req-407', priority: 'HIGH', required_count: 2 });
+            }
+            return { data: rows, error: null };
+          },
+        }),
+      };
+    },
+  };
+
+  const okRes = await fetchPriorityQuotasInBatches(mockSupabaseOk, reqIds407);
+  assert.equal(okRes.ok, true);
+  if (okRes.ok) {
+    assert.deepEqual(batchSizes, [100, 100, 100, 100, 7]);
+    assert.equal(okRes.quotasByReqId.get('req-1')?.length, 2);
+    assert.equal(okRes.quotasByReqId.get('req-407')?.length, 2);
+    assert.equal(okRes.quotasByReqId.get('req-200'), undefined);
+  }
+
+  // Fallo en el lote 3 debe abortar loadPreviewCompareInputs sin devolver prioridades incompletas
+  let callCount = 0;
+  const makeEmptyQueryChain = (data: any[] = []) => {
+    const chain: any = {
+      select: () => chain,
+      eq: () => chain,
+      gte: () => chain,
+      lte: () => chain,
+      neq: () => chain,
+      order: () => chain,
+      range: async () => ({ data, error: null }),
+      then: (resolve: (val: any) => void) => resolve({ data, error: null }),
+    };
+    return chain;
+  };
+  const mockSupabaseBatchFail = {
+    from: (table: string) => {
+      if (table === 'shift_requirements') {
+        return makeEmptyQueryChain(
+          reqIds407.map((id) => ({ id, date: '2026-12-07', required_count: 1 }))
+        );
+      }
+      if (table === 'shift_requirement_priority_quotas') {
+        return {
+          select: () => ({
+            in: async () => {
+              callCount++;
+              if (callCount === 3) {
+                return { data: null, error: { message: 'fetch failed on batch 3' } };
+              }
+              return { data: [], error: null };
+            },
+          }),
+        };
+      }
+      return makeEmptyQueryChain([]);
+    },
+  };
+
+  const failLoaded = await loadPreviewCompareInputs(mockSupabaseBatchFail, {
+    startDate: '2026-12-07',
+    endDate: '2027-01-03',
+  });
+  assert.equal(failLoaded.ok, false);
+  if (!failLoaded.ok) {
+    assert.match(failLoaded.error, /lote \(3\)/i);
+    assert.match(failLoaded.error, /fetch failed on batch 3/i);
+  }
 });

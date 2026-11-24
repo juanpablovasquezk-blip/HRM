@@ -33,6 +33,47 @@ export function resolveOperadorAeropuertoPosition<T extends { id: string; name?:
   return positions.find((p) => normalizeCatalogLabel(p.name) === 'OPERADOR AEROPUERTO');
 }
 
+export const PRIORITY_QUOTA_BATCH_SIZE = 100;
+
+export async function fetchPriorityQuotasInBatches(
+  supabase: any,
+  reqIds: string[],
+  batchSize: number = PRIORITY_QUOTA_BATCH_SIZE
+): Promise<
+  | { ok: true; quotasByReqId: Map<string, Array<{ priority: string; required_count: number }>> }
+  | { ok: false; error: string }
+> {
+  const uniqueIds = Array.from(new Set(reqIds.filter(Boolean)));
+  const quotasByReqId = new Map<string, Array<{ priority: string; required_count: number }>>();
+  if (uniqueIds.length === 0) {
+    return { ok: true, quotasByReqId };
+  }
+
+  for (let i = 0; i < uniqueIds.length; i += batchSize) {
+    const batch = uniqueIds.slice(i, i + batchSize);
+    const { data, error } = await supabase
+      .from('shift_requirement_priority_quotas')
+      .select('shift_requirement_id, priority, required_count')
+      .in('shift_requirement_id', batch);
+
+    if (error) {
+      const msg = typeof error === 'string' ? error : error.message || JSON.stringify(error);
+      return {
+        ok: false,
+        error: `Error al cargar desglose de prioridades por lote (${Math.floor(i / batchSize) + 1}): ${msg}`,
+      };
+    }
+
+    for (const q of data || []) {
+      const list = quotasByReqId.get(q.shift_requirement_id) || [];
+      list.push({ priority: q.priority, required_count: q.required_count });
+      quotasByReqId.set(q.shift_requirement_id, list);
+    }
+  }
+
+  return { ok: true, quotasByReqId };
+}
+
 export interface LoadPreviewCompareParams {
   startDate: string;
   endDate: string;
@@ -128,22 +169,14 @@ export async function loadPreviewCompareInputs(
   let rawRequirements = rawRequirementsRaw;
   if (rawRequirementsRaw.length > 0) {
     const reqIds = rawRequirementsRaw.map((r: any) => r.id).filter(Boolean);
-    const { data: quotaRows, error: quotaErr } = await supabase
-      .from('shift_requirement_priority_quotas')
-      .select('shift_requirement_id, priority, required_count')
-      .in('shift_requirement_id', reqIds);
-    if (!quotaErr && Array.isArray(quotaRows) && quotaRows.length > 0) {
-      const quotasByReqId = new Map<string, Array<{ priority: string; required_count: number }>>();
-      for (const q of quotaRows) {
-        const list = quotasByReqId.get(q.shift_requirement_id) || [];
-        list.push({ priority: q.priority, required_count: q.required_count });
-        quotasByReqId.set(q.shift_requirement_id, list);
-      }
-      rawRequirements = rawRequirementsRaw.map((r: any) => ({
-        ...r,
-        priority_quotas: quotasByReqId.get(r.id) || null,
-      }));
+    const quotaResult = await fetchPriorityQuotasInBatches(supabase, reqIds);
+    if (!quotaResult.ok) {
+      return { ok: false, error: quotaResult.error };
     }
+    rawRequirements = rawRequirementsRaw.map((r: any) => ({
+      ...r,
+      priority_quotas: quotaResult.quotasByReqId.get(r.id) || null,
+    }));
   }
   const personnelRaw = persRes.data || [];
   const positions = posRes.data || [];
