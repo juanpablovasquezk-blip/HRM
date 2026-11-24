@@ -202,6 +202,7 @@ export interface CompareEnginesPreviewParams {
     titulares: Ns22TitularConfig[];
     shiftDef: Ns22ShiftDefinition;
   } | null;
+  excludeUnconfiguredNs22?: boolean;
   reinforcementConfig?: Record<
     string,
     ReinforcementShiftConfig | ReinforcementShiftConfig[]
@@ -586,6 +587,7 @@ function computeV2PreviewMetrics(params: CompareEnginesPreviewParams) {
     areaFilter: params.areaFilter,
     positionFilter: params.positionFilter,
     ns22Config: params.ns22Config,
+    excludeUnconfiguredNs22: params.excludeUnconfiguredNs22,
     reinforcementConfig: params.reinforcementConfig,
     areaNameById: params.areaNameById,
     positionNameById: params.positionNameById,
@@ -610,6 +612,7 @@ async function computeV2PreviewMetricsAsync(params: CompareEnginesPreviewParams)
     areaFilter: params.areaFilter,
     positionFilter: params.positionFilter,
     ns22Config: params.ns22Config,
+    excludeUnconfiguredNs22: params.excludeUnconfiguredNs22,
     reinforcementConfig: params.reinforcementConfig,
     areaNameById: params.areaNameById,
     positionNameById: params.positionNameById,

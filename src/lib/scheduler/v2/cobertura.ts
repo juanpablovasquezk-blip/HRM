@@ -246,6 +246,7 @@ export interface ScheduleCrossAreaParams {
     titulares: Ns22TitularConfig[];
     shiftDef: Ns22ShiftDefinition;
   } | null;
+  excludeUnconfiguredNs22?: boolean;
   reinforcementConfig?: Record<
     string,
     ReinforcementShiftConfig | ReinforcementShiftConfig[]
@@ -277,6 +278,7 @@ function* scheduleCrossAreaGen(
     areaFilter,
     positionFilter,
     ns22Config,
+    excludeUnconfiguredNs22 = false,
     reinforcementConfig,
     baseCalendarByPerson,
     referenceDate = new Date(),
@@ -496,6 +498,25 @@ function* scheduleCrossAreaGen(
       ns22SlotKeyPrefix === `${slot.area_id}|${slot.position_id}|${slot.shift_id}`
     ) {
       return false;
+    }
+    if (!ns22Config && excludeUnconfiguredNs22) {
+      const areaName = (areaNameById?.get(slot.area_id) || slot.area_name || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+      const shiftStart = (slot.shift_start || '').trim();
+      const shiftName = (slot.shift_name || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toUpperCase();
+      if (
+        areaName === 'AEROPUERTO' &&
+        (shiftStart.startsWith('22:00') || shiftName.includes('NS 22') || shiftName === 'NS22')
+      ) {
+        return false;
+      }
     }
     return slot.remaining_count > 0;
   });

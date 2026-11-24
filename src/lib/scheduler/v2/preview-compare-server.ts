@@ -14,6 +14,25 @@ import { fetchAllPaginated } from './pagination';
 import type { CompareEnginesPreviewParams } from './preview-compare';
 import { resolveShiftDurationHours } from '../../../app/(dashboard)/shifts/shift-duration';
 
+export function normalizeCatalogLabel(v?: string | null): string {
+  return (v || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+/**
+ * Resolves the "Operador Aeropuerto" position unequivocally.
+ * Never falls back to generic Aeropuerto matching (which could pick Supervisor Aeropuerto).
+ */
+export function resolveOperadorAeropuertoPosition<T extends { id: string; name?: string | null }>(
+  positions: T[]
+): T | undefined {
+  return positions.find((p) => normalizeCatalogLabel(p.name) === 'OPERADOR AEROPUERTO');
+}
+
 export interface LoadPreviewCompareParams {
   startDate: string;
   endDate: string;
@@ -179,17 +198,16 @@ export async function loadPreviewCompareInputs(
     };
   });
 
-  const norm = (v?: string | null) =>
-    (v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-  const aeroArea = areas.find((a: any) => norm(a.name).includes('AEROPUERTO'));
-  const aeroPos = positions.find((p: any) => norm(p.name).includes('AEROPUERTO'));
+  const norm = normalizeCatalogLabel;
+  const aeroArea = areas.find((a: any) => norm(a.name) === 'AEROPUERTO');
+  const aeroPos = resolveOperadorAeropuertoPosition(positions);
   const ns22Shift = allShifts.find(
     (s: any) => norm(s.name).includes('NS 22') || (s.start_time || '').startsWith('22:00')
   );
 
   const aero4x4Workers = activePersonnel.filter((p: any) => {
-    const mainPos = positions.find((pos: any) => pos.id === p.main_position);
-    return norm(p.rotation_pattern).includes('4X4') && norm(mainPos?.name).includes('AEROPUERTO');
+    if (!aeroPos) return false;
+    return norm(p.rotation_pattern).includes('4X4') && p.main_position === aeroPos.id;
   });
 
   let ns22Config: CompareEnginesPreviewParams['ns22Config'] = null;
@@ -338,6 +356,7 @@ export async function loadPreviewCompareInputs(
       areaFilter: areaId && areaId !== 'all' ? areaId : null,
       positionFilter: targetPositionIds,
       ns22Config,
+      excludeUnconfiguredNs22: true,
       reinforcementConfig,
       areaNameById,
       positionNameById,

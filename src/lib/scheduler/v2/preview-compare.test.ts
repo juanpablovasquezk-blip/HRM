@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deriveNs22AnchorFromHistory, isNs22TitularWorkNight } from './aeropuerto-ns22';
-import { scheduleCrossAreaAsync } from './cobertura';
+import { scheduleCrossArea, scheduleCrossAreaAsync } from './cobertura';
 import { fetchAllPaginated } from './pagination';
 import { compareEnginesPreview, compareEnginesPreviewStaged } from './preview-compare';
+import { resolveOperadorAeropuertoPosition } from './preview-compare-server';
 import type {
   PersonnelScheduleProfile,
   RawExistingAssignment,
@@ -688,4 +689,212 @@ test('ROSTER-06: ReadableStream.cancel() (cierre desde navegador) aborta el trab
   assert.equal(workController.signal.aborted, true);
   assert.equal(stoppedBySignal, true);
   assert.ok(elapsedMs < 2000, `El stream cancelado debe detener el cálculo rápido (tardó ${elapsedMs}ms)`);
+});
+
+test('NS22 catálogo: identifica Operador Aeropuerto inequívocamente aunque Supervisor Aeropuerto venga primero, y excluye NS22 si falta config', () => {
+  const positionsWithSupervisorFirst = [
+    { id: 'pos-sup-aero', name: 'Supervisor Aeropuerto' },
+    { id: 'pos-op-aero', name: 'Operador Aeropuerto' },
+  ];
+  const resolved = resolveOperadorAeropuertoPosition(positionsWithSupervisorFirst);
+  assert.equal(resolved?.id, 'pos-op-aero');
+
+  const withoutOperador = [
+    { id: 'pos-sup-aero', name: 'Supervisor Aeropuerto' },
+    { id: 'pos-bodega', name: 'Operador Bodega' },
+  ];
+  assert.equal(resolveOperadorAeropuertoPosition(withoutOperador), undefined);
+
+  const shifts = [
+    { id: 'sh-ns22', name: 'NS 22', start_time: '22:00', end_time: '07:00', duration_hours: 8 },
+    { id: 'sh-am08', name: 'AM 08', start_time: '08:00', end_time: '16:00', duration_hours: 8 },
+  ];
+
+  const titularA = deriveNs22AnchorFromHistory({
+    personnelId: 'tit-1',
+    firstName: 'MARCELO ANDRES',
+    observedNs22Dates: ['2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07'],
+    observedWindowDates: ['2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', '2026-11-08'],
+  });
+  const titularB = deriveNs22AnchorFromHistory({
+    personnelId: 'tit-2',
+    firstName: 'JAVIER IGNACIO',
+    observedNs22Dates: ['2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11'],
+    observedWindowDates: ['2026-11-07', '2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11'],
+  });
+  assert.equal(titularA.status, 'provisional');
+  assert.equal(titularB.status, 'provisional');
+
+  const v2ParamsWithTitulares = {
+    startDate: '2026-12-07',
+    endDate: '2026-12-09',
+    rawRequirements: [
+      {
+        id: 'r-ns22-7',
+        date: '2026-12-07',
+        area_id: 'area-aero',
+        position_id: resolved!.id,
+        shift_id: 'sh-ns22',
+        required_count: 1,
+        is_extra: false,
+        area: { name: 'Aeropuerto' },
+        position: { name: 'Operador Aeropuerto' },
+        shift: { name: 'NS 22', start_time: '22:00', end_time: '07:00', duration_hours: 8 },
+      },
+      {
+        id: 'r-ns22-8',
+        date: '2026-12-08',
+        area_id: 'area-aero',
+        position_id: resolved!.id,
+        shift_id: 'sh-ns22',
+        required_count: 1,
+        is_extra: false,
+        area: { name: 'Aeropuerto' },
+        position: { name: 'Operador Aeropuerto' },
+        shift: { name: 'NS 22', start_time: '22:00', end_time: '07:00', duration_hours: 8 },
+      },
+      {
+        id: 'r-ns22-9',
+        date: '2026-12-09',
+        area_id: 'area-aero',
+        position_id: resolved!.id,
+        shift_id: 'sh-ns22',
+        required_count: 1,
+        is_extra: false,
+        area: { name: 'Aeropuerto' },
+        position: { name: 'Operador Aeropuerto' },
+        shift: { name: 'NS 22', start_time: '22:00', end_time: '07:00', duration_hours: 8 },
+      },
+    ],
+    existingAssignments: [],
+    personnel: [
+      {
+        personnel_id: 'tit-1',
+        full_name: 'MARCELO ANDRES JARA',
+        main_position: resolved!.id,
+        secondary_positions: [],
+        rotation_pattern: '4X4',
+      },
+      {
+        personnel_id: 'tit-2',
+        full_name: 'JAVIER IGNACIO LOPEZ',
+        main_position: resolved!.id,
+        secondary_positions: [],
+        rotation_pattern: '4X4',
+      },
+      {
+        personnel_id: 'rep-marco',
+        full_name: 'MARCO ANTONIO HOGADA',
+        main_position: resolved!.id,
+        secondary_positions: [],
+        rotation_pattern: '5X2',
+      },
+    ],
+    approvedLeaves: [
+      {
+        personnel_id: 'tit-1',
+        start_date: '2026-12-09',
+        end_date: '2026-12-09',
+        status: 'approved',
+        type: 'administrative',
+      },
+    ],
+    allShifts: shifts,
+    areaNameById: new Map([['area-aero', 'Aeropuerto']]),
+    positionNameById: new Map([
+      ['pos-sup-aero', 'Supervisor Aeropuerto'],
+      ['pos-op-aero', 'Operador Aeropuerto'],
+    ]),
+    ns22Config: {
+      titulares: [
+        {
+          personnel_id: 'tit-1',
+          first_name: 'MARCELO ANDRES',
+          anchor_date: titularA.anchor_date,
+          cycle_offset: titularA.cycle_offset,
+          confirmed_4x4_regime: false,
+        },
+        {
+          personnel_id: 'tit-2',
+          first_name: 'JAVIER IGNACIO',
+          anchor_date: titularB.anchor_date,
+          cycle_offset: titularB.cycle_offset,
+          confirmed_4x4_regime: false,
+        },
+      ],
+      shiftDef: {
+        shift_id: 'sh-ns22',
+        area_id: 'area-aero',
+        position_id: resolved!.id,
+        shift_start: '22:00',
+        shift_end: '07:00',
+        duration_hours: 8,
+      },
+    },
+    excludeUnconfiguredNs22: true,
+    unconfirmedRules: [titularA.notice!, titularB.notice!],
+    referenceDate: REF_DATE,
+  };
+
+  const previewWithTitulares = compareEnginesPreview(v2ParamsWithTitulares);
+  const v2ResWithTitulares = scheduleCrossArea(v2ParamsWithTitulares);
+
+  const ns22ByDate = new Map(
+    v2ResWithTitulares.ordinary_assignments
+      .filter((a) => a.shift_id === 'sh-ns22')
+      .map((a) => [a.date, a])
+  );
+  assert.equal(ns22ByDate.get('2026-12-07')?.personnel_id, 'tit-1');
+  assert.equal(ns22ByDate.get('2026-12-08')?.personnel_id, 'rep-marco'); // 22:00-07:00 invade ausencia aprobada del 2026-12-09
+  assert.equal(ns22ByDate.get('2026-12-09')?.personnel_id, 'rep-marco');
+  assert.ok(
+    previewWithTitulares.unconfirmed_rules.some((r) => r.includes('ancla provisional estimada'))
+  );
+
+  // Si falta la configuración de NS22, NS22 debe quedar fuera de la asignación general
+  const missingConfigParams = {
+    startDate: '2026-12-07',
+    endDate: '2026-12-07',
+    rawRequirements: [
+      {
+        id: 'r-ns22-missing',
+        date: '2026-12-07',
+        area_id: 'area-aero',
+        position_id: 'pos-op-aero',
+        shift_id: 'sh-ns22',
+        required_count: 1,
+        is_extra: false,
+        area: { name: 'Aeropuerto' },
+        position: { name: 'Operador Aeropuerto' },
+        shift: { name: 'NS 22', start_time: '22:00', end_time: '07:00', duration_hours: 8 },
+      },
+    ],
+    existingAssignments: [],
+    personnel: [
+      {
+        personnel_id: 'rep-marco',
+        full_name: 'MARCO ANTONIO HOGADA',
+        main_position: 'pos-op-aero',
+        secondary_positions: [],
+        rotation_pattern: '5X2',
+      },
+    ],
+    allShifts: shifts,
+    areaNameById: new Map([['area-aero', 'Aeropuerto']]),
+    positionNameById: new Map([['pos-op-aero', 'Operador Aeropuerto']]),
+    ns22Config: null,
+    excludeUnconfiguredNs22: true,
+    unconfirmedRules: ['Regla NS22 4x4 sin evaluar completamente en vista previa (cargo=faltante).'],
+    referenceDate: REF_DATE,
+  };
+  const previewMissingConfig = compareEnginesPreview(missingConfigParams);
+  const v2ResMissingConfig = scheduleCrossArea(missingConfigParams);
+
+  assert.equal(
+    v2ResMissingConfig.ordinary_assignments.filter((a) => a.shift_id === 'sh-ns22').length,
+    0
+  );
+  assert.ok(
+    previewMissingConfig.unconfirmed_rules.some((r) => r.includes('sin evaluar completamente'))
+  );
 });

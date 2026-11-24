@@ -459,3 +459,118 @@ test('ROSTER-07: NS22 sin duration_hours computa 8h (22:00-07:00 con 1h colació
   );
   assert.equal(rest12h, null);
 });
+
+test('NS22 titular disponible con reemplazante libre: asigna al titular y no desplaza por ancla provisional', () => {
+  const shiftDef: Ns22ShiftDefinition = {
+    shift_id: 'shift-ns22',
+    area_id: 'area-aero',
+    position_id: 'pos-op',
+    shift_start: '22:00',
+    shift_end: '07:00',
+    duration_hours: 8,
+  };
+
+  const titulares: Ns22TitularConfig[] = [
+    {
+      personnel_id: 'titular-marcelo',
+      first_name: 'Marcelo',
+      anchor_date: '2026-11-01',
+      confirmed_4x4_regime: false,
+    },
+    {
+      personnel_id: 'titular-javier',
+      first_name: 'Javier',
+      anchor_date: '2026-11-05',
+      confirmed_4x4_regime: false,
+    },
+  ];
+
+  const freeReplacement: PersonnelScheduleProfile = {
+    personnel_id: 'rep-marco',
+    full_name: 'Marco Antonio',
+    main_position: 'pos-op',
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+
+  const result = scheduleAirportNs22({
+    startDate: '2026-11-01',
+    endDate: '2026-11-01',
+    shiftDef,
+    titulares,
+    replacementCandidates: [freeReplacement],
+    approvedLeaves: [],
+    protectedAssignments: [],
+  });
+
+  assert.equal(result.assignments.length, 1);
+  assert.equal(result.assignments[0].personnel_id, 'titular-marcelo');
+  assert.equal(result.assignments[0].role, 'titular');
+  assert.equal(result.vacancies.length, 0);
+});
+
+test('NS22 titular ausente con reemplazante libre: cubre reemplazante sin desplazar el ciclo 4x4', () => {
+  const shiftDef: Ns22ShiftDefinition = {
+    shift_id: 'shift-ns22',
+    area_id: 'area-aero',
+    position_id: 'pos-op',
+    shift_start: '22:00',
+    shift_end: '07:00',
+    duration_hours: 8,
+  };
+
+  const titulares: Ns22TitularConfig[] = [
+    {
+      personnel_id: 'titular-marcelo',
+      first_name: 'Marcelo',
+      anchor_date: '2026-11-01',
+      confirmed_4x4_regime: true,
+    },
+    {
+      personnel_id: 'titular-javier',
+      first_name: 'Javier',
+      anchor_date: '2026-11-05',
+      confirmed_4x4_regime: true,
+    },
+  ];
+
+  const freeReplacement: PersonnelScheduleProfile = {
+    personnel_id: 'rep-marco',
+    full_name: 'Marco Antonio',
+    main_position: 'pos-op',
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+
+  const result = scheduleAirportNs22({
+    startDate: '2026-11-01',
+    endDate: '2026-11-05',
+    shiftDef,
+    titulares,
+    replacementCandidates: [freeReplacement],
+    approvedLeaves: [
+      {
+        personnel_id: 'titular-marcelo',
+        start_date: '2026-11-03',
+        end_date: '2026-11-03',
+        status: 'approved',
+        type: 'administrative',
+      },
+    ],
+    protectedAssignments: [],
+  });
+
+  const byDate = new Map(result.assignments.map((a) => [a.date, a]));
+  assert.equal(byDate.get('2026-11-01')?.personnel_id, 'titular-marcelo');
+  assert.equal(byDate.get('2026-11-01')?.role, 'titular');
+  assert.equal(byDate.get('2026-11-02')?.personnel_id, 'rep-marco');
+  assert.equal(byDate.get('2026-11-02')?.role, 'replacement');
+  assert.equal(byDate.get('2026-11-02')?.replaces_titular_id, 'titular-marcelo');
+  assert.equal(byDate.get('2026-11-03')?.personnel_id, 'rep-marco');
+  assert.equal(byDate.get('2026-11-03')?.role, 'replacement');
+  assert.equal(byDate.get('2026-11-03')?.replaces_titular_id, 'titular-marcelo');
+  assert.equal(byDate.get('2026-11-04')?.personnel_id, 'titular-marcelo');
+  assert.equal(byDate.get('2026-11-04')?.role, 'titular');
+  assert.equal(byDate.get('2026-11-05')?.personnel_id, 'titular-javier');
+  assert.equal(byDate.get('2026-11-05')?.role, 'titular');
+});
