@@ -1,4 +1,5 @@
 import { buildDotacionSlotKey, normalizeIsoDate } from './dotacion';
+import { normalizeCatalogLabel, resolveOperadorAeropuertoPosition } from './preview-compare-server';
 import { reconcileVacancyExtraRequirements } from './vacantes-diaria';
 import type { CrossAreaScheduleResult, ExtraRequirementState } from './types';
 
@@ -303,6 +304,100 @@ export function validateNs22OperationalConfig(config?: Ns22OperationalConfirmati
     ok: reasons.length === 0,
     unconfirmedReasons: reasons,
     sundayExemptionPending: !config?.regimeConfirmed,
+  };
+}
+
+/**
+ * Construye y valida en servidor la confirmación operativa de NS22 a partir de
+ * la configuración persistida en Supabase (`shifts`, `positions`, `personnel.ns22_anchor_date`).
+ * Mantiene `regimeConfirmed = false` (exención de domingos pendiente).
+ */
+export function buildNs22ConfirmationFromDbData(params: {
+  shifts: Array<{
+    id: string;
+    name?: string | null;
+    start_time?: string | null;
+    end_time?: string | null;
+  }>;
+  positions: Array<{ id: string; name?: string | null; area_id?: string | null }>;
+  personnel: Array<{
+    id: string;
+    first_name?: string | null;
+    last_name_father?: string | null;
+    full_name?: string | null;
+    main_position?: string | null;
+    rotation_pattern?: string | null;
+    ns22_anchor_date?: string | null;
+    is_active?: boolean | null;
+  }>;
+}): {
+  ok: boolean;
+  error?: string;
+  confirmation?: Ns22OperationalConfirmation;
+} {
+  const norm = normalizeCatalogLabel;
+  const ns22Shift = (params.shifts || []).find(
+    (s) => norm(s.name).includes('NS 22') || norm(s.name).includes('NS22') || String(s.start_time || '').startsWith('22:00')
+  );
+  if (!ns22Shift) {
+    return { ok: false, error: 'Falta el turno operativo NS 22 en el catálogo de turnos.' };
+  }
+
+  const startTime = String(ns22Shift.start_time || '').slice(0, 5);
+  const endTime = String(ns22Shift.end_time || '').slice(0, 5);
+  if (startTime !== '22:00' || endTime !== '07:00') {
+    return {
+      ok: false,
+      error: `El horario del turno NS22 en Supabase debe ser 22:00 a 07:00 (actual: ${startTime || 'sin inicio'} a ${endTime || 'sin fin'}).`,
+    };
+  }
+
+  const aeroPos = resolveOperadorAeropuertoPosition(params.positions || []);
+  if (!aeroPos) {
+    return { ok: false, error: 'Falta el cargo Operador Aeropuerto en el catálogo de posiciones.' };
+  }
+
+  const titularesDb = (params.personnel || []).filter(
+    (p) =>
+      p.is_active !== false &&
+      p.main_position === aeroPos.id &&
+      norm(p.rotation_pattern).includes('4X4')
+  );
+
+  if (titularesDb.length < 2) {
+    return {
+      ok: false,
+      error: `Faltan titulares NS22 4x4 activos en Operador Aeropuerto (requeridos: 2, encontrados: ${titularesDb.length}).`,
+    };
+  }
+
+  const titulares: Ns22TitularConfirmation[] = [];
+  for (const w of titularesDb) {
+    const fullName =
+      w.full_name || `${w.first_name || ''} ${w.last_name_father || ''}`.trim() || w.id;
+    const rawAnchor = w.ns22_anchor_date ? String(w.ns22_anchor_date).split('T')[0].trim() : '';
+    if (!rawAnchor) {
+      return {
+        ok: false,
+        error: `Falta el ancla NS22 registrada (personnel.ns22_anchor_date) para ${fullName}.`,
+      };
+    }
+    titulares.push({
+      personnelId: w.id,
+      name: fullName,
+      anchorStatus: 'confirmed',
+      confirmedAnchorDate: rawAnchor,
+    });
+  }
+
+  return {
+    ok: true,
+    confirmation: {
+      confirmed: true,
+      scheduleConfirmed: true,
+      regimeConfirmed: false,
+      titulares,
+    },
   };
 }
 

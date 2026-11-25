@@ -26,6 +26,7 @@ import { deriveNs22AnchorFromHistory } from '@/lib/scheduler/v2/aeropuerto-ns22'
 import { fetchAllPaginated } from '@/lib/scheduler/v2/pagination';
 import { scheduleCrossArea } from '@/lib/scheduler/v2/cobertura';
 import {
+  buildNs22ConfirmationFromDbData,
   isAuthorizedV2Publisher,
   isProtectedPersistedAssignment,
   isV2SaveEnabled,
@@ -3161,17 +3162,40 @@ export async function saveV2DraftAction(params: {
       };
     }
 
-    const gate = validateNs22OperationalConfig(params.ns22Confirmation);
-    if (!gate.ok || !params.ns22Confirmation) {
+    const supabase: any = isIsolatedTest ? params.testHooks!.supabase : createAdminClient();
+    const adapter = createSupabaseRosterPersistenceAdapter(supabase);
+    const [{ data: shifts }, { data: positions }, { data: personnel }] = await Promise.all([
+      supabase.from('shifts').select('id, name, start_time, end_time, duration_hours'),
+      supabase.from('positions').select('id, name, area_id'),
+      supabase
+        .from('personnel')
+        .select('id, first_name, last_name_father, main_position, rotation_pattern, ns22_anchor_date, is_active'),
+    ]);
+
+    let resolvedNs22Confirmation = params.ns22Confirmation ?? null;
+    if (!resolvedNs22Confirmation) {
+      const built = buildNs22ConfirmationFromDbData({
+        shifts: shifts || [],
+        positions: positions || [],
+        personnel: personnel || [],
+      });
+      if (!built.ok || !built.confirmation) {
+        return {
+          success: false,
+          error: `Guardado de borrador v2 bloqueado: ${built.error || 'Configuración NS22 incompleta.'}`,
+        };
+      }
+      resolvedNs22Confirmation = built.confirmation;
+    }
+
+    const gate = validateNs22OperationalConfig(resolvedNs22Confirmation);
+    if (!gate.ok) {
       return {
         success: false,
         error: `Guardado de borrador v2 bloqueado: ${gate.unconfirmedReasons.join(' ')}`,
       };
     }
 
-    const supabase: any = isIsolatedTest ? params.testHooks!.supabase : createAdminClient();
-    const adapter = createSupabaseRosterPersistenceAdapter(supabase);
-    const { data: shifts } = await supabase.from('shifts').select('id, duration_hours');
     const shiftDurationById = new Map<string, number>(
       (shifts || []).map((s: any) => [s.id, Number(s.duration_hours) || 8])
     );
@@ -3183,7 +3207,7 @@ export async function saveV2DraftAction(params: {
       personnelIds: params.personnelIds ?? [],
       positionIds: params.positionIds ?? [],
       expectedBaselineHash: params.expectedBaselineHash,
-      ns22Config: params.ns22Confirmation,
+      ns22Config: resolvedNs22Confirmation,
       previewMetrics: params.previewMetrics,
       shiftDurationById,
     });

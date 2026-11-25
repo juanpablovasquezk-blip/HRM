@@ -15,6 +15,7 @@ import {
   updateDraftMetricsAndResetApproval,
 } from './draft-lifecycle';
 import {
+  buildNs22ConfirmationFromDbData,
   computeRangeStateHash,
   isAuthorizedV2Publisher,
   isV2SaveEnabled,
@@ -710,4 +711,130 @@ test('Editar propuesta v2 en memoria con ROSTER_V2_SAVE_ENABLED=false: agregar, 
       process.env.ROSTER_V2_SAVE_ENABLED = prevSaveFlag;
     }
   }
+});
+
+test('saveV2DraftAction / buildNs22ConfirmationFromDbData: construye NS22 desde Supabase sin ns22Confirmation del botón, guarda propuesta editada y bloquea si falta ancla o horario', async () => {
+  const shiftsCatalog = [
+    { id: 'sh-ns22', name: 'NS 22', start_time: '22:00:00', end_time: '07:00:00', duration_hours: 8 },
+  ];
+  const positionsCatalog = [
+    { id: 'pos-op-aero', name: 'Operador Aeropuerto', area_id: 'area-aero' },
+  ];
+  const personnelCatalog = [
+    {
+      id: '1e2cc199-7a29-417f-86d3-58143d448654',
+      first_name: 'MARCELO ANDRES',
+      last_name_father: 'JARA',
+      main_position: 'pos-op-aero',
+      rotation_pattern: '4x4_noche',
+      ns22_anchor_date: '2026-12-14',
+      is_active: true,
+    },
+    {
+      id: 'dafef0b7-cbab-4eaa-8aec-88ae7b4848d3',
+      first_name: 'JAVIER IGNACIO',
+      last_name_father: 'LOPEZ',
+      main_position: 'pos-op-aero',
+      rotation_pattern: '4x4_noche',
+      ns22_anchor_date: '2026-12-10',
+      is_active: true,
+    },
+  ];
+
+  // 1. Caso válido: ambas anclas registradas (2026-12-14 y 2026-12-10), 22:00-07:00, exención pendiente
+  const builtOk = buildNs22ConfirmationFromDbData({
+    shifts: shiftsCatalog,
+    positions: positionsCatalog,
+    personnel: personnelCatalog,
+  });
+  assert.equal(builtOk.ok, true);
+  assert.equal(builtOk.confirmation?.confirmed, true);
+  assert.equal(builtOk.confirmation?.scheduleConfirmed, true);
+  assert.equal(builtOk.confirmation?.regimeConfirmed, false);
+  assert.equal(builtOk.confirmation?.titulares.length, 2);
+  assert.equal(builtOk.confirmation?.titulares[0].confirmedAnchorDate, '2026-12-14');
+  assert.equal(builtOk.confirmation?.titulares[1].confirmedAnchorDate, '2026-12-10');
+
+  // Simular guardado y reapertura exacta de propuesta editada vía adapter sin enviar ns22Confirmation en el botón
+  const adapter = createIsolatedMemoryAdapter({ assignments: [], requirements: [] });
+  const editedPreview = {
+    engine: 'v2' as const,
+    label: 'v2',
+    elapsed_ms: 10,
+    execution_time_ms: 10,
+    total_required: 1,
+    total_covered: 1,
+    total_vacancies: 0,
+    coverage_percent: 100,
+    coverage_by_priority: { CRITICAL: { required: 1, covered: 1, vacancies: 0 } },
+    covered_primary_count: 1,
+    covered_secondary_count: 0,
+    reinforcement_count: 0,
+    conflicts_count: 0,
+    jornada_conflicts_count: 0,
+    conflicts: [],
+    holiday_warnings: [],
+    vacancies: [],
+    start_date: '2026-12-07',
+    end_date: '2027-01-03',
+    assignments: [
+      {
+        date: '2026-12-10',
+        personnel_id: 'dafef0b7-cbab-4eaa-8aec-88ae7b4848d3',
+        shift_id: 'sh-ns22',
+        shift_name: 'NS 22',
+        shift_start: '22:00',
+        shift_end: '07:00',
+        area_id: 'area-aero',
+        area_name: 'Aeropuerto',
+        position_id: 'pos-op-aero',
+        position_name: 'Operador Aeropuerto',
+        assignment_kind: 'ns22_titular' as const,
+        match_type: 'primary' as const,
+        is_extra: false,
+        is_protected: false,
+      },
+    ],
+  };
+
+  const saved = await saveV2PreviewAsDraft(adapter, {
+    startDate: '2026-12-07',
+    endDate: '2027-01-03',
+    expectedBaselineHash: '',
+    ns22Config: builtOk.confirmation!,
+    previewMetrics: editedPreview,
+    shiftDurationById: new Map([['sh-ns22', 8]]),
+  });
+  assert.equal(saved.success, true);
+  assert.equal(saved.draftState?.approval_status, 'pending_review');
+  assert.equal(adapter.state.assignments.every((a) => a.is_published === false), true);
+
+  const reopened = await reopenV2SavedDraft(adapter, saved.draftState!.draft_id);
+  assert.equal(reopened.ok, true);
+  assert.equal(reopened.draftState?.v2_metrics.assignments?.length, 1);
+  assert.equal(
+    reopened.draftState?.v2_metrics.assignments?.[0].personnel_id,
+    'dafef0b7-cbab-4eaa-8aec-88ae7b4848d3'
+  );
+
+  // 2. Caso ancla faltante -> bloquea e indica el dato exacto que falta
+  const missingAnchor = buildNs22ConfirmationFromDbData({
+    shifts: shiftsCatalog,
+    positions: positionsCatalog,
+    personnel: [
+      personnelCatalog[0],
+      { ...personnelCatalog[1], ns22_anchor_date: null },
+    ],
+  });
+  assert.equal(missingAnchor.ok, false);
+  assert.match(missingAnchor.error || '', /ns22_anchor_date.*JAVIER IGNACIO LOPEZ/i);
+
+  // 3. Caso horario NS22 distinto de 22:00 a 07:00 -> bloquea e indica el horario esperado
+  const wrongSchedule = buildNs22ConfirmationFromDbData({
+    shifts: [{ id: 'sh-ns22', name: 'NS 22', start_time: '22:00:00', end_time: '08:00:00' }],
+    positions: positionsCatalog,
+    personnel: personnelCatalog,
+  });
+  assert.equal(wrongSchedule.ok, false);
+  assert.match(wrongSchedule.error || '', /22:00 a 07:00/i);
 });
