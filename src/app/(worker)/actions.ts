@@ -1,5 +1,6 @@
 'use server';
 
+import { cache } from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { requireActionAuth } from '@/lib/auth/action-guard';
 import { cookies } from 'next/headers';
@@ -44,7 +45,7 @@ export async function logoutWorker() {
   redirect('/login');
 }
 
-export async function getWorkerSession() {
+const getWorkerSessionCached = cache(async () => {
   const auth = await requireActionAuth();
   if (!auth.ok) return null;
 
@@ -76,6 +77,10 @@ export async function getWorkerSession() {
   }
 
   return null;
+});
+
+export async function getWorkerSession() {
+  return getWorkerSessionCached();
 }
 export async function getWorkerTomorrowData() {
   const session = await getWorkerSession();
@@ -403,6 +408,46 @@ export async function getWorkerDocuments() {
     .order('uploaded_at', { ascending: false });
   
   return data || [];
+}
+
+export async function getWorkerDocumentDirectTarget(definitionId: string) {
+  const session = await getWorkerSession();
+  if (!session || !definitionId) return { definition: null, document: null };
+
+  const positionIds: string[] = [];
+  if (session.main_position) positionIds.push(session.main_position);
+  if (Array.isArray(session.secondary_positions)) positionIds.push(...session.secondary_positions);
+
+  const supabase = await createClient();
+  const [{ data: def }, { data: docs }] = await Promise.all([
+    supabase
+      .from('document_definitions')
+      .select('*')
+      .eq('id', definitionId)
+      .eq('is_active', true)
+      .maybeSingle(),
+    supabase
+      .from('documents')
+      .select('*')
+      .eq('personnel_id', session.id)
+      .order('uploaded_at', { ascending: false }),
+  ]);
+
+  if (!def) return { definition: null, document: null };
+
+  const applicable: string[] = def.applicable_positions || [];
+  const isApplicable =
+    applicable.length === 0 || applicable.some((p: string) => positionIds.includes(p));
+  if (!isApplicable) return { definition: null, document: null };
+
+  const doc =
+    (docs || []).find(
+      (d: any) =>
+        d.definition_id === def.id ||
+        (d.type || '').toLowerCase().trim() === (def.name || '').toLowerCase().trim()
+    ) || null;
+
+  return { definition: def, document: doc };
 }
 
 

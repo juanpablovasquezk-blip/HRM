@@ -44,6 +44,9 @@ interface WorkerDocumentsClientProps {
   existingDocuments: Document[];
   userId: string;
   personnel: any;
+  initialDefinitionId?: string;
+  renderMode?: 'full' | 'dialog_only' | 'list_only';
+  todayStr?: string;
 }
 
 const getCaptureType = (defName: string): 'card' | 'vertical_card' | 'selfie' | 'pdf' => {
@@ -84,41 +87,100 @@ const base64ToFile = (base64String: string, filename: string): File => {
   return new File([u8arr], filename, { type: mime });
 };
 
-export default function WorkerDocumentsClient({ definitions, existingDocuments, userId, personnel }: WorkerDocumentsClientProps) {
+export default function WorkerDocumentsClient({
+  definitions,
+  existingDocuments,
+  userId,
+  personnel,
+  initialDefinitionId,
+  renderMode = 'full',
+  todayStr,
+}: WorkerDocumentsClientProps) {
+  const effectiveTodayStr = todayStr || new Date().toISOString().split('T')[0];
+
+  const resolveStatusForDef = (defId: string) => {
+    const def = definitions.find(d => d.id === defId);
+    const doc = existingDocuments.find(d =>
+      d.definition_id === defId ||
+      (def && (d.type || '').toLowerCase().trim() === (def.name || '').toLowerCase().trim())
+    );
+    if (!doc) {
+      return { label: 'Faltante', color: 'bg-red-50 text-red-700', icon: AlertCircle, status: 'MISSING' as const, doc: null };
+    }
+    if (doc.status === 'REJECTED') {
+      return { label: 'Rechazado', color: 'bg-red-50 text-red-700', icon: XCircle, status: 'REJECTED' as const, doc };
+    }
+    if (doc.expiration_date && doc.expiration_date < effectiveTodayStr) {
+      return { label: 'Vencido', color: 'bg-orange-50 text-orange-700', icon: AlertCircle, status: 'EXPIRED' as const, doc };
+    }
+    if (doc.status === 'APPROVED') {
+      return { label: 'Aprobado', color: 'bg-emerald-50 text-emerald-700', icon: CheckCircle2, status: 'APPROVED' as const, doc };
+    }
+    return { label: 'En revisión', color: 'bg-amber-50 text-amber-700', icon: Clock, status: 'PENDING' as const, doc };
+  };
+
+  const initialTargetDef = initialDefinitionId
+    ? definitions.find(d => d.id === initialDefinitionId) || null
+    : null;
+  const initialTargetStatus = initialTargetDef ? resolveStatusForDef(initialTargetDef.id) : null;
+  const shouldOpenUploadInitially = Boolean(
+    renderMode !== 'list_only' &&
+      initialTargetDef &&
+      initialTargetStatus &&
+      (initialTargetStatus.status === 'MISSING' ||
+        initialTargetStatus.status === 'EXPIRED' ||
+        initialTargetStatus.status === 'REJECTED')
+  );
+  const shouldOpenDetailInitially = Boolean(
+    renderMode !== 'list_only' &&
+      initialTargetDef &&
+      initialTargetStatus &&
+      (initialTargetStatus.status === 'PENDING' || initialTargetStatus.status === 'APPROVED')
+  );
+
   const [uploadingId, setUploadingId] = useState<string | null>(null);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [selectedDef, setSelectedDef] = useState<DocumentDefinition | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(shouldOpenUploadInitially);
+  const [selectedDef, setSelectedDef] = useState<DocumentDefinition | null>(
+    shouldOpenUploadInitially ? initialTargetDef : null
+  );
+  const [selectedExistingDoc, setSelectedExistingDoc] = useState<Document | null>(
+    shouldOpenUploadInitially ? (initialTargetStatus?.doc || null) : null
+  );
+  const [selectedExistingStatus, setSelectedExistingStatus] = useState<string | null>(
+    shouldOpenUploadInitially ? (initialTargetStatus?.status || null) : null
+  );
+  const [isDetailOpen, setIsDetailOpen] = useState(shouldOpenDetailInitially);
+  const [detailDef, setDetailDef] = useState<DocumentDefinition | null>(
+    shouldOpenDetailInitially ? initialTargetDef : null
+  );
+  const [detailDoc, setDetailDoc] = useState<Document | null>(
+    shouldOpenDetailInitially ? (initialTargetStatus?.doc || null) : null
+  );
   const [expiryDate, setExpiryDate] = useState<string>('');
   const [docNumber, setDocNumber] = useState<string>('');
   const [capturedValue, setCapturedValue] = useState<string | null>(null);
   const [capturedFront, setCapturedFront] = useState<string | null>(null);
   const [capturedBack, setCapturedBack] = useState<string | null>(null);
-  
-  const supabase = createClient();
 
-  const getDocStatus = (defId: string) => {
-    const def = definitions.find(d => d.id === defId);
-    const doc = existingDocuments.find(d => 
-      d.definition_id === defId ||
-      (def && (d.type || '').toLowerCase().trim() === (def.name || '').toLowerCase().trim())
-    );
-    if (!doc) return { label: 'Faltante', color: 'bg-red-50 text-red-700', icon: AlertCircle, status: 'MISSING' };
-    
-    switch (doc.status) {
-      case 'APPROVED': return { label: 'Aprobado', color: 'bg-emerald-50 text-emerald-700', icon: CheckCircle2, status: 'APPROVED' };
-      case 'REJECTED': return { label: 'Rechazado', color: 'bg-red-50 text-red-700', icon: XCircle, status: 'REJECTED' };
-      default: return { label: 'Pendiente', color: 'bg-amber-50 text-amber-700', icon: Clock, status: 'PENDING' };
-    }
-  };
+  const getDocStatus = (defId: string) => resolveStatusForDef(defId);
 
   const handleOpenUpload = (def: DocumentDefinition) => {
+    const st = resolveStatusForDef(def.id);
     setSelectedDef(def);
+    setSelectedExistingDoc(st.doc || null);
+    setSelectedExistingStatus(st.status);
     setExpiryDate('');
     setDocNumber('');
     setCapturedValue(null);
     setCapturedFront(null);
     setCapturedBack(null);
     setIsDialogOpen(true);
+  };
+
+  const handleOpenDetail = (def: DocumentDefinition, doc: Document | null) => {
+    setDetailDef(def);
+    setDetailDoc(doc);
+    setIsDetailOpen(true);
   };
 
   const processUpload = async () => {
@@ -212,13 +274,15 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-lg mx-auto">
-      <div className="space-y-1">
-        <h2 className="text-2xl font-black text-slate-900 leading-tight">Mis Documentos 📄</h2>
-        <p className="text-slate-500 font-medium text-sm">Gestiona tus documentos requeridos por la empresa</p>
-      </div>
+    <div className={renderMode === 'dialog_only' ? '' : 'p-6 space-y-6 max-w-lg mx-auto'}>
+      {renderMode !== 'dialog_only' && (
+        <>
+          <div className="space-y-1">
+            <h2 className="text-2xl font-black text-slate-900 leading-tight">Mis Documentos 📄</h2>
+            <p className="text-slate-500 font-medium text-sm">Gestiona tus documentos requeridos por la empresa</p>
+          </div>
 
-      <div className="space-y-4">
+          <div className="space-y-4">
         {definitions.map((def) => {
           const status = getDocStatus(def.id);
           const StatusIcon = status.icon;
@@ -339,13 +403,13 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
                   </div>
                 </div>
 
-                <div className="mt-4 flex items-center justify-between gap-2">
-                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full ${status.color} text-[10px] font-black uppercase tracking-wider`}>
-                    <StatusIcon className="h-3 w-3" />
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full ${status.color} text-[10px] font-black uppercase tracking-wider shrink-0 whitespace-nowrap`}>
+                    <StatusIcon className="h-3 w-3 shrink-0" />
                     {status.label}
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {doc && (
                       <a 
                         href={doc.file_url} 
@@ -360,6 +424,17 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
                       </a>
                     )}
                     
+                    {status.status === 'PENDING' && doc && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => handleOpenDetail(def, doc)}
+                        className="h-9 px-3 rounded-xl font-bold text-xs border-slate-200 text-slate-700"
+                      >
+                        Detalle
+                      </Button>
+                    )}
+
                     <Button 
                       onClick={() => handleOpenUpload(def)} 
                       disabled={uploadingId === def.id}
@@ -399,8 +474,11 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
           Asegúrate de que las fotos sean claras y que toda la información sea legible. Los documentos marcados como <strong>obligatorios</strong> son necesarios para tu continuidad operativa.
         </p>
       </div>
+        </>
+      )}
 
-      {/* Upload Dialog */}
+      {/* Upload / Replacement Dialog */}
+      {renderMode !== 'list_only' && (
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className={cn(
           "rounded-3xl p-6 overflow-hidden border-none shadow-2xl bg-white transition-all duration-300",
@@ -411,12 +489,35 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
           <DialogHeader className="p-0 mb-6">
             <DialogTitle className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
               <Upload className="h-5 w-5 text-orange-500" />
-              Subir {selectedDef?.name}
+              {selectedExistingDoc ? `Reemplazar ${selectedDef?.name}` : `Subir ${selectedDef?.name}`}
             </DialogTitle>
             <DialogDescription className="text-slate-400 font-medium">
-              Completa la información para subir tu documento.
+              {selectedExistingStatus === 'EXPIRED'
+                ? 'Tu documento está vencido. Sube una versión vigente para renovarlo.'
+                : selectedExistingStatus === 'REJECTED'
+                ? 'Tu documento fue rechazado. Corrige lo indicado y súbelo nuevamente.'
+                : 'Completa la información para subir tu documento.'}
             </DialogDescription>
           </DialogHeader>
+
+          {selectedExistingStatus === 'REJECTED' && selectedExistingDoc?.rejection_reason && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="text-[10px] font-black text-red-800 uppercase">Motivo de rechazo</p>
+                <p className="text-xs text-red-700">{selectedExistingDoc.rejection_reason}</p>
+              </div>
+            </div>
+          )}
+
+          {selectedExistingStatus === 'EXPIRED' && selectedExistingDoc?.expiration_date && (
+            <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-2xl flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-orange-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-orange-800">
+                Documento vencido el <strong>{format(parseISO(selectedExistingDoc.expiration_date), 'dd-MM-yyyy')}</strong>.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-6">
             {selectedDef && (selectedDef.name.toLowerCase().includes('tica') || selectedDef.name.toLowerCase().includes('pcp')) && (
@@ -514,6 +615,67 @@ export default function WorkerDocumentsClient({ definitions, existingDocuments, 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
+
+      {/* Detail Dialog (In Review / Approved) */}
+      {renderMode !== 'list_only' && (
+        <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
+          <DialogContent className="rounded-3xl p-6 border-none shadow-2xl bg-white sm:max-w-[420px]">
+            <DialogHeader className="p-0 mb-4">
+              <DialogTitle className="text-lg font-black uppercase tracking-tight flex items-center gap-2">
+                <Clock className="h-5 w-5 text-amber-600" />
+                {detailDef?.name}
+              </DialogTitle>
+              <DialogDescription className="text-slate-500 text-xs">
+                Estado actual de tu documento enviado.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 text-sm">
+              <div className="rounded-2xl bg-amber-50 border border-amber-200 p-3.5 space-y-1">
+                <p className="text-xs font-black uppercase text-amber-900">
+                  {detailDoc?.status === 'APPROVED' ? 'Aprobado' : 'En revisión — Esperando validación de RR. HH.'}
+                </p>
+                {detailDoc?.uploaded_at && (
+                  <p className="text-xs text-amber-800">
+                    Enviado: {format(parseISO(String(detailDoc.uploaded_at).slice(0, 10)), 'dd-MM-yyyy')}
+                  </p>
+                )}
+                {detailDoc?.expiration_date && (
+                  <p className="text-xs text-amber-800">
+                    Vencimiento informado: {format(parseISO(detailDoc.expiration_date), 'dd-MM-yyyy')}
+                  </p>
+                )}
+              </div>
+
+              {detailDoc?.file_url && (
+                <a
+                  href={detailDoc.file_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn(
+                    buttonVariants({ variant: 'outline' }),
+                    'w-full rounded-2xl gap-2 text-xs font-bold'
+                  )}
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Ver documento enviado
+                </a>
+              )}
+            </div>
+
+            <DialogFooter className="mt-4">
+              <Button
+                type="button"
+                onClick={() => setIsDetailOpen(false)}
+                className="w-full rounded-2xl bg-slate-900 text-white font-bold text-xs uppercase"
+              >
+                Cerrar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

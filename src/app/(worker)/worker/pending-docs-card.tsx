@@ -1,6 +1,8 @@
-import React from 'react';
+'use client';
+
+import React, { useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, ChevronRight, Clock, FileWarning, XCircle } from 'lucide-react';
+import { AlertCircle, ChevronRight, Clock, FileWarning, Loader2, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import type { WorkerPendingDocItem, WorkerPendingDocStatus } from '@/lib/worker/portal-requests';
 
@@ -27,6 +29,8 @@ const STATUS_STYLE: Record<
 };
 
 export function PendingDocsCard({ items }: { items: WorkerPendingDocItem[] }) {
+  const [tappedId, setTappedId] = useState<string | null>(null);
+
   if (!items || items.length === 0) return null;
 
   return (
@@ -37,14 +41,24 @@ export function PendingDocsCard({ items }: { items: WorkerPendingDocItem[] }) {
             Documentos pendientes ({items.length})
           </p>
           <p className="text-xs text-slate-500">
-            Revisa los documentos que debes subir, renovar, corregir o que están esperando validación.
+            Toca un documento para subirlo, renovarlo, corregirlo o ver su estado.
           </p>
         </div>
         <Link
           href="/worker/documents"
-          className="inline-flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-slate-800 shrink-0"
+          onClick={() => setTappedId('all')}
+          className="inline-flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-slate-800 active:scale-[0.98] transition-all shrink-0"
         >
-          Mis documentos <ChevronRight className="h-3.5 w-3.5" />
+          {tappedId === 'all' ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Abriendo...
+            </>
+          ) : (
+            <>
+              Mis documentos <ChevronRight className="h-3.5 w-3.5" />
+            </>
+          )}
         </Link>
       </div>
 
@@ -52,25 +66,37 @@ export function PendingDocsCard({ items }: { items: WorkerPendingDocItem[] }) {
         {items.map((item) => {
           const cfg = STATUS_STYLE[item.status];
           const Icon = cfg.icon;
+          const isOpening = tappedId === item.definitionId;
           return (
-            <div
+            <Link
               key={item.definitionId}
-              className="flex items-start justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"
+              href={`/worker/documents?definitionId=${encodeURIComponent(item.definitionId)}`}
+              onClick={() => setTappedId(item.definitionId)}
+              className="flex items-start justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 hover:bg-slate-100/80 active:scale-[0.98] transition-all"
             >
               <div className="flex items-start gap-2.5 min-w-0">
-                <Icon className="h-4 w-4 text-slate-600 shrink-0 mt-0.5" />
+                {isOpening ? (
+                  <Loader2 className="h-4 w-4 text-orange-600 animate-spin shrink-0 mt-0.5" />
+                ) : (
+                  <Icon className="h-4 w-4 text-slate-600 shrink-0 mt-0.5" />
+                )}
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-slate-900 truncate">{item.name}</p>
-                  <p className="text-[11px] text-slate-600 leading-snug">{item.detail}</p>
+                  <p className="text-[11px] text-slate-600 leading-snug">
+                    {isOpening ? 'Abriendo documento...' : item.detail}
+                  </p>
                 </div>
               </div>
-              <Badge
-                variant="outline"
-                className={`shrink-0 text-[10px] font-bold px-2 py-0.5 ${cfg.badgeClass}`}
-              >
-                {item.label}
-              </Badge>
-            </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Badge
+                  variant="outline"
+                  className={`text-[10px] font-bold px-2 py-0.5 ${cfg.badgeClass}`}
+                >
+                  {item.label}
+                </Badge>
+                <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+              </div>
+            </Link>
           );
         })}
       </div>
