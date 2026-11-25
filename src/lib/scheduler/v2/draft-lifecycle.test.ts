@@ -989,3 +989,69 @@ test('Guardar borrador v2 omite reconciliación con Dotación Extra, guarda refu
   assert.equal(newRows.every((a) => a.is_published === false), true);
   assert.equal(adapter.state.assignments.filter((a) => a.is_extra).length, 1);
 });
+
+test('NS22 titular nuevo (4x4 bloqueado por regla) no se marca is_protected, se guarda y se publica; protegido existente se preserva', () => {
+  const marceloId = '1e2cc199-7a29-417f-86d3-58143d448654';
+  const javierId = 'dafef0b7-cbab-4eaa-8aec-88ae7b4848d3';
+  const replId = 'p-repl';
+  const areaId = 'area-aero';
+  const posId = 'pos-op-aero';
+  const shNs22 = 'sh-ns22';
+
+  const preview = compareEnginesPreview({
+    startDate: '2026-12-10',
+    endDate: '2026-12-15',
+    rawRequirements: ['2026-12-10', '2026-12-11', '2026-12-14', '2026-12-15'].map((d, i) => ({
+      id: `req-ns22-${i}`,
+      date: d,
+      area_id: areaId,
+      position_id: posId,
+      shift_id: shNs22,
+      required_count: 1,
+      priority: 'CRITICAL',
+      shift: { name: 'NS 22', start_time: '22:00:00', end_time: '07:00:00', duration_hours: 8 },
+    })) as any,
+    existingAssignments: [
+      {
+        id: 'prot-mar-14',
+        date: '2026-12-14',
+        personnel_id: marceloId,
+        area_id: areaId,
+        position_id: posId,
+        shift_id: shNs22,
+        status: 'confirmed',
+        is_manual: true,
+        is_locked: true,
+        is_published: true,
+        is_validated: true,
+        is_extra: false,
+        shift_start: '22:00:00',
+        shift_end: '07:00:00',
+        duration_hours: 8,
+      },
+    ],
+    personnel: [
+      { personnel_id: marceloId, full_name: 'MARCELO JARA', main_position: posId, secondary_positions: [], rotation_pattern: '4x4_noche' },
+      { personnel_id: javierId, full_name: 'JAVIER LOPEZ', main_position: posId, secondary_positions: [], rotation_pattern: '4x4_noche' },
+      { personnel_id: replId, full_name: 'REEMPLAZO AERO', main_position: posId, secondary_positions: [], rotation_pattern: '5X2' },
+    ],
+    approvedLeaves: [
+      { personnel_id: javierId, start_date: '2026-12-11', end_date: '2026-12-11', status: 'approved', type: 'personal' },
+    ],
+    ns22Config: {
+      titulares: [
+        { personnel_id: marceloId, first_name: 'Marcelo', anchor_date: '2026-12-14', cycle_offset: 0, confirmed_4x4_regime: false },
+        { personnel_id: javierId, first_name: 'Javier', anchor_date: '2026-12-10', cycle_offset: 0, confirmed_4x4_regime: false },
+      ],
+      shiftDef: { shift_id: shNs22, area_id: areaId, position_id: posId, shift_start: '22:00', shift_end: '07:00', duration_hours: 8 },
+    },
+    areaNameById: new Map([[areaId, 'Aeropuerto']]),
+    positionNameById: new Map([[posId, 'Operador Aeropuerto']]),
+  });
+
+  const byDate = new Map((preview.v2.assignments || []).map((a) => [a.date, a]));
+  assert.equal(byDate.get('2026-12-10')?.is_protected, false);
+  assert.equal(byDate.get('2026-12-11')?.is_protected, false);
+  assert.equal(byDate.get('2026-12-14')?.is_protected, true);
+  assert.equal(byDate.get('2026-12-15')?.is_protected, false);
+});

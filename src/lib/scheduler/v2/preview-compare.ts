@@ -497,7 +497,13 @@ function buildV2MetricsFromResult(
       position_name: params.positionNameById?.get(a.position_id) || '',
       assignment_kind: a.assignment_kind,
       match_type: a.match_type,
-      is_protected: Boolean(a.is_locked || a.frozen_by_rule),
+      // El bloqueo interno de ciclo 4x4 (is_locked/frozen_by_rule en ns22_titular nuevo)
+      // protege la regla durante la simulación, pero sigue siendo una asignación NUEVA
+      // que debe guardarse y publicarse; solo es `is_protected` si ya existía protegida en BD.
+      is_protected:
+        a.assignment_kind === 'ns22_titular'
+          ? false
+          : Boolean(a.is_locked || a.frozen_by_rule),
       is_extra: false,
     });
   }
