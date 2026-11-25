@@ -118,6 +118,9 @@ export default function AttendanceClient({ initialData }: { initialData: any }) 
       const res = await updateAttendance(id, status, comment);
       if (res.success) {
         toast.success(`${status === 'present' ? 'Presente' : 'Ausente'}`);
+        if (res.bonusWarning) {
+          toast.warning(res.bonusWarning, { duration: 8000 });
+        }
         setData((prev: any) => ({
           ...prev,
           assignments: prev.assignments.map((a: any) => 

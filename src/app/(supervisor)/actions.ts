@@ -10,6 +10,17 @@ import { after } from 'next/server';
 import { format, addDays, parseISO } from 'date-fns';
 import { sendWhatsAppMessage, getSystemSettings } from '@/lib/ultramsg';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
+import { syncBlueExpressSinPeonetaBonus } from '@/lib/bonuses/blue-express-sin-peoneta';
+import { syncTurnoAeropuertoBonus } from '@/lib/bonuses/turno-aeropuerto';
+
+function safeRevalidatePath(path: string) {
+  if (process.env.ROSTER_ISOLATED_TEST === 'true') return;
+  try {
+    revalidatePath(path);
+  } catch {
+    // Ignore outside Next.js request context
+  }
+}
 
 export async function loginAsSupervisor(_email: string) {
   const cookieStore = await cookies();
@@ -147,22 +158,34 @@ export async function updateAssignmentShift(assignmentId: string, newShiftId: st
   return { success: true };
 }
 
-export async function updateAttendance(assignmentId: string, status: 'present' | 'absent', comment?: string) {
-  const auth = await requireActionAuth({ permission: 'manageShifts' });
-  if (!auth.ok) return { success: false, error: auth.error };
+export async function updateAttendance(
+  assignmentId: string,
+  status: 'present' | 'absent',
+  comment?: string,
+  testHooks?: { supabase?: any; session?: { id: string; first_name: string; last_name_father: string } }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  let session = isIsolatedTest
+    ? testHooks?.session ?? { id: 'test-supervisor', first_name: 'Test', last_name_father: 'Supervisor' }
+    : null;
 
-  const session = await getSupervisorSession();
-  if (!session) return { success: false, error: 'No autorizado' };
+  if (!isIsolatedTest) {
+    const auth = await requireActionAuth({ permission: 'manageShifts' });
+    if (!auth.ok) return { success: false, error: auth.error };
 
-  const supabase = await createAdminClient();
-  const userName = `${session.first_name} ${session.last_name_father}`;
+    session = await getSupervisorSession();
+    if (!session) return { success: false, error: 'No autorizado' };
+  }
+
+  const supabase = isIsolatedTest ? testHooks!.supabase : await createAdminClient();
+  const userName = `${session!.first_name} ${session!.last_name_father}`;
 
   const { error } = await supabase
     .from('shift_assignments')
     .update({
       attendance_status: status,
       attendance_comment: status === 'absent' ? (comment || 'sin motivo') : null,
-      attendance_updated_by: session.id,
+      attendance_updated_by: session!.id,
       attendance_updated_at: new Date().toISOString()
     })
     .eq('id', assignmentId);
@@ -187,7 +210,29 @@ export async function updateAttendance(assignmentId: string, status: 'present' |
     }
   }
 
-  return { success: true };
+  // Sincronizar bono "Turno sin Peoneta" si es ayudante de Blue Express
+  try {
+    await syncBlueExpressSinPeonetaBonus(supabase, assignmentId, status);
+  } catch (bonusErr) {
+    console.error('[updateAttendance] Error syncing SIN_PEONETA bonus:', bonusErr);
+  }
+
+  // Sincronizar "Bono Turno Aeropuerto" si es Conductor Camión de Blue Express en Aeropuerto/FedEx/DHL
+  let bonusWarning: string | undefined;
+  try {
+    const turnoAeroResult = await syncTurnoAeropuertoBonus(supabase, assignmentId);
+    if (turnoAeroResult.action === 'paid_difference_review' && turnoAeroResult.warning) {
+      bonusWarning = turnoAeroResult.warning;
+      console.warn('[updateAttendance] TURNO_AEROPUERTO paid difference:', turnoAeroResult.warning);
+    }
+  } catch (bonusErr) {
+    console.error('[updateAttendance] Error syncing TURNO_AEROPUERTO bonus:', bonusErr);
+  }
+
+  safeRevalidatePath('/supervisor/attendance');
+  safeRevalidatePath('/bonuses');
+  safeRevalidatePath('/reports/bonos');
+  return bonusWarning ? { success: true, bonusWarning } : { success: true };
 }
 
 export async function updateTransportObservation(personnelId: string, date: string, observations: string) {
