@@ -1,5 +1,23 @@
 export const TURNO_AEROPUERTO_CODE = 'TURNO_AEROPUERTO';
 export const TURNO_AEROPUERTO_AMOUNT = 5000;
+export const TURNO_AEROPUERTO_EFFECTIVE_FROM = '2026-11-01';
+
+export function isWithinTurnoAeropuertoEffectiveRange(date: string | null | undefined): boolean {
+  if (!date) return false;
+  return date >= TURNO_AEROPUERTO_EFFECTIVE_FROM;
+}
+
+export function isOrdinaryPresentAssignment(assignment: {
+  status?: string | null;
+  attendance_status?: string | null;
+  is_extra?: boolean | null;
+}): boolean {
+  return (
+    assignment.status !== 'cancelled' &&
+    assignment.attendance_status === 'present' &&
+    assignment.is_extra === false
+  );
+}
 
 export interface TurnoAeropuertoSyncResult {
   action:
@@ -86,6 +104,10 @@ export async function syncTurnoAeropuertoBonus(
   const personnelId: string = targetAssignment.personnel_id;
   const date: string = targetAssignment.date;
 
+  if (!isWithinTurnoAeropuertoEffectiveRange(date)) {
+    return { action: 'not_eligible' };
+  }
+
   // 2. Obtener tipo de bono TURNO_AEROPUERTO
   const { data: bonusType, error: btErr } = await supabase
     .from('bonus_types')
@@ -130,10 +152,10 @@ export async function syncTurnoAeropuertoBonus(
     isConductorBlue = isConductorCamionBlueExpress(mainPos?.name, mainAreaName);
   }
 
-  // 4. Evaluar todas las asignaciones activas del trabajador en esa fecha
+  // 4. Evaluar todas las asignaciones ordinarias activas (is_extra = false) del trabajador en esa fecha
   const { data: dayAssignments, error: dayErr } = await supabase
     .from('shift_assignments')
-    .select('id, status, attendance_status, position_id, area_id')
+    .select('id, status, attendance_status, position_id, area_id, is_extra')
     .eq('personnel_id', personnelId)
     .eq('date', date)
     .neq('status', 'cancelled');
@@ -142,8 +164,8 @@ export async function syncTurnoAeropuertoBonus(
     return { action: 'noop' };
   }
 
-  const presentAssignments = (dayAssignments ?? []).filter(
-    (a: any) => a.attendance_status === 'present'
+  const presentAssignments = (dayAssignments ?? []).filter((a: any) =>
+    isOrdinaryPresentAssignment(a)
   );
 
   let eligiblePresent: { id: string; posName: string; areaName: string } | null = null;
