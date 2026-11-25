@@ -91,6 +91,37 @@ export interface SaveV2TxParams {
   deleteRequirementIds: string[];
 }
 
+export interface PersistedV2DraftRow {
+  id: string;
+  start_date: string;
+  end_date: string;
+  area_id: string | null;
+  personnel_ids: string[];
+  position_ids: string[];
+  baseline_range_hash: string;
+  persisted_range_hash: string;
+  draft_version_hash: string;
+  approval_status: 'pending_review' | 'approved' | 'published';
+  approved_version_hash: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
+  published_at: string | null;
+  snapshot_id: string | null;
+  v2_metrics: any;
+  updated_at: string;
+}
+
+export interface PublishV2TxParams {
+  draftId: string;
+  startDate: string;
+  endDate: string;
+  areaId?: string | null;
+  expectedPersistedRangeHash: string;
+  expectedDraftVersionHash: string;
+  expectedApprovedVersionHash: string;
+  nowIso: string;
+}
+
 export interface RosterPersistenceAdapter {
   loadRangeState(
     startDate: string,
@@ -130,6 +161,14 @@ export interface RosterPersistenceAdapter {
     snapshotId: string;
     restoredAssignmentsCount?: number;
     restoredRequirementsCount?: number;
+  }>;
+  saveDraftState?(draft: PersistedV2DraftRow): Promise<void>;
+  loadDraftState?(draftId: string): Promise<PersistedV2DraftRow | null>;
+  executePublishTx?(params: PublishV2TxParams): Promise<{
+    success: boolean;
+    conflictDetected?: boolean;
+    publishedCount?: number;
+    error?: string;
   }>;
 }
 
@@ -174,6 +213,42 @@ export interface RecoverSnapshotResult {
 /**
  * Mantiene `v1` como motor predeterminado hasta que se apruebe explícitamente el cambio.
  */
+export function getAuthorizedV2PublishUserId(): string | null {
+  const configured = process.env.ROSTER_V2_PUBLISH_USER_ID?.trim();
+  return configured ? configured : null;
+}
+
+export function isAuthorizedV2Publisher(auth: {
+  ok: boolean;
+  userId?: string | null;
+  role?: string | null;
+}): { ok: boolean; error?: string } {
+  if (!auth.ok || !auth.userId) {
+    return { ok: false, error: 'Usuario no autenticado para publicar borrador v2.' };
+  }
+  const normalizedRole = String(auth.role || '').toUpperCase().trim();
+  if (normalizedRole !== 'ADMIN') {
+    return {
+      ok: false,
+      error: 'Solo un administrador autorizado (rol ADMIN) puede publicar el borrador v2.',
+    };
+  }
+  const allowedUserId = getAuthorizedV2PublishUserId();
+  if (!allowedUserId) {
+    return {
+      ok: false,
+      error: 'Publicación v2 bloqueada: falta configurar ROSTER_V2_PUBLISH_USER_ID en el servidor.',
+    };
+  }
+  if (auth.userId !== allowedUserId) {
+    return {
+      ok: false,
+      error: 'Cuenta ADMIN no autorizada para publicar el borrador v2 desde HRM.',
+    };
+  }
+  return { ok: true };
+}
+
 export function getDefaultSchedulerEngine(): SchedulerEngineChoice {
   return process.env.ROSTER_V2_DEFAULT_ENABLED === 'true' ? 'v2' : 'v1';
 }
@@ -195,12 +270,16 @@ export function isProtectedPersistedAssignment(row: PersistedAssignmentRow): boo
 }
 
 /**
- * Verifica que horario, anclas y régimen de los titulares NS22 estén confirmados
+ * Verifica que el ciclo operativo NS22 (horario y anclas de los titulares) esté confirmado
  * antes de permitir el guardado operativo con `v2`.
+ * Separa esta confirmación de la exención de cuota de domingos libres (`regimeConfirmed`):
+ * si `regimeConfirmed` sigue pendiente (`false`), el guardado se permite aplicando las
+ * validaciones vigentes de domingos libres.
  */
 export function validateNs22OperationalConfig(config?: Ns22OperationalConfirmation | null): {
   ok: boolean;
   unconfirmedReasons: string[];
+  sundayExemptionPending?: boolean;
 } {
   const reasons: string[] = [];
   if (!config || !config.confirmed) {
@@ -208,9 +287,6 @@ export function validateNs22OperationalConfig(config?: Ns22OperationalConfirmati
   }
   if (!config?.scheduleConfirmed) {
     reasons.push('Falta confirmar el horario operativo de Aeropuerto NS22 (ej. 22:00-07:00).');
-  }
-  if (!config?.regimeConfirmed) {
-    reasons.push('Falta confirmar el régimen 4x4 de los titulares NS22.');
   }
   const titulares = config?.titulares || [];
   if (titulares.length < 2) {
@@ -226,6 +302,7 @@ export function validateNs22OperationalConfig(config?: Ns22OperationalConfirmati
   return {
     ok: reasons.length === 0,
     unconfirmedReasons: reasons,
+    sundayExemptionPending: !config?.regimeConfirmed,
   };
 }
 

@@ -262,10 +262,14 @@ Revisión realizada sobre el motor actual sin modificar código ni ejecutar escr
   - **Probado en entorno aislado en memoria (`51/51`):** `runSchedulerV2` → `supabase.rpc('save_v2_schedule_tx')`, recarga de Planificación Diaria (`fetchDailyOperationalData`), `recoverV2RosterAction` → `supabase.rpc('recover_v2_snapshot_tx')`, rollback transaccional ante fallo intermedio, prueba con dos sesiones reproduciendo una edición o eliminación habitual de HRM mientras se ejecuta el guardado o la recuperación `v2` (preservando el cambio ajeno y abortando sin cambios parciales), flujo completo de Dotación Extra (`assignExtraPersonnel` nuevo y reactivado, exclusión del rol ordinario, aparición única en `getBonosReportData`), cómputo de 8h para NS22 sin `duration_hours` guardado conservando salida `07:00` (11h vs 12h), y `v1` como predeterminado.
   - **Bloqueo registrado para PostgreSQL real:** En esta máquina no existe PostgreSQL local, Docker, Supabase CLI ni una instancia aislada de Supabase disponible (`.env.local` apunta únicamente a la base operativa, excluida de estas pruebas). Queda preparado el procedimiento reproducible en `scripts/verify-roster07-isolated-pg.mjs` (con verificación previa de coincidencia SQL + API en el mismo proyecto aislado).
 - **Condiciones pendientes antes de habilitar `v2` en operación:**
-  1. Aprobación expresa del usuario para aplicar `docs/migrations/roster08-vacancy-extra-links.sql` y `docs/migrations/roster07-activation-and-snapshots.sql` en la base operativa.
-  2. Confirmación explícita del régimen `4x4_noche` / jornada excepcional aplicable a los dos titulares NS22 (horario `22:00-07:00` con 1h de colación = 8h trabajadas ya confirmado).
-  3. Ejecución de `scripts/verify-roster07-isolated-pg.mjs` en instancia aislada de Supabase/PostgreSQL.
-  4. Habilitación controlada de `ROSTER_V2_EXTRA_LINKS=true` y `ROSTER_V2_SAVE_ENABLED=true` (manteniendo `v1` predeterminado hasta confirmar operación).
+  1. Aprobación expresa del usuario para aplicar en orden las migraciones de **ROSTER-07** en la base operativa:
+     1) `docs/migrations/roster07-ns22-anchors.sql`
+     2) `docs/migrations/roster07-activation-and-snapshots.sql`
+     3) `docs/migrations/roster07-draft-approval-and-publish-tx.sql`
+     *(**ROSTER-08** — `docs/migrations/roster08-vacancy-extra-links.sql` — queda para un despliegue separado).*
+  2. Confirmación explícita de la exención de domingos libres del régimen `4x4_noche` para los dos titulares NS22 (horario `22:00-07:00` con 1h de colación = 8h trabajadas y anclas `2026-12-14` / `2026-12-10` ya verificados).
+  3. Configuración de `ROSTER_V2_PUBLISH_USER_ID` en el servidor para la cuenta `ADMIN` autorizada.
+  4. Habilitación controlada de `ROSTER_V2_SAVE_ENABLED=true` (manteniendo `ROSTER_V2_SAVE_ENABLED=false` y `v1` predeterminado hasta autorizar operación).
 
 ---
 

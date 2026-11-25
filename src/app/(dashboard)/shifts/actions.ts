@@ -26,6 +26,7 @@ import { deriveNs22AnchorFromHistory } from '@/lib/scheduler/v2/aeropuerto-ns22'
 import { fetchAllPaginated } from '@/lib/scheduler/v2/pagination';
 import { scheduleCrossArea } from '@/lib/scheduler/v2/cobertura';
 import {
+  isAuthorizedV2Publisher,
   isProtectedPersistedAssignment,
   isV2SaveEnabled,
   recoverRosterFromSnapshot,
@@ -34,6 +35,11 @@ import {
   type Ns22OperationalConfirmation,
   type PersistedAssignmentRow,
 } from '@/lib/scheduler/v2/save-recover';
+import {
+  publishV2ApprovedDraft,
+  saveV2PreviewAsDraft,
+  type V2SavedDraftState,
+} from '@/lib/scheduler/v2/draft-lifecycle';
 import {
   createSupabaseRosterPersistenceAdapter,
   type SupabaseLikeClient,
@@ -3115,6 +3121,158 @@ export async function recoverV2RosterAction(params: {
       success: false,
       snapshotId: params.snapshotId,
       error: err instanceof Error ? err.message : 'Error recuperando respaldo v2',
+    };
+  }
+}
+
+/**
+ * Guarda exactamente la propuesta v2 visible como borrador (`is_published: false`, sin notificaciones).
+ */
+export async function saveV2DraftAction(params: {
+  startDate: string;
+  endDate: string;
+  areaId?: string | null;
+  personnelIds?: string[];
+  positionIds?: string[];
+  expectedBaselineHash: string;
+  ns22Confirmation?: Ns22OperationalConfirmation | null;
+  previewMetrics: any;
+  testHooks?: {
+    supabase?: any;
+    authOk?: boolean;
+  };
+}) {
+  try {
+    const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(params.testHooks?.supabase);
+    if (!isIsolatedTest) {
+      const auth = await requireActionAuth({ permission: 'runScheduler' });
+      if (!auth.ok) {
+        return { success: false, error: auth.error };
+      }
+    } else if (params.testHooks?.authOk === false) {
+      return { success: false, error: 'No autorizado.' };
+    }
+
+    if (!isV2SaveEnabled()) {
+      return {
+        success: false,
+        error:
+          'El guardado operativo de v2 está deshabilitado hasta habilitar ROSTER_V2_SAVE_ENABLED=true en el entorno.',
+      };
+    }
+
+    const gate = validateNs22OperationalConfig(params.ns22Confirmation);
+    if (!gate.ok || !params.ns22Confirmation) {
+      return {
+        success: false,
+        error: `Guardado de borrador v2 bloqueado: ${gate.unconfirmedReasons.join(' ')}`,
+      };
+    }
+
+    const supabase: any = isIsolatedTest ? params.testHooks!.supabase : createAdminClient();
+    const adapter = createSupabaseRosterPersistenceAdapter(supabase);
+    const { data: shifts } = await supabase.from('shifts').select('id, duration_hours');
+    const shiftDurationById = new Map<string, number>(
+      (shifts || []).map((s: any) => [s.id, Number(s.duration_hours) || 8])
+    );
+
+    const res = await saveV2PreviewAsDraft(adapter, {
+      startDate: params.startDate,
+      endDate: params.endDate,
+      areaId: params.areaId ?? null,
+      personnelIds: params.personnelIds ?? [],
+      positionIds: params.positionIds ?? [],
+      expectedBaselineHash: params.expectedBaselineHash,
+      ns22Config: params.ns22Confirmation,
+      previewMetrics: params.previewMetrics,
+      shiftDurationById,
+    });
+
+    if (res.success && !isIsolatedTest) {
+      safeRevalidateRosterPaths();
+    }
+    return res;
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Error guardando borrador v2',
+    };
+  }
+}
+
+/**
+ * Publica únicamente la versión vigente y aprobada del borrador v2 tras revalidar concurrencia.
+ */
+export async function publishV2ApprovedDraftAction(params: {
+  draftState: V2SavedDraftState;
+  sendNotifications?: boolean;
+  testHooks?: {
+    supabase?: any;
+    authOk?: boolean;
+    authResult?: { ok: boolean; userId?: string; role?: string; error?: string };
+    publishOverride?: () => Promise<{ success: boolean; publishedCount?: number; error?: string }>;
+  };
+}) {
+  try {
+    const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(params.testHooks?.supabase);
+    if (!isIsolatedTest) {
+      const auth = await requireActionAuth({ roles: ['ADMIN'] });
+      if (!auth.ok) {
+        return { success: false, error: auth.error };
+      }
+      const pubAuth = isAuthorizedV2Publisher(auth);
+      if (!pubAuth.ok) {
+        return { success: false, error: pubAuth.error };
+      }
+    } else if (params.testHooks?.authOk === false) {
+      return { success: false, error: 'No autorizado.' };
+    } else if (params.testHooks?.authResult) {
+      const pubAuth = isAuthorizedV2Publisher(params.testHooks.authResult);
+      if (!pubAuth.ok) {
+        return { success: false, error: pubAuth.error };
+      }
+    }
+
+    if (!isV2SaveEnabled()) {
+      return {
+        success: false,
+        error:
+          'La publicación operativa de v2 está deshabilitada hasta habilitar ROSTER_V2_SAVE_ENABLED=true en el entorno.',
+      };
+    }
+
+    const supabase: any = isIsolatedTest ? params.testHooks!.supabase : createAdminClient();
+    const adapter = createSupabaseRosterPersistenceAdapter(supabase);
+
+    const res = await publishV2ApprovedDraft(
+      adapter,
+      params.draftState,
+      async (summary) => {
+        if (params.testHooks?.publishOverride) {
+          return params.testHooks.publishOverride();
+        }
+        const pubRes = await publishAssignments(
+          summary.start_date,
+          summary.end_date,
+          params.draftState.area_id || undefined,
+          { skipWhatsApp: !params.sendNotifications }
+        );
+        return {
+          success: pubRes.success,
+          publishedCount: summary.shifts_to_publish_count,
+          error: pubRes.error || undefined,
+        };
+      }
+    );
+
+    if (res.success && !isIsolatedTest) {
+      safeRevalidateRosterPaths();
+    }
+    return res;
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Error publicando borrador v2 aprobado',
     };
   }
 }

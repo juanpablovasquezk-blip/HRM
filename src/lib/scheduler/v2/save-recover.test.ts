@@ -850,3 +850,38 @@ test('ROSTER-07: guardado operativo v2 bloqueado si horario, anclas o régimen N
   assert.equal(res.snapshotId, null);
   assert.equal(db.snapshots.size, 0);
 });
+
+test('ROSTER-07: exención de domingos pendiente (regimeConfirmed=false) permite guardar con anclas NS22 confirmadas y mantiene validación de domingos', async () => {
+  const withPendingSundayExemption: Ns22OperationalConfirmation = {
+    confirmed: true,
+    scheduleConfirmed: true,
+    regimeConfirmed: false,
+    titulares: [
+      {
+        personnelId: '1e2cc199-7a29-417f-86d3-58143d448654',
+        name: 'Marcelo Jara',
+        anchorStatus: 'confirmed',
+        confirmedAnchorDate: '2026-12-14',
+      },
+      {
+        personnelId: 'dafef0b7-cbab-4eaa-8aec-88ae7b4848d3',
+        name: 'Javier López',
+        anchorStatus: 'confirmed',
+        confirmedAnchorDate: '2026-12-10',
+      },
+    ],
+  };
+
+  const gate = validateNs22OperationalConfig(withPendingSundayExemption);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.sundayExemptionPending, true);
+
+  const db = new IsolatedTestRosterDb();
+  const res = await saveV2Schedule(db, {
+    startDate: '2026-12-07',
+    endDate: '2026-12-07',
+    ns22Config: withPendingSundayExemption,
+    v2Result: makeEmptyV2Result(),
+  });
+  assert.equal(res.success, true);
+});

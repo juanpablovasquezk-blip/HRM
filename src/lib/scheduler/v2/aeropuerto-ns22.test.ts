@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { prepareDotacionSlots } from './dotacion';
 import { checkMinRestBetweenShifts, getShiftOccupiedDates } from './jornada';
 import { scheduleAirportNs22 } from './aeropuerto-ns22';
+import { validateNs22OperationalConfig } from './save-recover';
 import type {
   Ns22ShiftDefinition,
   Ns22TitularConfig,
@@ -737,4 +738,83 @@ test('NS22 cruce diciembre-enero (Caso B): cumpleaños de Javier el 04-01 bloque
 
   const javierCycle = result.titular_cycles.find((c) => c.personnel_id === javierId);
   assert.equal(javierCycle?.anchor_date, '2026-01-08');
+});
+
+test('Anclas NS22 verificadas en prueba (Marcelo 2026-12-14, Javier 2026-12-10, 22:00, 8h): 3-ene corresponde a Javier, se cubre con reemplazo por cumpleaños y exención pendiente bloquea guardado', () => {
+  const marceloId = '1e2cc199-7a29-417f-86d3-58143d448654';
+  const javierId = 'dafef0b7-cbab-4eaa-8aec-88ae7b4848d3';
+  const replId = 'rep-ns22-aero';
+
+  const verifiedTestTitulares: Ns22TitularConfig[] = [
+    {
+      personnel_id: marceloId,
+      first_name: 'Marcelo Jara',
+      anchor_date: '2026-12-14',
+      confirmed_4x4_regime: false,
+    },
+    {
+      personnel_id: javierId,
+      first_name: 'Javier López',
+      anchor_date: '2026-12-10',
+      confirmed_4x4_regime: false,
+      birth_date: '1990-01-04',
+    },
+  ];
+
+  const replProfile: PersonnelScheduleProfile = {
+    personnel_id: replId,
+    full_name: 'Reemplazo Aeropuerto',
+    birth_date: '1985-05-10',
+    main_position: ns22Shift.position_id,
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+
+  const result = scheduleAirportNs22({
+    startDate: '2026-12-07',
+    endDate: '2027-01-03',
+    titulares: verifiedTestTitulares,
+    shiftDef: { ...ns22Shift, shift_start: '22:00', shift_end: '07:00', duration_hours: 8 },
+    protectedAssignments: [],
+    approvedLeaves: [],
+    replacementCandidates: [replProfile],
+  });
+
+  const byDate = new Map(result.assignments.map((a) => [a.date, a]));
+
+  // Marcelo Jara: bloque 2026-12-14..17 y 2026-12-30..2027-01-02 (8h por turno)
+  for (const d of ['2026-12-14', '2026-12-15', '2026-12-30', '2027-01-02']) {
+    assert.equal(byDate.get(d)?.personnel_id, marceloId);
+    assert.equal(byDate.get(d)?.role, 'titular');
+    assert.equal(byDate.get(d)?.duration_hours, 8);
+  }
+
+  // Javier López: bloque 2026-12-10..13, 18..21, 26..29
+  for (const d of ['2026-12-10', '2026-12-13', '2026-12-18', '2026-12-26']) {
+    assert.equal(byDate.get(d)?.personnel_id, javierId);
+    assert.equal(byDate.get(d)?.role, 'titular');
+    assert.equal(byDate.get(d)?.duration_hours, 8);
+  }
+
+  // 2027-01-03 pertenece al bloque de Javier (ancla 2026-12-10, día 24 mod 8 = 0) y se cubre con reemplazo por su cumpleaños (04-01 saliente)
+  const jan03 = byDate.get('2027-01-03');
+  assert.ok(jan03);
+  assert.equal(jan03?.role, 'replacement');
+  assert.equal(jan03?.replaces_titular_id, javierId);
+  assert.equal(jan03?.personnel_id, replId);
+  assert.equal(jan03?.duration_hours, 8);
+
+  // Exención de domingos libres sigue pendiente, pero ya no bloquea la confirmación operativa del ciclo 4x4
+  assert.ok(result.verification_notices.some((n) => /4x4/i.test(n)));
+  const gate = validateNs22OperationalConfig({
+    confirmed: true,
+    scheduleConfirmed: true,
+    regimeConfirmed: false,
+    titulares: [
+      { personnelId: marceloId, name: 'Marcelo Jara', anchorStatus: 'confirmed', confirmedAnchorDate: '2026-12-14' },
+      { personnelId: javierId, name: 'Javier López', anchorStatus: 'confirmed', confirmedAnchorDate: '2026-12-10' },
+    ],
+  });
+  assert.equal(gate.ok, true);
+  assert.equal(gate.sundayExemptionPending, true);
 });

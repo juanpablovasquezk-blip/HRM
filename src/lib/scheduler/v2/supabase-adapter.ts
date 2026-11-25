@@ -2,6 +2,8 @@ import type { ExtraRequirementState } from './types';
 import type {
   PersistedAssignmentRow,
   PersistedRequirementRow,
+  PersistedV2DraftRow,
+  PublishV2TxParams,
   RosterPersistenceAdapter,
   RosterV2Snapshot,
   SaveV2TxParams,
@@ -241,8 +243,52 @@ export function createSupabaseRosterPersistenceAdapter(
               restoredRequirementsCount: Number(data?.restored_requirements_count || 0),
             };
           },
+          async executePublishTx(params: PublishV2TxParams) {
+            const { data, error } = await supabase.rpc!('publish_v2_approved_draft_tx', {
+              p_draft_id: params.draftId,
+              p_start_date: params.startDate,
+              p_end_date: params.endDate,
+              p_area_id: params.areaId ?? null,
+              p_expected_range_hash: params.expectedPersistedRangeHash,
+              p_expected_draft_version_hash: params.expectedDraftVersionHash,
+              p_expected_approved_version_hash: params.expectedApprovedVersionHash,
+              p_now_iso: params.nowIso,
+            });
+            if (error) {
+              const msg = String(error.message || '');
+              const isConflict = msg.includes('CONCURRENT_MODIFICATION') || msg.includes('STALE_APPROVAL');
+              return {
+                success: false,
+                conflictDetected: isConflict,
+                error: msg,
+              };
+            }
+            return {
+              success: true,
+              publishedCount: Number(data?.published_count || 0),
+            };
+          },
         }
       : {}),
+    async saveDraftState(draft: PersistedV2DraftRow) {
+      const { error } = await supabase
+        .from('roster_v2_drafts')
+        .upsert(draft, { onConflict: 'id' });
+      if (error) {
+        throw new Error(`Error guardando estado de borrador v2: ${error.message}`);
+      }
+    },
+    async loadDraftState(draftId: string): Promise<PersistedV2DraftRow | null> {
+      const { data, error } = await supabase
+        .from('roster_v2_drafts')
+        .select('*')
+        .eq('id', draftId)
+        .maybeSingle();
+      if (error) {
+        throw new Error(`Error leyendo borrador v2 ${draftId}: ${error.message}`);
+      }
+      return (data as PersistedV2DraftRow | null) || null;
+    },
     ...(supabase.__runInTransaction
       ? {
           runInTransaction<T>(fn: () => Promise<T>) {

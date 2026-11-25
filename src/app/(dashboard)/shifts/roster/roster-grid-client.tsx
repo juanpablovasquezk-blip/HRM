@@ -68,6 +68,7 @@ import { Progress } from "@/components/ui/progress";
 import { 
   Dialog, 
   DialogContent, 
+  DialogDescription,
   DialogHeader, 
   DialogTitle, 
   DialogFooter 
@@ -79,6 +80,13 @@ import {
   compareEnginesPreview,
   groupV2DailyPlanningSections,
 } from '@/lib/scheduler/v2/preview-compare';
+import { applyV2DraftAdjustment, applyV2DraftSwap } from '@/lib/scheduler/v2/preview-draft';
+import {
+  approveV2Draft,
+  buildV2PublishConfirmationSummary,
+  updateDraftMetricsAndResetApproval,
+  type V2SavedDraftState,
+} from '@/lib/scheduler/v2/draft-lifecycle';
 import type { PreviewComparisonResult } from '@/lib/scheduler/v2/types';
 import { 
   createManualAssignment, 
@@ -89,6 +97,8 @@ import {
   validateAssignments,
   publishAssignments,
   moveAssignment,
+  saveV2DraftAction,
+  publishV2ApprovedDraftAction,
   sendTodayChangeNotifications,
   previewTodayChangeNotifications,
 
@@ -234,6 +244,20 @@ export function RosterGridClient({
   const [isV2GridPreviewActive, setIsV2GridPreviewActive] = useState(false);
   const [showV2VacanciesPanel, setShowV2VacanciesPanel] = useState(false);
   const [v2DailyPlanDate, setV2DailyPlanDate] = useState<string | null>(null);
+  const [v2DraftUndoStack, setV2DraftUndoStack] = useState<PreviewComparisonResult['v2'][]>([]);
+  const [v2SavedDraft, setV2SavedDraft] = useState<V2SavedDraftState | null>(null);
+  const [v2PublishConfirmOpen, setV2PublishConfirmOpen] = useState(false);
+  const [v2DraftSaving, setV2DraftSaving] = useState(false);
+  const [v2DraftPublishing, setV2DraftPublishing] = useState(false);
+  const [v2DraftCellModal, setV2DraftCellModal] = useState<{
+    person: Personnel;
+    dateStr: string;
+    action: 'add' | 'replace' | 'remove' | 'swap';
+    areaId: string;
+    positionId: string;
+    shiftId: string;
+    swapTargetKey?: string;
+  } | null>(null);
 
   const guardPreviewMutation = useCallback(() => {
     if (!isV2GridPreviewActive) return false;
@@ -631,11 +655,28 @@ export function RosterGridClient({
 
   const handleCellClick = useCallback((person: Personnel, date: Date) => {
     if (readOnly) return;
-    if (isV2GridPreviewActive) {
-      toast.info('Vista previa · Sin guardar activa. Cierra la vista previa para editar.');
+    const dateStr = format(date, 'yyyy-MM-dd');
+    if (isV2GridPreviewActive && previewComparison) {
+      const existing = (previewComparison.v2.assignments || []).find(
+        (a) => a.personnel_id === person.id && a.date === dateStr
+      );
+      const defaultPos = existing?.position_id || person.main_position || positions[0]?.id || '';
+      const defaultArea =
+        existing?.area_id ||
+        positions.find((p) => p.id === defaultPos)?.area_id ||
+        areas[0]?.id ||
+        '';
+      const defaultShift = existing?.shift_id || shifts[0]?.id || '';
+      setV2DraftCellModal({
+        person,
+        dateStr,
+        action: existing ? 'replace' : 'add',
+        areaId: defaultArea,
+        positionId: defaultPos,
+        shiftId: defaultShift,
+      });
       return;
     }
-    const dateStr = format(date, 'yyyy-MM-dd');
     
     setSelectedCells(prev => {
       const exists = prev.find(c => c.personId === person.id && c.dateStr === dateStr);
@@ -2018,6 +2059,83 @@ export function RosterGridClient({
                   ? `Ocultar vacantes (${previewComparison.v2.total_vacancies})`
                   : `Ver vacantes (${previewComparison.v2.total_vacancies})`}
               </Button>
+              {v2DraftUndoStack.length > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100"
+                  onClick={() => {
+                    const prev = v2DraftUndoStack[v2DraftUndoStack.length - 1];
+                    setV2DraftUndoStack((s) => s.slice(0, -1));
+                    setPreviewComparison((cur) => (cur ? { ...cur, v2: prev } : cur));
+                    setV2SavedDraft((d) => (d ? updateDraftMetricsAndResetApproval(d, prev) : null));
+                    toast.success('Último ajuste manual deshecho en el borrador v2.');
+                  }}
+                >
+                  Deshacer ajuste ({v2DraftUndoStack.length})
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={v2DraftSaving}
+                className="h-8 bg-white dark:bg-slate-900 border-emerald-400 text-emerald-800 hover:bg-emerald-50 font-bold"
+                onClick={async () => {
+                  setV2DraftSaving(true);
+                  const res = await saveV2DraftAction({
+                    startDate: previewComparison.v2.start_date || format(days[0], 'yyyy-MM-dd'),
+                    endDate: previewComparison.v2.end_date || format(days[days.length - 1], 'yyyy-MM-dd'),
+                    areaId: areaFilter || null,
+                    personnelIds: personnelFilter,
+                    expectedBaselineHash: '',
+                    previewMetrics: previewComparison.v2,
+                  });
+                  setV2DraftSaving(false);
+                  if (!res.success || !('draftState' in res) || !res.draftState) {
+                    toast.error(res.error || 'No se pudo guardar el borrador v2.');
+                    return;
+                  }
+                  setV2SavedDraft(res.draftState);
+                  toast.success('Borrador v2 guardado sin publicar ni notificar.');
+                }}
+              >
+                {v2DraftSaving ? 'Guardando...' : 'Guardar borrador v2'}
+              </Button>
+              {v2SavedDraft && (
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={v2SavedDraft.approval_status === 'approved' ? 'default' : 'outline'}
+                    className={
+                      v2SavedDraft.approval_status === 'approved'
+                        ? 'h-8 bg-emerald-700 hover:bg-emerald-800 text-white font-bold'
+                        : 'h-8 border-emerald-500 text-emerald-800 hover:bg-emerald-50 font-bold'
+                    }
+                    onClick={() => {
+                      setV2SavedDraft((d) => (d ? approveV2Draft(d, 'supervisor') : null));
+                      toast.success('Borrador v2 revisado y aprobado.');
+                    }}
+                  >
+                    {v2SavedDraft.approval_status === 'approved' ? 'Borrador aprobado' : 'Aprobar borrador'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={
+                      v2SavedDraft.approval_status !== 'approved' ||
+                      v2DraftPublishing ||
+                      !buildV2PublishConfirmationSummary(v2SavedDraft).ready
+                    }
+                    className="h-8 bg-indigo-700 hover:bg-indigo-800 text-white font-bold"
+                    onClick={() => setV2PublishConfirmOpen(true)}
+                  >
+                    Publicar
+                  </Button>
+                </>
+              )}
               <Button
                 type="button"
                 size="sm"
@@ -3937,6 +4055,323 @@ export function RosterGridClient({
                   </div>
                 )}
               </div>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
+
+      {v2DraftCellModal && previewComparison && (() => {
+        const { person, dateStr, action, areaId, positionId, shiftId, swapTargetKey } = v2DraftCellModal;
+        const selectedShift = shifts.find((s) => s.id === shiftId) || shifts[0];
+        const selectedArea = areas.find((a) => a.id === areaId);
+        const selectedPos = positions.find((p) => p.id === positionId);
+        const hasExistingOnCell = (previewComparison.v2.assignments || []).some(
+          (a) => a.personnel_id === person.id && a.date === dateStr
+        );
+        const toPersonProfile = (p: Personnel) => ({
+          personnel_id: p.id,
+          first_name: p.first_name,
+          full_name: `${p.first_name} ${p.last_name_father}`.trim(),
+          birth_date: p.birth_date || null,
+          main_position: p.main_position,
+          main_position_name: positionsMap[p.main_position]?.name || '',
+          secondary_positions: p.secondary_positions || [],
+          rotation_pattern: p.rotation_pattern || null,
+          has_special_contract: Boolean(p.has_special_contract),
+        });
+        const shiftDurMap = new Map(shifts.map((s) => [s.id, Number((s as any).duration_hours) || 8]));
+        const swappableAssignments = (previewComparison.v2.assignments || []).filter(
+          (a) => !(a.personnel_id === person.id && a.date === dateStr) && !a.is_protected
+        );
+        const activeSwapKey =
+          swapTargetKey ||
+          (swappableAssignments[0]
+            ? `${swappableAssignments[0].personnel_id}|${swappableAssignments[0].date}`
+            : '');
+        const [swapPersonId, swapDate] = activeSwapKey ? activeSwapKey.split('|') : ['', ''];
+        const swapPerson = personnel.find((p) => p.id === swapPersonId);
+
+        const evalRes =
+          action === 'swap' && swapPerson && swapDate
+            ? applyV2DraftSwap({
+                currentV2: previewComparison.v2,
+                personA: toPersonProfile(person),
+                dateA: dateStr,
+                personB: toPersonProfile(swapPerson),
+                dateB: swapDate,
+                existingOutOfRangeOrProtected: assignments as any[],
+                approvedLeaves: leaves as any[],
+                shiftDurationById: shiftDurMap,
+              })
+            : applyV2DraftAdjustment({
+                currentV2: previewComparison.v2,
+                adjustment: {
+                  action: action === 'swap' ? 'replace' : action,
+                  date: dateStr,
+                  personnel_id: person.id,
+                  shift_id: selectedShift?.id || shiftId,
+                  shift_name: selectedShift?.name || '',
+                  shift_start: selectedShift?.start_time || '08:00',
+                  shift_end: selectedShift?.end_time || '17:00',
+                  duration_hours: Number((selectedShift as any)?.duration_hours) || 8,
+                  area_id: areaId,
+                  area_name: selectedArea?.name || '',
+                  position_id: positionId,
+                  position_name: selectedPos?.name || '',
+                },
+                person: toPersonProfile(person),
+                existingOutOfRangeOrProtected: assignments as any[],
+                approvedLeaves: leaves as any[],
+                shiftDurationById: shiftDurMap,
+              });
+
+        const prioLine = (p: 'CRITICAL' | 'HIGH' | 'NORMAL', label: string) => {
+          const b = evalRes.impact.before.by_priority?.[p];
+          const a = evalRes.impact.after.by_priority?.[p];
+          return `${label}: ${b?.covered ?? 0}/${b?.required ?? 0} → ${a?.covered ?? 0}/${a?.required ?? 0}`;
+        };
+
+        return (
+          <Dialog open onOpenChange={() => setV2DraftCellModal(null)}>
+            <DialogContent className="max-w-lg rounded-2xl">
+              <DialogHeader>
+                <DialogTitle className="text-base font-black">
+                  Ajuste manual en borrador v2 · {person.first_name} {person.last_name_father} ({dateStr})
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-xs">
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={action !== 'remove' ? 'default' : 'outline'}
+                    onClick={() =>
+                      setV2DraftCellModal((m) =>
+                        m ? { ...m, action: hasExistingOnCell ? 'replace' : 'add' } : m
+                      )
+                    }
+                  >
+                    {hasExistingOnCell ? 'Cambiar turno' : 'Agregar turno'}
+                  </Button>
+                  {hasExistingOnCell && (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={action === 'remove' ? 'destructive' : 'outline'}
+                        onClick={() =>
+                          setV2DraftCellModal((m) => (m ? { ...m, action: 'remove' } : m))
+                        }
+                      >
+                        Quitar turno
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={action === 'swap' ? 'default' : 'outline'}
+                        onClick={() =>
+                          setV2DraftCellModal((m) => (m ? { ...m, action: 'swap' } : m))
+                        }
+                      >
+                        Intercambiar
+                      </Button>
+                    </>
+                  )}
+                </div>
+
+                {action === 'swap' ? (
+                  <label className="space-y-1 block">
+                    <span className="font-bold text-slate-600">Intercambiar turno con:</span>
+                    <select
+                      value={activeSwapKey}
+                      onChange={(e) =>
+                        setV2DraftCellModal((m) => (m ? { ...m, swapTargetKey: e.target.value } : m))
+                      }
+                      className="w-full h-8 rounded border px-2 bg-white"
+                    >
+                      {swappableAssignments.map((a) => {
+                        const targetP = personnel.find((p) => p.id === a.personnel_id);
+                        return (
+                          <option key={`${a.personnel_id}|${a.date}`} value={`${a.personnel_id}|${a.date}`}>
+                            {a.date} · {targetP ? `${targetP.first_name} ${targetP.last_name_father}` : a.personnel_id} · {a.area_name} / {a.position_name} ({a.shift_name})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                ) : action !== 'remove' && (
+                  <div className="grid grid-cols-1 gap-2">
+                    <label className="space-y-1">
+                      <span className="font-bold text-slate-600">Área</span>
+                      <select
+                        value={areaId}
+                        onChange={(e) => {
+                          const nextArea = e.target.value;
+                          const nextPos =
+                            positions.find((p) => p.area_id === nextArea)?.id || positionId;
+                          setV2DraftCellModal((m) =>
+                            m ? { ...m, areaId: nextArea, positionId: nextPos } : m
+                          );
+                        }}
+                        className="w-full h-8 rounded border px-2 bg-white"
+                      >
+                        {areas.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold text-slate-600">Cargo</span>
+                      <select
+                        value={positionId}
+                        onChange={(e) =>
+                          setV2DraftCellModal((m) => (m ? { ...m, positionId: e.target.value } : m))
+                        }
+                        className="w-full h-8 rounded border px-2 bg-white"
+                      >
+                        {positions
+                          .filter((p) => !areaId || p.area_id === areaId)
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="font-bold text-slate-600">Turno</span>
+                      <select
+                        value={shiftId}
+                        onChange={(e) =>
+                          setV2DraftCellModal((m) => (m ? { ...m, shiftId: e.target.value } : m))
+                        }
+                        className="w-full h-8 rounded border px-2 bg-white"
+                      >
+                        {shifts.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} ({s.start_time.substring(0, 5)}–{s.end_time.substring(0, 5)})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 p-2.5 space-y-1">
+                  <p className="font-black text-indigo-900">Impacto en cobertura por prioridad</p>
+                  <p className="text-indigo-800 font-semibold">
+                    Total: {evalRes.impact.before.total_covered}/{evalRes.impact.before.total_required} →{' '}
+                    {evalRes.impact.after.total_covered}/{evalRes.impact.after.total_required}
+                  </p>
+                  <p className="text-indigo-800">
+                    {prioLine('CRITICAL', 'Crítica')} · {prioLine('HIGH', 'Alta')} ·{' '}
+                    {prioLine('NORMAL', 'Normal')}
+                  </p>
+                  {evalRes.impact.hours_impact && evalRes.impact.hours_impact.length > 0 && (
+                    <div className="pt-1 border-t border-indigo-200/70 space-y-0.5">
+                      {evalRes.impact.hours_impact.map((hi) => (
+                        <p key={hi.personnel_id} className="text-indigo-900">
+                          Horas semana ({hi.full_name || hi.personnel_id}): {hi.before_hours}h →{' '}
+                          <strong>{hi.after_hours}h</strong> ({hi.delta_hours >= 0 ? `+${hi.delta_hours}` : hi.delta_hours}h)
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {evalRes.errors.length > 0 && (
+                  <div className="rounded-lg border border-red-300 bg-red-50 p-2.5 text-red-800 space-y-1">
+                    {evalRes.errors.map((err, i) => (
+                      <p key={i}>• {err}</p>
+                    ))}
+                  </div>
+                )}
+
+                {evalRes.warnings.length > 0 && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-amber-800 space-y-1">
+                    {evalRes.warnings.map((w, i) => (
+                      <p key={i}>• {w}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <DialogFooter className="gap-2">
+                <Button type="button" variant="outline" onClick={() => setV2DraftCellModal(null)}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!evalRes.valid}
+                  onClick={() => {
+                    setV2DraftUndoStack((s) => [...s, previewComparison.v2]);
+                    setPreviewComparison((cur) => (cur ? { ...cur, v2: evalRes.nextV2 } : cur));
+                    setV2SavedDraft((d) => (d ? updateDraftMetricsAndResetApproval(d, evalRes.nextV2) : null));
+                    setV2DraftCellModal(null);
+                    toast.success('Ajuste aplicado al borrador v2 (sin guardar en BD).');
+                  }}
+                >
+                  Aplicar al borrador
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
+
+      {v2PublishConfirmOpen && v2SavedDraft && (() => {
+        const pubSummary = buildV2PublishConfirmationSummary(v2SavedDraft);
+        return (
+          <Dialog open onOpenChange={() => setV2PublishConfirmOpen(false)}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Confirmar publicación de borrador v2</DialogTitle>
+                <DialogDescription>
+                  Solo se publicará la versión vigente y aprobada tras revalidar que no existan cambios concurrentes.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2 text-xs">
+                <p><strong>Rango:</strong> {pubSummary.start_date} al {pubSummary.end_date}</p>
+                <p><strong>Turnos a publicar:</strong> {pubSummary.shifts_to_publish_count} (cobertura ordinaria: {pubSummary.ordinary_covered}/{pubSummary.ordinary_required})</p>
+                <p><strong>Refuerzos separados:</strong> {pubSummary.reinforcements_count}</p>
+                <p>
+                  <strong>Vacantes abiertas:</strong> {pubSummary.open_vacancies_count}
+                  {pubSummary.open_vacancies_count > 0
+                    ? ` (Crítica: ${pubSummary.open_vacancies_by_priority.CRITICAL || 0}, Alta: ${pubSummary.open_vacancies_by_priority.HIGH || 0}, Normal: ${pubSummary.open_vacancies_by_priority.NORMAL || 0})`
+                    : ''}
+                </p>
+                {!pubSummary.ready && pubSummary.blocked_reason && (
+                  <p className="text-red-700 font-semibold">{pubSummary.blocked_reason}</p>
+                )}
+              </div>
+              <DialogFooter className="gap-2">
+                <Button type="button" variant="outline" onClick={() => setV2PublishConfirmOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!pubSummary.ready || v2DraftPublishing}
+                  onClick={async () => {
+                    setV2DraftPublishing(true);
+                    const res = await publishV2ApprovedDraftAction({
+                      draftState: v2SavedDraft,
+                      sendNotifications: true,
+                    });
+                    setV2DraftPublishing(false);
+                    if (!res.success) {
+                      toast.error(res.error || 'Publicación detenida por conflicto o falta de aprobación.');
+                      return;
+                    }
+                    if ('nextDraftState' in res && res.nextDraftState) setV2SavedDraft(res.nextDraftState);
+                    setV2PublishConfirmOpen(false);
+                    const pubCount = 'publishedCount' in res ? res.publishedCount : undefined;
+                    toast.success(`Borrador v2 publicado (${pubCount ?? pubSummary.shifts_to_publish_count} turnos).`);
+                  }}
+                >
+                  {v2DraftPublishing ? 'Publicando...' : 'Confirmar y publicar'}
+                </Button>
+              </DialogFooter>
             </DialogContent>
           </Dialog>
         );

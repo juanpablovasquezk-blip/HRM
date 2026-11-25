@@ -9,6 +9,7 @@ import {
   compareEnginesPreviewStaged,
   groupV2DailyPlanningSections,
 } from './preview-compare';
+import { applyV2DraftAdjustment, computeV2AuditSummaries } from './preview-draft';
 import {
   fetchPriorityQuotasInBatches,
   loadPreviewCompareInputs,
@@ -1488,6 +1489,115 @@ test('Preferencias flexibles v2: continuidad AM 11 y 2 libres consecutivos cuand
   assert.equal(sheet.blue_express.length, 1);
   assert.equal(sheet.blue_express[0].conductors[0].name, 'JUAN COLINA');
   assert.equal(sheet.blue_express[0].ayudantes[0].name, 'VICTOR SEPULVEDA');
+});
+
+test('Supervisores en fines de semana (reparto equilibrado) y ajuste manual + deshacer en borrador v2 sincronizado con resumen y hoja diaria', () => {
+  const shifts = [
+    { id: 'sh-am07', name: 'AM 07', start_time: '07:00', end_time: '16:00', duration_hours: 8 },
+  ];
+  const areaNameById = new Map([['area-base', 'Base Minerquim']]);
+  const positionNameById = new Map([['pos-sup-base', 'Supervisor Base']]);
+
+  const sup1: PersonnelScheduleProfile = {
+    personnel_id: 'sup-1',
+    full_name: 'SUPERVISOR UNO',
+    main_position: 'pos-sup-base',
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+  const sup2: PersonnelScheduleProfile = {
+    personnel_id: 'sup-2',
+    full_name: 'SUPERVISOR DOS',
+    main_position: 'pos-sup-base',
+    secondary_positions: [],
+    rotation_pattern: '5X2',
+  };
+
+  // Dos fines de semana (12-13 dic y 19-20 dic) con 1 cupo cada día -> debe repartirse equilibrado (2 y 2)
+  const reqs: RawShiftRequirement[] = ['2026-12-12', '2026-12-13', '2026-12-19', '2026-12-20'].map(
+    (d, i) => ({
+      id: `req-sup-${i}`,
+      date: d,
+      area_id: 'area-base',
+      position_id: 'pos-sup-base',
+      shift_id: 'sh-am07',
+      required_count: 1,
+      priority: 'HIGH',
+      is_extra: false,
+      area: { name: 'Base Minerquim' },
+      position: { name: 'Supervisor Base' },
+      shift: shifts[0],
+    })
+  );
+
+  const preview = compareEnginesPreview({
+    startDate: '2026-12-12',
+    endDate: '2026-12-20',
+    rawRequirements: reqs,
+    existingAssignments: [],
+    personnel: [sup1, sup2],
+    allShifts: shifts,
+    areaNameById,
+    positionNameById,
+    referenceDate: REF_DATE,
+  });
+
+  const audit = computeV2AuditSummaries({
+    v2: preview.v2,
+    personnel: [sup1, sup2],
+    existingAssignments: [],
+  });
+  const s1Wk = audit.people.find((p) => p.personnel_id === 'sup-1')!;
+  const s2Wk = audit.people.find((p) => p.personnel_id === 'sup-2')!;
+  assert.equal(s1Wk.saturdays_worked.length + s1Wk.sundays_worked_dec.length, 2);
+  assert.equal(s2Wk.saturdays_worked.length + s2Wk.sundays_worked_dec.length, 2);
+
+  // Ajuste manual en borrador: quitar asignación de 2026-12-12 -> impacta cobertura HIGH (4 -> 3) y hoja diaria muestra Sin cubrir
+  const dec12Asgn = (preview.v2.assignments || []).find((a) => a.date === '2026-12-12')!;
+  const removed = applyV2DraftAdjustment({
+    currentV2: preview.v2,
+    adjustment: {
+      action: 'remove',
+      date: '2026-12-12',
+      personnel_id: dec12Asgn.personnel_id,
+      shift_id: dec12Asgn.shift_id,
+      shift_name: dec12Asgn.shift_name || '',
+      shift_start: dec12Asgn.shift_start,
+      shift_end: dec12Asgn.shift_end,
+      duration_hours: 8,
+      area_id: dec12Asgn.area_id,
+      area_name: dec12Asgn.area_name || '',
+      position_id: dec12Asgn.position_id,
+      position_name: dec12Asgn.position_name || '',
+    },
+    person: dec12Asgn.personnel_id === 'sup-1' ? sup1 : sup2,
+  });
+  assert.equal(removed.valid, true);
+  assert.equal(removed.impact.before.by_priority?.HIGH?.covered, 4);
+  assert.equal(removed.impact.after.by_priority?.HIGH?.covered, 3);
+
+  const dailyAfterRemove = buildV2DailyPlanningRows(
+    '2026-12-12',
+    removed.nextV2,
+    new Map([
+      ['sup-1', 'SUPERVISOR UNO'],
+      ['sup-2', 'SUPERVISOR DOS'],
+    ])
+  );
+  assert.equal(dailyAfterRemove[0].ordinary_covered_count, 0);
+  assert.deepEqual(dailyAfterRemove[0].vacancy_priorities, ['HIGH']);
+
+  // Deshacer (restaurar preview.v2) vuelve a 4/4 y hoja diaria cubierta
+  const dailyAfterUndo = buildV2DailyPlanningRows(
+    '2026-12-12',
+    preview.v2,
+    new Map([
+      ['sup-1', 'SUPERVISOR UNO'],
+      ['sup-2', 'SUPERVISOR DOS'],
+    ])
+  );
+  assert.equal(dailyAfterUndo[0].ordinary_covered_count, 1);
+  assert.equal(preview.v2.total_covered, 4);
 });
 
 test('Revisión semanal Stage 4C: intercambio de 2 personas (Manuel -> DHL AM 04, Juan -> Aeropuerto AM 04) válido y rechazado por descanso/protegido', () => {
