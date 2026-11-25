@@ -563,7 +563,7 @@ test('ROSTER-06: cancelación o límite vencido detiene la comparación también
     const d = new Date(Date.UTC(2026, 11, 7 + idx));
     return d.toISOString().slice(0, 10);
   });
-  const personnel: PersonnelScheduleProfile[] = Array.from({ length: 30 }, (_, i) => ({
+  const personnel: PersonnelScheduleProfile[] = Array.from({ length: 60 }, (_, i) => ({
     personnel_id: `v1c-p-${i}`,
     first_name: `Op ${i}`,
     main_position: 'pos-1',
@@ -572,7 +572,7 @@ test('ROSTER-06: cancelación o límite vencido detiene la comparación también
   const rawRequirements: RawShiftRequirement[] = [];
   let seq = 1;
   for (const d of days) {
-    for (let k = 0; k < 12; k++) {
+    for (let k = 0; k < 24; k++) {
       rawRequirements.push({
         id: `v1c-req-${seq++}`,
         date: d,
@@ -589,7 +589,7 @@ test('ROSTER-06: cancelación o límite vencido detiene la comparación también
 
   const controller = new AbortController();
   const stagesSeen: string[] = [];
-  const timer = setTimeout(() => controller.abort(), 35);
+  let timer: ReturnType<typeof setTimeout> | null = null;
   const t0 = performance.now();
   let caught: Error | null = null;
   try {
@@ -606,12 +606,15 @@ test('ROSTER-06: cancelación o límite vencido detiene la comparación también
       },
       (s) => {
         stagesSeen.push(s);
+        if (s === 'calculating_v1' && !timer) {
+          timer = setTimeout(() => controller.abort(), 25);
+        }
       }
     );
   } catch (err: any) {
     caught = err;
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
   const elapsedMs = performance.now() - t0;
 

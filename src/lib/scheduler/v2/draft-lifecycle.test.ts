@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compareEnginesPreview, buildV2DailyPlanningRows } from './preview-compare';
+import { applyV2DraftAdjustment, applyV2DraftSwap } from './preview-draft';
 import {
   approveV2Draft,
   approveV2DraftPersisted,
@@ -16,6 +17,7 @@ import {
 import {
   computeRangeStateHash,
   isAuthorizedV2Publisher,
+  isV2SaveEnabled,
   type Ns22OperationalConfirmation,
   type PersistedAssignmentRow,
   type PersistedRequirementRow,
@@ -496,6 +498,165 @@ test('Autorización de publicación v2: exige ROSTER_V2_PUBLISH_USER_ID y rol AD
       delete process.env.ROSTER_V2_PUBLISH_USER_ID;
     } else {
       process.env.ROSTER_V2_PUBLISH_USER_ID = prevEnv;
+    }
+  }
+});
+
+test('Editar propuesta v2 en memoria con ROSTER_V2_SAVE_ENABLED=false: agregar, cambiar, quitar, intercambiar y deshacer sin escribir en DB ni publicar', () => {
+  const prevSaveFlag = process.env.ROSTER_V2_SAVE_ENABLED;
+  process.env.ROSTER_V2_SAVE_ENABLED = 'false';
+  try {
+    assert.equal(isV2SaveEnabled(), false);
+
+    const p1: PersonnelScheduleProfile = {
+      personnel_id: 'p-1',
+      full_name: 'OPERADOR UNO',
+      main_position: 'pos-op',
+      secondary_positions: [],
+      rotation_pattern: '5X2',
+    };
+    const p2: PersonnelScheduleProfile = {
+      personnel_id: 'p-2',
+      full_name: 'OPERADOR DOS',
+      main_position: 'pos-op',
+      secondary_positions: [],
+      rotation_pattern: '5X2',
+    };
+
+    const reqs: RawShiftRequirement[] = [
+      {
+        id: 'req-1',
+        date: '2026-12-10',
+        area_id: 'area-bodega',
+        position_id: 'pos-op',
+        shift_id: 'sh-am08',
+        shift: { name: 'AM 08', start_time: '08:00', end_time: '17:00', duration_hours: 8 },
+        required_count: 1,
+        priority: 'CRITICAL',
+      } as RawShiftRequirement,
+      {
+        id: 'req-2',
+        date: '2026-12-11',
+        area_id: 'area-bodega',
+        position_id: 'pos-op',
+        shift_id: 'sh-am08',
+        shift: { name: 'AM 08', start_time: '08:00', end_time: '17:00', duration_hours: 8 },
+        required_count: 1,
+        priority: 'HIGH',
+      } as RawShiftRequirement,
+    ];
+
+    const preview = compareEnginesPreview({
+      startDate: '2026-12-10',
+      endDate: '2026-12-11',
+      personnel: [p1, p2],
+      rawRequirements: reqs,
+      existingAssignments: [],
+      approvedLeaves: [],
+      areaNameById: new Map([['area-bodega', 'Bodega']]),
+      positionNameById: new Map([['pos-op', 'Operador']]),
+      referenceDate: new Date('2026-12-01T12:00:00Z'),
+    });
+
+    const undoStack: typeof preview.v2[] = [];
+    let currentV2 = preview.v2;
+
+    // 1. Quitar turno del 11-12 y verificar que grilla, resumen y Programación Operativa reflejen la vacante
+    const asg11 = (currentV2.assignments || []).find((a) => a.date === '2026-12-11')!;
+    const personFor11 = asg11.personnel_id === 'p-1' ? p1 : p2;
+    const remRes = applyV2DraftAdjustment({
+      currentV2,
+      adjustment: {
+        action: 'remove',
+        date: '2026-12-11',
+        personnel_id: asg11.personnel_id,
+        shift_id: 'sh-am08',
+        shift_name: 'AM 08',
+        shift_start: '08:00',
+        shift_end: '17:00',
+        duration_hours: 8,
+        area_id: 'area-bodega',
+        area_name: 'Bodega',
+        position_id: 'pos-op',
+        position_name: 'Operador',
+      },
+      person: personFor11,
+      existingOutOfRangeOrProtected: [],
+      approvedLeaves: [],
+      shiftDurationById: new Map([['sh-am08', 8]]),
+    });
+    assert.equal(remRes.valid, true);
+    undoStack.push(currentV2);
+    currentV2 = remRes.nextV2!;
+    assert.equal(currentV2.total_covered, 1);
+    assert.equal(currentV2.total_vacancies, 1);
+
+    const opRowsAfterRemove = buildV2DailyPlanningRows(
+      '2026-12-11',
+      currentV2,
+      new Map([['p-1', 'OPERADOR UNO'], ['p-2', 'OPERADOR DOS']])
+    );
+    assert.equal(opRowsAfterRemove[0].missing_count, 1);
+
+    // 2. Volver a agregar turno en 2026-12-11 para otro operador
+    const otherPerson = asg11.personnel_id === 'p-1' ? p2 : p1;
+    const addRes = applyV2DraftAdjustment({
+      currentV2,
+      adjustment: {
+        action: 'add',
+        date: '2026-12-11',
+        personnel_id: otherPerson.personnel_id,
+        shift_id: 'sh-am08',
+        shift_name: 'AM 08',
+        shift_start: '08:00',
+        shift_end: '17:00',
+        duration_hours: 8,
+        area_id: 'area-bodega',
+        area_name: 'Bodega',
+        position_id: 'pos-op',
+        position_name: 'Operador',
+      },
+      person: otherPerson,
+      existingOutOfRangeOrProtected: [],
+      approvedLeaves: [],
+      shiftDurationById: new Map([['sh-am08', 8]]),
+    });
+    assert.equal(addRes.valid, true, JSON.stringify(addRes.errors));
+    undoStack.push(currentV2);
+    currentV2 = addRes.nextV2!;
+    assert.equal(currentV2.total_covered, 2);
+
+    // 3. Intercambiar turnos entre p1 y p2
+    const pOn10 = (currentV2.assignments || []).find((a) => a.date === '2026-12-10')!;
+    const pOn11 = (currentV2.assignments || []).find((a) => a.date === '2026-12-11')!;
+    if (pOn10.personnel_id !== pOn11.personnel_id) {
+      const swapRes = applyV2DraftSwap({
+        currentV2,
+        personA: pOn10.personnel_id === 'p-1' ? p1 : p2,
+        dateA: '2026-12-10',
+        personB: pOn11.personnel_id === 'p-1' ? p1 : p2,
+        dateB: '2026-12-11',
+        existingOutOfRangeOrProtected: [],
+        approvedLeaves: [],
+        shiftDurationById: new Map([['sh-am08', 8]]),
+      });
+      assert.equal(swapRes.valid, true);
+      undoStack.push(currentV2);
+      currentV2 = swapRes.nextV2!;
+      assert.equal(currentV2.total_covered, 2);
+    }
+
+    // 4. Deshacer todos los ajustes en memoria -> vuelve al estado inicial sin tocar DB ni publicar
+    while (undoStack.length > 0) {
+      currentV2 = undoStack.pop()!;
+    }
+    assert.equal(currentV2.total_covered, preview.v2.total_covered);
+    assert.equal((currentV2.assignments || []).length, (preview.v2.assignments || []).length);
+  } finally {
+    if (prevSaveFlag === undefined) {
+      delete process.env.ROSTER_V2_SAVE_ENABLED;
+    } else {
+      process.env.ROSTER_V2_SAVE_ENABLED = prevSaveFlag;
     }
   }
 });

@@ -242,6 +242,7 @@ export function RosterGridClient({
   const [isPreviewCompareOpen, setIsPreviewCompareOpen] = useState(false);
   const [previewComparison, setPreviewComparison] = useState<PreviewComparisonResult | null>(null);
   const [isV2GridPreviewActive, setIsV2GridPreviewActive] = useState(false);
+  const [isV2ProposalEditing, setIsV2ProposalEditing] = useState(false);
   const [showV2VacanciesPanel, setShowV2VacanciesPanel] = useState(false);
   const [v2DailyPlanDate, setV2DailyPlanDate] = useState<string | null>(null);
   const [v2DraftUndoStack, setV2DraftUndoStack] = useState<PreviewComparisonResult['v2'][]>([]);
@@ -258,6 +259,19 @@ export function RosterGridClient({
     shiftId: string;
     swapTargetKey?: string;
   } | null>(null);
+
+  const hasUnsavedV2ProposalChanges =
+    isV2GridPreviewActive && v2DraftUndoStack.length > 0 && !v2SavedDraft;
+
+  useEffect(() => {
+    if (!hasUnsavedV2ProposalChanges) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedV2ProposalChanges]);
 
   const guardPreviewMutation = useCallback(() => {
     if (!isV2GridPreviewActive) return false;
@@ -657,6 +671,10 @@ export function RosterGridClient({
     if (readOnly) return;
     const dateStr = format(date, 'yyyy-MM-dd');
     if (isV2GridPreviewActive && previewComparison) {
+      if (!isV2ProposalEditing && !v2SavedDraft) {
+        toast.info('Activa «Editar propuesta» para agregar, quitar, cambiar o intercambiar turnos en memoria.');
+        return;
+      }
       const existing = (previewComparison.v2.assignments || []).find(
         (a) => a.personnel_id === person.id && a.date === dateStr
       );
@@ -2040,14 +2058,34 @@ export function RosterGridClient({
         <div className="mb-3 rounded-xl border-2 border-indigo-300 bg-indigo-50/90 dark:bg-indigo-950/40 dark:border-indigo-700 p-3 shadow-sm space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge className="bg-indigo-600 text-white font-bold px-2.5 py-0.5 text-xs">
-                Vista previa · Sin guardar
+              <Badge
+                className={cn(
+                  'text-white font-bold px-2.5 py-0.5 text-xs',
+                  hasUnsavedV2ProposalChanges ? 'bg-amber-600' : 'bg-indigo-600'
+                )}
+              >
+                {hasUnsavedV2ProposalChanges
+                  ? 'Vista previa · Cambios sin guardar'
+                  : 'Vista previa · Sin guardar'}
               </Badge>
               <span className="text-xs font-semibold text-indigo-950 dark:text-indigo-100">
                 Propuesta v2 ({previewComparison.v2.start_date} al {previewComparison.v2.end_date}) · Cobertura: {previewComparison.v2.total_covered}/{previewComparison.v2.total_required} ({previewComparison.v2.coverage_percent}%) · Refuerzos: {previewComparison.v2.reinforcement_count} · Vacantes: {previewComparison.v2.total_vacancies}
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <Button
+                type="button"
+                size="sm"
+                variant={isV2ProposalEditing ? 'default' : 'outline'}
+                className={
+                  isV2ProposalEditing
+                    ? 'h-8 bg-indigo-700 hover:bg-indigo-800 text-white font-bold'
+                    : 'h-8 bg-white dark:bg-slate-900 border-indigo-400 text-indigo-900 hover:bg-indigo-100 font-bold'
+                }
+                onClick={() => setIsV2ProposalEditing((v) => !v)}
+              >
+                {isV2ProposalEditing ? 'Editando propuesta' : 'Editar propuesta'}
+              </Button>
               <Button
                 type="button"
                 size="sm"
@@ -2164,8 +2202,18 @@ export function RosterGridClient({
                 variant="secondary"
                 className="h-8"
                 onClick={() => {
+                  if (
+                    hasUnsavedV2ProposalChanges &&
+                    !window.confirm(
+                      'Hay cambios sin guardar en la propuesta v2. ¿Deseas salir y descartar los ajustes pendientes?'
+                    )
+                  ) {
+                    return;
+                  }
                   setIsV2GridPreviewActive(false);
+                  setIsV2ProposalEditing(false);
                   setShowV2VacanciesPanel(false);
+                  setV2DraftUndoStack([]);
                 }}
               >
                 Cerrar vista previa
@@ -3151,6 +3199,23 @@ export function RosterGridClient({
             </Button>
             <Button
               type="button"
+              variant="outline"
+              className="border-indigo-400 text-indigo-900 hover:bg-indigo-50 font-semibold"
+              disabled={!previewComparison?.v2.assignments}
+              onClick={() => {
+                setSelectedCells([]);
+                setIsAssignmentDialogOpen(false);
+                setIsAiConfigOpen(false);
+                setIsV2GridPreviewActive(true);
+                setIsV2ProposalEditing(true);
+                setShowV2VacanciesPanel(false);
+                setIsPreviewCompareOpen(false);
+              }}
+            >
+              Editar propuesta
+            </Button>
+            <Button
+              type="button"
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
               disabled={!previewComparison?.v2.assignments}
               onClick={() => {
@@ -3158,6 +3223,7 @@ export function RosterGridClient({
                 setIsAssignmentDialogOpen(false);
                 setIsAiConfigOpen(false);
                 setIsV2GridPreviewActive(true);
+                setIsV2ProposalEditing(false);
                 setShowV2VacanciesPanel(false);
                 setIsPreviewCompareOpen(false);
               }}
@@ -3911,8 +3977,17 @@ export function RosterGridClient({
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <Badge className="bg-indigo-500/30 text-indigo-200 border-indigo-400/40 text-[10px] font-black uppercase tracking-widest">
-                        Vista previa v2 · Sin guardar
+                      <Badge
+                        className={cn(
+                          'text-[10px] font-black uppercase tracking-widest',
+                          hasUnsavedV2ProposalChanges
+                            ? 'bg-amber-500/30 text-amber-200 border-amber-400/40'
+                            : 'bg-indigo-500/30 text-indigo-200 border-indigo-400/40'
+                        )}
+                      >
+                        {hasUnsavedV2ProposalChanges
+                          ? 'Vista previa · Cambios sin guardar'
+                          : 'Vista previa v2 · Sin guardar'}
                       </Badge>
                       <span className="text-[11px] font-semibold text-slate-300">
                         Programación Operativa
