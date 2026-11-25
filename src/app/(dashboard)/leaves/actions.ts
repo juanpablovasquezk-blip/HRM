@@ -9,6 +9,90 @@ import { partialRecalculate } from '@/lib/scheduler';
 import { resolveLeaveOverlap, isFreeDayRequest } from '@/lib/leaves/leave-overlap';
 import { parseISO, format, addDays, subDays } from 'date-fns';
 
+function safeRevalidateLeavesPaths() {
+  if (process.env.ROSTER_ISOLATED_TEST === 'true') return;
+  revalidatePath('/leaves');
+  revalidatePath('/shifts/assignments');
+  revalidatePath('/shifts/roster');
+  revalidatePath('/shifts/daily');
+  revalidatePath('/dashboard');
+  revalidatePath('/worker');
+}
+
+export async function previewLeaveApprovalImpact(
+  leaveId: string,
+  testHooks?: { supabase?: any; authOk?: boolean }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  if (!isIsolatedTest) {
+    const auth = await requireActionAuth({ permission: 'approveLeaves' });
+    if (!auth.ok) return { success: false, error: auth.error };
+  } else if (testHooks?.authOk === false) {
+    return { success: false, error: 'No autorizado.' };
+  }
+
+  const supabaseAdmin: any = isIsolatedTest ? testHooks!.supabase : createAdminClient();
+  const { data: leave, error: leaveErr } = await supabaseAdmin
+    .from('leaves')
+    .select('*, personnel:personnel(id, first_name, last_name_father)')
+    .eq('id', leaveId)
+    .single();
+
+  if (leaveErr || !leave) {
+    return { success: false, error: 'Solicitud no encontrada.' };
+  }
+
+  const [{ data: allAffectedShifts }, { data: transportRequests }] = await Promise.all([
+    supabaseAdmin
+      .from('shift_assignments')
+      .select('id, date, shift_id, is_published, status, shift:shifts(name, start_time, end_time), area:areas(name), position:positions(name)')
+      .eq('personnel_id', leave.personnel_id)
+      .gte('date', leave.start_date)
+      .lte('date', leave.end_date)
+      .neq('status', 'cancelled')
+      .order('date', { ascending: true }),
+    supabaseAdmin
+      .from('transport_requests')
+      .select('id, date, transport_type, status')
+      .eq('personnel_id', leave.personnel_id)
+      .gte('date', leave.start_date)
+      .lte('date', leave.end_date)
+      .order('date', { ascending: true }),
+  ]);
+
+  const affectedShifts = (allAffectedShifts || []).map((s: any) => ({
+    ...s,
+    signature: `${s.id}|${s.date}|${s.shift_id}|${Boolean(s.is_published)}|${s.shift?.start_time || ''}|${s.shift?.end_time || ''}`,
+  }));
+  const publishedShifts = affectedShifts.filter((s: any) => s.is_published === true);
+  const draftShifts = affectedShifts.filter((s: any) => !s.is_published);
+
+  const transports = (transportRequests || []).map((t: any) => ({
+    ...t,
+    signature: `${t.id}|${t.date}|${t.transport_type || ''}|${t.status || ''}`,
+  }));
+
+  const dates: string[] = [];
+  let cursor = parseISO(leave.start_date);
+  const end = parseISO(leave.end_date);
+  while (cursor <= end) {
+    dates.push(format(cursor, 'yyyy-MM-dd'));
+    cursor = addDays(cursor, 1);
+  }
+
+  return {
+    success: true,
+    leave,
+    dates,
+    affectedShifts,
+    publishedShifts,
+    draftShifts,
+    shiftSignatures: affectedShifts.map((s: any) => s.signature),
+    transportRequests: transports,
+    transportSignatures: transports.map((t: any) => t.signature),
+  };
+}
+
 export async function requestLeave(formData: FormData) {
   const auth = await requireActionAuth();
   if (!auth.ok) {
@@ -103,103 +187,60 @@ export async function requestLeave(formData: FormData) {
   };
 }
 
-export async function approveLeave(leaveId: string) {
-  const auth = await requireActionAuth({ permission: 'approveLeaves' });
-  if (!auth.ok) {
-    return { success: false, error: auth.error };
-  }
-
-  const supabaseAdmin = createAdminClient();
-
-  const { data: leave, error: fetchError } = await supabaseAdmin
-    .from('leaves')
-    .select('*')
-    .eq('id', leaveId)
-    .single();
-
-  if (fetchError || !leave) return { success: false, error: 'Leave not found' };
-
-  // Las vacaciones y licencias médicas tienen mayor prioridad que los días solicitados
-  if (leave.type === 'vacation' || leave.type === 'sick') {
-    const { data: conflictingLeaves } = await supabaseAdmin
-      .from('leaves')
-      .select('*')
-      .eq('personnel_id', leave.personnel_id)
-      .neq('id', leaveId)
-      .neq('status', 'rejected')
-      .lte('start_date', leave.end_date)
-      .gte('end_date', leave.start_date);
-
-    if (conflictingLeaves && conflictingLeaves.length > 0) {
-      for (const conf of conflictingLeaves) {
-        if (isFreeDayRequest(conf)) {
-          if (conf.start_date >= leave.start_date && conf.end_date <= leave.end_date) {
-            await supabaseAdmin.from('leaves').delete().eq('id', conf.id);
-          } else if (conf.start_date < leave.start_date && conf.end_date <= leave.end_date) {
-            const prevDay = format(subDays(parseISO(leave.start_date), 1), 'yyyy-MM-dd');
-            await supabaseAdmin.from('leaves').update({ end_date: prevDay }).eq('id', conf.id);
-          } else if (conf.start_date >= leave.start_date && conf.end_date > leave.end_date) {
-            const nextDay = format(addDays(parseISO(leave.end_date), 1), 'yyyy-MM-dd');
-            await supabaseAdmin.from('leaves').update({ start_date: nextDay }).eq('id', conf.id);
-          } else if (conf.start_date < leave.start_date && conf.end_date > leave.end_date) {
-            const prevDay = format(subDays(parseISO(leave.start_date), 1), 'yyyy-MM-dd');
-            const nextDay = format(addDays(parseISO(leave.end_date), 1), 'yyyy-MM-dd');
-            await supabaseAdmin.from('leaves').update({ end_date: prevDay }).eq('id', conf.id);
-            await supabaseAdmin.from('leaves').insert({
-              personnel_id: leave.personnel_id,
-              type: conf.type,
-              status: conf.status,
-              reason: conf.reason,
-              start_date: nextDay,
-              end_date: conf.end_date,
-            });
-          }
-        }
-      }
+export async function approveLeave(
+  leaveId: string,
+  expectedImpact?: {
+    expectedDates?: string[];
+    expectedShiftIds?: string[];
+    expectedTransportIds?: string[];
+    expectedShiftSignatures?: string[];
+    expectedTransportSignatures?: string[];
+  },
+  testHooks?: { supabase?: any; authOk?: boolean; userId?: string }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  let approvedBy = 'admin';
+  if (!isIsolatedTest) {
+    const auth = await requireActionAuth({ permission: 'approveLeaves' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
     }
+    approvedBy = auth.userId;
+  } else {
+    if (testHooks?.authOk === false) return { success: false, error: 'No autorizado.' };
+    approvedBy = testHooks?.userId || 'admin';
   }
 
-  const { error } = await supabaseAdmin
-    .from('leaves')
-    .update({
-      status: 'approved',
-      approved_by: auth.userId,
-      approved_at: new Date().toISOString(),
-    })
-    .eq('id', leaveId);
+  const supabaseAdmin: any = isIsolatedTest ? testHooks!.supabase : createAdminClient();
 
-  if (error) return { success: false, error: error.message };
+  const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc('approve_leave_with_impact_tx', {
+    p_leave_id: leaveId,
+    p_approved_by: approvedBy,
+    p_expected_dates: expectedImpact?.expectedDates ?? null,
+    p_expected_shift_ids: expectedImpact?.expectedShiftIds ?? null,
+    p_expected_transport_ids: expectedImpact?.expectedTransportIds ?? null,
+    p_expected_shift_signatures: expectedImpact?.expectedShiftSignatures ?? null,
+    p_expected_transport_signatures: expectedImpact?.expectedTransportSignatures ?? null,
+  });
 
-  // Update conflicting shift assignments to cancelled
-  const { error: asgErr } = await supabaseAdmin
-    .from('shift_assignments')
-    .update({ status: 'cancelled' })
-    .eq('personnel_id', leave.personnel_id)
-    .gte('date', leave.start_date)
-    .lte('date', leave.end_date);
-
-  if (asgErr) {
-    console.error('[LEAVE-APPROVAL] Error cancelling shift assignments:', asgErr);
+  if (rpcErr) {
+    return { success: false, error: rpcErr.message };
   }
 
-  // Delete conflicting transport requests
-  const { error: trErr } = await supabaseAdmin
-    .from('transport_requests')
-    .delete()
-    .eq('personnel_id', leave.personnel_id)
-    .gte('date', leave.start_date)
-    .lte('date', leave.end_date);
-
-  if (trErr) {
-    console.error('[LEAVE-APPROVAL] Error deleting transport requests:', trErr);
+  if (!rpcRes?.ok) {
+    return {
+      success: false,
+      code: rpcRes?.code,
+      error: rpcRes?.error || 'No se pudo aprobar la solicitud.',
+    };
   }
 
   // Trigger partial recalculation for sick leave
-  if (leave.type === 'sick') {
+  if (rpcRes.leave_type === 'sick') {
     try {
       await partialRecalculate({
-        date_range: [leave.start_date, leave.end_date],
-        affected_personnel_id: leave.personnel_id,
+        date_range: [rpcRes.start_date, rpcRes.end_date],
+        affected_personnel_id: rpcRes.personnel_id,
         reason: 'sick_leave',
         override_freeze: true, // Sick leave can override freeze
       });
@@ -208,11 +249,7 @@ export async function approveLeave(leaveId: string) {
     }
   }
 
-  revalidatePath('/leaves');
-  revalidatePath('/shifts/assignments');
-  revalidatePath('/shifts/roster');
-  revalidatePath('/shifts/daily');
-  revalidatePath('/dashboard');
+  safeRevalidateLeavesPaths();
   return { success: true, error: null };
 }
 
@@ -327,26 +364,36 @@ export async function updateLeave(id: string, formData: FormData) {
   };
 }
 
-export async function rejectLeave(leaveId: string) {
-  const auth = await requireActionAuth({ permission: 'approveLeaves' });
-  if (!auth.ok) {
-    return { success: false, error: auth.error };
+export async function rejectLeave(
+  leaveId: string,
+  testHooks?: { supabase?: any; authOk?: boolean; userId?: string }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  let rejectedBy = 'admin';
+  if (!isIsolatedTest) {
+    const auth = await requireActionAuth({ permission: 'approveLeaves' });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+    rejectedBy = auth.userId;
+  } else {
+    if (testHooks?.authOk === false) return { success: false, error: 'No autorizado.' };
+    rejectedBy = testHooks?.userId || 'admin';
   }
 
-  const supabaseAdmin = createAdminClient();
+  const supabaseAdmin: any = isIsolatedTest ? testHooks!.supabase : createAdminClient();
 
   const { error } = await supabaseAdmin
     .from('leaves')
     .update({
       status: 'rejected',
-      approved_by: auth.userId,
+      approved_by: rejectedBy,
       approved_at: new Date().toISOString(),
     })
     .eq('id', leaveId);
 
   if (error) return { success: false, error: error.message };
-  revalidatePath('/leaves');
-  revalidatePath('/shifts/daily');
+  safeRevalidateLeavesPaths();
   return { success: true, error: null };
 }
 

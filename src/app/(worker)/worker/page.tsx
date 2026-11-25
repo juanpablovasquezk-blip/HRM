@@ -1,6 +1,12 @@
 import React from 'react';
 import Link from 'next/link';
-import { getWorkerTomorrowData, getWorkerSession, getWorkerFreeRequests, getWorkerSizeRequirements } from '../actions';
+import {
+  getWorkerTomorrowData,
+  getWorkerSession,
+  getWorkerPortalRequests,
+  getWorkerSizeRequirements,
+  getWorkerPendingDocuments,
+} from '../actions';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { format, parseISO, differenceInDays } from 'date-fns';
@@ -18,6 +24,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import FreeRequestClient from './free-request-client';
+import { PendingDocsCard } from './pending-docs-card';
 
 export default async function WorkerHomePage() {
   const session = await getWorkerSession();
@@ -28,19 +35,10 @@ export default async function WorkerHomePage() {
 
   const tomorrowFormatted = format(parseISO(data.date), "EEEE d 'de' MMMM", { locale: es });
 
-  // Document Compliance Check (Temporarily disabled until tables are fixed)
-  /*
-  const supabase = await createClient();
-  const [{ data: definitions }, { data: userDocs }] = await Promise.all([
-    supabase.from('document_definitions').select('*').eq('is_active', true),
-    supabase.from('documents').select('*').eq('personnel_id', session.id)
-  ]);
-  */
-  let bannerConfig = null;
-
-  const [{ data: freeRequests }, sizeRequirements] = await Promise.all([
-    getWorkerFreeRequests(session.id),
+  const [{ data: portalRequests }, sizeRequirements, pendingDocsRes] = await Promise.all([
+    getWorkerPortalRequests(session.id),
     getWorkerSizeRequirements(),
+    getWorkerPendingDocuments(),
   ]);
 
   return (
@@ -82,6 +80,9 @@ export default async function WorkerHomePage() {
             </div>
           </Link>
         )}
+
+        {/* Documentos pendientes */}
+        <PendingDocsCard items={pendingDocsRes.items} />
       </div>
 
       {/* Main Content */}
@@ -226,8 +227,12 @@ export default async function WorkerHomePage() {
         </div>
       )}
 
-      {/* Free Day Request Section */}
-      <FreeRequestClient personnelId={session.id} initialRequests={freeRequests || []} />
+      {/* Free Days, Vacations & My Requests */}
+      <FreeRequestClient
+        personnelId={session.id}
+        initialRequests={portalRequests || []}
+        referenceNowIso={new Date().toISOString()}
+      />
 
       {/* Quick Help Footer */}
       <div className="bg-slate-900/5 p-4 rounded-2xl border border-slate-200/50">

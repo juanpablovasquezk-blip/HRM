@@ -10,6 +10,19 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { calculateDynamicExpiration } from '@/lib/utils/document-calc';
 import { syncDependentDocumentsExpiration } from '@/lib/documents/sync-expiry';
 import { validateAntecedentesPDF } from '@/lib/documents/validation';
+import {
+  evaluateWorkerPendingDocuments,
+  expandDateRange,
+  FREE_DAY_REQUEST_REASON,
+  getSantiagoDateString,
+  VACATION_SUCCESS_MESSAGE,
+} from '@/lib/worker/portal-requests';
+
+function safeRevalidateWorkerPaths() {
+  if (process.env.ROSTER_ISOLATED_TEST === 'true') return;
+  revalidatePath('/worker');
+  revalidatePath('/leaves');
+}
 
 export async function loginAsWorker(_email: string) {
   const cookieStore = await cookies();
@@ -548,8 +561,91 @@ export async function uploadDocumentRecord(record: any) {
   return { success: true };
 }
 
-export async function requestFreeDays(personnelId: string, dates: string[]) {
-  const session = await getWorkerSession();
+export async function checkWorkerQuotaAvailability(
+  params: { personnelId: string; dates: string[] },
+  testHooks?: { supabase?: any; session?: any }
+): Promise<{ available: boolean; occupiedDates: string[]; error?: string }> {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  const session = isIsolatedTest ? testHooks?.session : await getWorkerSession();
+  if (!session?.id || params.personnelId !== session.id) {
+    return { available: false, occupiedDates: [], error: 'No autorizado.' };
+  }
+
+  const uniqueDates = Array.from(new Set((params.dates || []).filter(Boolean))).sort();
+  if (uniqueDates.length === 0) {
+    return { available: true, occupiedDates: [] };
+  }
+
+  const supabase: any = isIsolatedTest ? testHooks!.supabase : createAdminClient();
+  const minDate = uniqueDates[0];
+  const maxDate = uniqueDates[uniqueDates.length - 1];
+
+  const { data: workerRow } = await supabase
+    .from('personnel')
+    .select('id, main_position')
+    .eq('id', params.personnelId)
+    .maybeSingle();
+
+  let areaId: string | null = null;
+  if (workerRow?.main_position) {
+    const { data: posRow } = await supabase
+      .from('positions')
+      .select('id, area_id')
+      .eq('id', workerRow.main_position)
+      .maybeSingle();
+    areaId = posRow?.area_id || null;
+  }
+
+  // Find peer IDs sharing the same main_position and area_id
+  let peerIds: string[] = [];
+  if (workerRow?.main_position && areaId) {
+    const { data: posPeers } = await supabase
+      .from('personnel')
+      .select('id')
+      .eq('main_position', workerRow.main_position)
+      .neq('id', params.personnelId);
+    peerIds = (posPeers || []).map((p: any) => p.id);
+  }
+
+  const targetIds = [params.personnelId, ...peerIds];
+  const { data: overlappingLeaves, error } = await supabase
+    .from('leaves')
+    .select('personnel_id, start_date, end_date, type, status, reason')
+    .in('personnel_id', targetIds)
+    .in('status', ['pending', 'approved'])
+    .lte('start_date', maxDate)
+    .gte('end_date', minDate);
+
+  if (error) {
+    return { available: false, occupiedDates: [], error: error.message };
+  }
+
+  const occupiedSet = new Set<string>();
+  for (const leave of overlappingLeaves || []) {
+    const isSelf = leave.personnel_id === params.personnelId;
+    const isQuotaLeave =
+      leave.type === 'vacation' ||
+      (leave.type === 'other' && leave.reason === FREE_DAY_REQUEST_REASON);
+    if (!isSelf && !isQuotaLeave) continue;
+
+    for (const d of uniqueDates) {
+      if (leave.start_date <= d && leave.end_date >= d) {
+        occupiedSet.add(d);
+      }
+    }
+  }
+
+  const occupiedDates = Array.from(occupiedSet).sort();
+  return { available: occupiedDates.length === 0, occupiedDates };
+}
+
+export async function requestFreeDays(
+  personnelId: string,
+  dates: string[],
+  testHooks?: { supabase?: any; session?: any; now?: Date }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  const session = isIsolatedTest ? testHooks?.session : await getWorkerSession();
   if (!session?.id) {
     return { success: false, error: 'Usuario no autenticado.' };
   }
@@ -557,90 +653,203 @@ export async function requestFreeDays(personnelId: string, dates: string[]) {
     return { success: false, error: 'No autorizado para solicitar días libres para otro trabajador.' };
   }
 
-  const supabase = createAdminClient();
-  
   if (!dates || dates.length === 0) return { success: true };
 
-  // Las vacaciones y licencias médicas tienen mayor prioridad sobre los días solicitados
-  const { data: existingLeaves } = await supabase
-    .from('leaves')
-    .select('start_date, end_date, type')
-    .eq('personnel_id', personnelId)
-    .neq('status', 'rejected')
-    .in('type', ['vacation', 'sick']);
+  const supabase: any = isIsolatedTest ? testHooks!.supabase : createAdminClient();
+  const nowIso = (testHooks?.now || new Date()).toISOString();
 
-  if (existingLeaves && existingLeaves.length > 0) {
-    const clashingDate = dates.find(d => 
-      existingLeaves.some(l => l.start_date <= d && l.end_date >= d)
-    );
-    if (clashingDate) {
-      return { 
-        success: false, 
-        error: `La fecha ${clashingDate} coincide con un período de vacaciones o licencia médica. Las vacaciones y licencias tienen mayor prioridad.` 
-      };
-    }
+  const { data: rpcRes, error: rpcErr } = await supabase.rpc('submit_worker_leave_request_tx', {
+    p_personnel_id: session.id,
+    p_kind: 'free_day',
+    p_dates: dates,
+    p_start_date: null,
+    p_end_date: null,
+    p_now: nowIso,
+  });
+
+  if (rpcErr) {
+    return { success: false, error: rpcErr.message };
   }
 
-  // Insert each date as a separate leave record
-  const leaves = dates.map(date => ({
-    personnel_id: personnelId,
-    start_date: date,
-    end_date: date,
-    type: 'other',
-    status: 'pending',
-    reason: 'Solicitud mensual de días libres'
-  }));
+  if (!rpcRes?.ok) {
+    return {
+      success: false,
+      code: rpcRes?.code,
+      occupiedDates: (rpcRes?.occupied_dates as string[] | undefined) || [],
+      closedDates: (rpcRes?.closed_dates as string[] | undefined) || [],
+      error: rpcRes?.error || 'No se pudo registrar la solicitud de días libres.',
+    };
+  }
 
-  const { error } = await supabase.from('leaves').insert(leaves);
-  if (error) return { success: false, error: error.message };
-  
-  revalidatePath('/worker');
-  revalidatePath('/leaves');
-  return { success: true };
+  safeRevalidateWorkerPaths();
+  return { success: true, ids: rpcRes.ids || [] };
 }
 
-export async function getWorkerFreeRequests(personnelId: string) {
-  const session = await getWorkerSession();
+export async function requestVacation(
+  params: { personnelId: string; startDate: string; endDate: string },
+  testHooks?: { supabase?: any; session?: any; now?: Date }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  const session = isIsolatedTest ? testHooks?.session : await getWorkerSession();
+  if (!session?.id) {
+    return { success: false, error: 'Usuario no autenticado.' };
+  }
+  if (params.personnelId !== session.id) {
+    return { success: false, error: 'No autorizado para solicitar vacaciones para otro trabajador.' };
+  }
+
+  if (!params.startDate || !params.endDate || params.startDate > params.endDate) {
+    return { success: false, error: 'Selecciona un rango válido de primer y último día.' };
+  }
+
+  const supabase: any = isIsolatedTest ? testHooks!.supabase : createAdminClient();
+  const nowIso = (testHooks?.now || new Date()).toISOString();
+
+  const { data: rpcRes, error: rpcErr } = await supabase.rpc('submit_worker_leave_request_tx', {
+    p_personnel_id: session.id,
+    p_kind: 'vacation',
+    p_dates: null,
+    p_start_date: params.startDate,
+    p_end_date: params.endDate,
+    p_now: nowIso,
+  });
+
+  if (rpcErr) {
+    return { success: false, error: rpcErr.message };
+  }
+
+  if (!rpcRes?.ok) {
+    return {
+      success: false,
+      code: rpcRes?.code,
+      occupiedDates: (rpcRes?.occupied_dates as string[] | undefined) || [],
+      closedDates: (rpcRes?.closed_dates as string[] | undefined) || [],
+      error: rpcRes?.error || 'No se pudo registrar la solicitud de vacaciones.',
+    };
+  }
+
+  safeRevalidateWorkerPaths();
+  return {
+    success: true,
+    ids: rpcRes.ids || [],
+    message: VACATION_SUCCESS_MESSAGE,
+  };
+}
+
+export async function getWorkerPortalRequests(
+  personnelId: string,
+  testHooks?: { supabase?: any; session?: any }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  const session = isIsolatedTest ? testHooks?.session : await getWorkerSession();
   if (!session?.id || personnelId !== session.id) {
     return { data: [], error: 'No autorizado' };
   }
 
-  const supabase = await createClient();
-  const today = new Date();
-  const nextMonth = addMonths(today, 1);
-  const start = format(startOfMonth(nextMonth), 'yyyy-MM-dd');
-  const end = format(endOfMonth(nextMonth), 'yyyy-MM-dd');
-
+  const supabase: any = isIsolatedTest ? testHooks!.supabase : createAdminClient();
   const { data, error } = await supabase
     .from('leaves')
     .select('*')
     .eq('personnel_id', personnelId)
-    .gte('start_date', start)
-    .lte('start_date', end)
-    .eq('reason', 'Solicitud mensual de días libres')
+    .in('type', ['vacation', 'other'])
     .order('start_date', { ascending: true });
 
-  return { data: data || [], error: error?.message };
+  const filtered = (data || []).filter(
+    (l: any) => l.type === 'vacation' || (l.type === 'other' && l.reason === FREE_DAY_REQUEST_REASON)
+  );
+
+  return { data: filtered, error: error?.message };
 }
 
-export async function deleteWorkerLeave(leaveId: string) {
-  const session = await getWorkerSession();
+export async function getWorkerFreeRequests(personnelId: string) {
+  const res = await getWorkerPortalRequests(personnelId);
+  return {
+    data: (res.data || []).filter((l: any) => l.type === 'other' && l.reason === FREE_DAY_REQUEST_REASON),
+    error: res.error,
+  };
+}
+
+export async function deleteWorkerLeave(
+  leaveId: string,
+  testHooks?: { supabase?: any; session?: any }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  const session = isIsolatedTest ? testHooks?.session : await getWorkerSession();
   if (!session?.id) {
     return { success: false, error: 'Usuario no autenticado.' };
   }
 
-  const supabase = await createClient();
+  const supabase: any = isIsolatedTest ? testHooks!.supabase : createAdminClient();
+  const { data: existing } = await supabase
+    .from('leaves')
+    .select('id, personnel_id, status, type, reason')
+    .eq('id', leaveId)
+    .eq('personnel_id', session.id)
+    .maybeSingle();
+
+  if (!existing) {
+    return { success: false, error: 'Solicitud no encontrada.' };
+  }
+  if (existing.status !== 'pending') {
+    return { success: false, error: 'Solo puedes cancelar solicitudes pendientes de revisión.' };
+  }
+  if (existing.type !== 'vacation' && existing.reason !== FREE_DAY_REQUEST_REASON) {
+    return { success: false, error: 'Esta solicitud no puede cancelarse desde el portal.' };
+  }
+
   const { error } = await supabase
     .from('leaves')
     .delete()
     .eq('id', leaveId)
     .eq('personnel_id', session.id)
-    .eq('reason', 'Solicitud mensual de días libres'); // Security: only monthly requests
+    .eq('status', 'pending');
 
   if (error) return { success: false, error: error.message };
-  revalidatePath('/worker');
-  revalidatePath('/leaves');
+  safeRevalidateWorkerPaths();
   return { success: true };
+}
+
+export async function getWorkerPendingDocuments(
+  testHooks?: { supabase?: any; session?: any; now?: Date }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  const session = isIsolatedTest ? testHooks?.session : await getWorkerSession();
+  if (!session?.id) return { items: [] };
+
+  let definitions: any[] = [];
+  let existingDocuments: any[] = [];
+
+  if (isIsolatedTest) {
+    const supabase = testHooks!.supabase;
+    const positionIds: string[] = [];
+    if (session.main_position) positionIds.push(session.main_position);
+    if (Array.isArray(session.secondary_positions)) positionIds.push(...session.secondary_positions);
+
+    const [{ data: allDefs }, { data: docs }] = await Promise.all([
+      supabase.from('document_definitions').select('*').eq('is_active', true),
+      supabase.from('documents').select('*').eq('personnel_id', session.id),
+    ]);
+    definitions = (allDefs || []).filter((def: any) => {
+      const applicable: string[] = def.applicable_positions || [];
+      if (applicable.length === 0) return true;
+      return applicable.some((p: string) => positionIds.includes(p));
+    });
+    existingDocuments = docs || [];
+  } else {
+    [definitions, existingDocuments] = await Promise.all([
+      getActiveDocumentDefinitions(),
+      getWorkerDocuments(),
+    ]);
+  }
+
+  const todayStr = getSantiagoDateString(testHooks?.now || new Date());
+  const items = evaluateWorkerPendingDocuments({
+    definitions,
+    existingDocuments,
+    todayStr,
+  });
+
+  return { items };
 }
 
 export async function getWorkerProfile() {
