@@ -37,6 +37,7 @@ import {
   type PersistedAssignmentRow,
 } from '@/lib/scheduler/v2/save-recover';
 import {
+  approveV2DraftPersisted,
   publishV2ApprovedDraft,
   saveV2PreviewAsDraft,
   type V2SavedDraftState,
@@ -3229,6 +3230,77 @@ export async function saveV2DraftAction(params: {
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Error guardando borrador v2',
+    };
+  }
+}
+
+/**
+ * Aprueba en servidor la versión vigente del borrador v2 usando el usuario autenticado.
+ * Valida que el identificador y draft_version_hash coincidan con el borrador persistido en Supabase.
+ */
+export async function approveV2DraftAction(params: {
+  draftState: V2SavedDraftState;
+  testHooks?: {
+    supabase?: any;
+    authResult?: { ok: boolean; userId?: string; email?: string | null; role?: string; error?: string };
+  };
+}) {
+  try {
+    const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(params.testHooks?.supabase);
+    let approvedBy = 'supervisor';
+    if (!isIsolatedTest) {
+      const auth = await requireActionAuth({ permission: 'runScheduler' });
+      if (!auth.ok) {
+        return { success: false, error: auth.error };
+      }
+      approvedBy = auth.email || auth.userId || 'supervisor';
+    } else if (params.testHooks?.authResult) {
+      if (!params.testHooks.authResult.ok) {
+        return { success: false, error: params.testHooks.authResult.error || 'No autorizado.' };
+      }
+      approvedBy =
+        params.testHooks.authResult.email || params.testHooks.authResult.userId || 'supervisor';
+    }
+
+    if (!isV2SaveEnabled()) {
+      return {
+        success: false,
+        error:
+          'La aprobación operativa de v2 está deshabilitada hasta habilitar ROSTER_V2_SAVE_ENABLED=true en el entorno.',
+      };
+    }
+
+    const supabase: any = isIsolatedTest ? params.testHooks!.supabase : createAdminClient();
+    const adapter = createSupabaseRosterPersistenceAdapter(supabase);
+    const persisted = adapter.loadDraftState
+      ? await adapter.loadDraftState(params.draftState.draft_id)
+      : null;
+
+    if (
+      !persisted ||
+      persisted.id !== params.draftState.draft_id ||
+      persisted.draft_version_hash !== params.draftState.draft_version_hash
+    ) {
+      return {
+        success: false,
+        conflictDetected: true,
+        error:
+          'STALE_DRAFT: El borrador vigente en Supabase no coincide con la versión en pantalla; reabre o guarda el borrador actual antes de aprobar.',
+      };
+    }
+
+    const approved = await approveV2DraftPersisted(adapter, params.draftState, approvedBy);
+    if (!isIsolatedTest) {
+      safeRevalidateRosterPaths();
+    }
+    return {
+      success: true,
+      draftState: approved,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Error aprobando borrador v2',
     };
   }
 }

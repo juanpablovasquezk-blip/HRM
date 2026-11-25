@@ -82,13 +82,13 @@ import {
 } from '@/lib/scheduler/v2/preview-compare';
 import { applyV2DraftAdjustment, applyV2DraftSwap, resolveV2GridCellClick } from '@/lib/scheduler/v2/preview-draft';
 import {
-  approveV2Draft,
   buildV2PublishConfirmationSummary,
   updateDraftMetricsAndResetApproval,
   type V2SavedDraftState,
 } from '@/lib/scheduler/v2/draft-lifecycle';
 import type { PreviewComparisonResult } from '@/lib/scheduler/v2/types';
 import { 
+  approveV2DraftAction,
   createManualAssignment, 
   deleteAssignment, 
   runScheduler,
@@ -249,6 +249,7 @@ export function RosterGridClient({
   const [v2SavedDraft, setV2SavedDraft] = useState<V2SavedDraftState | null>(null);
   const [v2PublishConfirmOpen, setV2PublishConfirmOpen] = useState(false);
   const [v2DraftSaving, setV2DraftSaving] = useState(false);
+  const [v2DraftApproving, setV2DraftApproving] = useState(false);
   const [v2DraftPublishing, setV2DraftPublishing] = useState(false);
   const [v2DraftCellModal, setV2DraftCellModal] = useState<{
     person: Personnel;
@@ -2164,18 +2165,30 @@ export function RosterGridClient({
                   <Button
                     type="button"
                     size="sm"
+                    disabled={v2DraftApproving || v2SavedDraft.approval_status === 'approved'}
                     variant={v2SavedDraft.approval_status === 'approved' ? 'default' : 'outline'}
                     className={
                       v2SavedDraft.approval_status === 'approved'
                         ? 'h-8 bg-emerald-700 hover:bg-emerald-800 text-white font-bold'
                         : 'h-8 border-emerald-500 text-emerald-800 hover:bg-emerald-50 font-bold'
                     }
-                    onClick={() => {
-                      setV2SavedDraft((d) => (d ? approveV2Draft(d, 'supervisor') : null));
-                      toast.success('Borrador v2 revisado y aprobado.');
+                    onClick={async () => {
+                      setV2DraftApproving(true);
+                      const res = await approveV2DraftAction({ draftState: v2SavedDraft });
+                      setV2DraftApproving(false);
+                      if (!res.success || !('draftState' in res) || !res.draftState) {
+                        toast.error(res.error || 'No se pudo aprobar el borrador v2 en el servidor.');
+                        return;
+                      }
+                      setV2SavedDraft(res.draftState);
+                      toast.success('Borrador v2 aprobado y guardado en servidor.');
                     }}
                   >
-                    {v2SavedDraft.approval_status === 'approved' ? 'Borrador aprobado' : 'Aprobar borrador'}
+                    {v2DraftApproving
+                      ? 'Aprobando...'
+                      : v2SavedDraft.approval_status === 'approved'
+                        ? 'Borrador aprobado'
+                        : 'Aprobar borrador'}
                   </Button>
                   <Button
                     type="button"
@@ -4421,13 +4434,14 @@ export function RosterGridClient({
               <DialogHeader>
                 <DialogTitle>Confirmar publicación de borrador v2</DialogTitle>
                 <DialogDescription>
-                  Solo se publicará la versión vigente y aprobada tras revalidar que no existan cambios concurrentes.
+                  Solo se publicará la versión vigente y aprobada tras revalidar que no existan cambios concurrentes. Esta publicación se realiza sin envío de WhatsApp.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-2 text-xs">
                 <p><strong>Rango:</strong> {pubSummary.start_date} al {pubSummary.end_date}</p>
                 <p><strong>Turnos a publicar:</strong> {pubSummary.shifts_to_publish_count} (cobertura ordinaria: {pubSummary.ordinary_covered}/{pubSummary.ordinary_required})</p>
                 <p><strong>Refuerzos separados:</strong> {pubSummary.reinforcements_count}</p>
+                <p><strong>Notificaciones WhatsApp:</strong> Desactivadas (sin envío de WhatsApp)</p>
                 <p>
                   <strong>Vacantes abiertas:</strong> {pubSummary.open_vacancies_count}
                   {pubSummary.open_vacancies_count > 0
@@ -4449,7 +4463,7 @@ export function RosterGridClient({
                     setV2DraftPublishing(true);
                     const res = await publishV2ApprovedDraftAction({
                       draftState: v2SavedDraft,
-                      sendNotifications: true,
+                      sendNotifications: false,
                     });
                     setV2DraftPublishing(false);
                     if (!res.success) {
