@@ -88,6 +88,122 @@ export function buildWorkerMonthSelectorOptions(now: Date = new Date()): WorkerM
   return options;
 }
 
+export function isFiveByTwoRegime(rotationPattern?: string | null): boolean {
+  return appliesFiveDayTwoOffWeeklyRule({ rotationPattern });
+}
+
+/**
+ * Matches HRM v2 scheduler (`jornada.ts`): every operational worker follows the
+ * 5-day / 2-days-off weekly rule unless explicitly excluded (4x4_noche titulares,
+ * 7x7, or non-shift administrative staff). Patterns like `5X2`, `BLUE_DIA-3`,
+ * `BLUE_NOCHE-*`, and `L-V` all follow the 5-day / 2-days-off rule.
+ */
+export function appliesFiveDayTwoOffWeeklyRule(params: {
+  rotationPattern?: string | null;
+  ns22AnchorDate?: string | null;
+  requiresShifts?: boolean | null;
+}): boolean {
+  if (params.requiresShifts === false) return false;
+  if (params.ns22AnchorDate) return false;
+  const norm = (params.rotationPattern || '').toUpperCase().replace(/×/g, 'X');
+  if (norm.includes('4X4') || norm.includes('7X7')) return false;
+  return true;
+}
+
+export function validateWeeklyFreeDayQuota(params: {
+  rotationPattern?: string | null;
+  ns22AnchorDate?: string | null;
+  requiresShifts?: boolean | null;
+  birthDate?: string | null;
+  existingFreeRequests: any[];
+  selectedDates: string[];
+}): { valid: boolean; message: string | null; exceededDates: string[] } {
+  const {
+    rotationPattern,
+    ns22AnchorDate,
+    requiresShifts,
+    birthDate,
+    existingFreeRequests,
+    selectedDates,
+  } = params;
+  if (
+    !appliesFiveDayTwoOffWeeklyRule({ rotationPattern, ns22AnchorDate, requiresShifts }) ||
+    !selectedDates ||
+    selectedDates.length === 0
+  ) {
+    return { valid: true, message: null, exceededDates: [] };
+  }
+
+  const birthMonthDay = birthDate && birthDate.length >= 10 ? birthDate.slice(5, 10) : null;
+
+  // Group selected dates by Monday-to-Sunday week
+  const weeks = new Map<string, string[]>();
+  for (const d of selectedDates) {
+    const dt = parseISO(d);
+    const dayOfWeek = dt.getDay(); // 0=Sun, 1=Mon..6=Sat
+    const diffToMon = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = addDays(dt, diffToMon);
+    const weekKey = format(monday, 'yyyy-MM-dd');
+    const list = weeks.get(weekKey) || [];
+    list.push(d);
+    weeks.set(weekKey, list);
+  }
+
+  const dayNameEs = (iso: string) =>
+    format(parseISO(iso), 'EEEE', { locale: es }).toLowerCase();
+
+  for (const [weekStartStr, selectedInWeek] of weeks.entries()) {
+    const monday = parseISO(weekStartStr);
+    const sundayStr = format(addDays(monday, 6), 'yyyy-MM-dd');
+
+    const birthdayDates: string[] = [];
+    if (birthMonthDay) {
+      for (let i = 0; i < 7; i++) {
+        const dStr = format(addDays(monday, i), 'yyyy-MM-dd');
+        if (dStr.slice(5, 10) === birthMonthDay) {
+          birthdayDates.push(dStr);
+        }
+      }
+    }
+
+    const existingDates = new Set<string>();
+    for (const req of existingFreeRequests || []) {
+      if (req.status !== 'pending' && req.status !== 'approved') continue;
+      if (req.type !== 'other' || req.reason !== FREE_DAY_REQUEST_REASON) continue;
+      for (const d of expandDateRange(req.start_date, req.end_date)) {
+        if (d >= weekStartStr && d <= sundayStr) {
+          existingDates.add(d);
+        }
+      }
+    }
+
+    const union = new Set<string>([
+      ...birthdayDates,
+      ...existingDates,
+      ...selectedInWeek,
+    ]);
+
+    if (union.size > 2) {
+      const bdayList = birthdayDates.sort();
+      const existingList = Array.from(existingDates).sort();
+      let message: string;
+      if (bdayList.length > 0 && existingList.length > 0) {
+        const bName = dayNameEs(bdayList[0]);
+        const eName = dayNameEs(existingList[0]);
+        message = `El ${bName} ya tienes libre por tu cumpleaños. Con el ${eName} completas tus dos días libres de esta semana.`;
+      } else if (bdayList.length > 0) {
+        const bName = dayNameEs(bdayList[0]);
+        message = `El ${bName} ya tienes libre por tu cumpleaños. Solo puedes elegir un día libre adicional esta semana (elige uno).`;
+      } else {
+        message = 'Ya completas tus dos días libres permitidos para esta semana (lunes a domingo). Elige otra fecha.';
+      }
+      return { valid: false, message, exceededDates: selectedInWeek };
+    }
+  }
+
+  return { valid: true, message: null, exceededDates: [] };
+}
+
 export function expandDateRange(startDate: string, endDate: string): string[] {
   if (!startDate || !endDate || startDate > endDate) return [];
   const dates: string[] = [];

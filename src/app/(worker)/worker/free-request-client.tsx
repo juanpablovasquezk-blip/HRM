@@ -27,12 +27,17 @@ import {
   FREE_DAY_REQUEST_REASON,
   isMonthOpenForWorkerRequest,
   VACATION_SUCCESS_MESSAGE,
+  validateWeeklyFreeDayQuota,
 } from '@/lib/worker/portal-requests';
 
 interface FreeRequestClientProps {
   personnelId: string;
   initialRequests?: any[];
   referenceNowIso?: string;
+  rotationPattern?: string | null;
+  ns22AnchorDate?: string | null;
+  requiresShifts?: boolean | null;
+  birthDate?: string | null;
   initialFreeOccupiedDates?: string[];
   initialVacationOccupiedDates?: string[];
   initialVacationSuccessMessage?: string | null;
@@ -42,6 +47,10 @@ export default function FreeRequestClient({
   personnelId,
   initialRequests = [],
   referenceNowIso,
+  rotationPattern = null,
+  ns22AnchorDate = null,
+  requiresShifts = true,
+  birthDate = null,
   initialFreeOccupiedDates = [],
   initialVacationOccupiedDates = [],
   initialVacationSuccessMessage = null,
@@ -103,6 +112,19 @@ export default function FreeRequestClient({
   const remainingFreeQuota = Math.max(0, 2 - activeFreeDaysCountInMonth);
   const isFreeLimitReached = remainingFreeQuota === 0;
 
+  const weeklyQuotaCheck = useMemo(
+    () =>
+      validateWeeklyFreeDayQuota({
+        rotationPattern,
+        ns22AnchorDate,
+        requiresShifts,
+        birthDate,
+        existingFreeRequests: requests,
+        selectedDates,
+      }),
+    [rotationPattern, ns22AnchorDate, requiresShifts, birthDate, requests, selectedDates]
+  );
+
   const verifyFreeDatesQuota = async (datesToVerify: string[]) => {
     if (datesToVerify.length === 0) {
       setFreeOccupiedDates([]);
@@ -147,7 +169,7 @@ export default function FreeRequestClient({
   };
 
   const handleSubmitFree = async () => {
-    if (selectedDates.length === 0 || freeOccupiedDates.length > 0) return;
+    if (selectedDates.length === 0 || freeOccupiedDates.length > 0 || !weeklyQuotaCheck.valid) return;
 
     setIsSubmittingFree(true);
     const res = await requestFreeDays(personnelId, selectedDates);
@@ -432,6 +454,15 @@ export default function FreeRequestClient({
               </div>
             )}
 
+            {!weeklyQuotaCheck.valid && weeklyQuotaCheck.message && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-3.5 flex items-start gap-2.5">
+                <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-red-800 leading-snug font-medium">
+                  {weeklyQuotaCheck.message}
+                </p>
+              </div>
+            )}
+
             {freeOccupiedDates.length > 0 && (
               <div className="bg-red-50 border border-red-200 rounded-2xl p-3.5 flex items-start gap-2.5">
                 <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
@@ -456,6 +487,7 @@ export default function FreeRequestClient({
                 isSubmittingFree ||
                 isCheckingFree ||
                 isFreeLimitReached ||
+                !weeklyQuotaCheck.valid ||
                 freeOccupiedDates.length > 0
               }
               className="w-full bg-slate-900 hover:bg-slate-800 text-white rounded-2xl py-6 font-black uppercase tracking-widest text-xs shadow-lg shadow-slate-200"

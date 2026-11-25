@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  appliesFiveDayTwoOffWeeklyRule,
   buildWorkerMonthSelectorOptions,
   evaluateWorkerPendingDocuments,
   expandDateRange,
   getMonthDeadlineDateString,
   getSantiagoDateString,
   isMonthOpenForWorkerRequest,
+  validateWeeklyFreeDayQuota,
 } from './portal-requests';
 
 test('Portal trabajador: fechas límite en horario de Santiago y selector de meses el 25-11-2026', () => {
@@ -58,4 +60,75 @@ test('Portal trabajador: evaluación de documentos pendientes (Faltante, Vencido
   assert.equal(byName.get('Cédula de Identidad')?.status, 'REJECTED');
   assert.equal(byName.get('Certificado Antecedentes')?.status, 'IN_REVIEW');
   assert.equal(byName.has('Contrato'), false);
+});
+
+test('Portal trabajador: cupo semanal 5x2 con cumpleaños el miércoles y semana que cruza de mes', () => {
+  // Cumpleaños miércoles 2027-01-13
+  const r1 = validateWeeklyFreeDayQuota({
+    rotationPattern: '5x2',
+    birthDate: '1992-01-13',
+    existingFreeRequests: [
+      {
+        start_date: '2027-01-14',
+        end_date: '2027-01-14',
+        type: 'other',
+        status: 'pending',
+        reason: 'Solicitud mensual de días libres',
+      },
+    ],
+    selectedDates: ['2027-01-15'],
+  });
+  assert.equal(r1.valid, false);
+  assert.match(r1.message || '', /miércoles ya tienes libre por tu cumpleaños.*jueves/i);
+
+  // Jueves y viernes seleccionados juntos
+  const r2 = validateWeeklyFreeDayQuota({
+    rotationPattern: '5x2',
+    birthDate: '1992-01-13',
+    existingFreeRequests: [],
+    selectedDates: ['2027-01-14', '2027-01-15'],
+  });
+  assert.equal(r2.valid, false);
+  assert.match(r2.message || '', /miércoles ya tienes libre por tu cumpleaños/i);
+
+  // Semana que cruza de mes (2027-03-29..2027-04-04): cumpleaños 31-03 (miércoles), ya pidió 01-04 (jueves), intenta 02-04 (viernes)
+  const rCross = validateWeeklyFreeDayQuota({
+    rotationPattern: '5x2',
+    birthDate: '1992-03-31',
+    existingFreeRequests: [
+      {
+        start_date: '2027-04-01',
+        end_date: '2027-04-01',
+        type: 'other',
+        status: 'approved',
+        reason: 'Solicitud mensual de días libres',
+      },
+    ],
+    selectedDates: ['2027-04-02'],
+  });
+  assert.equal(rCross.valid, false);
+  assert.match(rCross.message || '', /miércoles ya tienes libre por tu cumpleaños.*jueves/i);
+
+  // Regímenes alineados con HRM v2: 5X2, BLUE_DIA-3, L-V aplican; 4X4_NOCHE titular queda fuera
+  assert.equal(appliesFiveDayTwoOffWeeklyRule({ rotationPattern: '5x2', requiresShifts: true }), true);
+  assert.equal(appliesFiveDayTwoOffWeeklyRule({ rotationPattern: 'BLUE_DIA-3', requiresShifts: true }), true);
+  assert.equal(appliesFiveDayTwoOffWeeklyRule({ rotationPattern: 'l-v', requiresShifts: true }), true);
+  assert.equal(appliesFiveDayTwoOffWeeklyRule({ rotationPattern: '4x4_noche', ns22AnchorDate: '2026-12-14', requiresShifts: true }), false);
+
+  const rBlue = validateWeeklyFreeDayQuota({
+    rotationPattern: 'BLUE_DIA-3',
+    birthDate: '1992-01-13',
+    existingFreeRequests: [],
+    selectedDates: ['2027-01-14', '2027-01-15'],
+  });
+  assert.equal(rBlue.valid, false);
+
+  const r4x4 = validateWeeklyFreeDayQuota({
+    rotationPattern: '4x4_noche',
+    ns22AnchorDate: '2026-12-14',
+    birthDate: '1992-01-13',
+    existingFreeRequests: [],
+    selectedDates: ['2027-01-14', '2027-01-15'],
+  });
+  assert.equal(r4x4.valid, true);
 });

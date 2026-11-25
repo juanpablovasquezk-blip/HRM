@@ -232,6 +232,10 @@ export default async function WorkerHomePage() {
         personnelId={session.id}
         initialRequests={portalRequests || []}
         referenceNowIso={new Date().toISOString()}
+        rotationPattern={session.rotation_pattern || null}
+        ns22AnchorDate={session.ns22_anchor_date || null}
+        requiresShifts={session.requires_shifts ?? true}
+        birthDate={session.birth_date || null}
       />
 
       {/* Quick Help Footer */}

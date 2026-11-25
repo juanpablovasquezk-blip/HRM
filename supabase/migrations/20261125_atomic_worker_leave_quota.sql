@@ -23,6 +23,19 @@ DECLARE
   v_occupied_dates date[] := ARRAY[]::date[];
   v_main_position uuid;
   v_area_id uuid;
+  v_rotation_pattern text;
+  v_norm_pattern text;
+  v_ns22_anchor_date text;
+  v_requires_shifts boolean;
+  v_birth_date text;
+  v_is_5x2 boolean := false;
+  v_week_start date;
+  v_week_end date;
+  v_bday_in_week date;
+  v_existing_in_week date[];
+  v_weekly_total_count integer;
+  v_bday_name text;
+  v_existing_name text;
   v_month_start date;
   v_month_end date;
   v_existing_free_count integer;
@@ -78,9 +91,9 @@ BEGIN
     );
   END IF;
 
-  -- Resolve worker's main_position and area_id
-  SELECT p.main_position, pos.area_id
-  INTO v_main_position, v_area_id
+  -- Resolve worker's main_position, area_id, rotation_pattern, ns22_anchor_date, requires_shifts, and birth_date
+  SELECT p.main_position, pos.area_id, p.rotation_pattern, p.ns22_anchor_date::text, p.requires_shifts, p.birth_date::text
+  INTO v_main_position, v_area_id, v_rotation_pattern, v_ns22_anchor_date, v_requires_shifts, v_birth_date
   FROM public.personnel p
   LEFT JOIN public.positions pos ON pos.id = p.main_position
   WHERE p.id = p_personnel_id;
@@ -89,7 +102,13 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'code', 'PERSONNEL_NOT_FOUND', 'error', 'Trabajador no encontrado.');
   END IF;
 
-  -- Acquire per-worker + month advisory lock for free-day monthly cap (serializes distinct-date concurrent submits)
+  v_norm_pattern := UPPER(REPLACE(COALESCE(v_rotation_pattern, ''), '×', 'X'));
+  v_is_5x2 := COALESCE(v_requires_shifts, true)
+    AND v_ns22_anchor_date IS NULL
+    AND v_norm_pattern NOT LIKE '%4X4%'
+    AND v_norm_pattern NOT LIKE '%7X7%';
+
+  -- Acquire per-worker + month advisory lock and per-worker + week advisory lock (5x2)
   IF p_kind = 'free_day' THEN
     FOR v_month_start IN
       SELECT DISTINCT date_trunc('month', d)::date AS m_start
@@ -100,6 +119,18 @@ BEGIN
         hashtext('worker_month_free_cap|' || p_personnel_id::text || '|' || to_char(v_month_start, 'YYYY-MM'))
       );
     END LOOP;
+
+    IF v_is_5x2 THEN
+      FOR v_week_start IN
+        SELECT DISTINCT date_trunc('week', d)::date AS w_start
+        FROM unnest(v_dates) AS d
+        ORDER BY w_start
+      LOOP
+        PERFORM pg_advisory_xact_lock(
+          hashtext('worker_week_free_cap|' || p_personnel_id::text || '|' || to_char(v_week_start, 'YYYY-MM-DD'))
+        );
+      END LOOP;
+    END IF;
   END IF;
 
   -- Acquire deterministic transaction-scoped advisory locks in date order
@@ -173,6 +204,85 @@ BEGIN
         );
       END IF;
     END LOOP;
+
+    -- Check 5x2 weekly (Monday-to-Sunday) cap of 2 free days (birthday + pending/approved + selected, deduplicated)
+    IF v_is_5x2 THEN
+      FOR v_week_start IN
+        SELECT DISTINCT date_trunc('week', d)::date AS w_start
+        FROM unnest(v_dates) AS d
+        ORDER BY w_start
+      LOOP
+        v_week_end := v_week_start + 6;
+        v_bday_in_week := NULL;
+
+        IF v_birth_date IS NOT NULL AND length(trim(v_birth_date)) >= 10 THEN
+          SELECT g::date
+          INTO v_bday_in_week
+          FROM generate_series(v_week_start, v_week_end, interval '1 day') AS g
+          WHERE to_char(g::date, 'MM-DD') = substring(trim(v_birth_date) FROM 6 FOR 5)
+          LIMIT 1;
+        END IF;
+
+        SELECT COALESCE(ARRAY(
+          SELECT DISTINCT g::date
+          FROM public.leaves l
+          CROSS JOIN LATERAL generate_series(
+            GREATEST(l.start_date::date, v_week_start),
+            LEAST(l.end_date::date, v_week_end),
+            interval '1 day'
+          ) AS g
+          WHERE l.personnel_id = p_personnel_id
+            AND l.status IN ('pending', 'approved')
+            AND l.type = 'other'
+            AND l.reason = 'Solicitud mensual de días libres'
+            AND l.start_date::date <= v_week_end
+            AND l.end_date::date >= v_week_start
+          ORDER BY g::date
+        ), ARRAY[]::date[]) INTO v_existing_in_week;
+
+        SELECT COUNT(DISTINCT u.d)
+        INTO v_weekly_total_count
+        FROM (
+          SELECT v_bday_in_week AS d WHERE v_bday_in_week IS NOT NULL
+          UNION
+          SELECT x AS d FROM unnest(v_existing_in_week) AS x
+          UNION
+          SELECT x AS d FROM unnest(v_dates) AS x WHERE x >= v_week_start AND x <= v_week_end
+        ) AS u;
+
+        IF v_weekly_total_count > 2 THEN
+          IF v_bday_in_week IS NOT NULL THEN
+            v_bday_name := CASE EXTRACT(ISODOW FROM v_bday_in_week)::int
+              WHEN 1 THEN 'lunes' WHEN 2 THEN 'martes' WHEN 3 THEN 'miércoles'
+              WHEN 4 THEN 'jueves' WHEN 5 THEN 'viernes' WHEN 6 THEN 'sábado' ELSE 'domingo'
+            END;
+            IF array_length(v_existing_in_week, 1) IS NOT NULL THEN
+              v_existing_name := CASE EXTRACT(ISODOW FROM v_existing_in_week[1])::int
+                WHEN 1 THEN 'lunes' WHEN 2 THEN 'martes' WHEN 3 THEN 'miércoles'
+                WHEN 4 THEN 'jueves' WHEN 5 THEN 'viernes' WHEN 6 THEN 'sábado' ELSE 'domingo'
+              END;
+              RETURN jsonb_build_object(
+                'ok', false,
+                'code', 'WEEKLY_LIMIT_EXCEEDED',
+                'error', 'El ' || v_bday_name || ' ya tienes libre por tu cumpleaños. Con el ' || v_existing_name || ' completas tus dos días libres de esta semana.'
+              );
+            ELSE
+              RETURN jsonb_build_object(
+                'ok', false,
+                'code', 'WEEKLY_LIMIT_EXCEEDED',
+                'error', 'El ' || v_bday_name || ' ya tienes libre por tu cumpleaños. Solo puedes elegir un día libre adicional esta semana (elige uno).'
+              );
+            END IF;
+          ELSE
+            RETURN jsonb_build_object(
+              'ok', false,
+              'code', 'WEEKLY_LIMIT_EXCEEDED',
+              'error', 'Ya completas tus dos días libres permitidos para esta semana (lunes a domingo). Elige otra fecha.'
+            );
+          END IF;
+        END IF;
+      END LOOP;
+    END IF;
   END IF;
 
   -- Check shared quota (1 slot per date for same main_position + area_id)
