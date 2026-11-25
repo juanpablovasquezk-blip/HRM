@@ -80,7 +80,7 @@ import {
   compareEnginesPreview,
   groupV2DailyPlanningSections,
 } from '@/lib/scheduler/v2/preview-compare';
-import { applyV2DraftAdjustment, applyV2DraftSwap } from '@/lib/scheduler/v2/preview-draft';
+import { applyV2DraftAdjustment, applyV2DraftSwap, resolveV2GridCellClick } from '@/lib/scheduler/v2/preview-draft';
 import {
   approveV2Draft,
   buildV2PublishConfirmationSummary,
@@ -670,28 +670,30 @@ export function RosterGridClient({
   const handleCellClick = useCallback((person: Personnel, date: Date) => {
     if (readOnly) return;
     const dateStr = format(date, 'yyyy-MM-dd');
-    if (isV2GridPreviewActive && previewComparison) {
-      if (!isV2ProposalEditing && !v2SavedDraft) {
-        toast.info('Activa «Editar propuesta» para agregar, quitar, cambiar o intercambiar turnos en memoria.');
-        return;
-      }
-      const existing = (previewComparison.v2.assignments || []).find(
-        (a) => a.personnel_id === person.id && a.date === dateStr
-      );
-      const defaultPos = existing?.position_id || person.main_position || positions[0]?.id || '';
-      const defaultArea =
-        existing?.area_id ||
-        positions.find((p) => p.id === defaultPos)?.area_id ||
-        areas[0]?.id ||
-        '';
-      const defaultShift = existing?.shift_id || shifts[0]?.id || '';
+    const resolution = resolveV2GridCellClick({
+      isV2GridPreviewActive,
+      isV2ProposalEditing,
+      hasSavedDraft: Boolean(v2SavedDraft),
+      previewV2: previewComparison?.v2,
+      personId: person.id,
+      mainPositionId: person.main_position,
+      dateStr,
+      positions,
+      areas,
+      shifts,
+    });
+    if (resolution.mode === 'blocked_enable_edit') {
+      toast.info('Activa «Editar propuesta» para agregar, quitar, cambiar o intercambiar turnos en memoria.');
+      return;
+    }
+    if (resolution.mode === 'open_editor') {
       setV2DraftCellModal({
         person,
         dateStr,
-        action: existing ? 'replace' : 'add',
-        areaId: defaultArea,
-        positionId: defaultPos,
-        shiftId: defaultShift,
+        action: resolution.action,
+        areaId: resolution.areaId,
+        positionId: resolution.positionId,
+        shiftId: resolution.shiftId,
       });
       return;
     }
@@ -717,7 +719,16 @@ export function RosterGridClient({
         return [...prev, newCell];
       }
     });
-  }, [readOnly, positions]);
+  }, [
+    readOnly,
+    isV2GridPreviewActive,
+    isV2ProposalEditing,
+    v2SavedDraft,
+    previewComparison,
+    positions,
+    areas,
+    shifts,
+  ]);
 
   const handleToggleRow = useCallback((personId: string) => {
     if (isV2GridPreviewActive) return;

@@ -757,3 +757,56 @@ export function computeV2AuditSummaries(params: {
     dec_pending,
   };
 }
+
+export type V2GridCellClickResolution =
+  | { mode: 'operative_select' }
+  | { mode: 'blocked_enable_edit' }
+  | {
+      mode: 'open_editor';
+      action: 'add' | 'replace';
+      areaId: string;
+      positionId: string;
+      shiftId: string;
+    };
+
+/**
+ * Resuelve la acción de un clic en celda de la grilla:
+ * en vista previa v2 abre el editor de propuesta (replace en turno existente o add en OFF)
+ * sin activar la selección operativa.
+ */
+export function resolveV2GridCellClick(params: {
+  isV2GridPreviewActive: boolean;
+  isV2ProposalEditing: boolean;
+  hasSavedDraft: boolean;
+  previewV2?: EnginePreviewMetrics | null;
+  personId: string;
+  mainPositionId?: string | null;
+  dateStr: string;
+  positions: Array<{ id: string; area_id: string }>;
+  areas: Array<{ id: string }>;
+  shifts: Array<{ id: string }>;
+}): V2GridCellClickResolution {
+  if (!params.isV2GridPreviewActive || !params.previewV2) {
+    return { mode: 'operative_select' };
+  }
+  if (!params.isV2ProposalEditing && !params.hasSavedDraft) {
+    return { mode: 'blocked_enable_edit' };
+  }
+  const existing = (params.previewV2.assignments || []).find(
+    (a) => a.personnel_id === params.personId && a.date === params.dateStr
+  );
+  const defaultPos = existing?.position_id || params.mainPositionId || params.positions[0]?.id || '';
+  const defaultArea =
+    existing?.area_id ||
+    params.positions.find((p) => p.id === defaultPos)?.area_id ||
+    params.areas[0]?.id ||
+    '';
+  const defaultShift = existing?.shift_id || params.shifts[0]?.id || '';
+  return {
+    mode: 'open_editor',
+    action: existing ? 'replace' : 'add',
+    areaId: defaultArea,
+    positionId: defaultPos,
+    shiftId: defaultShift,
+  };
+}

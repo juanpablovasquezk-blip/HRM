@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compareEnginesPreview, buildV2DailyPlanningRows } from './preview-compare';
-import { applyV2DraftAdjustment, applyV2DraftSwap } from './preview-draft';
+import { applyV2DraftAdjustment, applyV2DraftSwap, resolveV2GridCellClick } from './preview-draft';
 import {
   approveV2Draft,
   approveV2DraftPersisted,
@@ -560,6 +560,57 @@ test('Editar propuesta v2 en memoria con ROSTER_V2_SAVE_ENABLED=false: agregar, 
 
     const undoStack: typeof preview.v2[] = [];
     let currentV2 = preview.v2;
+
+    // 0. Clic en turno propuesto y en celda OFF con «Editar propuesta» activo: abre editor sin activar selección operativa
+    const asg10 = (currentV2.assignments || []).find((a) => a.date === '2026-12-10')!;
+    const offPersonId = asg10.personnel_id === 'p-1' ? 'p-2' : 'p-1';
+    const clickBeforeEditMode = resolveV2GridCellClick({
+      isV2GridPreviewActive: true,
+      isV2ProposalEditing: false,
+      hasSavedDraft: false,
+      previewV2: currentV2,
+      personId: asg10.personnel_id,
+      mainPositionId: 'pos-op',
+      dateStr: '2026-12-10',
+      positions: [{ id: 'pos-op', area_id: 'area-bodega' }],
+      areas: [{ id: 'area-bodega' }],
+      shifts: [{ id: 'sh-am08' }],
+    });
+    assert.equal(clickBeforeEditMode.mode, 'blocked_enable_edit');
+
+    const clickProposedShift = resolveV2GridCellClick({
+      isV2GridPreviewActive: true,
+      isV2ProposalEditing: true,
+      hasSavedDraft: false,
+      previewV2: currentV2,
+      personId: asg10.personnel_id,
+      mainPositionId: 'pos-op',
+      dateStr: '2026-12-10',
+      positions: [{ id: 'pos-op', area_id: 'area-bodega' }],
+      areas: [{ id: 'area-bodega' }],
+      shifts: [{ id: 'sh-am08' }],
+    });
+    assert.equal(clickProposedShift.mode, 'open_editor');
+    if (clickProposedShift.mode === 'open_editor') {
+      assert.equal(clickProposedShift.action, 'replace');
+    }
+
+    const clickOffCell = resolveV2GridCellClick({
+      isV2GridPreviewActive: true,
+      isV2ProposalEditing: true,
+      hasSavedDraft: false,
+      previewV2: currentV2,
+      personId: offPersonId,
+      mainPositionId: 'pos-op',
+      dateStr: '2026-12-10',
+      positions: [{ id: 'pos-op', area_id: 'area-bodega' }],
+      areas: [{ id: 'area-bodega' }],
+      shifts: [{ id: 'sh-am08' }],
+    });
+    assert.equal(clickOffCell.mode, 'open_editor');
+    if (clickOffCell.mode === 'open_editor') {
+      assert.equal(clickOffCell.action, 'add');
+    }
 
     // 1. Quitar turno del 11-12 y verificar que grilla, resumen y Programación Operativa reflejen la vacante
     const asg11 = (currentV2.assignments || []).find((a) => a.date === '2026-12-11')!;
