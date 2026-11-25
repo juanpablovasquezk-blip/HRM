@@ -206,8 +206,15 @@ export async function saveV2PreviewAsDraft(
     };
   }
 
-  const afterState = await adapter.loadRangeState(input.startDate, input.endDate);
-  const persistedRangeHash = computeRangeStateHash(afterState.assignments, afterState.requirements);
+  let persistedRangeHash = saveResult.postSaveStateHash || null;
+  if (!persistedRangeHash) {
+    if (adapter.computeRangeHash) {
+      persistedRangeHash = await adapter.computeRangeHash(input.startDate, input.endDate);
+    } else {
+      const afterState = await adapter.loadRangeState(input.startDate, input.endDate);
+      persistedRangeHash = computeRangeStateHash(afterState.assignments, afterState.requirements);
+    }
+  }
   const draftVersionHash = computeV2DraftVersionHash({
     startDate: input.startDate,
     endDate: input.endDate,
@@ -340,7 +347,9 @@ export async function reopenV2SavedDraft(
       }
     : (savedDraftOrId as V2SavedDraftState);
   const currentState = await adapter.loadRangeState(savedDraft.start_date, savedDraft.end_date);
-  const currentRangeHash = computeRangeStateHash(currentState.assignments, currentState.requirements);
+  const currentRangeHash = adapter.computeRangeHash
+    ? await adapter.computeRangeHash(savedDraft.start_date, savedDraft.end_date)
+    : computeRangeStateHash(currentState.assignments, currentState.requirements);
   const concurrentChangeDetected = currentRangeHash !== savedDraft.persisted_range_hash;
 
   // Map persisted active rows back to V2PreviewAssignment preserving exact saved state
@@ -692,8 +701,12 @@ export async function publishV2ApprovedDraft(
   }
 
   const runPub = async () => {
-    const liveState = await adapter.loadRangeState(draftState.start_date, draftState.end_date);
-    const liveHash = computeRangeStateHash(liveState.assignments, liveState.requirements);
+    const liveHash = adapter.computeRangeHash
+      ? await adapter.computeRangeHash(draftState.start_date, draftState.end_date)
+      : await (async () => {
+          const liveState = await adapter.loadRangeState(draftState.start_date, draftState.end_date);
+          return computeRangeStateHash(liveState.assignments, liveState.requirements);
+        })();
     if (liveHash !== draftState.persisted_range_hash) {
       return {
         success: false,

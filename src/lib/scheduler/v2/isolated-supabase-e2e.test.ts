@@ -59,6 +59,17 @@ class IsolatedSupabaseClient {
     }
     try {
       const data = await this.__runInTransaction(async () => {
+        if (fn === 'compute_roster_range_hash') {
+          const startDate = String(args.p_start_date);
+          const endDate = String(args.p_end_date);
+          const rangeAssigns = this.tables.shift_assignments.filter(
+            (a) => a.date >= startDate && a.date <= endDate
+          );
+          const rangeReqs = this.tables.shift_requirements.filter(
+            (r) => r.date >= startDate && r.date <= endDate
+          );
+          return computeRangeStateHash(rangeAssigns as any, rangeReqs as any);
+        }
         if (fn === 'save_v2_schedule_tx') {
           const startDate = String(args.p_start_date);
           const endDate = String(args.p_end_date);

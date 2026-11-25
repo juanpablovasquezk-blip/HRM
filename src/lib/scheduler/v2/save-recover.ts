@@ -150,6 +150,7 @@ export interface RosterPersistenceAdapter {
     requirements: PersistedRequirementRow[]
   ): Promise<void>;
   runInTransaction?<T>(fn: () => Promise<T>): Promise<T>;
+  computeRangeHash?(startDate: string, endDate: string): Promise<string>;
   executeSaveTx?(params: SaveV2TxParams): Promise<{
     snapshotId: string;
     savedCompletedAt: string | null;
@@ -184,6 +185,7 @@ export interface SaveV2ScheduleInput {
   shouldValidate?: boolean;
   expectedBaselineAt?: string | null;
   expectedBaselineHash?: string | null;
+  requireBaselineHash?: boolean;
 }
 
 export interface SaveV2ScheduleResult {
@@ -191,6 +193,7 @@ export interface SaveV2ScheduleResult {
   rolledBack: boolean;
   conflictDetected?: boolean;
   snapshotId: string | null;
+  postSaveStateHash?: string | null;
   error?: string;
   unconfirmedReasons?: string[];
   deletedCount: number;
@@ -479,12 +482,33 @@ export async function saveV2Schedule(
     };
   }
 
+  const normalizedBaselineHash = input.expectedBaselineHash?.trim() || null;
+  if (input.requireBaselineHash && !normalizedBaselineHash) {
+    return {
+      success: false,
+      rolledBack: false,
+      conflictDetected: false,
+      snapshotId: null,
+      error:
+        'MISSING_BASELINE_HASH: Falta la referencia del calendario de la vista previa. Genera una nueva vista previa antes de guardar.',
+      deletedCount: 0,
+      insertedCount: 0,
+      preservedProtectedCount: 0,
+      preservedExtraCount: 0,
+      preservedOutOfScopeCount: 0,
+      vacancyExtraUpserts: 0,
+      vacancyExtraDeletes: 0,
+    };
+  }
+
   const beforeState = await adapter.loadRangeState(input.startDate, input.endDate);
   const currentMaxUpdatedAt = getMaxUpdatedAt(beforeState.assignments, beforeState.requirements);
-  const currentStateHash = computeRangeStateHash(beforeState.assignments, beforeState.requirements);
+  const currentStateHash = adapter.computeRangeHash
+    ? await adapter.computeRangeHash(input.startDate, input.endDate)
+    : computeRangeStateHash(beforeState.assignments, beforeState.requirements);
   if (
     (input.expectedBaselineAt && currentMaxUpdatedAt && currentMaxUpdatedAt > input.expectedBaselineAt) ||
-    (input.expectedBaselineHash && currentStateHash !== input.expectedBaselineHash)
+    (normalizedBaselineHash && currentStateHash !== normalizedBaselineHash)
   ) {
     return {
       success: false,
@@ -650,7 +674,7 @@ export async function saveV2Schedule(
         },
         ns22Confirmation: input.ns22Config,
         expectedBaselineAt: input.expectedBaselineAt ?? null,
-        expectedBaselineHash: input.expectedBaselineHash ?? null,
+        expectedBaselineHash: normalizedBaselineHash,
         deleteAssignmentIds: replaceableIds,
         insertAssignments: toInsert,
         upsertExtraRequirements: enrichedUpserts,
@@ -660,6 +684,7 @@ export async function saveV2Schedule(
         success: true,
         rolledBack: false,
         snapshotId: txRes.snapshotId,
+        postSaveStateHash: txRes.postSaveStateHash ?? null,
         deletedCount: replaceableIds.length,
         insertedCount: toInsert.length,
         preservedProtectedCount,

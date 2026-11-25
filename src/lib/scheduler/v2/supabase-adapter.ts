@@ -207,6 +207,16 @@ export function createSupabaseRosterPersistenceAdapter(
 
     ...(supabase.rpc
       ? {
+          async computeRangeHash(startDate: string, endDate: string) {
+            const { data, error } = await supabase.rpc!('compute_roster_range_hash', {
+              p_start_date: startDate,
+              p_end_date: endDate,
+            });
+            if (error) {
+              throw new Error(`Error calculando hash del rango: ${error.message}`);
+            }
+            return String(data || '');
+          },
           async executeSaveTx(params: SaveV2TxParams) {
             const { data, error } = await supabase.rpc!('save_v2_schedule_tx', {
               p_start_date: params.startDate,
