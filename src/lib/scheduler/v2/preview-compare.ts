@@ -212,6 +212,7 @@ export interface CompareEnginesPreviewParams {
   positionNameById?: Map<string, string>;
   baseCalendarByPerson?: Map<string, Set<string>> | null;
   unconfirmedRules?: string[];
+  baselineRangeHash?: string | null;
   referenceDate?: Date;
   deadlineAt?: number;
   signal?: AbortSignal;
@@ -920,7 +921,8 @@ function buildComparisonResult(
   v1Metrics: EnginePreviewMetrics,
   v2Res: ReturnType<typeof scheduleCrossArea>,
   v2Metrics: EnginePreviewMetrics,
-  unconfirmedRules: string[] = []
+  unconfirmedRules: string[] = [],
+  baselineRangeHash: string | null = null
 ): PreviewComparisonResult {
   const collectedUnconfirmed = Array.from(
     new Set([
@@ -936,6 +938,7 @@ function buildComparisonResult(
     default_engine: 'v1',
     dry_run: true,
     called_v1_save_route: false,
+    baseline_range_hash: baselineRangeHash,
     v1: v1Metrics,
     v2: v2Metrics,
     unconfirmed_rules: collectedUnconfirmed,
@@ -990,7 +993,13 @@ export function compareEnginesPreview(
   const { scopedPrepared, scopedSlotKeys } = prepareScopedDotacion(params);
   const v1Metrics = computeV1PreviewMetrics(params, scopedPrepared, scopedSlotKeys);
   const { v2Res, v2Metrics } = computeV2PreviewMetrics(params);
-  return buildComparisonResult(v1Metrics, v2Res, v2Metrics, params.unconfirmedRules);
+  return buildComparisonResult(
+    v1Metrics,
+    v2Res,
+    v2Metrics,
+    params.unconfirmedRules,
+    params.baselineRangeHash ?? null
+  );
 }
 
 /**
@@ -1015,5 +1024,11 @@ export async function compareEnginesPreviewStaged(
 
   await onStage?.('preparing_comparison');
   await yieldTick();
-  return buildComparisonResult(v1Metrics, v2Res, v2Metrics, params.unconfirmedRules);
+  return buildComparisonResult(
+    v1Metrics,
+    v2Res,
+    v2Metrics,
+    params.unconfirmedRules,
+    params.baselineRangeHash ?? null
+  );
 }

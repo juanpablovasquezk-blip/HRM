@@ -371,6 +371,17 @@ export async function loadPreviewCompareInputs(
     baseCalendarByPerson.get(a.personnel_id)!.add(d);
   }
 
+  let baselineRangeHash: string | null = null;
+  if (typeof supabase.rpc === 'function') {
+    const { data: hashData, error: hashErr } = await supabase.rpc('compute_roster_range_hash', {
+      p_start_date: startDate,
+      p_end_date: endDate,
+    });
+    if (!hashErr && typeof hashData === 'string' && hashData.trim()) {
+      baselineRangeHash = hashData.trim();
+    }
+  }
+
   return {
     ok: true,
     compareParams: {
@@ -396,6 +407,7 @@ export async function loadPreviewCompareInputs(
       positionNameById,
       baseCalendarByPerson,
       unconfirmedRules,
+      baselineRangeHash,
     },
   };
 }

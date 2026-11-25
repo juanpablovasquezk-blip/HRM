@@ -3162,6 +3162,15 @@ export async function saveV2DraftAction(params: {
       };
     }
 
+    const expectedBaselineHash = params.expectedBaselineHash?.trim() || '';
+    if (!expectedBaselineHash) {
+      return {
+        success: false,
+        error:
+          'Falta la referencia del calendario de la vista previa. Genera una nueva vista previa antes de guardar el borrador.',
+      };
+    }
+
     const supabase: any = isIsolatedTest ? params.testHooks!.supabase : createAdminClient();
     const adapter = createSupabaseRosterPersistenceAdapter(supabase);
     const [{ data: shifts }, { data: positions }, { data: personnel }] = await Promise.all([
@@ -3206,7 +3215,7 @@ export async function saveV2DraftAction(params: {
       areaId: params.areaId ?? null,
       personnelIds: params.personnelIds ?? [],
       positionIds: params.positionIds ?? [],
-      expectedBaselineHash: params.expectedBaselineHash,
+      expectedBaselineHash,
       ns22Config: resolvedNs22Confirmation,
       previewMetrics: params.previewMetrics,
       shiftDurationById,

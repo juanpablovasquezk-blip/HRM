@@ -2132,13 +2132,20 @@ export function RosterGridClient({
                 disabled={v2DraftSaving}
                 className="h-8 bg-white dark:bg-slate-900 border-emerald-400 text-emerald-800 hover:bg-emerald-50 font-bold"
                 onClick={async () => {
+                  const baselineHash = previewComparison.baseline_range_hash?.trim() || '';
+                  if (!baselineHash) {
+                    toast.error(
+                      'Falta la referencia del calendario de la vista previa. Genera una nueva vista previa antes de guardar el borrador.'
+                    );
+                    return;
+                  }
                   setV2DraftSaving(true);
                   const res = await saveV2DraftAction({
                     startDate: previewComparison.v2.start_date || format(days[0], 'yyyy-MM-dd'),
                     endDate: previewComparison.v2.end_date || format(days[days.length - 1], 'yyyy-MM-dd'),
                     areaId: areaFilter || null,
                     personnelIds: personnelFilter,
-                    expectedBaselineHash: '',
+                    expectedBaselineHash: baselineHash,
                     previewMetrics: previewComparison.v2,
                   });
                   setV2DraftSaving(false);

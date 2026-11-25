@@ -557,7 +557,9 @@ test('Editar propuesta v2 en memoria con ROSTER_V2_SAVE_ENABLED=false: agregar, 
       areaNameById: new Map([['area-bodega', 'Bodega']]),
       positionNameById: new Map([['pos-op', 'Operador']]),
       referenceDate: new Date('2026-12-01T12:00:00Z'),
+      baselineRangeHash: 'preview-hash-123',
     });
+    assert.equal(preview.baseline_range_hash, 'preview-hash-123');
 
     const undoStack: typeof preview.v2[] = [];
     let currentV2 = preview.v2;

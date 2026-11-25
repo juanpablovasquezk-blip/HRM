@@ -544,6 +544,7 @@ export interface PreviewComparisonResult {
   default_engine: 'v1';
   dry_run: true;
   called_v1_save_route: false;
+  baseline_range_hash?: string | null;
   v1: EnginePreviewMetrics;
   v2: EnginePreviewMetrics;
   unconfirmed_rules: string[];
