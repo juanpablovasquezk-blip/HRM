@@ -27,6 +27,12 @@ import {
 import { es } from 'date-fns/locale';
 import { Printer, Download, Search, Loader2, Camera, MessageSquare, Check, Users, Send } from 'lucide-react';
 import { getIndividualRoster, sendRosterWhatsApp } from './actions';
+import {
+  getRosterDisplayHolidays,
+  resolveRosterAssignmentDisplay,
+  SUNDAY_OR_HOLIDAY_CELL_STYLE,
+  SUNDAY_OR_HOLIDAY_HEADER_STYLE,
+} from './roster-display-utils';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -34,14 +40,15 @@ interface IndividualRosterClientProps {
   personnelList: any[];
   areas: any[];
   positions: any[];
+  initialData?: any;
 }
 
-export function IndividualRosterClient({ personnelList, areas, positions }: IndividualRosterClientProps) {
+export function IndividualRosterClient({ personnelList, areas, positions, initialData }: IndividualRosterClientProps) {
   const [selectedAreaId, setSelectedAreaId] = useState<string>('all');
   const [selectedId, setSelectedId] = useState<string>('');
-  const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
-  const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
-  const [data, setData] = useState<any>(null);
+  const [startDate, setStartDate] = useState(initialData?.startDate || format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [endDate, setEndDate] = useState(initialData?.endDate || format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [data, setData] = useState<any>(initialData ?? null);
   const [isPending, startTransition] = useTransition();
   const rosterRef = useRef<HTMLDivElement>(null);
 
@@ -326,6 +333,13 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
 
   const weeks = getWeeks();
 
+  const holidaysByDate = useMemo(() => {
+    if (weeks.length === 0) return getRosterDisplayHolidays(startDate, endDate);
+    const displayStart = format(weeks[0][0], 'yyyy-MM-dd');
+    const displayEnd = format(weeks[weeks.length - 1][6], 'yyyy-MM-dd');
+    return getRosterDisplayHolidays(displayStart, displayEnd);
+  }, [weeks, startDate, endDate]);
+
   // Set of dates that have an actual post-publication shift change
   const postPublishChangeDates = useMemo(() => {
     return new Set(
@@ -472,7 +486,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
 
       {/* Roster View */}
       {data && (
-        <div ref={rosterRef} className="print-roster-container bg-white p-8 border rounded-lg shadow-sm print:shadow-none print:border-none print:p-0">
+        <div ref={rosterRef} className="print-roster-container bg-white p-8 border rounded-lg shadow-sm print:shadow-none print:border-none print:p-0 [-webkit-print-color-adjust:exact] [print-color-adjust:exact]">
           {/* Header */}
           <div className="grid grid-cols-3 border-2 border-black mb-6 text-center font-bold uppercase text-sm">
             <div className="border-r-2 border-black py-2 bg-slate-50">MES: {(() => {
@@ -501,22 +515,45 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                   <thead>
                     <tr className="bg-slate-100">
                       <th className="border border-black p-1 w-20 bg-white"></th>
-                      {week.map((day, dIdx) => (
-                        <th key={dIdx} className="border border-black p-1 uppercase text-center w-[12%]">
-                          {format(day, 'EEEE', { locale: es })}
-                        </th>
-                      ))}
+                      {week.map((day, dIdx) => {
+                        const dateStr = format(day, 'yyyy-MM-dd');
+                        const holiday = holidaysByDate.get(dateStr);
+                        const isSundayOrHoliday = day.getDay() === 0 || Boolean(holiday);
+                        return (
+                          <th
+                            key={dIdx}
+                            className="border border-black p-1 uppercase text-center w-[12%]"
+                            style={isSundayOrHoliday ? SUNDAY_OR_HOLIDAY_HEADER_STYLE : undefined}
+                            title={holiday ? `Feriado: ${holiday.name}` : undefined}
+                          >
+                            <div>{format(day, 'EEEE', { locale: es })}</div>
+                            {holiday && (
+                              <div className="mt-0.5 text-[9px] font-extrabold tracking-wide text-slate-700">
+                                FERIADO
+                              </div>
+                            )}
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
                     {/* FECHA */}
                     <tr>
                       <td className="border border-black p-1 font-bold bg-slate-50">FECHA</td>
-                      {week.map((day, dIdx) => (
-                        <td key={dIdx} className="border border-black p-1 text-center font-mono">
-                          {format(day, 'dd-MM-yyyy')}
-                        </td>
-                      ))}
+                      {week.map((day, dIdx) => {
+                        const dateStr = format(day, 'yyyy-MM-dd');
+                        const isSundayOrHoliday = day.getDay() === 0 || holidaysByDate.has(dateStr);
+                        return (
+                          <td
+                            key={dIdx}
+                            className="border border-black p-1 text-center font-mono"
+                            style={isSundayOrHoliday ? SUNDAY_OR_HOLIDAY_CELL_STYLE : undefined}
+                          >
+                            {format(day, 'dd-MM-yyyy')}
+                          </td>
+                        );
+                      })}
                     </tr>
                     {/* TURNO */}
                     <tr>
@@ -525,6 +562,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
                         const dateStr = format(day, 'yyyy-MM-dd');
+                        const isSundayOrHoliday = day.getDay() === 0 || holidaysByDate.has(dateStr);
                         const isPostPublishChange = postPublishChangeDates.has(dateStr) && !leave;
                         const isPostLeave = isPostPublishLeave(day, leave);
                         const isChanged = isPostPublishChange || isPostLeave;
@@ -546,6 +584,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                               "border border-black p-1 text-center font-bold",
                               isChanged && "bg-amber-100 text-amber-900 print:bg-amber-100"
                             )}
+                            style={!isChanged && isSundayOrHoliday ? SUNDAY_OR_HOLIDAY_CELL_STYLE : undefined}
                             title={
                               isPostPublishChange ? "Cambio de turno realizado después de publicar el rol"
                               : isPostLeave ? "Solicitud de ausencia registrada después de publicar el rol"
@@ -567,37 +606,39 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
                         const dateStr = format(day, 'yyyy-MM-dd');
+                        const isSundayOrHoliday = day.getDay() === 0 || holidaysByDate.has(dateStr);
                         const isPostPublishChange = postPublishChangeDates.has(dateStr) && !leave;
                         const isPostLeave = isPostPublishLeave(day, leave);
                         const isChanged = isPostPublishChange || isPostLeave;
 
-                        let content = '';
-                        if (leave) {
-                          if (leave.type === 'vacation') content = 'VACACIONES';
-                          else if (leave.type === 'sick') content = 'LICENCIA';
-                          else content = 'PERMISO';
-                        }
-                        else if (asg) {
-                          const areaName = asg.area?.name || '';
-                          const posName = asg.position?.name || '';
-                          if (areaName.toLowerCase().includes('bodega')) {
-                            content = posName.replace(/operador\s+/gi, '').toUpperCase();
-                          } else {
-                            content = areaName.toUpperCase();
-                          }
-                        } else {
-                          content = 'LIBRE';
-                        }
+                        const display = resolveRosterAssignmentDisplay({
+                          assignment: asg,
+                          leave,
+                          isSundayOrHoliday,
+                        });
+                        const hasColoredDestination = !leave && Boolean(asg) && display.destinationKey !== 'other';
 
                         return (
                           <td
                             key={dIdx}
                             className={cn(
-                              "border border-black p-1 text-center text-[9px] uppercase",
-                              isChanged && "bg-amber-50 text-amber-900 print:bg-amber-50"
+                              "border border-black p-1 text-center font-bold uppercase",
+                              isChanged && !hasColoredDestination && "bg-amber-50 text-amber-900 print:bg-amber-50",
+                              isChanged && hasColoredDestination && "ring-2 ring-inset ring-amber-300"
                             )}
+                            style={
+                              hasColoredDestination || !isChanged
+                                ? display.style
+                                : undefined
+                            }
                           >
-                            {content}
+                            {isChanged && (
+                              <span
+                                className="inline-block w-2 h-2 rounded-full bg-amber-400 border border-white mr-1 align-middle -mt-0.5 shadow-sm"
+                                title="Modificación posterior a la publicación"
+                              />
+                            )}
+                            {display.label}
                           </td>
                         );
                       })}
@@ -609,6 +650,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
                         const dateStr = format(day, 'yyyy-MM-dd');
+                        const isSundayOrHoliday = day.getDay() === 0 || holidaysByDate.has(dateStr);
                         const isPostPublishChange = postPublishChangeDates.has(dateStr) && !leave;
                         const isPostLeave = isPostPublishLeave(day, leave);
                         const isChanged = isPostPublishChange || isPostLeave;
@@ -619,6 +661,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                               "border border-black p-1 text-center font-mono",
                               isChanged && "bg-amber-50 text-amber-900 print:bg-amber-50"
                             )}
+                            style={!isChanged && isSundayOrHoliday ? SUNDAY_OR_HOLIDAY_CELL_STYLE : undefined}
                           >
                             {!leave && (asg?.shift?.start_time?.slice(0, 5) || '')}
                           </td>
@@ -632,6 +675,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                         const asg = data.assignments.find((a: any) => isSameDay(parseISO(a.date), day));
                         const leave = data.leaves.find((l: any) => day >= parseISO(l.start_date) && day <= parseISO(l.end_date));
                         const dateStr = format(day, 'yyyy-MM-dd');
+                        const isSundayOrHoliday = day.getDay() === 0 || holidaysByDate.has(dateStr);
                         const isPostPublishChange = postPublishChangeDates.has(dateStr) && !leave;
                         const isPostLeave = isPostPublishLeave(day, leave);
                         const isChanged = isPostPublishChange || isPostLeave;
@@ -642,6 +686,7 @@ export function IndividualRosterClient({ personnelList, areas, positions }: Indi
                               "border border-black p-1 text-center font-mono",
                               isChanged && "bg-amber-50 text-amber-900 print:bg-amber-50"
                             )}
+                            style={!isChanged && isSundayOrHoliday ? SUNDAY_OR_HOLIDAY_CELL_STYLE : undefined}
                           >
                             {!leave && (asg?.shift?.end_time?.slice(0, 5) || '')}
                           </td>
