@@ -99,6 +99,11 @@ async function getCurrentUserId() {
   return user?.id || null;
 }
 
+function safeRevalidateRosterPath(path: string) {
+  if (process.env.ROSTER_ISOLATED_TEST === 'true') return;
+  revalidatePath(path);
+}
+
 // ─── Shift CRUD ───────────────────────────────────────────────────────────────
 
 export async function createShift(formData: FormData) {
@@ -1607,9 +1612,11 @@ export async function listAssignments(startDate: string, endDate: string, areaId
 
 export async function validatePersonnelAvailabilityForDates(
   personnelId: string,
-  dates: string[]
+  dates: string[],
+  testSupabase?: any
 ): Promise<{ success: boolean; error: string | null }> {
-  const supabase = await createClient();
+  const supabase: any =
+    process.env.ROSTER_ISOLATED_TEST === 'true' && testSupabase ? testSupabase : createAdminClient();
 
   const { data: personnel, error: pErr } = await supabase
     .from('personnel')
@@ -1668,8 +1675,26 @@ export async function validatePersonnelAvailabilityForDates(
   return { success: true, error: null };
 }
 
-export async function createManualAssignment(formData: FormData) {
-  const supabase = await createClient();
+export async function createManualAssignment(
+  formData: FormData,
+  testHooks?: { supabase?: any; authOk?: boolean; userId?: string | null }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+  let userId: string | null = null;
+  if (!isIsolatedTest) {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR'] });
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+    userId = auth.userId;
+  } else {
+    if (testHooks?.authOk === false) {
+      return { success: false, error: 'No autorizado.' };
+    }
+    userId = testHooks?.userId ?? null;
+  }
+
+  const supabase: any = isIsolatedTest ? testHooks!.supabase : createAdminClient();
   const personnelId = formData.get('personnel_id') as string;
   const shiftId = formData.get('shift_id') as string;
   const areaId = formData.get('area_id') as string;
@@ -1680,13 +1705,10 @@ export async function createManualAssignment(formData: FormData) {
   const dates = dateInput.includes(',') ? dateInput.split(',') : [dateInput];
 
   // Validate personnel availability
-  const validation = await validatePersonnelAvailabilityForDates(personnelId, dates);
+  const validation = await validatePersonnelAvailabilityForDates(personnelId, dates, supabase);
   if (!validation.success) {
     return { success: false, error: validation.error };
   }
-
-  // Get current user ID for audit logging
-  const userId = await getCurrentUserId();
 
   // Fetch existing assignments for these dates (excluding extra shifts) to compare and update
   const { data: existingAssignments, error: fetchError } = await supabase
@@ -1835,10 +1857,10 @@ export async function createManualAssignment(formData: FormData) {
     }
   }
 
-  revalidatePath('/shifts/assignments');
-  revalidatePath('/shifts/roster');
-  revalidatePath('/shifts/daily');
-  revalidatePath('/transport');
+  safeRevalidateRosterPath('/shifts/assignments');
+  safeRevalidateRosterPath('/shifts/roster');
+  safeRevalidateRosterPath('/shifts/daily');
+  safeRevalidateRosterPath('/transport');
   return { success: true, error: null };
 }
 
@@ -1854,13 +1876,23 @@ export async function validateAssignments(assignmentIds: string[]) {
   return { success: !error, error: error?.message };
 }
 
-export async function publishAssignments(input: string | string[], endDate?: string, areaId?: string, options?: { skipWhatsApp?: boolean }) {
-  if (!await isAdmin()) return { success: false, error: 'No authorized' };
+export async function publishAssignments(
+  input: string | string[],
+  endDate?: string,
+  areaId?: string,
+  options?: { skipWhatsApp?: boolean; testHooks?: { supabase?: any; authOk?: boolean } }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(options?.testHooks?.supabase);
+  if (!isIsolatedTest) {
+    if (!await isAdmin()) return { success: false, error: 'No authorized' };
+  } else if (options?.testHooks?.authOk === false) {
+    return { success: false, error: 'No authorized' };
+  }
   // Use the admin client (service role) for all DB operations in this function.
   // Auth is already verified above via isAdmin(). The service role bypasses RLS,
   // which is necessary because the anon-key client is blocked by RLS policies
   // on shift_assignments and roster_audit_logs.
-  const supabase = createAdminClient();
+  const supabase: any = isIsolatedTest ? options!.testHooks!.supabase : createAdminClient();
   
   // 1. Fetch assignments that are about to be published (were not published before)
   let selectQuery = supabase
@@ -2030,10 +2062,10 @@ export async function publishAssignments(input: string | string[], endDate?: str
             supabase.from('positions').select('id, name').in('id', positionIds)
           ]);
 
-          const personnelMap = new Map(personnelList?.map(p => [p.id, p]));
-          const shiftsMap = new Map(shiftsList?.map(s => [s.id, s]));
-          const areasMap = new Map(areasList?.map(a => [a.id, a]));
-          const positionsMap = new Map(positionsList?.map(p => [p.id, p]));
+          const personnelMap = new Map<string, any>(personnelList?.map((p: any) => [p.id, p]));
+          const shiftsMap = new Map<string, any>(shiftsList?.map((s: any) => [s.id, s]));
+          const areasMap = new Map<string, any>(areasList?.map((a: any) => [a.id, a]));
+          const positionsMap = new Map<string, any>(positionsList?.map((p: any) => [p.id, p]));
 
           const platformUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://hrm-roster-manager.vercel.app';
 
@@ -2112,9 +2144,9 @@ export async function publishAssignments(input: string | string[], endDate?: str
   }
 
 
-  revalidatePath('/shifts/roster');
-  revalidatePath('/dashboard');
-  revalidatePath('/shifts/daily');
+  safeRevalidateRosterPath('/shifts/roster');
+  safeRevalidateRosterPath('/dashboard');
+  safeRevalidateRosterPath('/shifts/daily');
   return { success: true, notifiedWorkers, skippedWorkers, failedWorkers };
 }
 
@@ -2474,17 +2506,37 @@ export async function moveAssignment(assignmentId: string, newDate: string, reas
   revalidatePath('/shifts/daily');
   return { success: true };
 }
-export async function deleteAssignment(id: string) {
-  const supabase = await createClient();
+export async function deleteAssignment(
+  id: string,
+  options?: { skipWhatsApp?: boolean; testHooks?: { supabase?: any; authOk?: boolean } }
+) {
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(options?.testHooks?.supabase);
+  if (!isIsolatedTest) {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
+  } else if (options?.testHooks?.authOk === false) {
+    return { success: false, error: 'No autorizado.' };
+  }
 
-  // 1. Fetch current assignment details before deleting
+  const supabase: any = isIsolatedTest ? options!.testHooks!.supabase : createAdminClient();
+
+  // 1. Fetch current assignment details before deleting (ordinary roster only)
   const { data: current } = await supabase
     .from('shift_assignments')
     .select('*, personnel:personnel(first_name, last_name_father, phone), shift:shifts(name, start_time, end_time), area:areas(name), position:positions(name)')
     .eq('id', id)
+    .eq('is_extra', false)
     .maybeSingle() as any;
 
-  const { error } = await supabase.from('shift_assignments').delete().eq('id', id);
+  if (!current) {
+    return { success: false, error: 'Asignación ordinaria no encontrada.' };
+  }
+
+  const { error } = await supabase
+    .from('shift_assignments')
+    .delete()
+    .eq('id', id)
+    .eq('is_extra', false);
   if (error) return { success: false, error: error.message };
 
   // Clean up pending transport requests for this deleted assignment
@@ -2494,8 +2546,8 @@ export async function deleteAssignment(id: string) {
     .eq('assignment_id', id)
     .eq('status', 'ABIERTO');
 
-  // 2. If it was published, notify the worker immediately of the change to Libre
-  if (current && current.is_published && current.personnel?.phone) {
+  // 2. If it was published, notify the worker immediately of the change to Libre (unless skipWhatsApp)
+  if (!options?.skipWhatsApp && current && current.is_published && current.personnel?.phone) {
     (async () => {
       try {
         const chileTime = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" }));
@@ -2545,10 +2597,10 @@ export async function deleteAssignment(id: string) {
     })();
   }
 
-  revalidatePath('/shifts/assignments');
-  revalidatePath('/shifts/roster');
-  revalidatePath('/shifts/daily');
-  revalidatePath('/transport');
+  safeRevalidateRosterPath('/shifts/assignments');
+  safeRevalidateRosterPath('/shifts/roster');
+  safeRevalidateRosterPath('/shifts/daily');
+  safeRevalidateRosterPath('/transport');
   return { success: true, error: null };
 }
 
@@ -2572,20 +2624,32 @@ export async function bulkDeleteManualAssignments(personnelId: string, dates: st
     .in('date', dates)
     .eq('status', 'ABIERTO');
 
-  revalidatePath('/shifts/assignments');
-  revalidatePath('/shifts/roster');
-  revalidatePath('/shifts/daily');
-  revalidatePath('/transport');
+  safeRevalidateRosterPath('/shifts/assignments');
+  safeRevalidateRosterPath('/shifts/roster');
+  safeRevalidateRosterPath('/shifts/daily');
+  safeRevalidateRosterPath('/transport');
   return { success: true, error: null };
 }
 
-export async function bulkDeleteAssignmentsByIds(ids: string[]) {
+export async function bulkDeleteAssignmentsByIds(
+  ids: string[],
+  options?: { testHooks?: { supabase?: any; authOk?: boolean } }
+) {
   if (ids.length === 0) return { success: true };
-  const supabase = await createClient();
+  const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(options?.testHooks?.supabase);
+  if (!isIsolatedTest) {
+    const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR'] });
+    if (!auth.ok) return { success: false, error: auth.error };
+  } else if (options?.testHooks?.authOk === false) {
+    return { success: false, error: 'No autorizado.' };
+  }
+
+  const supabase: any = isIsolatedTest ? options!.testHooks!.supabase : createAdminClient();
   const { error } = await supabase
     .from('shift_assignments')
     .delete()
-    .in('id', ids);
+    .in('id', ids)
+    .eq('is_extra', false);
   
   if (error) return { success: false, error: error.message };
 
@@ -2595,10 +2659,10 @@ export async function bulkDeleteAssignmentsByIds(ids: string[]) {
     .in('assignment_id', ids)
     .eq('status', 'ABIERTO');
   
-  revalidatePath('/shifts/assignments');
-  revalidatePath('/shifts/roster');
-  revalidatePath('/shifts/daily');
-  revalidatePath('/transport');
+  safeRevalidateRosterPath('/shifts/assignments');
+  safeRevalidateRosterPath('/shifts/roster');
+  safeRevalidateRosterPath('/shifts/daily');
+  safeRevalidateRosterPath('/transport');
   return { success: true };
 }
 // ─── Scheduling Engine Actions ────────────────────────────────────────────────
@@ -2728,7 +2792,7 @@ export async function runScheduler(startDate: string, endDate: string, areaId?: 
         }
       }
       const { data: pData } = await pQuery;
-      targetIds = (pData || []).map(p => p.id);
+      targetIds = (pData || []).map((p: any) => p.id);
     }
 
     // 2. Construir el resumen de auditoría
@@ -3576,13 +3640,24 @@ export async function bulkUpdateBlueRotations(
   return { error: null };
 }
 
-export async function getMonthlyAudit(startDate: string, areaId?: string, personnelIds?: string[], positionFilter?: string | string[]) {
+export async function getMonthlyAudit(
+  startDate: string,
+  areaId?: string,
+  personnelIds?: string[],
+  positionFilter?: string | string[],
+  testHooks?: { supabase?: any }
+) {
   try {
     const sDate = parseISO(startDate);
     const monthStart = startOfMonth(sDate);
     const monthEnd = endOfMonth(sDate);
 
-    const supabase = await createClient();
+    const isIsolatedTest = process.env.ROSTER_ISOLATED_TEST === 'true' && Boolean(testHooks?.supabase);
+    if (!isIsolatedTest) {
+      const auth = await requireActionAuth({ roles: ['ADMIN', 'HR', 'SUPERVISOR'] });
+      if (!auth.ok) return { success: false, error: auth.error };
+    }
+    const supabase: any = isIsolatedTest ? testHooks!.supabase : createAdminClient();
 
     let targetIds = personnelIds || [];
     if (targetIds.length === 0) {
@@ -3599,7 +3674,7 @@ export async function getMonthlyAudit(startDate: string, areaId?: string, person
         }
       }
       const { data: pData } = await pQuery;
-      targetIds = (pData || []).map(p => p.id);
+      targetIds = (pData || []).map((p: any) => p.id);
     }
 
     const auditSummary = await buildMonthlyAuditSummary(supabase, targetIds, monthStart, monthEnd);

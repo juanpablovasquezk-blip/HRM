@@ -125,6 +125,8 @@ interface Assignment {
   area_id: string; 
   position_id: string;
   is_manual: boolean;
+  is_extra?: boolean;
+  status?: string;
   is_validated?: boolean;
   is_published?: boolean;
   original_shift_id?: string | null;
@@ -1224,7 +1226,7 @@ export function RosterGridClient({
       }
 
       if (!hasError) {
-        toast.success(`${selectedCells.length} asignaciones guardadas`);
+        toast.success(`${selectedCells.length} asignaciones guardadas (pendientes de publicar)`);
         setSelectedCell(null);
         setSelectedCells([]);
         setIsAssignmentDialogOpen(false);
@@ -1235,11 +1237,14 @@ export function RosterGridClient({
 
   const handleDelete = (assignmentId: string) => {
     startTransition(async () => {
-      const res = await deleteAssignment(assignmentId);
+      const res = await deleteAssignment(assignmentId, { skipWhatsApp: true });
       if (res.error) toast.error(res.error);
       else {
-        toast.success('Asignación eliminada');
+        toast.success('Asignación eliminada (sin notificación WhatsApp)');
+        setIsAssignmentDialogOpen(false);
         setSelectedCell(null);
+        setSelectedCells([]);
+        router.refresh();
       }
     });
   };
@@ -1252,7 +1257,12 @@ export function RosterGridClient({
 
     startTransition(async () => {
       const idsToDelete = assignments
-        .filter(a => selectedCells.some(c => c.personId === a.personnel_id && c.dateStr === a.date))
+        .filter(
+          a =>
+            !a.is_extra &&
+            a.status !== 'cancelled' &&
+            selectedCells.some(c => c.personId === a.personnel_id && c.dateStr === a.date)
+        )
         .map(a => a.id);
 
       if (idsToDelete.length === 0) {
@@ -1266,9 +1276,10 @@ export function RosterGridClient({
       
       if (res.error) toast.error(res.error);
       else {
-        toast.success(`${idsToDelete.length} asignaciones eliminadas`);
+        toast.success(`${idsToDelete.length} asignaciones eliminadas (sin notificación WhatsApp)`);
         setSelectedCells([]);
         setSelectedCell(null);
+        router.refresh();
       }
     });
   };
@@ -1411,7 +1422,13 @@ export function RosterGridClient({
     }
 
     const idsToPublish = assignments
-      .filter(a => selectedCells.some(c => c.personId === a.personnel_id && c.dateStr === a.date) && !a.is_published)
+      .filter(
+        a =>
+          !a.is_extra &&
+          a.status !== 'cancelled' &&
+          selectedCells.some(c => c.personId === a.personnel_id && c.dateStr === a.date) &&
+          !a.is_published
+      )
       .map(a => a.id);
 
     if (idsToPublish.length === 0) {
@@ -1483,7 +1500,14 @@ export function RosterGridClient({
     const dateStrings = new Set(days.map(d => format(d, 'yyyy-MM-dd')));
 
     const idsToPublish = assignments
-      .filter(a => personnelIds.has(a.personnel_id) && dateStrings.has(a.date) && !a.is_published)
+      .filter(
+        a =>
+          !a.is_extra &&
+          a.status !== 'cancelled' &&
+          personnelIds.has(a.personnel_id) &&
+          dateStrings.has(a.date) &&
+          !a.is_published
+      )
       .map(a => a.id);
 
     if (idsToPublish.length === 0) {
@@ -2632,17 +2656,17 @@ export function RosterGridClient({
                 </div>
              </form>
 
-             {selectedCells.length === 1 && selectedCell && assignments.find(a => a.personnel_id === selectedCell.person.id && a.date === format(selectedCell.date, 'yyyy-MM-dd')) && (
+             {selectedCells.length === 1 && selectedCell && assignments.find(a => !a.is_extra && a.status !== 'cancelled' && a.personnel_id === selectedCell.person.id && a.date === format(selectedCell.date, 'yyyy-MM-dd')) && (
                <div className="pt-4 border-t">
                   <Button 
                     variant="destructive" 
                     className="w-full gap-2"
                     onClick={() => {
-                      const a = assignments.find(ax => ax.personnel_id === selectedCell.person.id && ax.date === format(selectedCell.date, 'yyyy-MM-dd'));
+                      const a = assignments.find(ax => !ax.is_extra && ax.status !== 'cancelled' && ax.personnel_id === selectedCell.person.id && ax.date === format(selectedCell.date, 'yyyy-MM-dd'));
                       if (a) handleDelete(a.id);
                     }}
                   >
-                    <Trash2 className="h-4 w-4" /> Eliminar Asignación Actual
+                    <Trash2 className="h-4 w-4" /> Eliminar Asignación Actual (Sin WhatsApp)
                   </Button>
                </div>
              )}
