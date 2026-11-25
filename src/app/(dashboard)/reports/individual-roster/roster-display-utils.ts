@@ -71,7 +71,12 @@ export function normalizeRosterDestination(rawLabel: string): {
   if (compact.includes('FEDEX')) {
     return { label: compact, destinationKey: 'fedex' };
   }
-  if (compact.includes('AEROPUERTO') || compact.includes('MINERQUIM')) {
+  if (
+    compact.includes('AEROPUERTO') ||
+    compact.includes('ATREX') ||
+    compact.includes('MINERQUIM') ||
+    compact.includes('CANES')
+  ) {
     return { label: compact, destinationKey: 'minerquim' };
   }
 

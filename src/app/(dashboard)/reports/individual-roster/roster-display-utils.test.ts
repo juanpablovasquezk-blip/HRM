@@ -39,14 +39,16 @@ test('Roster Individual: colores de destino, Bodegas (DHL/FedEx), BlueExpress, A
   assert.equal(blue1.destinationKey, 'blue_express');
   assert.deepEqual(blue1.style, blue2.style);
 
-  const aero = resolveRosterAssignmentDisplay({
-    assignment: { area: { name: 'Aeropuerto' }, position: { name: 'Conductor Aeropuerto' } },
-    isSundayOrHoliday: true,
-  });
-  assert.equal(aero.label, 'AEROPUERTO');
-  assert.equal(aero.destinationKey, 'minerquim');
-  assert.equal(aero.style.backgroundColor, '#F97316');
-  assert.equal(aero.style.color, '#111827');
+  for (const areaName of ['Aeropuerto', 'Atrex', 'Base Minerquim', 'Canes']) {
+    const minerquimDest = resolveRosterAssignmentDisplay({
+      assignment: { area: { name: areaName }, position: { name: 'Operador' } },
+      isSundayOrHoliday: true,
+    });
+    assert.equal(minerquimDest.label, areaName.toUpperCase());
+    assert.equal(minerquimDest.destinationKey, 'minerquim');
+    assert.equal(minerquimDest.style.backgroundColor, '#F97316');
+    assert.equal(minerquimDest.style.color, '#111827');
+  }
 
   const libre = resolveRosterAssignmentDisplay({
     assignment: null,
