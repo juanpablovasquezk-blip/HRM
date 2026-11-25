@@ -86,11 +86,12 @@ export function reconcileVacancyExtraRequirements(params: {
       shift_id: row.shift_id,
     });
 
-    const prevAuto = Number(row.auto_vacancy_count) || 0;
+    const prevAuto = Math.max(0, Math.trunc(Number(row.auto_vacancy_count) || 0));
+    const rawReq = Math.max(0, Math.trunc(Number(row.required_count) || 0));
     const inferredManual =
-      typeof row.manual_count === 'number'
-        ? Math.max(0, row.manual_count)
-        : Math.max(0, (Number(row.required_count) || 0) - prevAuto);
+      typeof row.manual_count === 'number' && Number.isFinite(row.manual_count)
+        ? Math.max(0, Math.trunc(row.manual_count))
+        : Math.max(0, rawReq - prevAuto);
 
     const existing = stateByKey.get(slotKey);
     if (existing) {
@@ -133,10 +134,15 @@ export function reconcileVacancyExtraRequirements(params: {
   // Aggregate current v2 remaining_vacancies by canonical slot_key (supporting multiple priority groups per slot)
   const aggregatedVacancies = new Map<string, SlotCoverageDetail>();
   for (const vac of v2Result.remaining_vacancies) {
-    if (vac.vacancy_count <= 0) continue;
+    const vacCount = Math.max(
+      0,
+      Math.trunc(Number(vac.vacancy_count ?? (vac as any).missing_count ?? 0) || 0)
+    );
+    if (!Number.isFinite(vacCount) || vacCount <= 0) continue;
+    const normalizedVac: SlotCoverageDetail = { ...vac, vacancy_count: vacCount };
     if (
       !isSlotInReconcileScope(
-        vac,
+        normalizedVac,
         normStart,
         normEnd,
         areaFilter,
@@ -146,11 +152,11 @@ export function reconcileVacancyExtraRequirements(params: {
       continue;
     }
 
-    const prev = aggregatedVacancies.get(vac.slot_key);
+    const prev = aggregatedVacancies.get(normalizedVac.slot_key);
     if (prev) {
-      prev.vacancy_count += vac.vacancy_count;
+      prev.vacancy_count += vacCount;
     } else {
-      aggregatedVacancies.set(vac.slot_key, { ...vac });
+      aggregatedVacancies.set(normalizedVac.slot_key, { ...normalizedVac });
     }
   }
 

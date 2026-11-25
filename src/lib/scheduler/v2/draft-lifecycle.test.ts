@@ -840,3 +840,152 @@ test('saveV2DraftAction / buildNs22ConfirmationFromDbData: construye NS22 desde 
   assert.equal(wrongSchedule.ok, false);
   assert.match(wrongSchedule.error || '', /22:00 a 07:00/i);
 });
+
+test('Guardar borrador v2 omite reconciliación con Dotación Extra, guarda refuerzos como is_extra=false y preserva extras existentes', async () => {
+  const existingExtraReq: PersistedRequirementRow = {
+    id: 'req-extra-1',
+    date: '2026-12-10',
+    area_id: 'area-aero',
+    position_id: 'pos-op-aero',
+    shift_id: 'sh-am07',
+    required_count: 2,
+    is_extra: true,
+    manual_extra_count: 2,
+    auto_vacancy_count: 0,
+    updated_at: '2026-12-01T10:00:00Z',
+  };
+  const existingExtraAsg: PersistedAssignmentRow = {
+    id: 'asg-extra-1',
+    date: '2026-12-10',
+    personnel_id: 'p-extra-1',
+    area_id: 'area-aero',
+    position_id: 'pos-op-aero',
+    shift_id: 'sh-am07',
+    status: 'scheduled',
+    is_locked: false,
+    is_manual: true,
+    is_confirmed: false,
+    is_validated: false,
+    is_published: true,
+    frozen_by_rule: false,
+    original_shift_id: null,
+    is_extra: true,
+    extra_target: 'manual',
+    updated_at: '2026-12-01T10:00:00Z',
+  };
+
+  const adapter = createIsolatedMemoryAdapter({
+    assignments: [existingExtraAsg],
+    requirements: [existingExtraReq],
+  });
+
+  const ns22Conf: Ns22OperationalConfirmation = {
+    confirmed: true,
+    scheduleConfirmed: true,
+    regimeConfirmed: false,
+    titulares: [
+      { personnelId: '1e2cc199-7a29-417f-86d3-58143d448654', name: 'Marcelo', anchorStatus: 'confirmed', confirmedAnchorDate: '2026-12-14' },
+      { personnelId: 'dafef0b7-cbab-4eaa-8aec-88ae7b4848d3', name: 'Javier', anchorStatus: 'confirmed', confirmedAnchorDate: '2026-12-10' },
+    ],
+  };
+
+  const previewWithVacAndReinf = {
+    engine: 'v2' as const,
+    label: 'v2',
+    elapsed_ms: 10,
+    execution_time_ms: 10,
+    total_required: 2,
+    total_covered: 1,
+    total_vacancies: 1,
+    coverage_percent: 50,
+    coverage_by_priority: { CRITICAL: { required: 2, covered: 1, vacancies: 1 } },
+    covered_primary_count: 1,
+    covered_secondary_count: 0,
+    reinforcement_count: 1,
+    conflicts_count: 0,
+    jornada_conflicts_count: 0,
+    conflicts: [],
+    holiday_warnings: [],
+    start_date: '2026-12-07',
+    end_date: '2027-01-03',
+    vacancies: [
+      {
+        slot_key: '2026-12-10|area-aero|pos-op-aero|sh-am07',
+        date: '2026-12-10',
+        area_id: 'area-aero',
+        area_name: 'Aeropuerto',
+        position_id: 'pos-op-aero',
+        position_name: 'Operador Aeropuerto',
+        shift_id: 'sh-am07',
+        shift_name: 'AM 07',
+        priority: 'CRITICAL' as const,
+        priority_rank: 4,
+        required_count: 2,
+        is_extra: false,
+        protected_filled_count: 0,
+        assigned_count: 1,
+        covered_count: 1,
+        vacancy_count: 1,
+        over_allocated_count: 0,
+      },
+    ],
+    assignments: [
+      {
+        date: '2026-12-10',
+        personnel_id: 'p-ord-1',
+        shift_id: 'sh-am07',
+        shift_name: 'AM 07',
+        shift_start: '07:00',
+        shift_end: '16:00',
+        area_id: 'area-aero',
+        area_name: 'Aeropuerto',
+        position_id: 'pos-op-aero',
+        position_name: 'Operador Aeropuerto',
+        assignment_kind: 'ordinary' as const,
+        match_type: 'primary' as const,
+        is_extra: false,
+        is_protected: false,
+      },
+      {
+        date: '2026-12-11',
+        personnel_id: 'p-reinf-1',
+        shift_id: 'sh-am07',
+        shift_name: 'AM 07',
+        shift_start: '07:00',
+        shift_end: '16:00',
+        area_id: 'area-aero',
+        area_name: 'Aeropuerto',
+        position_id: 'pos-op-aero',
+        position_name: 'Operador Aeropuerto',
+        assignment_kind: 'reinforcement' as const,
+        match_type: 'primary' as const,
+        is_extra: false,
+        is_protected: false,
+      },
+    ],
+  };
+
+  const saved = await saveV2PreviewAsDraft(adapter, {
+    startDate: '2026-12-07',
+    endDate: '2027-01-03',
+    expectedBaselineHash: '',
+    ns22Config: ns22Conf,
+    previewMetrics: previewWithVacAndReinf,
+    shiftDurationById: new Map([['sh-am07', 8]]),
+  });
+  assert.equal(saved.success, true);
+  assert.equal(saved.saveResult?.vacancyExtraUpserts, 0);
+  assert.equal(saved.saveResult?.vacancyExtraDeletes, 0);
+  assert.equal(saved.draftState?.approval_status, 'pending_review');
+  assert.equal(saved.draftState?.v2_metrics.reinforcement_count, 1);
+  assert.equal(saved.draftState?.v2_metrics.total_vacancies, 1);
+
+  // Dotación Extra existente intacta
+  assert.equal(adapter.state.requirements.length, 1);
+  assert.equal(adapter.state.requirements[0].required_count, 2);
+  assert.equal(adapter.state.requirements[0].manual_extra_count, 2);
+  const newRows = adapter.state.assignments.filter((a) => !a.is_extra);
+  assert.equal(newRows.length, 2);
+  assert.equal(newRows.every((a) => a.is_published === false), true);
+  assert.equal(adapter.state.assignments.filter((a) => a.is_extra).length, 1);
+});

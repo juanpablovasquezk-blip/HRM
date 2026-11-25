@@ -186,6 +186,7 @@ export interface SaveV2ScheduleInput {
   expectedBaselineAt?: string | null;
   expectedBaselineHash?: string | null;
   requireBaselineHash?: boolean;
+  skipExtraReconciliation?: boolean;
 }
 
 export interface SaveV2ScheduleResult {
@@ -608,59 +609,85 @@ export async function saveV2Schedule(
     });
   }
 
-  const existingExtraReqs = beforeState.requirements
-    .filter((r) => r.is_extra)
-    .map((r) => ({
-      id: r.id,
-      date: r.date,
-      area_id: r.area_id,
-      position_id: r.position_id,
-      shift_id: r.shift_id,
-      required_count: r.required_count,
-      is_extra: true as const,
-      manual_count: r.manual_extra_count,
-      auto_vacancy_count: r.auto_vacancy_count,
-      linked_requirement_id: r.linked_requirement_id ?? null,
-    }));
+  let enrichedUpserts: ExtraRequirementState[] = [];
+  let deleteIds: string[] = [];
 
-  const reconciled = reconcileVacancyExtraRequirements({
-    v2Result: input.v2Result,
-    existingExtraRequirements: existingExtraReqs,
-    rangeStart: input.startDate,
-    rangeEnd: input.endDate,
-    areaFilter: input.areaId && input.areaId !== 'all' ? input.areaId : null,
-    positionFilter: input.positionIds && input.positionIds.length > 0 ? input.positionIds : null,
-  });
-
-  const ordinaryReqIdBySlotKey = new Map<string, string>();
-  for (const r of beforeState.requirements) {
-    if (r.is_extra) continue;
-    const slotKey = buildDotacionSlotKey({
-      date: normalizeIsoDate(r.date),
-      area_id: r.area_id,
-      position_id: r.position_id,
-      shift_id: r.shift_id,
-    });
-    ordinaryReqIdBySlotKey.set(slotKey, r.id);
-  }
-  const enrichedUpserts: ExtraRequirementState[] = reconciled.upserts.map((u) => ({
-    ...u,
-    linked_requirement_id: u.linked_requirement_id ?? ordinaryReqIdBySlotKey.get(u.slot_key) ?? null,
-  }));
-
-  const deleteSlotSet = new Set(reconciled.deleted_slot_keys);
-  const deleteIds = existingExtraReqs
-    .filter((r) => {
-      if (!r.id) return false;
-      const slotKey = buildDotacionSlotKey({
+  if (!input.skipExtraReconciliation) {
+    const existingExtraReqs = beforeState.requirements
+      .filter((r) => r.is_extra)
+      .map((r) => ({
+        id: r.id,
         date: r.date,
         area_id: r.area_id,
         position_id: r.position_id,
         shift_id: r.shift_id,
+        required_count: r.required_count,
+        is_extra: true as const,
+        manual_count: r.manual_extra_count,
+        auto_vacancy_count: r.auto_vacancy_count,
+        linked_requirement_id: r.linked_requirement_id ?? null,
+      }));
+
+    const reconciled = reconcileVacancyExtraRequirements({
+      v2Result: input.v2Result,
+      existingExtraRequirements: existingExtraReqs,
+      rangeStart: input.startDate,
+      rangeEnd: input.endDate,
+      areaFilter: input.areaId && input.areaId !== 'all' ? input.areaId : null,
+      positionFilter: input.positionIds && input.positionIds.length > 0 ? input.positionIds : null,
+    });
+
+    const ordinaryReqIdBySlotKey = new Map<string, string>();
+    for (const r of beforeState.requirements) {
+      if (r.is_extra) continue;
+      const slotKey = buildDotacionSlotKey({
+        date: normalizeIsoDate(r.date),
+        area_id: r.area_id,
+        position_id: r.position_id,
+        shift_id: r.shift_id,
       });
-      return deleteSlotSet.has(slotKey);
-    })
-    .map((r) => r.id as string);
+      ordinaryReqIdBySlotKey.set(slotKey, r.id);
+    }
+    enrichedUpserts = reconciled.upserts.map((u) => {
+      const manualCount = Math.trunc(Number(u.manual_count));
+      const autoCount = Math.trunc(Number(u.auto_vacancy_count));
+      const reqCount = Math.trunc(Number(u.required_count));
+      if (
+        !Number.isInteger(manualCount) ||
+        manualCount < 0 ||
+        !Number.isInteger(autoCount) ||
+        autoCount < 0 ||
+        !Number.isInteger(reqCount) ||
+        reqCount < 0 ||
+        reqCount !== manualCount + autoCount
+      ) {
+        throw new Error(
+          `INVALID_EXTRA_REQUIREMENT_COUNT: Cantidad inválida en Dotación Extra (${u.slot_key}): required=${u.required_count}, manual=${u.manual_count}, auto=${u.auto_vacancy_count}.`
+        );
+      }
+      return {
+        ...u,
+        manual_count: manualCount,
+        auto_vacancy_count: autoCount,
+        required_count: reqCount,
+        linked_requirement_id: u.linked_requirement_id ?? ordinaryReqIdBySlotKey.get(u.slot_key) ?? null,
+      };
+    });
+
+    const deleteSlotSet = new Set(reconciled.deleted_slot_keys);
+    deleteIds = existingExtraReqs
+      .filter((r) => {
+        if (!r.id) return false;
+        const slotKey = buildDotacionSlotKey({
+          date: r.date,
+          area_id: r.area_id,
+          position_id: r.position_id,
+          shift_id: r.shift_id,
+        });
+        return deleteSlotSet.has(slotKey);
+      })
+      .map((r) => r.id as string);
+  }
 
   if (adapter.executeSaveTx) {
     try {
@@ -690,7 +717,7 @@ export async function saveV2Schedule(
         preservedProtectedCount,
         preservedExtraCount,
         preservedOutOfScopeCount,
-        vacancyExtraUpserts: reconciled.upserts.length,
+        vacancyExtraUpserts: enrichedUpserts.length,
         vacancyExtraDeletes: deleteIds.length,
       };
     } catch (err) {
@@ -749,7 +776,7 @@ export async function saveV2Schedule(
       preservedProtectedCount,
       preservedExtraCount,
       preservedOutOfScopeCount,
-      vacancyExtraUpserts: reconciled.upserts.length,
+      vacancyExtraUpserts: enrichedUpserts.length,
       vacancyExtraDeletes: deleteIds.length,
     };
   } catch (err) {

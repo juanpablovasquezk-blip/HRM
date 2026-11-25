@@ -164,15 +164,33 @@ export async function saveV2PreviewAsDraft(
       unmatched_protected_ordinary: 0,
       unmatched_protected_extra: 0,
     },
-    remaining_vacancies: (input.previewMetrics.vacancies || []).map((v) => ({
-      date: v.date,
-      area_id: v.area_id,
-      position_id: v.position_id,
-      shift_id: v.shift_id,
-      slot_key: `${v.date}|${v.area_id}|${v.position_id}|${v.shift_id}`,
-      priority: v.priority,
-      missing_count: Math.max(0, v.vacancy_count ?? (v.required_count - v.covered_count)),
-    })) as any[],
+    remaining_vacancies: (input.previewMetrics.vacancies || []).map((v) => {
+      const vacCount = Math.max(
+        0,
+        Math.trunc(Number(v.vacancy_count ?? (v.required_count - v.covered_count)) || 0)
+      );
+      const reqCount = Math.max(vacCount, Math.trunc(Number(v.required_count) || vacCount));
+      const covCount = Math.max(0, Math.trunc(Number(v.covered_count) || 0));
+      return {
+        slot_key: v.slot_key || `${v.date}|${v.area_id}|${v.position_id}|${v.shift_id}`,
+        date: v.date,
+        area_id: v.area_id,
+        area_name: v.area_name,
+        position_id: v.position_id,
+        position_name: v.position_name,
+        shift_id: v.shift_id,
+        shift_name: v.shift_name,
+        priority: v.priority,
+        priority_rank: v.priority_rank ?? 2,
+        required_count: reqCount,
+        is_extra: false,
+        protected_filled_count: Math.max(0, Math.trunc(Number(v.protected_filled_count) || 0)),
+        assigned_count: Math.max(0, Math.trunc(Number(v.assigned_count) || covCount)),
+        covered_count: covCount,
+        vacancy_count: vacCount,
+        over_allocated_count: Math.max(0, Math.trunc(Number(v.over_allocated_count) || 0)),
+      };
+    }),
     audit_violations: [],
     holiday_warnings: [],
     ns22_result: null,
@@ -195,6 +213,7 @@ export async function saveV2PreviewAsDraft(
     ns22Config: input.ns22Config,
     v2Result,
     shouldValidate: false,
+    skipExtraReconciliation: true,
   });
 
   if (!saveResult.success) {
@@ -359,7 +378,7 @@ export async function reopenV2SavedDraft(
   }
 
   const persistedActive = currentState.assignments.filter(
-    (a: PersistedAssignmentRow) => a.status !== 'cancelled'
+    (a: PersistedAssignmentRow) => a.status !== 'cancelled' && !a.is_extra
   );
 
   const reopenedAssignments: V2PreviewAssignment[] = persistedActive.map((row) => {
