@@ -1025,21 +1025,6 @@ export default function DailyPlanningClient({
           )}
 
           {!readOnly && (
-            <button
-              onClick={() => setShowRoster08Demo((prev) => !prev)}
-              className={`flex flex-col items-center justify-center gap-1 w-28 h-16 rounded-xl transition-all font-bold uppercase tracking-tight text-[9px] shadow-sm text-center leading-tight whitespace-normal p-2 ${
-                showRoster08Demo
-                  ? 'bg-amber-600 text-white hover:bg-amber-700'
-                  : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
-              }`}
-              title="Vista de prueba sintética ROSTER-08 sin escribir en base de datos"
-            >
-              <AlertTriangle className="w-3.5 h-3.5" />
-              <span>Demo Vacantes v2</span>
-            </button>
-          )}
-
-          {!readOnly && (
             <button 
               onClick={handleReset}
               className="flex flex-col items-center justify-center gap-1 w-28 h-16 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all font-bold uppercase tracking-tight text-[9px] shadow-sm text-center leading-tight whitespace-normal p-2"
