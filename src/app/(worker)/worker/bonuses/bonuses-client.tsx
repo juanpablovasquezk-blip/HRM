@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +15,8 @@ import {
   CheckCircle2, 
   Clock, 
   HelpCircle,
-  FileText
+  FileText,
+  Bus
 } from 'lucide-react';
 import { format, parseISO, addMonths, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -137,14 +139,24 @@ export function WorkerBonusesClient({ initialBonuses }: WorkerBonusesClientProps
   return (
     <div className="space-y-5 pb-8 max-w-lg mx-auto px-4 sm:px-0">
       {/* Encabezado */}
-      <div>
-        <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2">
-          <Coins className="h-6 w-6 text-emerald-600" />
-          Mis Bonos
-        </h1>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Consulta el detalle de tus bonos por faena, stall, derrames y especiales.
-        </p>
+      <div className="space-y-2.5">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2">
+            <Coins className="h-6 w-6 text-emerald-600" />
+            Mis Bonos
+          </h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Consulta el detalle de tus bonos por faena, stall, derrames y especiales.
+          </p>
+        </div>
+        <Link
+          href="/worker/transport"
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200/80 text-xs font-bold transition-colors"
+        >
+          <Bus className="h-4 w-4 shrink-0" />
+          <span>Ver mis transportes propios</span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+        </Link>
       </div>
 
       {/* Navegación por Mes / Rango */}
