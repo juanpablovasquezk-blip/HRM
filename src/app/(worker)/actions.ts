@@ -247,13 +247,18 @@ export async function getWorkerRosterData(month?: string) {
   const startOfMonth = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
   const endOfMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0);
 
-  const startStr = startOfMonth.toISOString().split('T')[0];
-  const endStr = endOfMonth.toISOString().split('T')[0];
+  const startStr = format(startOfMonth, 'yyyy-MM-dd');
+  const endStr = format(endOfMonth, 'yyyy-MM-dd');
 
   // 1. Fetch ALL assignments for the month (to detect changes), but EXCLUDE extra shifts
   const { data: assignments } = await supabase
     .from('shift_assignments')
-    .select('*, shift:shifts!shift_assignments_shift_id_fkey(*)')
+    .select(`
+      *,
+      shift:shifts!shift_assignments_shift_id_fkey(*),
+      area:areas!shift_assignments_area_id_fkey(id, name),
+      position:positions!shift_assignments_position_id_fkey(id, name)
+    `)
     .eq('personnel_id', session.id)
     .gte('date', startStr)
     .lte('date', endStr)
@@ -263,13 +268,13 @@ export async function getWorkerRosterData(month?: string) {
   // 2. Fetch Base Roster (deprecated baseline table is replaced by original_shift_id comparison)
   const roster = null;
 
-  // 3. Fetch Leaves (to show approved free days)
+  // 3. Fetch Leaves (to show approved free days and multi-day absences)
   const { data: leaves } = await supabase
     .from('leaves')
     .select('*')
     .eq('personnel_id', session.id)
-    .gte('start_date', startStr)
     .lte('start_date', endStr)
+    .gte('end_date', startStr)
     .eq('status', 'approved');
 
   return {
